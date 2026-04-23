@@ -1,0 +1,62 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: openflipbook-mongo
+    restart: unless-stopped
+    command: ["--bind_ip_all", "--quiet"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/modal-backend/Dockerfile
+    container_name: openflipbook-backend
+    restart: unless-stopped
+    env_file:
+      - path: apps/modal-backend/.env
+        required: false
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: openflipbook-web
+    restart: unless-stopped
+    env_file:
+      - path: apps/web/.env.local
+        required: false
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      # Backend URL is fixed inside the compose network.
+      MODAL_API_URL: http://backend:8787
+      # MONGODB_URI + MONGODB_DB come from apps/web/.env.local.
+      # If you want the local `mongo` service instead, set
+      #   MONGODB_URI=mongodb://mongo:27017
+      # in that file.
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:

@@ -1,0 +1,40 @@
+{
+  "name": "openflipbook",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source clone of flipbook.page — image-is-the-UI, BYO-keys demo.",
+  "license": "MIT",
+  "author": "Eren Akbulut <erenakbulutwork@gmail.com>",
+  "homepage": "https://github.com/eren23/openflipbook#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eren23/openflipbook.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eren23/openflipbook/issues"
+  },
+  "keywords": [
+    "flipbook",
+    "image-as-ui",
+    "nano-banana",
+    "ltx-video",
+    "openrouter",
+    "modal",
+    "nextjs"
+  ],
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @openflipbook/web dev",
+    "build": "pnpm --filter @openflipbook/web build",
+    "start": "pnpm --filter @openflipbook/web start",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "backend": "cd apps/modal-backend && PORT=8787 .venv/bin/python local_server.py",
+    "modal:serve": "cd apps/modal-backend && modal serve generate.py ltx_stream.py",
+    "modal:deploy": "cd apps/modal-backend && modal deploy generate.py ltx_stream.py",
+    "record-demo": "cd scripts/record-demo && pnpm install --ignore-workspace --silent && pnpm start"
+  }
+}

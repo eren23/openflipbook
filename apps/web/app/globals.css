@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Comic Neue", ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #f5efe2;
+  --color-ink: #1f1d1b;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+}
+
+@keyframes ec-ripple {
+  0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 1;   box-shadow: 0 0 0 0 rgba(255,255,255,0.9); }
+  70%  { transform: translate(-50%, -50%) scale(1.6); opacity: 0.4; box-shadow: 0 0 0 14px rgba(255,255,255,0); }
+  100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0;   box-shadow: 0 0 0 18px rgba(255,255,255,0); }
+}
