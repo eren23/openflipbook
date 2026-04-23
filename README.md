@@ -10,10 +10,12 @@
 ## Demo
 
 <p align="center">
-  <video src="apps/web/public/demo.mp4" controls muted playsinline loop width="720">
+  <video src="https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4" controls muted playsinline loop width="720">
     Your browser does not support embedded video. <a href="apps/web/public/demo.mp4">Download the clip</a>.
   </video>
 </p>
+
+https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4
 
 Screen capture of the live stack (sped up 4x): landing → "how does a steam engine work" deeplink → two click-to-explore hops. Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
 
