@@ -9,15 +9,9 @@
 
 ## Demo
 
-<p align="center">
-  <video src="https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4" controls muted playsinline loop width="720">
-    Your browser does not support embedded video. <a href="apps/web/public/demo.mp4">Download the clip</a>.
-  </video>
-</p>
+![openflipbook demo](apps/web/public/demo.gif)
 
-https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4
-
-Screen capture of the live stack (sped up 4x): landing → "how does a steam engine work" deeplink → two click-to-explore hops. Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
+Sped up 4x: landing → "how does a steam engine work" deeplink → two click-to-explore hops. [Full-quality MP4 with audio](https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4). Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
 
 **Read the backstory:** [`docs/STORY.md`](docs/STORY.md) — what we hoped Flipbook would be, what it actually is, and how the internals look once you crack the bundle open.
 
