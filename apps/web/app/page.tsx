@@ -15,11 +15,15 @@ export default function LandingPage() {
           an open-source Flipbook clone · BYO keys
         </span>
         <h1 className="mt-6 text-4xl font-bold leading-tight sm:text-6xl">
-          Endless Canvas
+          openflipbook
         </h1>
-        <p className="mt-4 max-w-2xl text-lg opacity-80">
+        <p className="mt-3 text-base opacity-70 sm:text-lg">
+          image-is-the-UI endless canvas
+        </p>
+        <p className="mt-6 max-w-2xl text-lg opacity-80">
           Every page is an AI-generated image. Click anywhere on the image and
-          the next page explores whatever you tapped.
+          the next page explores whatever you tapped. Open source, bring your
+          own keys.
         </p>
 
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">

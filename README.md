@@ -1,19 +1,36 @@
-# Endless Canvas
+# openflipbook
+
+> **An open-source [flipbook.page](https://flipbook.page) clone, image-is-the-UI.** Every page is an AI-generated illustration. Tap anywhere on the image and a vision model resolves what you tapped, turns it into the next page, and keeps going. Seed from a text query or drop in any image. Bring your own API keys; clone, run, hack.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/eren23/openflipbook?style=social)](https://github.com/eren23/openflipbook/stargazers)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](package.json)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black.svg)](https://nextjs.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Modal-009688.svg)](https://modal.com)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-> An open-source take on [flipbook.page](https://flipbook.page). Every page is an AI-generated image. Click anywhere on the image and a vision model resolves what you tapped, turns it into the next page, and keeps going. Seed from a text query or drop in any image.
 
 ## Demo
 
-![openflipbook demo](apps/web/public/demo.gif)
+![openflipbook demo — tap any region of an AI-generated page; a vision model resolves what you tapped and renders the next page](apps/web/public/demo.gif)
 
-Sped up 4x: landing → "how does a steam engine work" deeplink → two click-to-explore hops. [Full-quality MP4 with audio](https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4). Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
+Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click-to-explore hops. [Full-quality MP4 with audio](https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4). Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
 
-**Read the backstory:** [`docs/STORY.md`](docs/STORY.md) — what we hoped Flipbook would be, what it actually is, and how the internals look once you crack the bundle open.
+## Why this exists
+
+[flipbook.page](https://flipbook.page) is fun but closed. I wanted to see if the same paradigm — one image per page, tap to explore — could live on a stack you actually own: your fal key, your OpenRouter key, your R2, your Mongo, your Modal. Turns out yes. Same loop, different stack, MIT.
+
+It's also a nice excuse to swap pieces around. The image model, the planner, the click-resolving VLM, the video backend — all behind small interfaces in `apps/modal-backend/providers/`. Trade nano-banana for Flux, Qwen-VL for Gemini, LTX-2 for Wan; nothing else has to change.
+
+## TL;DR
+
+- **One image per page**, rendered by [`fal-ai/nano-banana`](https://fal.ai/models/fal-ai/nano-banana) (Gemini 2.5 Flash Image). Text inside the page is pixels, not DOM.
+- **Click → next page.** [`qwen/qwen-2.5-vl-72b-instruct`](https://openrouter.ai/qwen/qwen-2.5-vl-72b-instruct) via OpenRouter resolves the clicked region to a phrase; [`qwen/qwen-2.5-72b-instruct:online`](https://openrouter.ai/qwen/qwen-2.5-72b-instruct) plans the page with web-search grounding.
+- **Seed from your own image.** Upload / drag-and-drop works as a starting point.
+- **Optional animation toggle.**
+  - Default: one-shot 5s MP4 from `fal-ai/ltx-video/image-to-video`. Cheap (~$0.02/clip), no GPU on your side.
+  - Streaming: the same LTXF binary WebSocket protocol Flipbook uses, deployed to your own Modal account — true fragmented-MP4 streaming into a `<video>` tag via Media Source Extensions.
+- **Permalinks.** `/n/:id` hydrates from Mongo + R2 without regenerating.
+- **BYO keys.** No hosted backend. Clone it, run it, pay your own bills.
 
 ```
    ┌────────────────────────┐                  ┌─────────────────────────┐
@@ -43,16 +60,7 @@ Sped up 4x: landing → "how does a steam engine work" deeplink → two click-to
                             persistence: Cloudflare R2 + MongoDB
 ```
 
-## TL;DR
-
-- **One image per page**, rendered by [`fal-ai/nano-banana`](https://fal.ai/models/fal-ai/nano-banana) (Gemini 2.5 Flash Image). Text inside the page is pixels, not DOM.
-- **Click → next page.** [`qwen/qwen-2.5-vl-72b-instruct`](https://openrouter.ai/qwen/qwen-2.5-vl-72b-instruct) via OpenRouter resolves the clicked region to a phrase; [`qwen/qwen-2.5-72b-instruct:online`](https://openrouter.ai/qwen/qwen-2.5-72b-instruct) plans the page with web-search grounding.
-- **Seed from your own image.** Upload / drag-and-drop works as a starting point.
-- **Optional animation toggle.**
-  - Default: one-shot 5s MP4 from `fal-ai/ltx-video/image-to-video`. Cheap (~$0.02/clip), no GPU on your side.
-  - Streaming: the same LTXF binary WebSocket protocol Flipbook uses, deployed to your own Modal account — true fragmented-MP4 streaming into a `<video>` tag via Media Source Extensions.
-- **Permalinks.** `/n/:id` hydrates from Mongo + R2 without regenerating.
-- **BYO keys.** No hosted backend. Clone it, run it, pay your own bills.
+**Read the backstory:** [`docs/STORY.md`](docs/STORY.md) — what we hoped Flipbook would be, what it actually is, and how the internals look once you crack the bundle open.
 
 ## Quickstart
 

@@ -16,6 +16,7 @@ interface CreateBody {
   prompt_author_model: string;
   aspect_ratio?: string;
   final_prompt?: string | null;
+  click_in_parent?: { x_pct: number; y_pct: number } | null;
 }
 
 export async function POST(req: Request) {
@@ -55,6 +56,7 @@ export async function POST(req: Request) {
     prompt_author_model: body.prompt_author_model,
     aspect_ratio: body.aspect_ratio ?? "16:9",
     final_prompt: body.final_prompt ?? null,
+    click_in_parent: body.click_in_parent ?? null,
   });
 
   return NextResponse.json({

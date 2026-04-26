@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: openflipbook
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Akbulut
+    given-names: Eren
+    alias: eren23
+repository-code: "https://github.com/eren23/openflipbook"
+url: "https://github.com/eren23/openflipbook"
+abstract: "Open-source flipbook.page clone — every page is an AI-generated illustration; clicking any region resolves to the next page via a vision model. Next.js + FastAPI + Modal, bring your own keys."
+keywords:
+  - generative-ai
+  - flipbook
+  - ai-image-generation
+  - infinite-canvas
+  - vision-model
+license: MIT

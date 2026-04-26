@@ -26,6 +26,12 @@ class PagePlan:
     facts: list[str]
 
 
+@dataclass
+class ClickResolution:
+    subject: str
+    style: str
+
+
 def _client() -> AsyncOpenAI:
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
@@ -63,27 +69,34 @@ async def click_to_subject(
     y_pct: float,
     parent_title: str,
     parent_query: str,
-) -> str:
-    """Resolve the region at (x_pct, y_pct) in the image to a short subject phrase.
+) -> ClickResolution:
+    """Resolve the click region to a subject phrase AND a style descriptor.
 
-    The image is expected to have a red crosshair drawn at the click point
-    by the client (see `apps/web/lib/image-click.ts:annotateClickPoint`).
-    We still forward the numeric coordinates as a fallback hint in case the
-    client could not produce an annotated version.
+    The image has a red crosshair at the click point (see
+    `apps/web/lib/image-click.ts:annotateClickPoint`); numeric coords are a
+    fallback. We also ask the VLM to summarise the illustration's visual
+    style so the next page can match it — cheapest way to keep aesthetic
+    continuity across hops without a second VLM round-trip.
     """
     client = _client()
     system = (
         "You examine a generated illustration of the page titled "
         f"'{parent_title}' (user query: '{parent_query}'). A red crosshair with "
         "a white halo has been drawn on the image to mark where the user "
-        "clicked. Identify the specific subject under the crosshair, ignoring "
-        "the crosshair itself. Return a noun phrase 2-8 words long that would "
-        "make a good next query for a visual explainer. "
-        "Return JSON: {\"subject\": \"...\"}."
+        "clicked. Do TWO things and return them as JSON: "
+        "(1) `subject` — a 2-8 word noun phrase naming the specific thing "
+        "under the crosshair (ignore the crosshair itself); should make a "
+        "good next query for a visual explainer. "
+        "(2) `style` — a single sentence (<=30 words) describing the "
+        "illustration's visual style: art medium (e.g. flat infographic, "
+        "watercolor, technical line drawing, photoreal, anime, blueprint), "
+        "dominant palette, line work, level of detail, perspective. "
+        "Return JSON: {\"subject\": \"...\", \"style\": \"...\"}."
     )
     user_text = (
         "Look at the red crosshair marker on the image and tell me the "
-        "specific subject beneath it. Do NOT describe the crosshair. "
+        "specific subject beneath it. Also describe the visual style of "
+        "the illustration so the next page can be drawn in the SAME style. "
         "If the crosshair is not visible for any reason, fall back to the "
         f"numeric position x={x_pct:.3f}, y={y_pct:.3f} "
         "(0-1 normalized, origin top-left)."
@@ -105,18 +118,33 @@ async def click_to_subject(
         ],
         response_format={"type": "json_object"},
         temperature=0.2,
-        max_tokens=200,
+        max_tokens=300,
     )
     raw = (response.choices[0].message.content or "{}").strip()
     parsed = _safe_json(raw)
     subject = str(parsed.get("subject", "")).strip()
-    return subject or parent_title
+    style = str(parsed.get("style", "")).strip()
+    return ClickResolution(
+        subject=subject or parent_title,
+        style=style,
+    )
 
 
-async def plan_page(query: str, web_search: bool) -> PagePlan:
-    """Produce a page title, image-gen prompt, and factual snippets for the query."""
+async def plan_page(
+    query: str,
+    web_search: bool,
+    style_anchor: str | None = None,
+) -> PagePlan:
+    """Produce a page title, image-gen prompt, and factual snippets for the query.
+
+    `style_anchor` (when set) is the parent illustration's visual style as
+    described by the click-resolver VLM. We weave it into both the planner
+    system prompt AND the final image-gen prompt so the renderer sees an
+    explicit style instruction. Without this, generations drift across hops
+    (a flat infographic parent can produce a photoreal child).
+    """
     client = _client()
-    system = (
+    system_parts = [
         "You design a visual-explainer page for a given user query. Return JSON "
         "with keys: page_title (<=8 words, title case), prompt (<=120 words, a "
         "rich description of a single illustrated diagram suitable for a "
@@ -124,11 +152,24 @@ async def plan_page(query: str, web_search: bool) -> PagePlan:
         "layout hints), facts (list of 3-6 short factual bullets that should be "
         "visible as labels in the illustration). Do not include any text "
         "outside the JSON."
-    )
+    ]
+    if style_anchor:
+        system_parts.append(
+            "VISUAL STYLE LOCK (CRITICAL): the new illustration MUST be drawn "
+            f"in this exact style — \"{style_anchor}\". Match the medium, "
+            "palette, line work, level of stylization, and perspective. Do "
+            "NOT switch to a different art style. Begin the `prompt` with a "
+            "leading clause that names the style explicitly so the image "
+            "model can lock onto it (e.g. \"Flat infographic illustration "
+            "with bold blue accents and clean line work, ...\")."
+        )
+    system = " ".join(system_parts)
     user = (
         f"Query: {query}\n\n"
         "Design the illustrated page. Keep the layout readable at 1280x720."
     )
+    if style_anchor:
+        user += f"\n\nVisual style to preserve verbatim: {style_anchor}"
     response = await client.chat.completions.create(
         model=_text_model(online=web_search),
         messages=[

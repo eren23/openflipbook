@@ -67,25 +67,46 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
     from providers import llm
 
     try:
-        # 1. Resolve click → subject phrase if needed.
+        # 1. Resolve click → subject phrase + style anchor (style is empty for
+        #    text-only queries; only set on tap mode).
         effective_query = body.query
+        style_anchor: str | None = None
         if body.mode == "tap" and body.click and body.image:
-            subject = await llm.click_to_subject(
+            resolution = await llm.click_to_subject(
                 image_data_url=body.image,
                 x_pct=body.click.x_pct,
                 y_pct=body.click.y_pct,
                 parent_title=body.parent_title or body.query,
                 parent_query=body.parent_query or body.query,
             )
-            if subject:
-                effective_query = subject
-                yield _sse({"type": "status", "stage": "click_resolved", "subject": subject})
+            if resolution.subject:
+                effective_query = resolution.subject
+                yield _sse(
+                    {
+                        "type": "status",
+                        "stage": "click_resolved",
+                        "subject": resolution.subject,
+                    }
+                )
+            if resolution.style:
+                style_anchor = resolution.style
 
-        # 2. Plan.
+        # 2. Plan (with optional style anchor for visual continuity).
         yield _sse({"type": "status", "stage": "planning"})
-        plan = await llm.plan_page(query=effective_query, web_search=body.web_search)
+        plan = await llm.plan_page(
+            query=effective_query,
+            web_search=body.web_search,
+            style_anchor=style_anchor,
+        )
 
         composed_prompt = plan.prompt
+        if style_anchor:
+            # Belt + suspenders: prepend the style anchor explicitly so the
+            # image model sees it at the front of the prompt even if the
+            # planner omitted it.
+            composed_prompt = (
+                f"Style: {style_anchor}\n\n{composed_prompt}"
+            )
         if plan.facts:
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
 

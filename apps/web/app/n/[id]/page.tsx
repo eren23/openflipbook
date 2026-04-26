@@ -1,9 +1,73 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getNode } from "@/lib/db";
+import { getNode, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 
 interface PermalinkPageProps {
   params: Promise<{ id: string }>;
+}
+
+const cachedGetNode = cache(async (id: string): Promise<NodeRow | null> => {
+  const env = readServerEnv();
+  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_PUBLIC_BASE_URL) {
+    return null;
+  }
+  try {
+    return await getNode(id);
+  } catch {
+    return null;
+  }
+});
+
+function publicImageUrl(node: NodeRow): string | null {
+  const env = readServerEnv();
+  if (!env.R2_PUBLIC_BASE_URL) return null;
+  const base = env.R2_PUBLIC_BASE_URL.replace(/\/$/, "");
+  return `${base}/${node.image_key}`;
+}
+
+export async function generateMetadata({
+  params,
+}: PermalinkPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const node = await cachedGetNode(id);
+  if (!node) {
+    return {
+      title: "Page not found",
+      robots: { index: false, follow: false },
+    };
+  }
+  const imageUrl = publicImageUrl(node);
+  const title = node.page_title || node.query || "Generated page";
+  const description = `AI-generated page for "${node.query}" — explore openflipbook, an open-source click-to-explore image canvas.`;
+  return {
+    title,
+    description,
+    openGraph: {
+      type: "article",
+      title,
+      description,
+      url: `/n/${id}`,
+      ...(imageUrl
+        ? {
+            images: [
+              {
+                url: imageUrl,
+                alt: `Illustration for "${node.query}"`,
+              },
+            ],
+          }
+        : {}),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      ...(imageUrl ? { images: [imageUrl] } : {}),
+    },
+    alternates: { canonical: `/n/${id}` },
+  };
 }
 
 export default async function PermalinkPage({ params }: PermalinkPageProps) {
@@ -24,11 +88,10 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
     );
   }
 
-  const node = await getNode(id);
+  const node = await cachedGetNode(id);
   if (!node) notFound();
 
-  const publicBase = env.R2_PUBLIC_BASE_URL!.replace(/\/$/, "");
-  const imageUrl = `${publicBase}/${node.image_key}`;
+  const imageUrl = publicImageUrl(node)!;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-4 px-4 py-6">

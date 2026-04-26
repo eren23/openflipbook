@@ -36,6 +36,11 @@ async function nodes(): Promise<Collection<NodeDoc>> {
   return (await connect()).collection<NodeDoc>("nodes");
 }
 
+export interface ClickInParent {
+  x_pct: number;
+  y_pct: number;
+}
+
 export interface NodeDoc extends Document {
   _id: string;
   parent_id: string | null;
@@ -47,6 +52,7 @@ export interface NodeDoc extends Document {
   prompt_author_model: string;
   aspect_ratio: string;
   final_prompt: string | null;
+  click_in_parent: ClickInParent | null;
   created_at: Date;
 }
 
@@ -60,6 +66,7 @@ export interface NodeInsert {
   prompt_author_model: string;
   aspect_ratio: string;
   final_prompt: string | null;
+  click_in_parent?: ClickInParent | null;
 }
 
 export interface NodeRow {
@@ -73,12 +80,18 @@ export interface NodeRow {
   prompt_author_model: string;
   aspect_ratio: string;
   final_prompt: string | null;
+  click_in_parent: ClickInParent | null;
   created_at: string;
 }
 
 function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, ...rest } = doc;
-  return { id: _id, ...rest, created_at: created_at.toISOString() };
+  const { _id, created_at, click_in_parent, ...rest } = doc;
+  return {
+    id: _id,
+    ...rest,
+    click_in_parent: click_in_parent ?? null,
+    created_at: created_at.toISOString(),
+  };
 }
 
 export async function insertNode(n: NodeInsert): Promise<NodeRow> {
@@ -94,6 +107,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     prompt_author_model: n.prompt_author_model,
     aspect_ratio: n.aspect_ratio,
     final_prompt: n.final_prompt,
+    click_in_parent: n.click_in_parent ?? null,
     created_at: new Date(),
   };
   await collection.insertOne(doc);
