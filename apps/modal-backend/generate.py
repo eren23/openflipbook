@@ -56,6 +56,9 @@ class GenerateBody(BaseModel):
     parent_query: str | None = None
     parent_title: str | None = None
     click: Click | None = None
+    image_tier: str | None = None
+    image_model: str | None = None
+    edit_instruction: str | None = None
 
 
 def _sse(data: dict) -> bytes:
@@ -64,9 +67,55 @@ def _sse(data: dict) -> bytes:
 
 async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
     from providers import image as image_provider
+    from providers import image_edit as image_edit_provider
     from providers import llm
 
     try:
+        # Edit mode short-circuits the planner: we already have an image, the
+        # user just wants to mutate it. Persisted as a child node so the
+        # original is preserved in history + world map.
+        if body.mode == "edit":
+            if not body.image:
+                yield _sse({"type": "error", "message": "edit mode requires an image"})
+                return
+            raw_instruction = (body.edit_instruction or body.query or "").strip()
+            if not raw_instruction:
+                yield _sse({"type": "error", "message": "edit mode requires an instruction"})
+                return
+            yield _sse({"type": "status", "stage": "planning"})
+            polished = await llm.polish_edit_instruction(
+                instruction=raw_instruction,
+                page_title=body.parent_title,
+            )
+            yield _sse(
+                {
+                    "type": "status",
+                    "stage": "generating_image",
+                    "page_title": raw_instruction,
+                }
+            )
+            edit_result = await image_edit_provider.edit_image(
+                image_data_url=body.image,
+                instruction=polished,
+                tier=body.image_tier,
+                model_override=body.image_model,
+            )
+            edit_data_url = image_provider.encode_data_url(
+                edit_result.jpeg_bytes, edit_result.mime_type
+            )
+            yield _sse(
+                {
+                    "type": "final",
+                    "image_data_url": edit_data_url,
+                    "page_title": raw_instruction,
+                    "image_model": edit_result.model,
+                    "prompt_author_model": llm._text_model(online=False),
+                    "session_id": body.session_id,
+                    "final_prompt": polished,
+                }
+            )
+            return
+
         # 1. Resolve click → subject phrase + style anchor (style is empty for
         #    text-only queries; only set on tap mode).
         effective_query = body.query
@@ -122,6 +171,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
         result = await image_provider.generate_image(
             prompt=composed_prompt,
             aspect_ratio=body.aspect_ratio,
+            tier=body.image_tier,
+            model_override=body.image_model,
         )
         data_url = image_provider.encode_data_url(result.jpeg_bytes, result.mime_type)
 
@@ -168,14 +219,42 @@ class AnimateBody(BaseModel):
 
 @fastapi_app.post("/animate")
 async def animate(body: AnimateBody):
-    """Cheap-fallback animation: delegate to fal-ai/ltx-video."""
+    """Cheap-fallback animation: delegate to fal-ai/ltx-video.
+
+    Wraps fal errors into a JSON 502 with the original exception message so
+    the frontend can surface the real cause (rate limit, payload too large,
+    invalid image format) instead of a generic 500.
+    """
+    import logging
+    import traceback
+
     from providers import video as video_provider
 
-    clip = await video_provider.animate_image(
-        image_data_url=body.image_data_url,
-        prompt=body.prompt,
-        duration=body.duration,
+    logger = logging.getLogger("openflipbook.animate")
+    img_size_kb = len(body.image_data_url) // 1024
+    logger.info(
+        "animate request: prompt_len=%d image_data_url_kb=%d duration=%d",
+        len(body.prompt or ""),
+        img_size_kb,
+        body.duration,
     )
+    try:
+        clip = await video_provider.animate_image(
+            image_data_url=body.image_data_url,
+            prompt=body.prompt,
+            duration=body.duration,
+        )
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc(limit=4)
+        logger.error("animate failed: %s\n%s", exc, tb)
+        return JSONResponse(
+            {
+                "error": f"{type(exc).__name__}: {exc}",
+                "stage": "fal_animate",
+                "image_data_url_kb": img_size_kb,
+            },
+            status_code=502,
+        )
     return {
         "video_url": clip.video_url,
         "content_type": clip.content_type,

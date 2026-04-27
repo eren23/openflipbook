@@ -134,8 +134,10 @@ export default function WorldMap({
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       // Only begin pan on background — tile clicks are handled separately.
+      // Walk up the DOM since the actual target may be the inner <img> inside
+      // the tile button; checking only the immediate target misses those.
       const tgt = e.target as HTMLElement;
-      if (tgt.dataset.tile === "1") return;
+      if (tgt.closest('[data-tile="1"]')) return;
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
       setAnimateCamera(false);
       dragRef.current = {

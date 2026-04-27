@@ -43,6 +43,23 @@ def _animate_model() -> str:
     return DEFAULT_ANIMATE_MODEL
 
 
+async def _to_fal_url(image_data_url: str) -> str:
+    """Convert an inline data URL to a fal storage URL.
+
+    fal's queue endpoints can reject or stall on large data URLs (high-res
+    seedream / nano-banana-pro outputs hit 1-3MB easily). Uploading to fal
+    storage first sidesteps the limit and is what fal recommends.
+    """
+    if not image_data_url.startswith("data:"):
+        return image_data_url  # already a URL — pass through
+    header, _, b64 = image_data_url.partition(",")
+    mime = "image/jpeg"
+    if ";" in header and ":" in header:
+        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+    raw = base64.b64decode(b64)
+    return await fal_client.upload_async(raw, content_type=mime)
+
+
 async def animate_image(
     *,
     image_data_url: str,
@@ -52,9 +69,10 @@ async def animate_image(
     if not os.environ.get("FAL_KEY"):
         raise RuntimeError("FAL_KEY is not set")
 
+    image_url = await _to_fal_url(image_data_url)
     model = _animate_model()
     arguments: dict = {
-        "image_url": image_data_url,
+        "image_url": image_url,
         "prompt": prompt,
     }
     if model == PRO_ANIMATE_MODEL:
@@ -65,7 +83,7 @@ async def animate_image(
 
     video = result.get("video")
     if not isinstance(video, dict):
-        raise RuntimeError("fal animate returned no video payload")
+        raise RuntimeError(f"fal animate returned no video payload: {result!r:.300}")
     url = video.get("url")
     if not isinstance(url, str) or not url:
         raise RuntimeError("fal animate returned video without url")

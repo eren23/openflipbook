@@ -1,8 +1,14 @@
 """OpenRouter-backed LLM/VLM client.
 
-Uses the openai SDK pointed at https://openrouter.ai/api/v1. Models are
-configurable via env; defaults are Qwen 2.5 VL/text (cheap, strong).
-Web search uses OpenRouter's `:online` suffix (Exa-backed) — no extra key.
+Uses the openai SDK pointed at https://openrouter.ai/api/v1. Defaults are
+Gemini 3 Flash (multimodal) for both planning and click-resolution — strong
+JSON adherence, large context, cheap. Override via env to use Gemini 3 Pro
+or another OpenRouter slug.
+
+Web search: Gemini-family models on OpenRouter don't accept the legacy
+`:online` suffix universally, so for those we attach the OpenRouter web
+plugin (`extra_body={"plugins": [{"id": "web"}]}`) instead. Other models
+keep the `:online` suffix path.
 """
 
 from __future__ import annotations
@@ -15,8 +21,8 @@ from typing import Any
 from openai import AsyncOpenAI
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_VLM_MODEL = "qwen/qwen-2.5-vl-72b-instruct"
-DEFAULT_TEXT_MODEL = "qwen/qwen-2.5-72b-instruct"
+DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
 
 
 @dataclass
@@ -52,15 +58,36 @@ def _vlm_model() -> str:
     return os.environ.get("OPENROUTER_VLM_MODEL", DEFAULT_VLM_MODEL)
 
 
-def _text_model(online: bool) -> str:
-    base = os.environ.get("OPENROUTER_TEXT_MODEL", DEFAULT_TEXT_MODEL)
-    if online and os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
+def _web_search_enabled(online: bool) -> bool:
+    if not online:
+        return False
+    return os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
         "1",
         "true",
         "yes",
-    ):
+    )
+
+
+def _supports_online_suffix(model: str) -> bool:
+    # Gemini-family on OpenRouter requires the web plugin path; other models
+    # accept the `:online` suffix shorthand.
+    lowered = model.lower()
+    if "gemini" in lowered:
+        return False
+    return True
+
+
+def _text_model(online: bool) -> str:
+    base = os.environ.get("OPENROUTER_TEXT_MODEL", DEFAULT_TEXT_MODEL)
+    if _web_search_enabled(online) and _supports_online_suffix(base):
         return f"{base}:online"
     return base
+
+
+def _web_plugin_extra(model: str, online: bool) -> dict[str, Any]:
+    if _web_search_enabled(online) and not _supports_online_suffix(model):
+        return {"plugins": [{"id": "web"}]}
+    return {}
 
 
 async def click_to_subject(
@@ -170,8 +197,9 @@ async def plan_page(
     )
     if style_anchor:
         user += f"\n\nVisual style to preserve verbatim: {style_anchor}"
+    text_model = _text_model(online=web_search)
     response = await client.chat.completions.create(
-        model=_text_model(online=web_search),
+        model=text_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -179,6 +207,7 @@ async def plan_page(
         response_format={"type": "json_object"},
         temperature=0.7,
         max_tokens=900,
+        extra_body=_web_plugin_extra(text_model, online=web_search) or None,
     )
     raw = (response.choices[0].message.content or "{}").strip()
     parsed = _safe_json(raw)
@@ -191,6 +220,54 @@ async def plan_page(
             if isinstance(f, str) and f.strip():
                 facts.append(f.strip())
     return PagePlan(page_title=page_title, prompt=prompt, facts=facts)
+
+
+async def polish_edit_instruction(
+    instruction: str,
+    page_title: str | None = None,
+    style_anchor: str | None = None,
+) -> str:
+    """Expand a terse edit instruction into a model-friendly prompt.
+
+    Skipped at the call site if the instruction is already long. Keeps the
+    polish strictly additive — never invents a different operation than what
+    the user asked for.
+    """
+    instruction = instruction.strip()
+    if not instruction:
+        return instruction
+    if len(instruction.split()) > 20:
+        return instruction
+    client = _client()
+    system = (
+        "You rewrite a short image-edit instruction into a single sentence "
+        "that is concrete enough for an image-editing model to act on. Keep "
+        "the user's intent EXACTLY — never add operations they didn't ask "
+        "for, never remove ones they did. Aim for 15-30 words. Mention the "
+        "subject, where in the frame, and any relevant style cues. Return "
+        "ONLY the rewritten instruction, no preamble."
+    )
+    context_parts = [f"User instruction: {instruction}"]
+    if page_title:
+        context_parts.append(f"Current page: {page_title}")
+    if style_anchor:
+        context_parts.append(f"Existing visual style to preserve: {style_anchor}")
+    user = "\n".join(context_parts)
+    text_model = _text_model(online=False)
+    try:
+        response = await client.chat.completions.create(
+            model=text_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.3,
+            max_tokens=120,
+        )
+        polished = (response.choices[0].message.content or "").strip()
+        return polished or instruction
+    except Exception:  # noqa: BLE001
+        return instruction
 
 
 def _safe_json(raw: str) -> dict[str, Any]:

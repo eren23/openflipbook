@@ -5,6 +5,7 @@ import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import type {
   GenerateRequestBody,
   GenerateEvent,
+  ImageTier,
 } from "@openflipbook/config";
 import { annotateClickPoint, normalizeClickOnImage } from "@/lib/image-click";
 import {
@@ -131,6 +132,31 @@ export default function PlayPage() {
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+
+  const [imageTier, setImageTier] = useState<ImageTier>(() => {
+    if (typeof window === "undefined") return "balanced";
+    const stored = window.localStorage.getItem("openflipbook.tier");
+    return stored === "fast" || stored === "pro" || stored === "balanced"
+      ? stored
+      : "balanced";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("openflipbook.tier", imageTier);
+  }, [imageTier]);
+  const proWarnedRef = useRef(false);
+  useEffect(() => {
+    if (imageTier === "pro" && !proWarnedRef.current) {
+      proWarnedRef.current = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[openflipbook] pro tier uses a slower + pricier image model — switch back to balanced for snappier exploration."
+      );
+    }
+  }, [imageTier]);
+
+  const [editMode, setEditMode] = useState(false);
+  const [editInstruction, setEditInstruction] = useState("");
 
   const generate = useCallback(
     async (body: GenerateRequestBody) => {
@@ -393,9 +419,34 @@ export default function PlayPage() {
         session_id: sessionId,
         current_node_id: page?.nodeId ?? "",
         mode: "query",
+        image_tier: imageTier,
       });
     },
-    [input, sessionId, page, generate]
+    [input, sessionId, page, generate, imageTier]
+  );
+
+  const submitEdit = useCallback(
+    (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      const instruction = editInstruction.trim();
+      if (!instruction || !page?.imageDataUrl) return;
+      void generate({
+        query: instruction,
+        aspect_ratio: "16:9",
+        web_search: false,
+        session_id: page.sessionId,
+        current_node_id: page.nodeId ?? "",
+        mode: "edit",
+        image: page.imageDataUrl,
+        edit_instruction: instruction,
+        parent_query: page.query,
+        parent_title: page.title,
+        image_tier: imageTier,
+      });
+      setEditInstruction("");
+      setEditMode(false);
+    },
+    [editInstruction, page, generate, imageTier]
   );
 
   const canGoBack = history.trailIdx > 0;
@@ -558,6 +609,7 @@ export default function PlayPage() {
     const currentImage = page.imageDataUrl;
     const handler = async (evt: MouseEvent) => {
       if (phase === "generating") return;
+      if (editMode) return;
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
       const rect = img.getBoundingClientRect();
@@ -587,11 +639,12 @@ export default function PlayPage() {
         parent_query: page.query,
         parent_title: page.title,
         click,
+        image_tier: imageTier,
       });
     };
     img.addEventListener("click", handler);
     return () => img.removeEventListener("click", handler);
-  }, [page, phase, generate]);
+  }, [page, phase, generate, imageTier, editMode]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -616,12 +669,16 @@ export default function PlayPage() {
       session_id: sessionId,
       current_node_id: "",
       mode: "query",
+      image_tier: imageTier,
     });
-  }, [generate, sessionId]);
+  }, [generate, sessionId, imageTier]);
 
+  const animateAbortRef = useRef<AbortController | null>(null);
   const disconnectStream = useCallback(() => {
     streamRef.current?.close();
     streamRef.current = null;
+    animateAbortRef.current?.abort();
+    animateAbortRef.current = null;
     setStreamStatus("off");
     setFallbackVideoUrl(null);
   }, []);
@@ -642,7 +699,13 @@ export default function PlayPage() {
       setStreamStatus("connecting");
       return;
     }
-    // Cheap fallback via fal.
+    // Cheap fallback via fal. fal LTX video gen typically takes 30-90s; cap
+    // the wait at 3 minutes so a stuck request surfaces rather than hanging
+    // the UI silently.
+    animateAbortRef.current?.abort();
+    const ac = new AbortController();
+    animateAbortRef.current = ac;
+    const timeoutId = window.setTimeout(() => ac.abort(), 180_000);
     setStreamStatus("connecting");
     try {
       const res = await fetch("/api/animate", {
@@ -652,6 +715,7 @@ export default function PlayPage() {
           image_data_url: page.imageDataUrl,
           prompt: page.title,
         }),
+        signal: ac.signal,
       });
       const data = (await res.json()) as {
         video_url?: string;
@@ -663,8 +727,16 @@ export default function PlayPage() {
       setFallbackVideoUrl(data.video_url);
       setStreamStatus("playing");
     } catch (err) {
-      setStreamStatus("error");
-      setError((err as Error).message);
+      if ((err as Error).name === "AbortError") {
+        setStreamStatus("error");
+        setError("Animate timed out after 3 minutes. Try again or stop.");
+      } else {
+        setStreamStatus("error");
+        setError((err as Error).message);
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (animateAbortRef.current === ac) animateAbortRef.current = null;
     }
   }, [page]);
 
@@ -695,6 +767,30 @@ export default function PlayPage() {
         >
           ⬆ Upload
         </button>
+        <div
+          role="group"
+          aria-label="Image quality tier"
+          className="flex items-center overflow-hidden rounded-full border border-[var(--color-ink)]/40 text-xs"
+          title="Image quality tier — fast (cheap), balanced (default), pro (premium)"
+        >
+          {(["fast", "balanced", "pro"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setImageTier(t)}
+              disabled={phase === "generating"}
+              aria-pressed={imageTier === t}
+              className={
+                "px-2.5 py-1 transition-colors disabled:opacity-40 " +
+                (imageTier === t
+                  ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
+                  : "hover:bg-[var(--color-ink)]/5")
+              }
+            >
+              {t}
+            </button>
+          ))}
+        </div>
         <button
           type="submit"
           disabled={phase === "generating" || input.trim().length === 0}
@@ -805,15 +901,7 @@ export default function PlayPage() {
                 );
               }}
             >
-              {streamStatus === "off" || streamStatus === "error" ? (
-                <img
-                  ref={imgRef}
-                  src={page.imageDataUrl}
-                  alt={`Generated illustration for ${page.query}`}
-                  className="block h-auto w-full cursor-crosshair select-none"
-                  draggable={false}
-                />
-              ) : fallbackVideoUrl ? (
+              {fallbackVideoUrl ? (
                 <video
                   src={fallbackVideoUrl}
                   className="block h-auto w-full"
@@ -823,7 +911,9 @@ export default function PlayPage() {
                   playsInline
                   controls
                 />
-              ) : (
+              ) : process.env.NEXT_PUBLIC_LTX_WS_URL &&
+                streamStatus !== "off" &&
+                streamStatus !== "error" ? (
                 <video
                   ref={videoRef}
                   className="block h-auto w-full"
@@ -831,6 +921,19 @@ export default function PlayPage() {
                   muted
                   playsInline
                   controls
+                />
+              ) : (
+                <img
+                  ref={imgRef}
+                  src={page.imageDataUrl}
+                  alt={`Generated illustration for ${page.query}`}
+                  className={
+                    "block h-auto w-full select-none " +
+                    (streamStatus === "connecting"
+                      ? "cursor-wait"
+                      : "cursor-crosshair")
+                  }
+                  draggable={false}
                 />
               )}
 
@@ -895,29 +998,85 @@ export default function PlayPage() {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={streamStatus === "off" ? connectStream : disconnectStream}
-              className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs text-white"
-              title={
-                process.env.NEXT_PUBLIC_LTX_WS_URL
-                  ? "Stream an animated clip from Modal LTX"
-                  : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
-              }
-            >
-              {streamStatus === "off"
-                ? process.env.NEXT_PUBLIC_LTX_WS_URL
-                  ? "Animate (stream)"
-                  : "Animate (5s clip)"
-                : streamStatus === "playing"
-                  ? "Stop"
-                  : streamStatus === "connecting"
-                    ? "Generating clip…"
-                    : `… ${streamStatus}`}
-            </button>
-            <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">
-              Tap anywhere on the image to explore.
-            </figcaption>
+            {phase !== "generating" &&
+              streamStatus === "connecting" &&
+              !fallbackVideoUrl && (
+                <div className="pointer-events-none absolute inset-0 flex items-end bg-black/20">
+                  <div className="m-4 flex items-center gap-3 rounded-full bg-black/80 px-4 py-2 text-sm text-white shadow-lg">
+                    <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-white/90" />
+                    <span>
+                      Animating image… this can take 30-90s. The image stays
+                      visible until the clip is ready.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+            <div className="absolute right-3 top-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditMode((v) => !v);
+                  setEditInstruction("");
+                }}
+                disabled={phase === "generating"}
+                aria-pressed={editMode}
+                className={
+                  "rounded-full px-3 py-1 text-xs text-white disabled:opacity-50 " +
+                  (editMode ? "bg-amber-600" : "bg-black/60 hover:bg-black/75")
+                }
+                title="Edit this image with a text instruction"
+              >
+                {editMode ? "✕ Cancel edit" : "✎ Edit"}
+              </button>
+              <button
+                type="button"
+                onClick={streamStatus === "off" ? connectStream : disconnectStream}
+                className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
+                title={
+                  process.env.NEXT_PUBLIC_LTX_WS_URL
+                    ? "Stream an animated clip from Modal LTX"
+                    : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
+                }
+              >
+                {streamStatus === "off"
+                  ? process.env.NEXT_PUBLIC_LTX_WS_URL
+                    ? "Animate (stream)"
+                    : "Animate (5s clip)"
+                  : streamStatus === "playing"
+                    ? "Stop"
+                    : streamStatus === "connecting"
+                      ? "Generating clip…"
+                      : `… ${streamStatus}`}
+              </button>
+            </div>
+            {editMode ? (
+              <form
+                onSubmit={submitEdit}
+                className="absolute bottom-0 left-0 right-0 flex items-center gap-2 bg-black/65 px-3 py-2"
+              >
+                <input
+                  autoFocus
+                  value={editInstruction}
+                  onChange={(e) => setEditInstruction(e.target.value)}
+                  placeholder="Describe how to change this image…"
+                  className="flex-1 rounded-full bg-white/95 px-3 py-1 text-sm text-black outline-none placeholder:opacity-60"
+                />
+                <button
+                  type="submit"
+                  disabled={
+                    phase === "generating" || editInstruction.trim().length === 0
+                  }
+                  className="rounded-full bg-amber-500 px-3 py-1 text-xs text-black disabled:opacity-50"
+                >
+                  Apply
+                </button>
+              </form>
+            ) : (
+              <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">
+                Tap anywhere on the image to explore.
+              </figcaption>
+            )}
           </div>
         </figure>
       ) : (

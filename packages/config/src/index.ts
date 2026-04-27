@@ -2,6 +2,8 @@ export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 
 export type GenerateMode = "query" | "tap" | "edit";
 
+export type ImageTier = "fast" | "balanced" | "pro";
+
 export interface GenerateRequestBody {
   query: string;
   aspect_ratio: AspectRatio;
@@ -13,6 +15,9 @@ export interface GenerateRequestBody {
   parent_query?: string;
   parent_title?: string;
   click?: { x_pct: number; y_pct: number };
+  image_tier?: ImageTier;
+  image_model?: string;
+  edit_instruction?: string;
 }
 
 export interface GenerateProgressEvent {
