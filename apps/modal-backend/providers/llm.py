@@ -96,6 +96,7 @@ async def click_to_subject(
     y_pct: float,
     parent_title: str,
     parent_query: str,
+    output_locale: str | None = None,
 ) -> ClickResolution:
     """Resolve the click region to a subject phrase AND a style descriptor.
 
@@ -106,6 +107,13 @@ async def click_to_subject(
     continuity across hops without a second VLM round-trip.
     """
     client = _client()
+    locale_clause = (
+        f" The `subject` MUST be written in language code '{output_locale}' — "
+        "the next page is being generated in that language and the subject "
+        "phrase will be the page title."
+        if output_locale and output_locale.lower() not in ("en", "auto", "")
+        else ""
+    )
     system = (
         "You examine a generated illustration of the page titled "
         f"'{parent_title}' (user query: '{parent_query}'). A red crosshair with "
@@ -119,6 +127,7 @@ async def click_to_subject(
         "watercolor, technical line drawing, photoreal, anime, blueprint), "
         "dominant palette, line work, level of detail, perspective. "
         "Return JSON: {\"subject\": \"...\", \"style\": \"...\"}."
+        + locale_clause
     )
     user_text = (
         "Look at the red crosshair marker on the image and tell me the "
@@ -161,6 +170,7 @@ async def plan_page(
     query: str,
     web_search: bool,
     style_anchor: str | None = None,
+    output_locale: str | None = None,
 ) -> PagePlan:
     """Produce a page title, image-gen prompt, and factual snippets for the query.
 
@@ -189,6 +199,17 @@ async def plan_page(
             "leading clause that names the style explicitly so the image "
             "model can lock onto it (e.g. \"Flat infographic illustration "
             "with bold blue accents and clean line work, ...\")."
+        )
+    if output_locale and output_locale.lower() not in ("en", "auto", ""):
+        system_parts.append(
+            "OUTPUT LANGUAGE LOCK (CRITICAL): `page_title` and every entry in "
+            f"`facts` MUST be written in language code '{output_locale}'. The "
+            "image-gen prompt itself stays in English (the renderer is "
+            "English-trained), BUT it MUST instruct the renderer to draw all "
+            "in-image labels, callouts, and on-page text in "
+            f"'{output_locale}'. Include a sentence like \"All labels, "
+            "callouts, and text inside the illustration are written in "
+            f"{output_locale}.\" near the start of the prompt."
         )
     system = " ".join(system_parts)
     user = (
@@ -220,6 +241,91 @@ async def plan_page(
             if isinstance(f, str) and f.strip():
                 facts.append(f.strip())
     return PagePlan(page_title=page_title, prompt=prompt, facts=facts)
+
+
+async def rewrite_motion_prompt(
+    *,
+    page_title: str,
+    page_prompt: str | None = None,
+    image_data_url: str | None = None,
+    duration_seconds: int = 5,
+) -> str:
+    """Rewrite a page title/prompt into a motion-rich video prompt.
+
+    LTX/Wan/Hunyuan i2v models are extremely sensitive to prompt detail —
+    feeding them a bare page title produces near-static clips. This helper
+    asks a VLM (when an image is supplied) or LLM (when not) to compose a
+    cinematographic prompt naming a camera move, the primary subject's
+    action, and a short atmospheric beat, capped to one sentence.
+
+    Strictly additive: failures fall back to the original page_title so
+    animate never breaks if OpenRouter is misconfigured.
+    """
+    seed = (page_title or "").strip()
+    if not seed:
+        return page_prompt or ""
+    if os.environ.get("ANIMATE_PROMPT_REWRITE", "true").lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        return seed
+
+    client = _client()
+    system = (
+        "You convert a still illustration's caption into a one-sentence "
+        "image-to-video prompt for a diffusion video model (LTX, Wan, "
+        "Hunyuan-class). The clip is short — about "
+        f"{duration_seconds} seconds — and starts from the supplied still. "
+        "Name ONE camera move (slow dolly-in, gentle pan-left, push-out, "
+        "static with parallax), ONE subject action that fits the caption, "
+        "and ONE atmospheric beat (lighting shift, dust motes, rising steam). "
+        "Stay faithful to the caption — do not invent unrelated subjects or "
+        "switch art styles. Return ONLY the rewritten sentence, 25-45 words, "
+        "no preamble, no quotes."
+    )
+    user_text_parts = [f"Caption: {seed}"]
+    if page_prompt and page_prompt.strip() and page_prompt.strip() != seed:
+        user_text_parts.append(f"Scene description: {page_prompt.strip()}")
+    user_text = "\n".join(user_text_parts)
+
+    try:
+        if image_data_url:
+            response = await client.chat.completions.create(
+                model=_vlm_model(),
+                messages=[
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_text},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image_data_url,
+                                    "detail": "low",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                temperature=0.4,
+                max_tokens=160,
+            )
+        else:
+            response = await client.chat.completions.create(
+                model=_text_model(online=False),
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_text},
+                ],
+                temperature=0.4,
+                max_tokens=160,
+            )
+        rewritten = (response.choices[0].message.content or "").strip()
+        return rewritten or seed
+    except Exception:  # noqa: BLE001
+        return seed
 
 
 async def polish_edit_instruction(

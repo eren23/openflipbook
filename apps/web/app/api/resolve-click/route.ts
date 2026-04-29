@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   const body = await req.text();
   let upstream: Response;
   try {
-    upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/animate`, {
+    upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/resolve-click`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,

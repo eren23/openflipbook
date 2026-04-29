@@ -4,6 +4,8 @@ export type GenerateMode = "query" | "tap" | "edit";
 
 export type ImageTier = "fast" | "balanced" | "pro";
 
+export type VideoTier = "fast" | "balanced" | "pro";
+
 export interface GenerateRequestBody {
   query: string;
   aspect_ratio: AspectRatio;
@@ -18,6 +20,28 @@ export interface GenerateRequestBody {
   image_tier?: ImageTier;
   image_model?: string;
   edit_instruction?: string;
+  // BCP-47 short tag (e.g. "en", "tr", "ja"). When set, the planner +
+  // click-resolver are instructed to emit titles, labels, and the click
+  // subject in this language. Image labels render in-pixel via the model.
+  output_locale?: string;
+  // Hover-prefetched click resolution. When present, the SSE stream skips
+  // the VLM call entirely on tap mode, cutting ~600-1200ms off the hop.
+  prefetched_subject?: string;
+  prefetched_style?: string;
+}
+
+export interface ResolveClickRequestBody {
+  image_data_url: string;
+  x_pct: number;
+  y_pct: number;
+  parent_title?: string;
+  parent_query?: string;
+  output_locale?: string;
+}
+
+export interface ResolveClickResponse {
+  subject: string;
+  style: string;
 }
 
 export interface GenerateProgressEvent {

@@ -6,6 +6,7 @@ import type {
   GenerateRequestBody,
   GenerateEvent,
   ImageTier,
+  VideoTier,
 } from "@openflipbook/config";
 import { annotateClickPoint, normalizeClickOnImage } from "@/lib/image-click";
 import {
@@ -15,6 +16,16 @@ import {
   type StreamStatus,
 } from "@/lib/stream-client";
 import WorldMap from "@/components/world-map";
+import {
+  SUPPORTED_LOCALES,
+  type SupportedLocale,
+  getStrings,
+  isRTL,
+  resolveOutputLocale,
+} from "@/lib/i18n";
+
+type Theme = "light" | "sepia" | "dark";
+const THEMES: readonly Theme[] = ["light", "sepia", "dark"] as const;
 
 type Phase = "idle" | "generating" | "ready" | "error";
 
@@ -124,6 +135,9 @@ export default function PlayPage() {
     oy: number;
     phase: "in" | "out";
   } | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ xPx: number; yPx: number } | null>(
+    null
+  );
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -155,8 +169,78 @@ export default function PlayPage() {
     }
   }, [imageTier]);
 
+  const [videoTier, setVideoTier] = useState<VideoTier>(() => {
+    if (typeof window === "undefined") return "fast";
+    const stored = window.localStorage.getItem("openflipbook.videoTier");
+    return stored === "fast" || stored === "balanced" || stored === "pro"
+      ? stored
+      : "fast";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("openflipbook.videoTier", videoTier);
+  }, [videoTier]);
+
   const [editMode, setEditMode] = useState(false);
   const [editInstruction, setEditInstruction] = useState("");
+
+  const [outputLocale, setOutputLocale] = useState<SupportedLocale>(() => {
+    if (typeof window === "undefined") return "auto";
+    const stored = window.localStorage.getItem("openflipbook.outputLocale");
+    if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
+      return stored as SupportedLocale;
+    }
+    return "auto";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("openflipbook.outputLocale", outputLocale);
+    const head = resolveOutputLocale(outputLocale);
+    document.documentElement.setAttribute("lang", head);
+    document.documentElement.setAttribute("dir", isRTL(head) ? "rtl" : "ltr");
+  }, [outputLocale]);
+  const t = getStrings(outputLocale);
+
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "light";
+    const stored = window.localStorage.getItem("openflipbook.theme");
+    return stored === "sepia" || stored === "dark" || stored === "light"
+      ? stored
+      : "light";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("openflipbook.theme", theme);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // Hover-prefetch cache. Keyed by `${nodeId}:${xBucket}:${yBucket}` so two
+  // hovers within a 5% grid cell reuse the same VLM round-trip.
+  //
+  // Bandwidth/cost discipline (each prefetch POSTs ~1-3MB image data + spends
+  // OpenRouter VLM tokens):
+  //   - serial: only one in-flight request at a time; new hover aborts prior
+  //   - per-page cap: at most PREFETCH_PER_PAGE distinct buckets warmed
+  //   - LRU eviction at PREFETCH_LRU_MAX so long sessions don't grow Map<>
+  //   - debounce 450ms below filters out fast pointer sweeps
+  const PREFETCH_PER_PAGE = 6;
+  const PREFETCH_LRU_MAX = 200;
+  const prefetchCacheRef = useRef<
+    Map<string, { subject: string; style: string }>
+  >(new Map());
+  const prefetchInflightRef = useRef<Map<string, AbortController>>(new Map());
+  const prefetchTimerRef = useRef<number | null>(null);
+  const prefetchCurrentKeyRef = useRef<string | null>(null);
+  const prefetchPerPageCountRef = useRef<Map<string, number>>(new Map());
+
+  const bucketKey = useCallback(
+    (nodeId: string | null, xPct: number, yPct: number): string => {
+      const xb = Math.round(xPct * 20); // 5% grid
+      const yb = Math.round(yPct * 20);
+      return `${nodeId ?? "noid"}:${xb}:${yb}`;
+    },
+    []
+  );
 
   const generate = useCallback(
     async (body: GenerateRequestBody) => {
@@ -420,9 +504,10 @@ export default function PlayPage() {
         current_node_id: page?.nodeId ?? "",
         mode: "query",
         image_tier: imageTier,
+        output_locale: resolveOutputLocale(outputLocale),
       });
     },
-    [input, sessionId, page, generate, imageTier]
+    [input, sessionId, page, generate, imageTier, outputLocale]
   );
 
   const submitEdit = useCallback(
@@ -442,11 +527,12 @@ export default function PlayPage() {
         parent_query: page.query,
         parent_title: page.title,
         image_tier: imageTier,
+        output_locale: resolveOutputLocale(outputLocale),
       });
       setEditInstruction("");
       setEditMode(false);
     },
-    [editInstruction, page, generate, imageTier]
+    [editInstruction, page, generate, imageTier, outputLocale]
   );
 
   const canGoBack = history.trailIdx > 0;
@@ -607,6 +693,71 @@ export default function PlayPage() {
     const img = imgRef.current;
     if (!img || !page?.imageDataUrl) return;
     const currentImage = page.imageDataUrl;
+    const currentNodeId = page.nodeId;
+    const cache = prefetchCacheRef.current;
+    const inflight = prefetchInflightRef.current;
+
+    const pageBucketCounts = prefetchPerPageCountRef.current;
+    const pageScope = currentNodeId ?? "noid";
+
+    const firePrefetch = (xPct: number, yPct: number) => {
+      const key = bucketKey(currentNodeId, xPct, yPct);
+      if (prefetchCurrentKeyRef.current === key) return;
+      prefetchCurrentKeyRef.current = key;
+      if (cache.has(key)) return;
+      if ((pageBucketCounts.get(pageScope) ?? 0) >= PREFETCH_PER_PAGE) return;
+      // Serial: cancel any prior in-flight prefetch — only the latest hover
+      // is interesting, and parallel multi-MB POSTs are the cost we're
+      // worried about most.
+      inflight.forEach((ac) => ac.abort());
+      inflight.clear();
+      const ac = new AbortController();
+      inflight.set(key, ac);
+      pageBucketCounts.set(
+        pageScope,
+        (pageBucketCounts.get(pageScope) ?? 0) + 1
+      );
+      void (async () => {
+        try {
+          const res = await fetch("/api/resolve-click", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image_data_url: currentImage,
+              x_pct: xPct,
+              y_pct: yPct,
+              parent_title: page.title,
+              parent_query: page.query,
+              output_locale: resolveOutputLocale(outputLocale),
+            }),
+            signal: ac.signal,
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            subject?: string;
+            style?: string;
+          };
+          if (data.subject) {
+            cache.set(key, {
+              subject: data.subject,
+              style: data.style ?? "",
+            });
+            // Bound the cache so a long session doesn't grow Map<> forever.
+            // FIFO eviction is fine — cache entries are independent.
+            while (cache.size > PREFETCH_LRU_MAX) {
+              const oldest = cache.keys().next().value;
+              if (oldest === undefined) break;
+              cache.delete(oldest);
+            }
+          }
+        } catch {
+          // Best-effort. Click handler will fall back to the in-band VLM.
+        } finally {
+          inflight.delete(key);
+        }
+      })();
+    };
+
     const handler = async (evt: MouseEvent) => {
       if (phase === "generating") return;
       if (editMode) return;
@@ -628,6 +779,7 @@ export default function PlayPage() {
         // Fall back to the raw image + numeric coords if canvas taint or
         // decode failed. VLM still gets the text coords as a hint.
       }
+      const cached = cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -640,11 +792,59 @@ export default function PlayPage() {
         parent_title: page.title,
         click,
         image_tier: imageTier,
+        output_locale: resolveOutputLocale(outputLocale),
+        ...(cached
+          ? {
+              prefetched_subject: cached.subject,
+              prefetched_style: cached.style,
+            }
+          : {}),
       });
     };
+    const move = (evt: PointerEvent) => {
+      if (evt.pointerType === "touch") return;
+      const rect = img.getBoundingClientRect();
+      setHoverPos({
+        xPx: evt.clientX - rect.left,
+        yPx: evt.clientY - rect.top,
+      });
+      if (phase === "generating" || editMode) return;
+      if (streamStatus !== "off") return;
+      const click = normalizeClickOnImage(evt, img);
+      if (!click) return;
+      if (prefetchTimerRef.current !== null) {
+        window.clearTimeout(prefetchTimerRef.current);
+      }
+      prefetchTimerRef.current = window.setTimeout(() => {
+        firePrefetch(click.x_pct, click.y_pct);
+      }, 450);
+    };
+    const leave = () => {
+      setHoverPos(null);
+      if (prefetchTimerRef.current !== null) {
+        window.clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = null;
+      }
+      prefetchCurrentKeyRef.current = null;
+    };
     img.addEventListener("click", handler);
-    return () => img.removeEventListener("click", handler);
-  }, [page, phase, generate, imageTier, editMode]);
+    img.addEventListener("pointermove", move);
+    img.addEventListener("pointerleave", leave);
+    return () => {
+      img.removeEventListener("click", handler);
+      img.removeEventListener("pointermove", move);
+      img.removeEventListener("pointerleave", leave);
+      if (prefetchTimerRef.current !== null) {
+        window.clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = null;
+      }
+      // Abort any in-flight prefetches scoped to the previous page; cached
+      // entries can stay since they're keyed by nodeId.
+      inflight.forEach((ac) => ac.abort());
+      inflight.clear();
+      prefetchCurrentKeyRef.current = null;
+    };
+  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -670,8 +870,9 @@ export default function PlayPage() {
       current_node_id: "",
       mode: "query",
       image_tier: imageTier,
+      output_locale: resolveOutputLocale(outputLocale),
     });
-  }, [generate, sessionId, imageTier]);
+  }, [generate, sessionId, imageTier, outputLocale]);
 
   const animateAbortRef = useRef<AbortController | null>(null);
   const disconnectStream = useCallback(() => {
@@ -714,6 +915,7 @@ export default function PlayPage() {
         body: JSON.stringify({
           image_data_url: page.imageDataUrl,
           prompt: page.title,
+          video_tier: videoTier,
         }),
         signal: ac.signal,
       });
@@ -738,7 +940,7 @@ export default function PlayPage() {
       window.clearTimeout(timeoutId);
       if (animateAbortRef.current === ac) animateAbortRef.current = null;
     }
-  }, [page]);
+  }, [page, videoTier]);
 
   return (
     <main
@@ -749,12 +951,12 @@ export default function PlayPage() {
     >
       <form
         onSubmit={submitQuery}
-        className="flex items-center gap-2 rounded-full border border-[var(--color-ink)]/30 bg-white/80 px-4 py-2 shadow-sm"
+        className="flex flex-wrap items-center gap-2 rounded-full border border-[var(--color-edge)] bg-[var(--color-canvas)]/80 px-4 py-2 shadow-sm"
       >
         <input
           autoFocus
-          className="flex-1 bg-transparent outline-none placeholder:opacity-60"
-          placeholder="Ask about anything, or upload a seed image..."
+          className="min-w-[8rem] flex-1 bg-transparent outline-none placeholder:opacity-60"
+          placeholder={t.placeholder}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
@@ -762,32 +964,73 @@ export default function PlayPage() {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={phase === "generating"}
-          className="rounded-full border border-[var(--color-ink)]/40 px-3 py-1 text-xs hover:bg-[var(--color-ink)]/5 disabled:opacity-40"
+          className="rounded-full border border-[var(--color-edge)] px-3 py-1 text-xs hover:bg-[var(--color-ink)]/5 disabled:opacity-40"
           title="Upload an image as the starting page. Tap on it to explore regions."
         >
-          ⬆ Upload
+          {t.upload}
         </button>
+        <select
+          value={outputLocale}
+          onChange={(e) => setOutputLocale(e.target.value as SupportedLocale)}
+          disabled={phase === "generating"}
+          aria-label={t.langLabel}
+          title={t.langLabel}
+          className="rounded-full border border-[var(--color-edge)] bg-transparent px-2 py-1 text-xs disabled:opacity-40"
+        >
+          {SUPPORTED_LOCALES.map((loc) => (
+            <option key={loc} value={loc}>
+              {loc === "auto" ? t.langAuto : loc}
+            </option>
+          ))}
+        </select>
         <div
           role="group"
-          aria-label="Image quality tier"
-          className="flex items-center overflow-hidden rounded-full border border-[var(--color-ink)]/40 text-xs"
-          title="Image quality tier — fast (cheap), balanced (default), pro (premium)"
+          aria-label="Theme"
+          className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
+          title="Theme — light / sepia / dark"
         >
-          {(["fast", "balanced", "pro"] as const).map((t) => (
+          {THEMES.map((th) => (
             <button
-              key={t}
+              key={th}
               type="button"
-              onClick={() => setImageTier(t)}
-              disabled={phase === "generating"}
-              aria-pressed={imageTier === t}
+              onClick={() => setTheme(th)}
+              aria-pressed={theme === th}
               className={
-                "px-2.5 py-1 transition-colors disabled:opacity-40 " +
-                (imageTier === t
+                "px-2.5 py-1 transition-colors " +
+                (theme === th
                   ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
                   : "hover:bg-[var(--color-ink)]/5")
               }
             >
-              {t}
+              {th === "light"
+                ? t.themeLight
+                : th === "sepia"
+                  ? t.themeSepia
+                  : t.themeDark}
+            </button>
+          ))}
+        </div>
+        <div
+          role="group"
+          aria-label="Image quality tier"
+          className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
+          title="Image quality tier — fast (cheap), balanced (default), pro (premium)"
+        >
+          {(["fast", "balanced", "pro"] as const).map((tier) => (
+            <button
+              key={tier}
+              type="button"
+              onClick={() => setImageTier(tier)}
+              disabled={phase === "generating"}
+              aria-pressed={imageTier === tier}
+              className={
+                "px-2.5 py-1 transition-colors disabled:opacity-40 " +
+                (imageTier === tier
+                  ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
+                  : "hover:bg-[var(--color-ink)]/5")
+              }
+            >
+              {tier}
             </button>
           ))}
         </div>
@@ -796,7 +1039,7 @@ export default function PlayPage() {
           disabled={phase === "generating" || input.trim().length === 0}
           className="rounded-full bg-[var(--color-ink)] px-4 py-1 text-[var(--color-canvas)] disabled:opacity-40"
         >
-          {phase === "generating" ? "…" : "Go"}
+          {phase === "generating" ? t.generating : t.go}
         </button>
       </form>
 
@@ -931,11 +1174,86 @@ export default function PlayPage() {
                     "block h-auto w-full select-none " +
                     (streamStatus === "connecting"
                       ? "cursor-wait"
-                      : "cursor-crosshair")
+                      : phase === "generating" || editMode
+                        ? "cursor-crosshair"
+                        : "cursor-none")
                   }
                   draggable={false}
                 />
               )}
+
+              {hoverPos &&
+                phase !== "generating" &&
+                !editMode &&
+                streamStatus === "off" && (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      left: `${hoverPos.xPx}px`,
+                      top: `${hoverPos.yPx}px`,
+                      width: "28px",
+                      height: "28px",
+                    }}
+                  >
+                    <svg
+                      viewBox="0 0 28 28"
+                      width="28"
+                      height="28"
+                      className="block"
+                    >
+                      <circle
+                        cx="14"
+                        cy="14"
+                        r="11"
+                        fill="none"
+                        stroke="rgba(255,255,255,0.95)"
+                        strokeWidth="2.5"
+                      />
+                      <circle
+                        cx="14"
+                        cy="14"
+                        r="11"
+                        fill="none"
+                        stroke="#ef4444"
+                        strokeWidth="1.25"
+                      />
+                      <line
+                        x1="14"
+                        y1="2"
+                        x2="14"
+                        y2="9"
+                        stroke="#ef4444"
+                        strokeWidth="1.5"
+                      />
+                      <line
+                        x1="14"
+                        y1="19"
+                        x2="14"
+                        y2="26"
+                        stroke="#ef4444"
+                        strokeWidth="1.5"
+                      />
+                      <line
+                        x1="2"
+                        y1="14"
+                        x2="9"
+                        y2="14"
+                        stroke="#ef4444"
+                        strokeWidth="1.5"
+                      />
+                      <line
+                        x1="19"
+                        y1="14"
+                        x2="26"
+                        y2="14"
+                        stroke="#ef4444"
+                        strokeWidth="1.5"
+                      />
+                      <circle cx="14" cy="14" r="1.5" fill="#ef4444" />
+                    </svg>
+                  </span>
+                )}
 
               {clickRipple && phase === "generating" && (
                 <span
@@ -1027,8 +1345,33 @@ export default function PlayPage() {
                 }
                 title="Edit this image with a text instruction"
               >
-                {editMode ? "✕ Cancel edit" : "✎ Edit"}
+                {editMode ? t.cancelEdit : t.edit}
               </button>
+              {!process.env.NEXT_PUBLIC_LTX_WS_URL && streamStatus === "off" && (
+                <div
+                  role="group"
+                  aria-label="Video quality tier"
+                  className="flex items-center overflow-hidden rounded-full border border-white/30 bg-black/60 text-[10px] text-white"
+                  title="Video quality tier — fast (LTX), balanced (Wan 2.2), pro (LTX-2)"
+                >
+                  {(["fast", "balanced", "pro"] as const).map((tier) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      onClick={() => setVideoTier(tier)}
+                      aria-pressed={videoTier === tier}
+                      className={
+                        "px-2 py-1 transition-colors " +
+                        (videoTier === tier
+                          ? "bg-white text-black"
+                          : "hover:bg-white/15")
+                      }
+                    >
+                      {tier}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={streamStatus === "off" ? connectStream : disconnectStream}
@@ -1041,12 +1384,12 @@ export default function PlayPage() {
               >
                 {streamStatus === "off"
                   ? process.env.NEXT_PUBLIC_LTX_WS_URL
-                    ? "Animate (stream)"
-                    : "Animate (5s clip)"
+                    ? t.animateStream
+                    : t.animateClip
                   : streamStatus === "playing"
-                    ? "Stop"
+                    ? t.animateStop
                     : streamStatus === "connecting"
-                      ? "Generating clip…"
+                      ? t.generatingClip
                       : `… ${streamStatus}`}
               </button>
             </div>
@@ -1059,7 +1402,7 @@ export default function PlayPage() {
                   autoFocus
                   value={editInstruction}
                   onChange={(e) => setEditInstruction(e.target.value)}
-                  placeholder="Describe how to change this image…"
+                  placeholder={t.editPlaceholder}
                   className="flex-1 rounded-full bg-white/95 px-3 py-1 text-sm text-black outline-none placeholder:opacity-60"
                 />
                 <button
@@ -1069,12 +1412,12 @@ export default function PlayPage() {
                   }
                   className="rounded-full bg-amber-500 px-3 py-1 text-xs text-black disabled:opacity-50"
                 >
-                  Apply
+                  {t.apply}
                 </button>
               </form>
             ) : (
               <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">
-                Tap anywhere on the image to explore.
+                {t.tapHint}
               </figcaption>
             )}
           </div>

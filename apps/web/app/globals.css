@@ -2,18 +2,45 @@
 
 @theme {
   --font-display: "Comic Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Lora", "Source Serif 4", Georgia, "Times New Roman", serif;
   --color-canvas: #f5efe2;
   --color-ink: #1f1d1b;
+  --color-edge: rgba(31, 29, 27, 0.18);
 }
 
-:root {
+:root,
+:root[data-theme="light"] {
   color-scheme: light;
+  --color-canvas: #f5efe2;
+  --color-ink: #1f1d1b;
+  --color-edge: rgba(31, 29, 27, 0.18);
+}
+
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --color-canvas: #efe2c8;
+  --color-ink: #3a2918;
+  --color-edge: rgba(58, 41, 24, 0.22);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #15130f;
+  --color-ink: #f3ead6;
+  --color-edge: rgba(243, 234, 214, 0.18);
 }
 
 html,
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+.font-display {
   font-family: var(--font-display);
 }
 

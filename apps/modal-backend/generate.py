@@ -59,6 +59,9 @@ class GenerateBody(BaseModel):
     image_tier: str | None = None
     image_model: str | None = None
     edit_instruction: str | None = None
+    output_locale: str | None = None
+    prefetched_subject: str | None = None
+    prefetched_style: str | None = None
 
 
 def _sse(data: dict) -> bytes:
@@ -117,28 +120,58 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
             return
 
         # 1. Resolve click → subject phrase + style anchor (style is empty for
-        #    text-only queries; only set on tap mode).
+        #    text-only queries; only set on tap mode). When the client has
+        #    already prefetched on hover, skip the VLM round-trip entirely.
         effective_query = body.query
         style_anchor: str | None = None
         if body.mode == "tap" and body.click and body.image:
-            resolution = await llm.click_to_subject(
-                image_data_url=body.image,
-                x_pct=body.click.x_pct,
-                y_pct=body.click.y_pct,
-                parent_title=body.parent_title or body.query,
-                parent_query=body.parent_query or body.query,
-            )
-            if resolution.subject:
-                effective_query = resolution.subject
+            # Trust-but-verify on client-supplied prefetch hints. The web
+            # client computes these via the same VLM the backend would call,
+            # but the SSE handler will ultimately splice them into LLM
+            # prompts — so cap length + strip control chars to keep prompt
+            # injection / token-bomb surface small. Any rejection silently
+            # falls back to in-band resolution.
+            def _sanitize_hint(raw: str | None, max_len: int) -> str:
+                if not raw:
+                    return ""
+                cleaned = "".join(
+                    ch for ch in raw if ch == "\n" or ch == "\t" or ch >= " "
+                ).strip()
+                return cleaned[:max_len]
+
+            cleaned_subject = _sanitize_hint(body.prefetched_subject, 160)
+            cleaned_style = _sanitize_hint(body.prefetched_style, 320)
+            prefetched_ok = bool(cleaned_subject)
+            if prefetched_ok:
+                effective_query = cleaned_subject
+                style_anchor = cleaned_style or None
                 yield _sse(
                     {
                         "type": "status",
                         "stage": "click_resolved",
-                        "subject": resolution.subject,
+                        "subject": effective_query,
                     }
                 )
-            if resolution.style:
-                style_anchor = resolution.style
+            else:
+                resolution = await llm.click_to_subject(
+                    image_data_url=body.image,
+                    x_pct=body.click.x_pct,
+                    y_pct=body.click.y_pct,
+                    parent_title=body.parent_title or body.query,
+                    parent_query=body.parent_query or body.query,
+                    output_locale=body.output_locale,
+                )
+                if resolution.subject:
+                    effective_query = resolution.subject
+                    yield _sse(
+                        {
+                            "type": "status",
+                            "stage": "click_resolved",
+                            "subject": resolution.subject,
+                        }
+                    )
+                if resolution.style:
+                    style_anchor = resolution.style
 
         # 2. Plan (with optional style anchor for visual continuity).
         yield _sse({"type": "status", "stage": "planning"})
@@ -146,6 +179,7 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
             query=effective_query,
             web_search=body.web_search,
             style_anchor=style_anchor,
+            output_locale=body.output_locale,
         )
 
         composed_prompt = plan.prompt
@@ -215,6 +249,7 @@ class AnimateBody(BaseModel):
     image_data_url: str
     prompt: str
     duration: int = 5
+    video_tier: str | None = None
 
 
 @fastapi_app.post("/animate")
@@ -228,6 +263,7 @@ async def animate(body: AnimateBody):
     import logging
     import traceback
 
+    from providers import llm as llm_provider
     from providers import video as video_provider
 
     logger = logging.getLogger("openflipbook.animate")
@@ -238,11 +274,23 @@ async def animate(body: AnimateBody):
         img_size_kb,
         body.duration,
     )
+    motion_prompt = await llm_provider.rewrite_motion_prompt(
+        page_title=body.prompt or "",
+        image_data_url=body.image_data_url,
+        duration_seconds=body.duration,
+    )
+    if motion_prompt and motion_prompt != body.prompt:
+        logger.info(
+            "animate prompt rewritten: orig_len=%d new_len=%d",
+            len(body.prompt or ""),
+            len(motion_prompt),
+        )
     try:
         clip = await video_provider.animate_image(
             image_data_url=body.image_data_url,
-            prompt=body.prompt,
+            prompt=motion_prompt or body.prompt,
             duration=body.duration,
+            tier=body.video_tier,
         )
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc(limit=4)
@@ -261,6 +309,45 @@ async def animate(body: AnimateBody):
         "model": clip.model,
         "duration_seconds": clip.duration_seconds,
     }
+
+
+class ResolveClickBody(BaseModel):
+    image_data_url: str
+    x_pct: float = Field(ge=0.0, le=1.0)
+    y_pct: float = Field(ge=0.0, le=1.0)
+    parent_title: str | None = None
+    parent_query: str | None = None
+    output_locale: str | None = None
+
+
+@fastapi_app.post("/resolve-click")
+async def resolve_click(body: ResolveClickBody):
+    """Hover-prefetch endpoint.
+
+    Returns just the click→subject+style mapping so the frontend can warm a
+    tap before the user commits, then forward `prefetched_subject` /
+    `prefetched_style` into `/sse/generate` to skip the VLM step there.
+    """
+    import logging
+
+    from providers import llm as llm_provider
+
+    logger = logging.getLogger("openflipbook.resolve_click")
+    try:
+        resolution = await llm_provider.click_to_subject(
+            image_data_url=body.image_data_url,
+            x_pct=body.x_pct,
+            y_pct=body.y_pct,
+            parent_title=body.parent_title or "",
+            parent_query=body.parent_query or "",
+            output_locale=body.output_locale,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("resolve-click failed: %s", exc)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}"}, status_code=502
+        )
+    return {"subject": resolution.subject, "style": resolution.style}
 
 
 @fastapi_app.get("/health")
