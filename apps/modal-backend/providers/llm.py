@@ -97,6 +97,7 @@ async def click_to_subject(
     parent_title: str,
     parent_query: str,
     output_locale: str | None = None,
+    user_hint: str | None = None,
 ) -> ClickResolution:
     """Resolve the click region to a subject phrase AND a style descriptor.
 
@@ -129,6 +130,15 @@ async def click_to_subject(
         "Return JSON: {\"subject\": \"...\", \"style\": \"...\"}."
         + locale_clause
     )
+    hint_clause = ""
+    if user_hint:
+        hint_clause = (
+            "\n\nUser's note for this click (treat as guidance for what they "
+            f"want from the subject phrase): \"{user_hint}\". "
+            "Let it shape the angle/framing of the subject if relevant, but "
+            "keep the subject concrete and grounded in what's actually under "
+            "the crosshair."
+        )
     user_text = (
         "Look at the red crosshair marker on the image and tell me the "
         "specific subject beneath it. Also describe the visual style of "
@@ -136,6 +146,7 @@ async def click_to_subject(
         "If the crosshair is not visible for any reason, fall back to the "
         f"numeric position x={x_pct:.3f}, y={y_pct:.3f} "
         "(0-1 normalized, origin top-left)."
+        + hint_clause
     )
     response = await client.chat.completions.create(
         model=_vlm_model(),

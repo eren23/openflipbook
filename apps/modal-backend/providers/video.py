@@ -105,7 +105,11 @@ async def animate_image(
         "prompt": prompt,
     }
     if model == PRO_ANIMATE_MODEL:
-        arguments["duration"] = duration
+        # LTX-2's schema is a STRING enum on duration/resolution/fps —
+        # passing int 5 (or even int 6) makes fal's validator 502 the request
+        # with a confusingly generic error. Snap to {6, 8, 10} and stringify.
+        snapped = 6 if duration <= 6 else 8 if duration <= 8 else 10
+        arguments["duration"] = str(snapped)
         arguments["resolution"] = os.environ.get("LTX_PRO_RESOLUTION", "1080p")
     elif "wan" in model.lower():
         # Wan i2v on fal accepts duration via num_frames; default 5s @ 16fps.

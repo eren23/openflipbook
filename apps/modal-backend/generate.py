@@ -56,6 +56,7 @@ class GenerateBody(BaseModel):
     parent_query: str | None = None
     parent_title: str | None = None
     click: Click | None = None
+    click_hint: str | None = None
     image_tier: str | None = None
     image_model: str | None = None
     edit_instruction: str | None = None
@@ -141,6 +142,7 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
 
             cleaned_subject = _sanitize_hint(body.prefetched_subject, 160)
             cleaned_style = _sanitize_hint(body.prefetched_style, 320)
+            cleaned_user_hint = _sanitize_hint(body.click_hint, 240)
             prefetched_ok = bool(cleaned_subject)
             if prefetched_ok:
                 effective_query = cleaned_subject
@@ -160,6 +162,7 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                     parent_title=body.parent_title or body.query,
                     parent_query=body.parent_query or body.query,
                     output_locale=body.output_locale,
+                    user_hint=cleaned_user_hint or None,
                 )
                 if resolution.subject:
                     effective_query = resolution.subject
@@ -172,6 +175,13 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                     )
                 if resolution.style:
                     style_anchor = resolution.style
+
+            # Fold the user's free-form note into the planner query so the next
+            # page reflects their angle even when the prefetched-subject path
+            # short-circuited the VLM. Em dash separator keeps the subject
+            # readable as the page title; planner is instructed to honour both.
+            if cleaned_user_hint:
+                effective_query = f"{effective_query} — {cleaned_user_hint}"
 
         # 2. Plan (with optional style anchor for visual continuity).
         yield _sse({"type": "status", "stage": "planning"})

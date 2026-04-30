@@ -144,17 +144,53 @@ export default function PlayPage() {
   const streamRef = useRef<StreamClient | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus | "off">("off");
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
+  // After Stop, we keep `fallbackVideoUrl` around so the user can flip back
+  // to the already-generated clip without re-paying for animation. `showVideo`
+  // gates whether the figure renders the video or the still image.
+  const [showVideo, setShowVideo] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => {
+    setImgFailed(false);
+    // Each page has its own clip — clear the previous page's cached fal URL
+    // when the user navigates so "Replay clip" never resurfaces a stale clip.
+    setFallbackVideoUrl(null);
+    setShowVideo(false);
+  }, [page?.imageDataUrl]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
 
-  const [imageTier, setImageTier] = useState<ImageTier>(() => {
-    if (typeof window === "undefined") return "balanced";
-    const stored = window.localStorage.getItem("openflipbook.tier");
-    return stored === "fast" || stored === "pro" || stored === "balanced"
-      ? stored
-      : "balanced";
-  });
+  // Persisted-preference state: render with the SSR-safe default on first
+  // paint, then hydrate from localStorage in an effect. Reading localStorage
+  // inside the useState initializer causes React 19 to bail out of hydration
+  // on this subtree when the stored value diverges from SSR — symptom is that
+  // the first click on a tier/theme button "doesn't take" until a re-render
+  // settles. theme-init.js paints the correct `data-theme` on <html> before
+  // hydration; the per-effect firstRun guards keep these effects from
+  // overwriting that initial paint with the default values on mount.
+  const [imageTier, setImageTier] = useState<ImageTier>("balanced");
+  const [videoTier, setVideoTier] = useState<VideoTier>("fast");
+  const [outputLocale, setOutputLocale] = useState<SupportedLocale>("auto");
+  const [theme, setTheme] = useState<Theme>("light");
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const it = window.localStorage.getItem("openflipbook.tier");
+    if (it === "fast" || it === "balanced" || it === "pro") setImageTier(it);
+    const vt = window.localStorage.getItem("openflipbook.videoTier");
+    if (vt === "fast" || vt === "balanced" || vt === "pro") setVideoTier(vt);
+    const ol = window.localStorage.getItem("openflipbook.outputLocale");
+    if (ol && (SUPPORTED_LOCALES as readonly string[]).includes(ol)) {
+      setOutputLocale(ol as SupportedLocale);
+    }
+    const th = window.localStorage.getItem("openflipbook.theme");
+    if (th === "light" || th === "sepia" || th === "dark") setTheme(th);
+  }, []);
+
+  const firstImageTierRun = useRef(true);
+  useEffect(() => {
+    if (firstImageTierRun.current) {
+      firstImageTierRun.current = false;
+      return;
+    }
     if (typeof window === "undefined") return;
     window.localStorage.setItem("openflipbook.tier", imageTier);
   }, [imageTier]);
@@ -169,14 +205,12 @@ export default function PlayPage() {
     }
   }, [imageTier]);
 
-  const [videoTier, setVideoTier] = useState<VideoTier>(() => {
-    if (typeof window === "undefined") return "fast";
-    const stored = window.localStorage.getItem("openflipbook.videoTier");
-    return stored === "fast" || stored === "balanced" || stored === "pro"
-      ? stored
-      : "fast";
-  });
+  const firstVideoTierRun = useRef(true);
   useEffect(() => {
+    if (firstVideoTierRun.current) {
+      firstVideoTierRun.current = false;
+      return;
+    }
     if (typeof window === "undefined") return;
     window.localStorage.setItem("openflipbook.videoTier", videoTier);
   }, [videoTier]);
@@ -184,15 +218,12 @@ export default function PlayPage() {
   const [editMode, setEditMode] = useState(false);
   const [editInstruction, setEditInstruction] = useState("");
 
-  const [outputLocale, setOutputLocale] = useState<SupportedLocale>(() => {
-    if (typeof window === "undefined") return "auto";
-    const stored = window.localStorage.getItem("openflipbook.outputLocale");
-    if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
-      return stored as SupportedLocale;
-    }
-    return "auto";
-  });
+  const firstOutputLocaleRun = useRef(true);
   useEffect(() => {
+    if (firstOutputLocaleRun.current) {
+      firstOutputLocaleRun.current = false;
+      return;
+    }
     if (typeof window === "undefined") return;
     window.localStorage.setItem("openflipbook.outputLocale", outputLocale);
     const head = resolveOutputLocale(outputLocale);
@@ -201,14 +232,12 @@ export default function PlayPage() {
   }, [outputLocale]);
   const t = getStrings(outputLocale);
 
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light";
-    const stored = window.localStorage.getItem("openflipbook.theme");
-    return stored === "sepia" || stored === "dark" || stored === "light"
-      ? stored
-      : "light";
-  });
+  const firstThemeRun = useRef(true);
   useEffect(() => {
+    if (firstThemeRun.current) {
+      firstThemeRun.current = false;
+      return;
+    }
     if (typeof window === "undefined") return;
     window.localStorage.setItem("openflipbook.theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
@@ -763,6 +792,17 @@ export default function PlayPage() {
       if (editMode) return;
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
+      // Cmd (mac) / Ctrl (other) + click → ask the user for an extra angle on
+      // the click point ("cross-section view", "explain like I'm 5"). Captured
+      // before any zoom/ripple state so the prompt is the first thing they see.
+      let hint = "";
+      if (evt.metaKey || evt.ctrlKey) {
+        const raw = window.prompt(
+          "Add a note for this click (optional — e.g. 'cross-section', 'for a 5-year-old'):"
+        );
+        if (raw === null) return; // user cancelled
+        hint = raw.trim().slice(0, 240);
+      }
       const rect = img.getBoundingClientRect();
       const px = evt.clientX - rect.left;
       const py = evt.clientY - rect.top;
@@ -779,7 +819,12 @@ export default function PlayPage() {
         // Fall back to the raw image + numeric coords if canvas taint or
         // decode failed. VLM still gets the text coords as a hint.
       }
-      const cached = cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
+      // Skip the prefetched-subject shortcut when a hint is present — the
+      // hover prefetch was resolved without the user's note, so it would
+      // ignore the angle they just typed.
+      const cached = hint
+        ? undefined
+        : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -793,6 +838,7 @@ export default function PlayPage() {
         click,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(hint ? { click_hint: hint } : {}),
         ...(cached
           ? {
               prefetched_subject: cached.subject,
@@ -881,8 +927,16 @@ export default function PlayPage() {
     animateAbortRef.current?.abort();
     animateAbortRef.current = null;
     setStreamStatus("off");
-    setFallbackVideoUrl(null);
+    setShowVideo(false);
+    // Intentionally NOT clearing fallbackVideoUrl here — the user can hit
+    // "Replay clip" to bring it back without re-running fal.
   }, []);
+
+  const replayVideo = useCallback(() => {
+    if (!fallbackVideoUrl) return;
+    setShowVideo(true);
+    setStreamStatus("playing");
+  }, [fallbackVideoUrl]);
 
   const connectStream = useCallback(async () => {
     if (!page?.imageDataUrl) return;
@@ -927,6 +981,7 @@ export default function PlayPage() {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       setFallbackVideoUrl(data.video_url);
+      setShowVideo(true);
       setStreamStatus("playing");
     } catch (err) {
       if ((err as Error).name === "AbortError") {
@@ -1016,6 +1071,7 @@ export default function PlayPage() {
           className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
           title="Image quality tier — fast (cheap), balanced (default), pro (premium)"
         >
+          <span className="px-2 py-1 opacity-60">image</span>
           {(["fast", "balanced", "pro"] as const).map((tier) => (
             <button
               key={tier}
@@ -1121,9 +1177,9 @@ export default function PlayPage() {
         />
       ) : page?.imageDataUrl ? (
         <figure className="overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg">
-          <div className="relative">
+          <div className="relative aspect-[16/9] w-full">
             <div
-              className="relative"
+              className="relative h-full w-full"
               style={
                 zoomFx
                   ? {
@@ -1144,10 +1200,10 @@ export default function PlayPage() {
                 );
               }}
             >
-              {fallbackVideoUrl ? (
+              {fallbackVideoUrl && showVideo ? (
                 <video
                   src={fallbackVideoUrl}
-                  className="block h-auto w-full"
+                  className="block h-full w-full object-contain"
                   autoPlay
                   loop
                   muted
@@ -1159,7 +1215,7 @@ export default function PlayPage() {
                 streamStatus !== "error" ? (
                 <video
                   ref={videoRef}
-                  className="block h-auto w-full"
+                  className="block h-full w-full object-contain"
                   autoPlay
                   muted
                   playsInline
@@ -1170,8 +1226,9 @@ export default function PlayPage() {
                   ref={imgRef}
                   src={page.imageDataUrl}
                   alt={`Generated illustration for ${page.query}`}
+                  onError={() => setImgFailed(true)}
                   className={
-                    "block h-auto w-full select-none " +
+                    "block h-full w-full object-contain select-none " +
                     (streamStatus === "connecting"
                       ? "cursor-wait"
                       : phase === "generating" || editMode
@@ -1180,6 +1237,15 @@ export default function PlayPage() {
                   }
                   draggable={false}
                 />
+              )}
+              {imgFailed && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center text-white">
+                  <div className="max-w-md text-sm leading-relaxed">
+                    Couldn&apos;t load this page&apos;s image. The persisted R2
+                    link may have expired or the bucket&apos;s public access is
+                    off. Type a new query above and hit Go to start fresh.
+                  </div>
+                </div>
               )}
 
               {hoverPos &&
@@ -1354,6 +1420,7 @@ export default function PlayPage() {
                   className="flex items-center overflow-hidden rounded-full border border-white/30 bg-black/60 text-[10px] text-white"
                   title="Video quality tier — fast (LTX), balanced (Wan 2.2), pro (LTX-2)"
                 >
+                  <span className="px-2 py-1 opacity-70">video</span>
                   {(["fast", "balanced", "pro"] as const).map((tier) => (
                     <button
                       key={tier}
@@ -1374,18 +1441,28 @@ export default function PlayPage() {
               )}
               <button
                 type="button"
-                onClick={streamStatus === "off" ? connectStream : disconnectStream}
+                onClick={
+                  streamStatus === "off"
+                    ? fallbackVideoUrl && !showVideo
+                      ? replayVideo
+                      : connectStream
+                    : disconnectStream
+                }
                 className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
                 title={
-                  process.env.NEXT_PUBLIC_LTX_WS_URL
-                    ? "Stream an animated clip from Modal LTX"
-                    : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
+                  fallbackVideoUrl && !showVideo && streamStatus === "off"
+                    ? "Replay the clip you already generated for this page (no new fal call)"
+                    : process.env.NEXT_PUBLIC_LTX_WS_URL
+                      ? "Stream an animated clip from Modal LTX"
+                      : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
                 }
               >
                 {streamStatus === "off"
-                  ? process.env.NEXT_PUBLIC_LTX_WS_URL
-                    ? t.animateStream
-                    : t.animateClip
+                  ? fallbackVideoUrl && !showVideo
+                    ? "▶ Replay clip"
+                    : process.env.NEXT_PUBLIC_LTX_WS_URL
+                      ? t.animateStream
+                      : t.animateClip
                   : streamStatus === "playing"
                     ? t.animateStop
                     : streamStatus === "connecting"
