@@ -27,6 +27,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install_from_requirements("requirements.txt")
     .add_local_python_source("providers")
+    .add_local_python_source("obs")
 )
 
 secrets = [
@@ -63,30 +64,40 @@ class GenerateBody(BaseModel):
     output_locale: str | None = None
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
+    trace_id: str | None = None
 
 
-def _sse(data: dict) -> bytes:
+def _sse(data: dict, trace_id: str | None = None) -> bytes:
+    """Encode an SSE event. Trace ID rides on every payload so the browser
+    can stamp it on its perf-HUD timeline without needing a side channel."""
+    if trace_id and "trace_id" not in data:
+        data = {**data, "trace_id": trace_id}
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
-async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
+async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[bytes]:
+    import time as _time
+    from obs import bind_trace, log, record_error
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
     from providers import llm
 
+    bind_trace(trace_id)
+    started = _time.perf_counter()
+    log("info", "sse.generate.start", mode=body.mode, locale=body.output_locale)
     try:
         # Edit mode short-circuits the planner: we already have an image, the
         # user just wants to mutate it. Persisted as a child node so the
         # original is preserved in history + world map.
         if body.mode == "edit":
             if not body.image:
-                yield _sse({"type": "error", "message": "edit mode requires an image"})
+                yield _sse({"type": "error", "message": "edit mode requires an image"}, trace_id)
                 return
             raw_instruction = (body.edit_instruction or body.query or "").strip()
             if not raw_instruction:
-                yield _sse({"type": "error", "message": "edit mode requires an instruction"})
+                yield _sse({"type": "error", "message": "edit mode requires an instruction"}, trace_id)
                 return
-            yield _sse({"type": "status", "stage": "planning"})
+            yield _sse({"type": "status", "stage": "planning"}, trace_id)
             polished = await llm.polish_edit_instruction(
                 instruction=raw_instruction,
                 page_title=body.parent_title,
@@ -96,7 +107,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                     "type": "status",
                     "stage": "generating_image",
                     "page_title": raw_instruction,
-                }
+                },
+                trace_id,
             )
             edit_result = await image_edit_provider.edit_image(
                 image_data_url=body.image,
@@ -116,7 +128,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                     "prompt_author_model": llm._text_model(online=False),
                     "session_id": body.session_id,
                     "final_prompt": polished,
-                }
+                },
+                trace_id,
             )
             return
 
@@ -152,7 +165,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                         "type": "status",
                         "stage": "click_resolved",
                         "subject": effective_query,
-                    }
+                    },
+                    trace_id,
                 )
             else:
                 resolution = await llm.click_to_subject(
@@ -171,7 +185,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                             "type": "status",
                             "stage": "click_resolved",
                             "subject": resolution.subject,
-                        }
+                        },
+                        trace_id,
                     )
                 if resolution.style:
                     style_anchor = resolution.style
@@ -184,7 +199,7 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                 effective_query = f"{effective_query} — {cleaned_user_hint}"
 
         # 2. Plan (with optional style anchor for visual continuity).
-        yield _sse({"type": "status", "stage": "planning"})
+        yield _sse({"type": "status", "stage": "planning"}, trace_id)
         plan = await llm.plan_page(
             query=effective_query,
             web_search=body.web_search,
@@ -208,7 +223,8 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                 "type": "status",
                 "stage": "generating_image",
                 "page_title": plan.page_title,
-            }
+            },
+            trace_id,
         )
 
         # 3. Image gen.
@@ -231,26 +247,44 @@ async def _event_stream(body: GenerateBody) -> AsyncIterator[bytes]:
                 "prompt_author_model": text_model,
                 "session_id": body.session_id,
                 "final_prompt": composed_prompt,
-            }
+            },
+            trace_id,
+        )
+        log(
+            "info",
+            "sse.generate.end",
+            duration_ms=round((_time.perf_counter() - started) * 1000, 2),
         )
     except Exception as exc:  # noqa: BLE001
-        yield _sse({"type": "error", "message": str(exc)})
+        log(
+            "error",
+            "sse.generate.end",
+            duration_ms=round((_time.perf_counter() - started) * 1000, 2),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        record_error("sse_generate", exc)
+        yield _sse({"type": "error", "message": str(exc)}, trace_id)
 
 
 @fastapi_app.post("/sse/generate")
 async def sse_generate(req: Request):
+    from obs import bind_trace, TRACE_HEADER
+
     raw = await req.json()
     try:
         body = GenerateBody.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=400)
 
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+
     return StreamingResponse(
-        _event_stream(body),
+        _event_stream(body, trace_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
+            "X-Trace-Id": trace_id,
         },
     )
 
@@ -260,29 +294,30 @@ class AnimateBody(BaseModel):
     prompt: str
     duration: int = 5
     video_tier: str | None = None
+    trace_id: str | None = None
 
 
 @fastapi_app.post("/animate")
-async def animate(body: AnimateBody):
+async def animate(req: Request, body: AnimateBody):
     """Cheap-fallback animation: delegate to fal-ai/ltx-video.
 
     Wraps fal errors into a JSON 502 with the original exception message so
     the frontend can surface the real cause (rate limit, payload too large,
     invalid image format) instead of a generic 500.
     """
-    import logging
-    import traceback
+    from obs import TRACE_HEADER, bind_trace, log, record_error
 
     from providers import llm as llm_provider
     from providers import video as video_provider
 
-    logger = logging.getLogger("openflipbook.animate")
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     img_size_kb = len(body.image_data_url) // 1024
-    logger.info(
-        "animate request: prompt_len=%d image_data_url_kb=%d duration=%d",
-        len(body.prompt or ""),
-        img_size_kb,
-        body.duration,
+    log(
+        "info",
+        "animate.request",
+        prompt_len=len(body.prompt or ""),
+        image_kb=img_size_kb,
+        duration=body.duration,
     )
     motion_prompt = await llm_provider.rewrite_motion_prompt(
         page_title=body.prompt or "",
@@ -290,10 +325,11 @@ async def animate(body: AnimateBody):
         duration_seconds=body.duration,
     )
     if motion_prompt and motion_prompt != body.prompt:
-        logger.info(
-            "animate prompt rewritten: orig_len=%d new_len=%d",
-            len(body.prompt or ""),
-            len(motion_prompt),
+        log(
+            "info",
+            "animate.prompt_rewritten",
+            orig_len=len(body.prompt or ""),
+            new_len=len(motion_prompt),
         )
     try:
         clip = await video_provider.animate_image(
@@ -303,22 +339,27 @@ async def animate(body: AnimateBody):
             tier=body.video_tier,
         )
     except Exception as exc:  # noqa: BLE001
-        tb = traceback.format_exc(limit=4)
-        logger.error("animate failed: %s\n%s", exc, tb)
+        record_error("animate", exc, image_kb=img_size_kb)
         return JSONResponse(
             {
                 "error": f"{type(exc).__name__}: {exc}",
                 "stage": "fal_animate",
                 "image_data_url_kb": img_size_kb,
+                "trace_id": trace_id,
             },
             status_code=502,
+            headers={"X-Trace-Id": trace_id},
         )
-    return {
-        "video_url": clip.video_url,
-        "content_type": clip.content_type,
-        "model": clip.model,
-        "duration_seconds": clip.duration_seconds,
-    }
+    return JSONResponse(
+        {
+            "video_url": clip.video_url,
+            "content_type": clip.content_type,
+            "model": clip.model,
+            "duration_seconds": clip.duration_seconds,
+            "trace_id": trace_id,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
 
 
 class ResolveClickBody(BaseModel):
@@ -328,21 +369,21 @@ class ResolveClickBody(BaseModel):
     parent_title: str | None = None
     parent_query: str | None = None
     output_locale: str | None = None
+    trace_id: str | None = None
 
 
 @fastapi_app.post("/resolve-click")
-async def resolve_click(body: ResolveClickBody):
+async def resolve_click(req: Request, body: ResolveClickBody):
     """Hover-prefetch endpoint.
 
     Returns just the click→subject+style mapping so the frontend can warm a
     tap before the user commits, then forward `prefetched_subject` /
     `prefetched_style` into `/sse/generate` to skip the VLM step there.
     """
-    import logging
-
+    from obs import TRACE_HEADER, bind_trace, record_error
     from providers import llm as llm_provider
 
-    logger = logging.getLogger("openflipbook.resolve_click")
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     try:
         resolution = await llm_provider.click_to_subject(
             image_data_url=body.image_data_url,
@@ -353,16 +394,32 @@ async def resolve_click(body: ResolveClickBody):
             output_locale=body.output_locale,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.error("resolve-click failed: %s", exc)
+        record_error("resolve_click", exc)
         return JSONResponse(
-            {"error": f"{type(exc).__name__}: {exc}"}, status_code=502
+            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
         )
-    return {"subject": resolution.subject, "style": resolution.style}
+    return JSONResponse(
+        {
+            "subject": resolution.subject,
+            "style": resolution.style,
+            "trace_id": trace_id,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
 
 
 @fastapi_app.get("/health")
 async def health() -> dict:
     return {"ok": True, "service": APP_NAME}
+
+
+@fastapi_app.get("/status")
+async def status() -> dict:
+    from obs import status_payload
+
+    return await status_payload(APP_NAME)
 
 
 @app.function(secrets=secrets, min_containers=0, timeout=600)

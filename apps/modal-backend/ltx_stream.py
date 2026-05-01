@@ -53,8 +53,10 @@ image = (
         "pillow>=11",
         "fastapi>=0.115",
         "websockets>=13",
+        "httpx>=0.27",
     )
     .add_local_python_source("ltxf")
+    .add_local_python_source("obs")
 )
 
 volume = modal.Volume.from_name(
@@ -233,6 +235,15 @@ async def ws_stream(websocket: WebSocket):
 @fastapi_app.get("/health")
 async def health() -> dict:
     return {"ok": True, "service": APP_NAME, "model": MODEL_REPO}
+
+
+@fastapi_app.get("/status")
+async def status() -> dict:
+    from obs import status_payload
+
+    payload = await status_payload(APP_NAME)
+    payload["model"] = MODEL_REPO
+    return payload
 
 
 @app.function(timeout=600)
