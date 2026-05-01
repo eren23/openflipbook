@@ -38,20 +38,76 @@ class ClickResolution:
     style: str
 
 
+_OPENAI_CLIENT: AsyncOpenAI | None = None
+
+
 def _client() -> AsyncOpenAI:
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
-    return AsyncOpenAI(
-        api_key=api_key,
-        base_url=OPENROUTER_BASE_URL,
-        default_headers={
-            "HTTP-Referer": os.environ.get(
-                "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
-            ),
-            "X-Title": "Endless Canvas",
-        },
-    )
+    """Module-level singleton AsyncOpenAI client.
+
+    Constructing AsyncOpenAI is cheap individually (~5 ms) but happens up to 4
+    times per /sse/generate today; the underlying httpx pool also restarts
+    each time, so warm keepalives never benefit. Reuse one instance.
+    """
+    global _OPENAI_CLIENT
+    if _OPENAI_CLIENT is None:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        _OPENAI_CLIENT = AsyncOpenAI(
+            api_key=api_key,
+            base_url=OPENROUTER_BASE_URL,
+            default_headers={
+                "HTTP-Referer": os.environ.get(
+                    "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
+                ),
+                "X-Title": "Endless Canvas",
+            },
+        )
+    return _OPENAI_CLIENT
+
+
+def _cache_enabled() -> bool:
+    return os.environ.get("OPENROUTER_CACHE", "true").lower() in ("1", "true", "yes")
+
+
+def _system_message(text: str) -> dict[str, Any]:
+    """System message body. Wraps in a content-block list with `cache_control`
+    when caching is enabled, so OpenRouter passes the marker through to
+    backends that honour it (Anthropic, Gemini-on-Vertex). Backends that
+    don't recognise the marker ignore it silently — no behavior regression.
+    """
+    if _cache_enabled():
+        return {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    return {"role": "system", "content": text}
+
+
+def _log_cache_usage(span_ctx: dict[str, Any], response: Any) -> None:
+    try:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = (
+            getattr(details, "cached_tokens", None)
+            if details is not None
+            else None
+        )
+        if cached is not None:
+            span_ctx["cached_tokens"] = cached
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        if prompt_tokens is not None:
+            span_ctx["prompt_tokens"] = prompt_tokens
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _vlm_model() -> str:
@@ -148,25 +204,29 @@ async def click_to_subject(
         "(0-1 normalized, origin top-left)."
         + hint_clause
     )
-    response = await client.chat.completions.create(
-        model=_vlm_model(),
-        messages=[
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data_url, "detail": "high"},
-                    },
-                ],
-            },
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-        max_tokens=300,
-    )
+    from obs import span
+
+    async with span("vlm.click_to_subject", model=_vlm_model()) as ctx:
+        response = await client.chat.completions.create(
+            model=_vlm_model(),
+            messages=[
+                _system_message(system),
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_data_url, "detail": "high"},
+                        },
+                    ],
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=300,
+        )
+        _log_cache_usage(ctx, response)
     raw = (response.choices[0].message.content or "{}").strip()
     parsed = _safe_json(raw)
     subject = str(parsed.get("subject", "")).strip()
@@ -229,18 +289,22 @@ async def plan_page(
     )
     if style_anchor:
         user += f"\n\nVisual style to preserve verbatim: {style_anchor}"
+    from obs import span
+
     text_model = _text_model(online=web_search)
-    response = await client.chat.completions.create(
-        model=text_model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-        max_tokens=900,
-        extra_body=_web_plugin_extra(text_model, online=web_search) or None,
-    )
+    async with span("planner.plan_page", model=text_model, web_search=web_search) as ctx:
+        response = await client.chat.completions.create(
+            model=text_model,
+            messages=[
+                _system_message(system),
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7,
+            max_tokens=900,
+            extra_body=_web_plugin_extra(text_model, online=web_search) or None,
+        )
+        _log_cache_usage(ctx, response)
     raw = (response.choices[0].message.content or "{}").strip()
     parsed = _safe_json(raw)
     page_title = str(parsed.get("page_title", query)).strip() or query
@@ -300,39 +364,43 @@ async def rewrite_motion_prompt(
         user_text_parts.append(f"Scene description: {page_prompt.strip()}")
     user_text = "\n".join(user_text_parts)
 
+    from obs import span
+
     try:
-        if image_data_url:
-            response = await client.chat.completions.create(
-                model=_vlm_model(),
-                messages=[
-                    {"role": "system", "content": system},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_text},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": image_data_url,
-                                    "detail": "low",
+        async with span("llm.rewrite_motion") as ctx:
+            if image_data_url:
+                response = await client.chat.completions.create(
+                    model=_vlm_model(),
+                    messages=[
+                        _system_message(system),
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": user_text},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": image_data_url,
+                                        "detail": "low",
+                                    },
                                 },
-                            },
-                        ],
-                    },
-                ],
-                temperature=0.4,
-                max_tokens=160,
-            )
-        else:
-            response = await client.chat.completions.create(
-                model=_text_model(online=False),
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_text},
-                ],
-                temperature=0.4,
-                max_tokens=160,
-            )
+                            ],
+                        },
+                    ],
+                    temperature=0.4,
+                    max_tokens=160,
+                )
+            else:
+                response = await client.chat.completions.create(
+                    model=_text_model(online=False),
+                    messages=[
+                        _system_message(system),
+                        {"role": "user", "content": user_text},
+                    ],
+                    temperature=0.4,
+                    max_tokens=160,
+                )
+            _log_cache_usage(ctx, response)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten or seed
     except Exception:  # noqa: BLE001
@@ -370,17 +438,21 @@ async def polish_edit_instruction(
     if style_anchor:
         context_parts.append(f"Existing visual style to preserve: {style_anchor}")
     user = "\n".join(context_parts)
+    from obs import span
+
     text_model = _text_model(online=False)
     try:
-        response = await client.chat.completions.create(
-            model=text_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
-            max_tokens=120,
-        )
+        async with span("llm.polish_edit") as ctx:
+            response = await client.chat.completions.create(
+                model=text_model,
+                messages=[
+                    _system_message(system),
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.3,
+                max_tokens=120,
+            )
+            _log_cache_usage(ctx, response)
         polished = (response.choices[0].message.content or "").strip()
         return polished or instruction
     except Exception:  # noqa: BLE001

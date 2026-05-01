@@ -49,3 +49,30 @@ h3,
   70%  { transform: scale(1.6); opacity: 0.4; box-shadow: 0 0 0 14px rgba(255,255,255,0); }
   100% { transform: scale(1.8); opacity: 0;   box-shadow: 0 0 0 18px rgba(255,255,255,0); }
 }
+
+/* Subtle warm-tint pulse on the outgoing image while the next page decodes.
+ * Held under 1.4s so it doesn't outlast a typical generation. */
+@keyframes ec-shimmer {
+  0%   { opacity: 1;   filter: blur(0px) saturate(1.0); }
+  50%  { opacity: 0.78; filter: blur(2px) saturate(1.06); }
+  100% { opacity: 1;   filter: blur(0px) saturate(1.0); }
+}
+
+.ec-morph-old {
+  animation: ec-shimmer 1.4s ease-in-out infinite;
+  will-change: opacity, filter;
+}
+
+.ec-morph-new {
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ec-morph-old,
+  .ec-morph-new {
+    animation: none !important;
+    transition: opacity 180ms linear !important;
+    transform: none !important;
+    filter: none !important;
+  }
+}

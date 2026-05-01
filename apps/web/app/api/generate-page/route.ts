@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
+import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Proxies to the user's Modal-hosted generate endpoint as SSE.
- * Full implementation lands in step 3 of the build order.
  */
 export async function POST(req: Request) {
   const modalUrl = process.env.MODAL_API_URL;
@@ -19,16 +19,20 @@ export async function POST(req: Request) {
     );
   }
 
+  const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
   const upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/sse/generate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      [TRACE_HEADER]: traceId,
+    },
     body: await req.text(),
   });
 
   if (!upstream.ok || !upstream.body) {
     return NextResponse.json(
-      { error: `Upstream returned HTTP ${upstream.status}` },
-      { status: 502 }
+      { error: `Upstream returned HTTP ${upstream.status}`, trace_id: traceId },
+      { status: 502, headers: { [TRACE_HEADER]: traceId } }
     );
   }
 
@@ -38,6 +42,7 @@ export async function POST(req: Request) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      [TRACE_HEADER]: traceId,
     },
   });
 }

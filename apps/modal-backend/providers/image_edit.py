@@ -12,13 +12,17 @@ nano-banana-pro which handles both gen and edit on the same endpoint.
 
 from __future__ import annotations
 
-import base64
 import os
 from typing import Any
 
-import fal_client
-
-from .image import GeneratedImage, _ensure_fal_key, _fetch_image_bytes, _first_image
+from ._common import to_fal_url
+from .image import (
+    GeneratedImage,
+    _ensure_fal_key,
+    _fal_subscribe,
+    _fetch_image_bytes,
+    _first_image,
+)
 
 EDIT_TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana/edit",
@@ -59,33 +63,25 @@ def _edit_args_for(model: str, instruction: str, image_url: str) -> dict[str, An
     return {"prompt": instruction, "image_urls": [image_url]}
 
 
-async def _to_fal_url(image_data_url: str) -> str:
-    if not image_data_url.startswith("data:"):
-        return image_data_url
-    header, _, b64 = image_data_url.partition(",")
-    mime = "image/jpeg"
-    if ";" in header and ":" in header:
-        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
-    raw = base64.b64decode(b64)
-    return await fal_client.upload_async(raw, content_type=mime)
-
-
 async def edit_image(
     image_data_url: str,
     instruction: str,
     tier: str | None = None,
     model_override: str | None = None,
 ) -> GeneratedImage:
+    from obs import span
+
     _ensure_fal_key()
     model = _resolve_edit_model(tier, model_override)
-    image_url = await _to_fal_url(image_data_url)
-    result = await fal_client.subscribe_async(
-        model,
-        arguments=_edit_args_for(model, instruction, image_url),
-        with_logs=False,
-    )
-    image_info = _first_image(result)
-    jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+    image_url = await to_fal_url(image_data_url)
+    async with span("image.edit", model=model, instr_len=len(instruction)) as ctx:
+        result = await _fal_subscribe(
+            model,
+            _edit_args_for(model, instruction, image_url),
+        )
+        image_info = _first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
     return GeneratedImage(
         jpeg_bytes=jpeg_bytes,
         mime_type=mime,

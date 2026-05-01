@@ -1,0 +1,19 @@
+{
+  "name": "@openflipbook/perfbudget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright-driven perf-budget runner for /play; non-zero exit on regression.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx run.ts",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

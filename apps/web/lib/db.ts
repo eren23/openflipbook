@@ -23,12 +23,18 @@ async function connect(): Promise<Db> {
 
 async function ensureIndexes(db: Db): Promise<void> {
   const nodes = db.collection<NodeDoc>("nodes");
+  const errors = db.collection<ErrorDoc>("errors");
   await Promise.all([
     nodes.createIndex(
       { session_id: 1, created_at: -1 },
       { name: "session_created_idx" }
     ),
     nodes.createIndex({ parent_id: 1 }, { name: "parent_idx" }),
+    nodes.createIndex(
+      { parent_id: 1, created_at: -1 },
+      { name: "parent_created_idx" }
+    ),
+    errors.createIndex({ ts: -1 }, { name: "errors_ts_idx" }),
   ]);
 }
 
@@ -120,15 +126,102 @@ export async function getNode(id: string): Promise<NodeRow | null> {
   return doc ? toRow(doc) : null;
 }
 
+export interface ListNodesResult {
+  rows: NodeRow[];
+  next_cursor: string | null;
+}
+
 export async function listNodesBySession(
   sessionId: string,
-  limit = 50
-): Promise<NodeRow[]> {
+  opts: { cursor?: string | null; limit?: number } = {}
+): Promise<ListNodesResult> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
   const collection = await nodes();
+  const filter: Record<string, unknown> = { session_id: sessionId };
+  // Cursor format: "<iso_ts>|<_id>" — `_id` is a UUID tiebreaker so two
+  // documents inserted within the same millisecond don't get skipped on
+  // page boundaries. Old-format cursors (no pipe, ISO only) are accepted
+  // for forward-compat; they fall back to the original $gt-on-timestamp
+  // filter and may miss ms-tied rows.
+  if (opts.cursor) {
+    const [tsPart, idPart] = opts.cursor.split("|");
+    const cursorDate = new Date(tsPart ?? opts.cursor);
+    if (!Number.isNaN(cursorDate.getTime())) {
+      if (idPart) {
+        filter.$or = [
+          { created_at: { $gt: cursorDate } },
+          { created_at: cursorDate, _id: { $gt: idPart } },
+        ];
+      } else {
+        filter.created_at = { $gt: cursorDate };
+      }
+    }
+  }
   const docs = await collection
-    .find({ session_id: sessionId })
-    .sort({ created_at: 1 })
+    .find(filter)
+    .sort({ created_at: 1, _id: 1 })
     .limit(limit)
     .toArray();
-  return docs.map(toRow);
+  const rows = docs.map(toRow);
+  const lastDoc = docs[docs.length - 1];
+  const next_cursor =
+    docs.length === limit && lastDoc
+      ? `${lastDoc.created_at.toISOString()}|${lastDoc._id}`
+      : null;
+  return { rows, next_cursor };
+}
+
+export interface ErrorDoc extends Document {
+  _id?: string;
+  trace_id: string | null;
+  ts: Date;
+  kind: string;
+  message: string;
+  stack?: string | null;
+  body_excerpt?: string | null;
+  source: "client" | "backend";
+}
+
+export interface ErrorRow {
+  trace_id: string | null;
+  ts: string;
+  kind: string;
+  message: string;
+  stack: string | null;
+  body_excerpt: string | null;
+  source: "client" | "backend";
+}
+
+export async function recordError(input: Omit<ErrorRow, "ts">): Promise<void> {
+  const db = await connect();
+  const collection = db.collection<ErrorDoc>("errors");
+  await collection.insertOne({
+    _id: crypto.randomUUID(),
+    trace_id: input.trace_id,
+    ts: new Date(),
+    kind: input.kind,
+    message: input.message,
+    stack: input.stack ?? null,
+    body_excerpt: input.body_excerpt ?? null,
+    source: input.source,
+  });
+}
+
+export async function listRecentErrors(limit = 50): Promise<ErrorRow[]> {
+  const db = await connect();
+  const collection = db.collection<ErrorDoc>("errors");
+  const docs = await collection
+    .find({})
+    .sort({ ts: -1 })
+    .limit(Math.min(Math.max(limit, 1), 200))
+    .toArray();
+  return docs.map((doc) => ({
+    trace_id: doc.trace_id ?? null,
+    ts: doc.ts.toISOString(),
+    kind: doc.kind,
+    message: doc.message,
+    stack: doc.stack ?? null,
+    body_excerpt: doc.body_excerpt ?? null,
+    source: doc.source,
+  }));
 }

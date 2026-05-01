@@ -6,3 +6,4 @@ fal-client>=0.5
 pydantic>=2.9
 uvicorn[standard]>=0.32
 python-dotenv>=1.0
+tenacity>=9.0

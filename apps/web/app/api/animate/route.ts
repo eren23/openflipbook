@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,12 +12,13 @@ export async function POST(req: Request) {
       { status: 503 }
     );
   }
+  const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
   const body = await req.text();
   let upstream: Response;
   try {
     upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/animate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
       body,
       signal: req.signal,
     });
@@ -32,6 +34,7 @@ export async function POST(req: Request) {
     headers: {
       "Content-Type":
         upstream.headers.get("content-type") ?? "application/json",
+      [TRACE_HEADER]: traceId,
     },
   });
 }

@@ -32,6 +32,7 @@ export interface GenerateRequestBody {
   // the VLM call entirely on tap mode, cutting ~600-1200ms off the hop.
   prefetched_subject?: string;
   prefetched_style?: string;
+  trace_id?: string;
 }
 
 export interface ResolveClickRequestBody {
@@ -41,6 +42,7 @@ export interface ResolveClickRequestBody {
   parent_title?: string;
   parent_query?: string;
   output_locale?: string;
+  trace_id?: string;
 }
 
 export interface ResolveClickResponse {
@@ -52,6 +54,7 @@ export interface GenerateProgressEvent {
   type: "progress";
   frame_index: number;
   jpeg_b64: string;
+  trace_id?: string;
 }
 
 export interface GenerateFinalEvent {
@@ -62,11 +65,13 @@ export interface GenerateFinalEvent {
   prompt_author_model: string;
   session_id: string;
   final_prompt: string;
+  trace_id?: string;
 }
 
 export interface GenerateErrorEvent {
   type: "error";
   message: string;
+  trace_id?: string;
 }
 
 export type GenerateStage =
@@ -80,6 +85,7 @@ export interface GenerateStatusEvent {
   stage: GenerateStage;
   page_title?: string;
   subject?: string;
+  trace_id?: string;
 }
 
 export type GenerateEvent =

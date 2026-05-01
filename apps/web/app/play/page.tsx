@@ -16,6 +16,14 @@ import {
   type StreamStatus,
 } from "@/lib/stream-client";
 import WorldMap from "@/components/world-map";
+import DebugHud from "@/components/debug-hud";
+import {
+  TRACE_HEADER,
+  emit as hudEmit,
+  newTraceId,
+  nowMs,
+  setLastTrace,
+} from "@/lib/trace";
 import {
   SUPPORTED_LOCALES,
   type SupportedLocale,
@@ -85,12 +93,17 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 async function persistNode(
-  body: PersistBody
+  body: PersistBody,
+  traceId: string | null
 ): Promise<{ id: string; image_url: string } | null> {
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (traceId) headers[TRACE_HEADER] = traceId;
     const res = await fetch("/api/nodes", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     if (!res.ok) return null;
@@ -130,11 +143,44 @@ export default function PlayPage() {
     yPx: number;
     key: number;
   } | null>(null);
-  const [zoomFx, setZoomFx] = useState<{
+  // Morph state. The new page is rendered as a second <img> above the old
+  // one, scaling from the click origin while the old layer fades. See
+  // globals.css `.ec-morph-old`/`.ec-morph-new` for the animation surface.
+  // `phase: "wait"` until the next image data URL is decoded; flips to
+  // "reveal" when the decode-then-reveal effect resolves; cleanup on
+  // transitionend → null. `reduceMotion` short-circuits to a flat opacity
+  // crossfade.
+  // `isFinal` separates the SSE `progress` event stream (partial JPEGs that
+  // mutate page.imageDataUrl mid-generation) from the terminal `final` event.
+  // Without this gate the decode-then-reveal effect would fire on the first
+  // progress partial and the user would see the partial revealed full-size,
+  // then a hard cut to the final image. The flag is flipped only in the SSE
+  // `final` branch.
+  const [morphFx, setMorphFx] = useState<{
     ox: number;
     oy: number;
-    phase: "in" | "out";
+    prevImg: string | null;
+    nextImg: string | null;
+    phase: "wait" | "reveal";
+    isFinal: boolean;
+    startedAt: number;
+    reduceMotion: boolean;
   } | null>(null);
+  const [quickbarOpen, setQuickbarOpen] = useState(false);
+  const [quickbarQuery, setQuickbarQuery] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [beaconsHidden, setBeaconsHidden] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    xPx: number;
+    yPx: number;
+  } | null>(null);
+  const traceIdRef = useRef<string | null>(null);
+  // Guard against re-entry between the click handler's synchronous
+  // setMorphFx() call and React's next render that propagates
+  // phase==="generating" into the click effect closure. Without this, a
+  // double-click can pass the `phase === "generating"` check twice and start
+  // two overlapping generates.
+  const clickInFlightRef = useRef(false);
   const [hoverPos, setHoverPos] = useState<{ xPx: number; yPx: number } | null>(
     null
   );
@@ -281,12 +327,19 @@ export default function PlayPage() {
       setStatusMsg(
         body.mode === "tap" ? "Resolving what you tapped…" : "Planning page…"
       );
+      const traceId = body.trace_id ?? newTraceId();
+      traceIdRef.current = traceId;
+      setLastTrace(traceId);
+      hudEmit("sse:status", { stage: "request", trace_id: traceId, t: nowMs() });
 
       try {
         const response = await fetch("/api/generate-page", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          headers: {
+            "Content-Type": "application/json",
+            [TRACE_HEADER]: traceId,
+          },
+          body: JSON.stringify({ ...body, trace_id: traceId }),
           signal: ac.signal,
         });
         if (!response.ok || !response.body) {
@@ -310,6 +363,13 @@ export default function PlayPage() {
             if (!payload) continue;
             const evt = JSON.parse(payload) as GenerateEvent;
             if (evt.type === "status") {
+              hudEmit("sse:status", {
+                stage: evt.stage,
+                page_title: evt.page_title,
+                subject: evt.subject,
+                trace_id: traceId,
+                t: nowMs(),
+              });
               if (evt.stage === "click_resolved" && evt.subject) {
                 setStatusMsg(`Exploring "${evt.subject}"…`);
               } else if (evt.stage === "planning") {
@@ -333,6 +393,12 @@ export default function PlayPage() {
             } else if (evt.type === "final") {
               lastImage = evt.image_data_url;
               lastTitle = evt.page_title;
+              hudEmit("sse:final", {
+                page_title: evt.page_title,
+                image_model: evt.image_model,
+                trace_id: traceId,
+                t: nowMs(),
+              });
               setPage({
                 nodeId: null,
                 sessionId: evt.session_id,
@@ -340,24 +406,30 @@ export default function PlayPage() {
                 title: evt.page_title,
                 imageDataUrl: evt.image_data_url,
               });
-              void persistNode({
-                parent_id: body.current_node_id || null,
-                session_id: evt.session_id,
-                query: body.query,
-                page_title: evt.page_title,
-                image_data_url: evt.image_data_url,
-                image_model: evt.image_model,
-                prompt_author_model: evt.prompt_author_model,
-                aspect_ratio: body.aspect_ratio,
-                final_prompt: evt.final_prompt,
-                click_in_parent:
-                  body.mode === "tap" && body.click
-                    ? {
-                        x_pct: body.click.x_pct,
-                        y_pct: body.click.y_pct,
-                      }
-                    : null,
-              }).then((saved) => {
+              // Flip the morph gate so the decode-then-reveal effect runs
+              // ONLY on the final image, not on streamed progress partials.
+              setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+              void persistNode(
+                {
+                  parent_id: body.current_node_id || null,
+                  session_id: evt.session_id,
+                  query: body.query,
+                  page_title: evt.page_title,
+                  image_data_url: evt.image_data_url,
+                  image_model: evt.image_model,
+                  prompt_author_model: evt.prompt_author_model,
+                  aspect_ratio: body.aspect_ratio,
+                  final_prompt: evt.final_prompt,
+                  click_in_parent:
+                    body.mode === "tap" && body.click
+                      ? {
+                          x_pct: body.click.x_pct,
+                          y_pct: body.click.y_pct,
+                        }
+                      : null,
+                },
+                traceId
+              ).then((saved) => {
                 if (saved) {
                   const persisted: Page = {
                     nodeId: saved.id,
@@ -401,21 +473,41 @@ export default function PlayPage() {
                 }
               });
             } else if (evt.type === "error") {
+              hudEmit("sse:error", {
+                message: evt.message,
+                trace_id: traceId,
+                t: nowMs(),
+              });
               throw new Error(evt.message);
             }
           }
         }
         setPhase("ready");
         setStatusMsg(null);
-        setZoomFx((prev) => (prev ? { ...prev, phase: "out" } : null));
       } catch (err) {
         if ((err as Error).name === "AbortError") {
-          setZoomFx(null);
+          setMorphFx(null);
           return;
         }
         setError((err as Error).message);
         setPhase("error");
-        setZoomFx(null);
+        setMorphFx(null);
+        // Best-effort error sink so /status's "recent errors" panel can
+        // surface client-side failures alongside backend ones.
+        void fetch("/api/errors", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [TRACE_HEADER]: traceId,
+          },
+          body: JSON.stringify({
+            kind: "client.generate",
+            message: (err as Error).message,
+            stack: (err as Error).stack,
+            trace_id: traceId,
+            source: "client",
+          }),
+        }).catch(() => {});
       }
     },
     []
@@ -441,17 +533,23 @@ export default function PlayPage() {
         setPhase("ready");
         setError(null);
         setStatusMsg(null);
-        void persistNode({
-          parent_id: null,
-          session_id: sessionId,
-          query: seedQuery,
-          page_title: seedTitle,
-          image_data_url: dataUrl,
-          image_model: "user-upload",
-          prompt_author_model: "user-upload",
-          aspect_ratio: "16:9",
-          final_prompt: "",
-        }).then((saved) => {
+        const uploadTrace = newTraceId();
+        traceIdRef.current = uploadTrace;
+        setLastTrace(uploadTrace);
+        void persistNode(
+          {
+            parent_id: null,
+            session_id: sessionId,
+            query: seedQuery,
+            page_title: seedTitle,
+            image_data_url: dataUrl,
+            image_model: "user-upload",
+            prompt_author_model: "user-upload",
+            aspect_ratio: "16:9",
+            final_prompt: "",
+          },
+          uploadTrace
+        ).then((saved) => {
           if (saved) {
             const persisted: Page = {
               nodeId: saved.id,
@@ -579,7 +677,7 @@ export default function PlayPage() {
     setPhase("ready");
     setError(null);
     setStatusMsg(null);
-    setZoomFx(null);
+    setMorphFx(null);
     abortRef.current?.abort();
     if (target.nodeId) {
       const url = new URL(window.location.href);
@@ -611,7 +709,7 @@ export default function PlayPage() {
       setPhase("ready");
       setError(null);
       setStatusMsg(null);
-      setZoomFx(null);
+      setMorphFx(null);
       abortRef.current?.abort();
       if (target.nodeId) {
         const url = new URL(window.location.href);
@@ -632,14 +730,22 @@ export default function PlayPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (
-        target &&
+      const inField =
+        !!target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
+          target.isContentEditable);
+      // Esc always closes overlays even when typing in the quickbar.
+      if (e.key === "Escape") {
+        if (helpOpen || quickbarOpen || contextMenu) {
+          e.preventDefault();
+          setHelpOpen(false);
+          setQuickbarOpen(false);
+          setContextMenu(null);
+        }
         return;
       }
+      if (inField) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
@@ -647,14 +753,24 @@ export default function PlayPage() {
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         goForward();
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        if (e.shiftKey) goForward();
+        else goBack();
       } else if (e.key.toLowerCase() === "m") {
         e.preventDefault();
         setViewMode((m) => (m === "map" ? "page" : "map"));
+      } else if (e.key === "/") {
+        e.preventDefault();
+        setQuickbarOpen(true);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((h) => !h);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goBack, goForward]);
+  }, [goBack, goForward, helpOpen, quickbarOpen, contextMenu]);
 
   // Hydrate the session graph from the server when landing with ?continue=.
   // Pages are sorted by created_at on the server (see listNodesBySession).
@@ -671,7 +787,13 @@ export default function PlayPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(cont)}`);
+        const hydrationTrace = newTraceId();
+        traceIdRef.current = hydrationTrace;
+        setLastTrace(hydrationTrace);
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(cont)}`,
+          { headers: { [TRACE_HEADER]: hydrationTrace } }
+        );
         if (!res.ok) return;
         const data = (await res.json()) as {
           nodes: Array<{
@@ -717,6 +839,47 @@ export default function PlayPage() {
       cancelled = true;
     };
   }, []);
+
+  // Release the click re-entry guard whenever generation settles into a
+  // terminal state. `phase` is the canonical signal; abort/cancel paths
+  // also land here via setPhase calls.
+  useEffect(() => {
+    if (phase !== "generating") {
+      clickInFlightRef.current = false;
+    }
+  }, [phase]);
+
+  // Decode the next image off-thread before flipping the morph from "wait"
+  // to "reveal". Without this the new <img> would paint mid-decode and the
+  // scale/opacity transition would visibly stutter for ~80–200 ms on large
+  // (3+ MB) data URLs. `Image().decode()` is well-supported in modern
+  // browsers; the catch path falls through so a decode-disallowed
+  // environment still gets a working (less smooth) reveal.
+  useEffect(() => {
+    if (!morphFx || morphFx.phase !== "wait") return;
+    if (!morphFx.isFinal) return;
+    if (!page?.imageDataUrl) return;
+    if (page.imageDataUrl === morphFx.prevImg) return;
+    let cancelled = false;
+    const url = page.imageDataUrl;
+    const im = new Image();
+    im.decoding = "async";
+    im.src = url;
+    const decodeStart = nowMs();
+    const finish = () => {
+      if (cancelled) return;
+      hudEmit("image:decode", { ms: nowMs() - decodeStart });
+      setMorphFx((prev) =>
+        prev && prev.phase === "wait"
+          ? { ...prev, nextImg: url, phase: "reveal" }
+          : prev
+      );
+    };
+    im.decode().then(finish).catch(finish);
+    return () => {
+      cancelled = true;
+    };
+  }, [page?.imageDataUrl, morphFx]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -790,8 +953,13 @@ export default function PlayPage() {
     const handler = async (evt: MouseEvent) => {
       if (phase === "generating") return;
       if (editMode) return;
+      if (clickInFlightRef.current) return;
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
+      // Claim the slot synchronously before any await — protects the window
+      // between setMorphFx and React installing a new effect with
+      // phase==="generating".
+      clickInFlightRef.current = true;
       // Cmd (mac) / Ctrl (other) + click → ask the user for an extra angle on
       // the click point ("cross-section view", "explain like I'm 5"). Captured
       // before any zoom/ripple state so the prompt is the first thing they see.
@@ -807,7 +975,20 @@ export default function PlayPage() {
       const px = evt.clientX - rect.left;
       const py = evt.clientY - rect.top;
       setClickRipple({ xPx: px, yPx: py, key: Date.now() });
-      setZoomFx({ ox: px, oy: py, phase: "in" });
+      const reduceMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      setMorphFx({
+        ox: px,
+        oy: py,
+        prevImg: currentImage,
+        nextImg: null,
+        phase: "wait",
+        isFinal: false,
+        startedAt: nowMs(),
+        reduceMotion,
+      });
+      hudEmit("morph:start", { ox: px, oy: py, t: nowMs() });
       let annotated = currentImage;
       try {
         annotated = await annotateClickPoint(
@@ -1176,30 +1357,18 @@ export default function PlayPage() {
           onClose={() => setViewMode("page")}
         />
       ) : page?.imageDataUrl ? (
-        <figure className="overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg">
+        <figure
+          className="overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg"
+          onContextMenu={(e) => {
+            if (!page?.imageDataUrl) return;
+            e.preventDefault();
+            // ContextMenu renders inside a fixed-positioned overlay, so it
+            // anchors to the viewport — pass clientX/Y directly.
+            setContextMenu({ xPx: e.clientX, yPx: e.clientY });
+          }}
+        >
           <div className="relative aspect-[16/9] w-full">
-            <div
-              className="relative h-full w-full"
-              style={
-                zoomFx
-                  ? {
-                      transform: `scale(${zoomFx.phase === "in" ? 1.6 : 1})`,
-                      transformOrigin: `${zoomFx.ox}px ${zoomFx.oy}px`,
-                      transition:
-                        zoomFx.phase === "in"
-                          ? "transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1)"
-                          : "transform 380ms cubic-bezier(0.22, 0.61, 0.36, 1)",
-                      willChange: "transform",
-                    }
-                  : undefined
-              }
-              onTransitionEnd={(e) => {
-                if (e.propertyName !== "transform") return;
-                setZoomFx((prev) =>
-                  prev?.phase === "out" ? null : prev
-                );
-              }}
-            >
+            <div className="relative h-full w-full">
               {fallbackVideoUrl && showVideo ? (
                 <video
                   src={fallbackVideoUrl}
@@ -1222,21 +1391,79 @@ export default function PlayPage() {
                   controls
                 />
               ) : (
-                <img
-                  ref={imgRef}
-                  src={page.imageDataUrl}
-                  alt={`Generated illustration for ${page.query}`}
-                  onError={() => setImgFailed(true)}
-                  className={
-                    "block h-full w-full object-contain select-none " +
-                    (streamStatus === "connecting"
-                      ? "cursor-wait"
-                      : phase === "generating" || editMode
-                        ? "cursor-crosshair"
-                        : "cursor-none")
-                  }
-                  draggable={false}
-                />
+                <>
+                  {/* Outgoing image. While morphFx is in `wait` (decode
+                      pending) the old image shimmers/blurs slightly so it
+                      reads as "transition in progress" instead of "stuck".
+                      Once the new image takes over, this layer fades out. */}
+                  {morphFx ? (
+                    <img
+                      src={morphFx.prevImg ?? page.imageDataUrl}
+                      alt=""
+                      aria-hidden
+                      className={
+                        "absolute inset-0 block h-full w-full object-contain select-none " +
+                        (morphFx.phase === "wait" && !morphFx.reduceMotion
+                          ? "ec-morph-old"
+                          : "")
+                      }
+                      style={{
+                        opacity: morphFx.phase === "reveal" ? 0 : 1,
+                        transition:
+                          "opacity 480ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+                      }}
+                      draggable={false}
+                    />
+                  ) : null}
+                  <img
+                    ref={imgRef}
+                    src={
+                      morphFx?.nextImg ?? page.imageDataUrl
+                    }
+                    alt={`Generated illustration for ${page.query}`}
+                    onError={() => setImgFailed(true)}
+                    className={
+                      "absolute inset-0 block h-full w-full object-contain select-none " +
+                      (morphFx ? "ec-morph-new " : "") +
+                      (streamStatus === "connecting"
+                        ? "cursor-wait"
+                        : phase === "generating" || editMode
+                          ? "cursor-crosshair"
+                          : "cursor-none")
+                    }
+                    style={
+                      morphFx
+                        ? {
+                            transformOrigin: `${morphFx.ox}px ${morphFx.oy}px`,
+                            transform:
+                              morphFx.phase === "reveal" || morphFx.reduceMotion
+                                ? "scale(1)"
+                                : "scale(0.92)",
+                            opacity:
+                              morphFx.phase === "reveal" ? 1 : morphFx.reduceMotion ? 1 : 0,
+                            transition: morphFx.reduceMotion
+                              ? "opacity 200ms linear"
+                              : "transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 360ms ease-out",
+                          }
+                        : undefined
+                    }
+                    onTransitionEnd={(e) => {
+                      if (
+                        e.propertyName !== "transform" &&
+                        e.propertyName !== "opacity"
+                      )
+                        return;
+                      setMorphFx((prev) => {
+                        if (!prev || prev.phase !== "reveal") return prev;
+                        hudEmit("morph:end", {
+                          duration_ms: nowMs() - prev.startedAt,
+                        });
+                        return null;
+                      });
+                    }}
+                    draggable={false}
+                  />
+                </>
               )}
               {imgFailed && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center text-white">
@@ -1337,6 +1564,7 @@ export default function PlayPage() {
 
             {/* Beacons: small markers at click points where children exist. */}
             {page?.nodeId &&
+              !beaconsHidden &&
               (streamStatus === "off" || streamStatus === "error") &&
               history.items
                 .filter(
@@ -1527,6 +1755,260 @@ export default function PlayPage() {
           Permalink: <code>/n/{page.nodeId}</code>
         </p>
       )}
+
+      {quickbarOpen && (
+        <Quickbar
+          query={quickbarQuery}
+          setQuery={setQuickbarQuery}
+          items={history.items}
+          onPick={(id) => {
+            setQuickbarOpen(false);
+            setQuickbarQuery("");
+            selectFromMap(id);
+          }}
+          onClose={() => {
+            setQuickbarOpen(false);
+            setQuickbarQuery("");
+          }}
+        />
+      )}
+
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.xPx}
+          y={contextMenu.yPx}
+          beaconsHidden={beaconsHidden}
+          canCopy={!!page?.nodeId}
+          canPrune={
+            !!page?.nodeId &&
+            history.items.some((p) => p.nodeId === page?.nodeId)
+          }
+          onCopyPermalink={() => {
+            if (page?.nodeId) {
+              const link = `${window.location.origin}/n/${page.nodeId}`;
+              void navigator.clipboard?.writeText(link);
+            }
+            setContextMenu(null);
+          }}
+          onPrune={() => {
+            setContextMenu(null);
+            if (!page?.nodeId) return;
+            const targetId = page.nodeId;
+            setHistory((prev) => {
+              const subtree = new Set<string>();
+              const queue = [targetId];
+              while (queue.length) {
+                const id = queue.shift()!;
+                if (subtree.has(id)) continue;
+                subtree.add(id);
+                for (const item of prev.items) {
+                  if (item.parentId === id && item.nodeId)
+                    queue.push(item.nodeId);
+                }
+              }
+              const removeCount = subtree.size;
+              if (
+                removeCount > 1 &&
+                !window.confirm(
+                  `Remove this branch and ${removeCount - 1} child page(s) from history? Persisted pages stay on disk.`
+                )
+              ) {
+                return prev;
+              }
+              const items = prev.items.filter(
+                (p) => !p.nodeId || !subtree.has(p.nodeId)
+              );
+              const trail = prev.trail.filter((id) => !subtree.has(id));
+              return {
+                items,
+                trail,
+                trailIdx: trail.length - 1,
+              };
+            });
+          }}
+          onToggleBeacons={() => {
+            setBeaconsHidden((h) => !h);
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      <DebugHud />
     </main>
+  );
+}
+
+function Quickbar({
+  query,
+  setQuery,
+  items,
+  onPick,
+  onClose,
+}: {
+  query: string;
+  setQuery: (q: string) => void;
+  items: Page[];
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  const lower = query.trim().toLowerCase();
+  const matches = items
+    .filter(
+      (p): p is Page & { nodeId: string } =>
+        !!p.nodeId &&
+        (lower
+          ? p.title.toLowerCase().includes(lower) ||
+            p.query.toLowerCase().includes(lower)
+          : true)
+    )
+    .slice(-8)
+    .reverse();
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 px-4 pt-[20vh]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-xl border border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && matches[0]) onPick(matches[0].nodeId);
+          }}
+          placeholder="Jump to page…"
+          className="w-full rounded-md border border-[var(--color-edge)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-ink)]"
+        />
+        <ul className="mt-2 max-h-72 overflow-auto text-sm">
+          {matches.length === 0 && (
+            <li className="px-2 py-3 opacity-60">No matches yet.</li>
+          )}
+          {matches.map((m) => (
+            <li key={m.nodeId}>
+              <button
+                type="button"
+                className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-ink)]/10"
+                onClick={() => onPick(m.nodeId)}
+              >
+                <span className="block truncate font-display">{m.title}</span>
+                <span className="block truncate text-xs opacity-60">
+                  {m.query}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-xl border border-[var(--color-edge)] bg-[var(--color-canvas)] p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="font-display text-lg">Shortcuts</h2>
+        <dl className="mt-3 space-y-2 text-sm">
+          <Row k="←" v="Back" />
+          <Row k="→" v="Forward" />
+          <Row k="Backspace" v="Back (Shift = forward)" />
+          <Row k="M" v="Toggle map view" />
+          <Row k="/" v="Jump to page…" />
+          <Row k="?" v="This help" />
+          <Row k="Esc" v="Close overlay" />
+          <Row k="Right-click" v="Page menu" />
+          <Row k="⌘/Ctrl-click" v="Click with a note" />
+        </dl>
+        <button
+          type="button"
+          className="mt-4 w-full rounded-md border border-[var(--color-edge)] py-1.5 text-sm hover:bg-[var(--color-ink)]/10"
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt className="font-mono text-xs opacity-80">{k}</dt>
+      <dd className="text-sm">{v}</dd>
+    </div>
+  );
+}
+
+function ContextMenu({
+  x,
+  y,
+  beaconsHidden,
+  canCopy,
+  canPrune,
+  onCopyPermalink,
+  onPrune,
+  onToggleBeacons,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  beaconsHidden: boolean;
+  canCopy: boolean;
+  canPrune: boolean;
+  onCopyPermalink: () => void;
+  onPrune: () => void;
+  onToggleBeacons: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[55]" onClick={onClose}>
+      <div
+        className="absolute min-w-[220px] rounded-md border border-[var(--color-edge)] bg-[var(--color-canvas)] py-1 text-sm shadow-xl"
+        style={{ left: x, top: y }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left hover:bg-[var(--color-ink)]/10 disabled:opacity-50"
+          disabled={!canCopy}
+          onClick={onCopyPermalink}
+        >
+          Copy permalink
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left hover:bg-[var(--color-ink)]/10"
+          onClick={onToggleBeacons}
+        >
+          {beaconsHidden ? "Show beacons" : "Hide beacons"}
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left text-red-700 hover:bg-red-500/10 disabled:opacity-50"
+          disabled={!canPrune}
+          onClick={onPrune}
+        >
+          Prune branch from history
+        </button>
+      </div>
+    </div>
   );
 }

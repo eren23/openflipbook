@@ -19,6 +19,12 @@ from typing import Any
 
 import fal_client
 import httpx
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
@@ -87,15 +93,15 @@ async def generate_image(
     tier: str | None = None,
     model_override: str | None = None,
 ) -> GeneratedImage:
+    from obs import span
+
     _ensure_fal_key()
     model = _resolve_model(tier, model_override)
-    result = await fal_client.subscribe_async(
-        model,
-        arguments=_args_for(model, prompt, aspect_ratio),
-        with_logs=False,
-    )
-    image_info = _first_image(result)
-    jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+    async with span("image.generate", model=model, prompt_len=len(prompt)) as ctx:
+        result = await _fal_subscribe(model, _args_for(model, prompt, aspect_ratio))
+        image_info = _first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
     return GeneratedImage(
         jpeg_bytes=jpeg_bytes,
         mime_type=mime,
@@ -119,12 +125,66 @@ def _first_image(result: dict) -> dict:
     return first
 
 
+_HTTPX: httpx.AsyncClient | None = None
+
+
+def _http_client() -> httpx.AsyncClient:
+    global _HTTPX
+    if _HTTPX is None or _HTTPX.is_closed:
+        _HTTPX = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            limits=httpx.Limits(
+                max_keepalive_connections=20, max_connections=50
+            ),
+        )
+    return _HTTPX
+
+
 async def _fetch_image_bytes(image_info: dict) -> tuple[bytes, str]:
     url = image_info.get("url")
     if not isinstance(url, str) or not url:
         raise RuntimeError("fal image missing url")
     mime = str(image_info.get("content_type") or "image/jpeg")
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return resp.content, mime
+    resp = await _http_client().get(url)
+    resp.raise_for_status()
+    return resp.content, mime
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """fal/transport transients worth retrying. 4xx-other should fail fast.
+
+    fal_client raises its own exception hierarchy (`FalClientHTTPError`,
+    `FalClientTimeoutError`) for queue/HTTP failures — NOT bare httpx
+    exceptions — so the classifier checks those first. Falls back to httpx
+    exceptions for the post-fal CDN download path.
+    """
+    if isinstance(exc, fal_client.FalClientHTTPError):
+        code = exc.status_code
+        return code == 429 or 500 <= code < 600
+    if isinstance(exc, fal_client.FalClientTimeoutError):
+        return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or 500 <= code < 600
+    return False
+
+
+async def _fal_subscribe(model: str, arguments: dict) -> dict:
+    """fal_client.subscribe_async with bounded exponential backoff.
+
+    Three attempts max. Doesn't retry on auth/4xx-other so a misconfigured
+    key fails fast. Wider safety net would mask real bugs.
+    """
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    ):
+        with attempt:
+            return await fal_client.subscribe_async(
+                model, arguments=arguments, with_logs=False
+            )
+    raise RuntimeError("unreachable")  # pragma: no cover

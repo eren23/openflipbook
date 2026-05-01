@@ -20,7 +20,8 @@ import base64
 import os
 from dataclasses import dataclass
 
-import fal_client
+from ._common import to_fal_url
+from .image import _fal_subscribe
 
 DEFAULT_ANIMATE_MODEL = "fal-ai/ltx-video/image-to-video"
 PRO_ANIMATE_MODEL = "fal-ai/ltx-2/image-to-video"
@@ -71,23 +72,6 @@ def _animate_model(tier: str | None = None) -> str:
     return os.environ.get(env_key) or TIER_VIDEO_MODELS[resolved]
 
 
-async def _to_fal_url(image_data_url: str) -> str:
-    """Convert an inline data URL to a fal storage URL.
-
-    fal's queue endpoints can reject or stall on large data URLs (high-res
-    seedream / nano-banana-pro outputs hit 1-3MB easily). Uploading to fal
-    storage first sidesteps the limit and is what fal recommends.
-    """
-    if not image_data_url.startswith("data:"):
-        return image_data_url  # already a URL — pass through
-    header, _, b64 = image_data_url.partition(",")
-    mime = "image/jpeg"
-    if ";" in header and ":" in header:
-        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
-    raw = base64.b64decode(b64)
-    return await fal_client.upload_async(raw, content_type=mime)
-
-
 async def animate_image(
     *,
     image_data_url: str,
@@ -95,10 +79,12 @@ async def animate_image(
     duration: int = 5,
     tier: str | None = None,
 ) -> AnimatedClip:
+    from obs import span
+
     if not os.environ.get("FAL_KEY"):
         raise RuntimeError("FAL_KEY is not set")
 
-    image_url = await _to_fal_url(image_data_url)
+    image_url = await to_fal_url(image_data_url)
     model = _animate_model(tier)
     arguments: dict = {
         "image_url": image_url,
@@ -116,7 +102,8 @@ async def animate_image(
         arguments["num_frames"] = max(16, min(duration * 16, 96))
         arguments["resolution"] = os.environ.get("WAN_RESOLUTION", "720p")
 
-    result = await fal_client.subscribe_async(model, arguments=arguments, with_logs=False)
+    async with span("video.animate", model=model, duration=duration):
+        result = await _fal_subscribe(model, arguments)
 
     video = result.get("video")
     if not isinstance(video, dict):
