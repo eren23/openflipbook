@@ -17,6 +17,8 @@ import {
 } from "@/lib/stream-client";
 import WorldMap from "@/components/world-map";
 import DebugHud from "@/components/debug-hud";
+import SessionMinimap from "@/components/session-minimap";
+import WaterfallHUD from "@/components/waterfall-hud";
 import {
   TRACE_HEADER,
   emit as hudEmit,
@@ -122,6 +124,16 @@ export default function PlayPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
   const [sessionId] = useState(initialSessionId);
+  // Surface the live session id to the landing's "open last atlas" link.
+  // Wrapped in a try because localStorage can throw under privacy modes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("openflipbook.lastSession", sessionId);
+    } catch {
+      /* no-op */
+    }
+  }, [sessionId]);
   // `items` is the append-only graph of all known pages this session.
   // `trail` is the visited-order stack for back/forward; `trailIdx` is the
   // current pointer. Clicking on any page creates a NEW child without
@@ -1331,6 +1343,15 @@ export default function PlayPage() {
             >
               {viewMode === "map" ? "📄 page" : "🗺 map"}
             </button>
+            <a
+              href={`/atlas/${encodeURIComponent(sessionId)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-[var(--color-ink)]/40 px-3 py-1 hover:bg-[var(--color-ink)]/5"
+              title="Open this session's atlas in a new tab"
+            >
+              ↗ atlas
+            </a>
           </div>
           <span className="opacity-60">
             step {history.trailIdx + 1} of {history.trail.length}
@@ -1340,6 +1361,8 @@ export default function PlayPage() {
           </span>
         </div>
       )}
+
+      {page?.imageDataUrl && <WaterfallHUD />}
 
       {page?.imageDataUrl && viewMode === "map" ? (
         <WorldMap
@@ -1837,6 +1860,23 @@ export default function PlayPage() {
       )}
 
       <DebugHud />
+
+      {viewMode !== "map" && history.items.length >= 2 && (
+        <SessionMinimap
+          pages={history.items
+            .filter((p): p is Page & { nodeId: string } => Boolean(p.nodeId))
+            .map((p) => ({
+              nodeId: p.nodeId,
+              parentId: p.parentId ?? null,
+              imageDataUrl: p.imageDataUrl,
+              title: p.title,
+              ...(p.clickInParent ? { clickInParent: p.clickInParent } : {}),
+            }))}
+          activeNodeId={page?.nodeId ?? null}
+          onExpand={() => setViewMode("map")}
+          onJump={selectFromMap}
+        />
+      )}
     </main>
   );
 }

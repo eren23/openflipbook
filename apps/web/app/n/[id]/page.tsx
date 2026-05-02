@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getNode, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
+import PermalinkImage from "@/components/permalink-image";
 
 interface PermalinkPageProps {
   params: Promise<{ id: string }>;
@@ -104,14 +105,12 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
           Continue this session
         </a>
       </header>
-      <figure className="overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageUrl}
-          alt={`Generated illustration for ${node.query}`}
-          className="block h-auto w-full"
-        />
-      </figure>
+      <PermalinkImage
+        nodeId={node.id}
+        imageUrl={imageUrl}
+        query={node.query}
+        sessionId={node.session_id}
+      />
       <footer className="text-center text-xs opacity-60">
         Query: <code>{node.query}</code> · Image: {node.image_model} · Prompt:{" "}
         {node.prompt_author_model}

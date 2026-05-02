@@ -1,4 +1,5 @@
 import Link from "next/link";
+import RecentAtlasLink from "@/components/recent-atlas-link";
 
 const SAMPLE_QUERIES = [
   "how does a steam engine work",
@@ -41,6 +42,10 @@ export default function LandingPage() {
           >
             Read the code on GitHub
           </a>
+        </div>
+
+        <div className="mt-4">
+          <RecentAtlasLink />
         </div>
 
         <div className="mt-12 w-full">

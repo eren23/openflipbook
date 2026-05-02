@@ -131,6 +131,20 @@ export interface ListNodesResult {
   next_cursor: string | null;
 }
 
+export async function listNodesByParent(
+  parentId: string,
+  opts: { limit?: number } = {}
+): Promise<NodeRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+  const collection = await nodes();
+  const docs = await collection
+    .find({ parent_id: parentId })
+    .sort({ created_at: 1, _id: 1 })
+    .limit(limit)
+    .toArray();
+  return docs.map(toRow);
+}
+
 export async function listNodesBySession(
   sessionId: string,
   opts: { cursor?: string | null; limit?: number } = {}

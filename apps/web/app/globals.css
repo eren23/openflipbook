@@ -76,3 +76,50 @@ h3,
     filter: none !important;
   }
 }
+
+/* Atlas: tiles fan in by BFS depth; connectors draw on slightly after.
+ * Both honor prefers-reduced-motion via the !important overrides below. */
+@keyframes ofb-tile-in {
+  0%   { opacity: 0; transform: scale(0.86); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.ofb-tile-in {
+  animation: ofb-tile-in 380ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes ofb-edge-draw {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.ofb-edge-draw {
+  animation: ofb-edge-draw 320ms ease-out both;
+}
+
+@keyframes ofb-mini-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+}
+
+.ofb-mini-active {
+  animation: ofb-mini-pulse 1.6s ease-in-out infinite;
+}
+
+.ofb-heat-pin .ofb-heat-dot {
+  transition: transform 120ms ease-out;
+}
+.ofb-heat-pin:hover .ofb-heat-dot,
+.ofb-heat-pin:focus-visible .ofb-heat-dot {
+  transform: scale(1.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ofb-tile-in,
+  .ofb-edge-draw,
+  .ofb-mini-active {
+    animation: none !important;
+  }
+}
