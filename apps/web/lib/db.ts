@@ -47,6 +47,11 @@ export interface ClickInParent {
   y_pct: number;
 }
 
+export interface NodeSource {
+  url: string;
+  title: string | null;
+}
+
 export interface NodeDoc extends Document {
   _id: string;
   parent_id: string | null;
@@ -59,6 +64,9 @@ export interface NodeDoc extends Document {
   aspect_ratio: string;
   final_prompt: string | null;
   click_in_parent: ClickInParent | null;
+  // Web-search citations the planner used. Backwards-compatible: missing on
+  // pre-citations nodes and treated as []. Domain-deduped, max ~3.
+  sources?: NodeSource[] | null;
   created_at: Date;
 }
 
@@ -73,6 +81,7 @@ export interface NodeInsert {
   aspect_ratio: string;
   final_prompt: string | null;
   click_in_parent?: ClickInParent | null;
+  sources?: NodeSource[] | null;
 }
 
 export interface NodeRow {
@@ -87,15 +96,17 @@ export interface NodeRow {
   aspect_ratio: string;
   final_prompt: string | null;
   click_in_parent: ClickInParent | null;
+  sources: NodeSource[];
   created_at: string;
 }
 
 function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, click_in_parent, ...rest } = doc;
+  const { _id, created_at, click_in_parent, sources, ...rest } = doc;
   return {
     id: _id,
     ...rest,
     click_in_parent: click_in_parent ?? null,
+    sources: Array.isArray(sources) ? sources : [],
     created_at: created_at.toISOString(),
   };
 }
@@ -114,6 +125,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     aspect_ratio: n.aspect_ratio,
     final_prompt: n.final_prompt,
     click_in_parent: n.click_in_parent ?? null,
+    sources: n.sources ?? null,
     created_at: new Date(),
   };
   await collection.insertOne(doc);

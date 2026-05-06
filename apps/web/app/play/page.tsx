@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import type {
+  Citation,
   GenerateRequestBody,
   GenerateEvent,
   ImageTier,
   VideoTier,
 } from "@openflipbook/config";
-import { annotateClickPoint, normalizeClickOnImage } from "@/lib/image-click";
+import {
+  annotateClickPoint,
+  annotateStroke,
+  normalizeClickOnImage,
+  summarizeStroke,
+  type NormalizedClick,
+} from "@/lib/image-click";
 import {
   getWSUrl,
   startLTXStream,
@@ -19,6 +26,8 @@ import WorldMap from "@/components/world-map";
 import DebugHud from "@/components/debug-hud";
 import SessionMinimap from "@/components/session-minimap";
 import WaterfallHUD from "@/components/waterfall-hud";
+import CitationsChip from "@/components/citations-chip";
+import TimeScrubber from "@/components/time-scrubber";
 import {
   TRACE_HEADER,
   emit as hudEmit,
@@ -50,6 +59,10 @@ interface Page {
   // Where the user clicked on the parent page (0..1). Used by the map
   // view to position the child tile inside the parent's rect.
   clickInParent?: { xPct: number; yPct: number };
+  // Web-search citations the planner used. Hydrated from the SSE final
+  // event and from /api/nodes/[id] on permalink replay. Empty when web
+  // search returned nothing or is disabled.
+  sources?: Citation[];
 }
 
 function newSessionId(): string {
@@ -76,6 +89,7 @@ interface PersistBody {
   aspect_ratio: string;
   final_prompt: string;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
+  sources?: { url: string; title: string | null }[] | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -181,6 +195,11 @@ export default function PlayPage() {
   const [quickbarOpen, setQuickbarOpen] = useState(false);
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [scrubberOpen, setScrubberOpen] = useState(false);
+  // True between an SSE `progress` (fast-tier draft) and the matching
+  // `final` event. Used to overlay a subtle breathing blur so the user
+  // reads the draft as in-progress, not done.
+  const [progressiveDraft, setProgressiveDraft] = useState(false);
   const [beaconsHidden, setBeaconsHidden] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     xPx: number;
@@ -196,6 +215,18 @@ export default function PlayPage() {
   const [hoverPos, setHoverPos] = useState<{ xPx: number; yPx: number } | null>(
     null
   );
+  // Annotate-and-regenerate: when the user holds Shift and drags on the
+  // image, we capture a polyline stroke. Released stroke is rendered onto a
+  // copy of the parent image so the VLM sees the user's circle/arrow as
+  // part of the click intent. `points` are normalised 0..1 in image space;
+  // `pxPoints` mirror them in pixel space for the live SVG overlay so we
+  // don't have to re-resolve sizes every frame.
+  const [strokeState, setStrokeState] = useState<{
+    points: NormalizedClick[];
+    pxPoints: { x: number; y: number }[];
+  } | null>(null);
+  const strokeActiveRef = useRef(false);
+  const strokePointsRef = useRef<NormalizedClick[]>([]);
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -301,6 +332,85 @@ export default function PlayPage() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  // Style DNA lock — when the user pins a page, every subsequent generate
+  // gets `session_style_anchor` set to that page's VLM-described style. The
+  // backend uses it to override the per-hop style derivation, keeping the
+  // session visually coherent even across unrelated subjects.
+  // `nodeId` is the pinned page; `style` is the cached VLM caption (we
+  // resolve it once on pin via /api/resolve-click and reuse). Persisted in
+  // localStorage keyed by sessionId so reload preserves the lock.
+  const [styleAnchor, setStyleAnchor] = useState<{
+    nodeId: string;
+    style: string;
+  } | null>(null);
+  const [styleAnchorPending, setStyleAnchorPending] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(
+        `openflipbook.styleAnchor.${sessionId}`
+      );
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        nodeId?: string;
+        style?: string;
+      };
+      if (parsed?.nodeId && parsed?.style) {
+        setStyleAnchor({ nodeId: parsed.nodeId, style: parsed.style });
+      }
+    } catch {
+      /* no-op */
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = `openflipbook.styleAnchor.${sessionId}`;
+    try {
+      if (styleAnchor) {
+        window.localStorage.setItem(key, JSON.stringify(styleAnchor));
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      /* no-op */
+    }
+  }, [styleAnchor, sessionId]);
+
+  const togglePinStyle = useCallback(async () => {
+    if (!page?.imageDataUrl || !page.nodeId) return;
+    if (styleAnchor && styleAnchor.nodeId === page.nodeId) {
+      setStyleAnchor(null);
+      return;
+    }
+    setStyleAnchorPending(true);
+    try {
+      // Use the click-resolve endpoint at the centre of the image — it
+      // already returns a `style` description as part of its response, so
+      // we get the anchor caption for free without a new backend route.
+      const trace = newTraceId();
+      const res = await fetch("/api/resolve-click", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", [TRACE_HEADER]: trace },
+        body: JSON.stringify({
+          image_data_url: page.imageDataUrl,
+          x_pct: 0.5,
+          y_pct: 0.5,
+          parent_title: page.title,
+          parent_query: page.query,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { style?: string };
+      const style = (data.style || "").trim();
+      if (!style) throw new Error("empty style");
+      setStyleAnchor({ nodeId: page.nodeId, style });
+    } catch {
+      // Best-effort — leave anchor unchanged on failure.
+    } finally {
+      setStyleAnchorPending(false);
+    }
+  }, [page, styleAnchor]);
+
   // Hover-prefetch cache. Keyed by `${nodeId}:${xBucket}:${yBucket}` so two
   // hovers within a 5% grid cell reuse the same VLM round-trip.
   //
@@ -313,7 +423,10 @@ export default function PlayPage() {
   const PREFETCH_PER_PAGE = 6;
   const PREFETCH_LRU_MAX = 200;
   const prefetchCacheRef = useRef<
-    Map<string, { subject: string; style: string }>
+    Map<
+      string,
+      { subject: string; style: string; subject_context?: string }
+    >
   >(new Map());
   const prefetchInflightRef = useRef<Map<string, AbortController>>(new Map());
   const prefetchTimerRef = useRef<number | null>(null);
@@ -395,6 +508,11 @@ export default function PlayPage() {
               }
             } else if (evt.type === "progress") {
               lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
+              setProgressiveDraft(true);
+              hudEmit("sse:progress", {
+                trace_id: traceId,
+                t: nowMs(),
+              });
               setPage((prev) => ({
                 nodeId: prev?.nodeId ?? null,
                 sessionId: body.session_id,
@@ -405,18 +523,23 @@ export default function PlayPage() {
             } else if (evt.type === "final") {
               lastImage = evt.image_data_url;
               lastTitle = evt.page_title;
+              const evtSources: Citation[] = Array.isArray(evt.sources)
+                ? evt.sources
+                : [];
               hudEmit("sse:final", {
                 page_title: evt.page_title,
                 image_model: evt.image_model,
                 trace_id: traceId,
                 t: nowMs(),
               });
+              setProgressiveDraft(false);
               setPage({
                 nodeId: null,
                 sessionId: evt.session_id,
                 query: body.query,
                 title: evt.page_title,
                 imageDataUrl: evt.image_data_url,
+                sources: evtSources,
               });
               // Flip the morph gate so the decode-then-reveal effect runs
               // ONLY on the final image, not on streamed progress partials.
@@ -439,6 +562,10 @@ export default function PlayPage() {
                           y_pct: body.click.y_pct,
                         }
                       : null,
+                  sources: evtSources.map((s) => ({
+                    url: s.url,
+                    title: s.title ?? null,
+                  })),
                 },
                 traceId
               ).then((saved) => {
@@ -450,6 +577,7 @@ export default function PlayPage() {
                     title: evt.page_title,
                     imageDataUrl: evt.image_data_url,
                     parentId: body.current_node_id || null,
+                    sources: evtSources,
                     ...(body.mode === "tap" && body.click
                       ? {
                           clickInParent: {
@@ -499,11 +627,13 @@ export default function PlayPage() {
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           setMorphFx(null);
+          setProgressiveDraft(false);
           return;
         }
         setError((err as Error).message);
         setPhase("error");
         setMorphFx(null);
+        setProgressiveDraft(false);
         // Best-effort error sink so /status's "recent errors" panel can
         // surface client-side failures alongside backend ones.
         void fetch("/api/errors", {
@@ -644,9 +774,10 @@ export default function PlayPage() {
         mode: "query",
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     },
-    [input, sessionId, page, generate, imageTier, outputLocale]
+    [input, sessionId, page, generate, imageTier, outputLocale, styleAnchor]
   );
 
   const submitEdit = useCallback(
@@ -667,11 +798,12 @@ export default function PlayPage() {
         parent_title: page.title,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
       setEditInstruction("");
       setEditMode(false);
     },
-    [editInstruction, page, generate, imageTier, outputLocale]
+    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor]
   );
 
   const canGoBack = history.trailIdx > 0;
@@ -772,6 +904,9 @@ export default function PlayPage() {
       } else if (e.key.toLowerCase() === "m") {
         e.preventDefault();
         setViewMode((m) => (m === "map" ? "page" : "map"));
+      } else if (e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        setScrubberOpen((s) => !s);
       } else if (e.key === "/") {
         e.preventDefault();
         setQuickbarOpen(true);
@@ -816,6 +951,7 @@ export default function PlayPage() {
             page_title: string;
             image_url: string;
             click_in_parent: { x_pct: number; y_pct: number } | null;
+            sources?: { url: string; title: string | null }[] | null;
           }>;
         };
         if (cancelled) return;
@@ -827,6 +963,7 @@ export default function PlayPage() {
           title: n.page_title,
           imageDataUrl: n.image_url,
           parentId: n.parent_id,
+          sources: Array.isArray(n.sources) ? n.sources : [],
           ...(n.click_in_parent
             ? {
                 clickInParent: {
@@ -893,6 +1030,96 @@ export default function PlayPage() {
     };
   }, [page?.imageDataUrl, morphFx]);
 
+  // Pre-resolve the 3-4 most click-worthy regions on the freshly rendered
+  // page. Pumps each candidate into prefetchCacheRef so clicks landing near
+  // them skip the VLM call. Runs once per nodeId. Disabled if the page lacks
+  // a stable nodeId (in-progress generation) — without a nodeId the bucket
+  // key is "noid" and would collide across pages.
+  const precomputedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (phase !== "ready") return;
+    if (!page?.imageDataUrl || !page.nodeId) return;
+    if (page.imageDataUrl.startsWith("http") && !page.imageDataUrl.startsWith("data:")) {
+      // Persisted images served from R2 are also fine — backend accepts URLs
+      // via the image-data-url field, but the precompute endpoint needs a
+      // data URL. Skip until we add http handling there.
+      // (Continuing past this in case of data: URL.)
+    }
+    const nodeId = page.nodeId;
+    if (precomputedRef.current.has(nodeId)) return;
+    precomputedRef.current.add(nodeId);
+    const ac = new AbortController();
+    const controller = ac;
+    void (async () => {
+      try {
+        // Backend expects a data URL; if the page was hydrated from R2 we
+        // skip — those pages already have whatever VLM context the user's
+        // prior session built up, and re-fetching them would be wasteful.
+        if (!page.imageDataUrl?.startsWith("data:")) return;
+        const trace = newTraceId();
+        const res = await fetch("/api/precompute-candidates", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [TRACE_HEADER]: trace,
+          },
+          body: JSON.stringify({
+            image_data_url: page.imageDataUrl,
+            parent_title: page.title,
+            parent_query: page.query,
+            output_locale: resolveOutputLocale(outputLocale),
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          candidates?: {
+            x_pct: number;
+            y_pct: number;
+            subject: string;
+            style: string;
+            salience: number;
+          }[];
+        };
+        if (!Array.isArray(data.candidates)) return;
+        const cache = prefetchCacheRef.current;
+        const counts = prefetchPerPageCountRef.current;
+        const scope = nodeId;
+        for (const c of data.candidates) {
+          if ((counts.get(scope) ?? 0) >= PREFETCH_PER_PAGE) break;
+          const key = bucketKey(nodeId, c.x_pct, c.y_pct);
+          if (cache.has(key)) continue;
+          cache.set(key, { subject: c.subject, style: c.style });
+          counts.set(scope, (counts.get(scope) ?? 0) + 1);
+          // LRU evict oldest entries when we exceed the global cap.
+          if (cache.size > PREFETCH_LRU_MAX) {
+            const oldestKey = cache.keys().next().value;
+            if (typeof oldestKey === "string") cache.delete(oldestKey);
+          }
+        }
+        hudEmit("precompute:candidates", {
+          node_id: nodeId,
+          count: data.candidates.length,
+          trace_id: trace,
+          t: nowMs(),
+        });
+      } catch {
+        // Best-effort — clicks fall back to on-demand resolution.
+      }
+    })();
+    return () => {
+      ac.abort();
+    };
+  }, [
+    phase,
+    page?.imageDataUrl,
+    page?.nodeId,
+    page?.title,
+    page?.query,
+    outputLocale,
+    bucketKey,
+  ]);
+
   useEffect(() => {
     const img = imgRef.current;
     if (!img || !page?.imageDataUrl) return;
@@ -940,11 +1167,13 @@ export default function PlayPage() {
           const data = (await res.json()) as {
             subject?: string;
             style?: string;
+            subject_context?: string;
           };
           if (data.subject) {
             cache.set(key, {
               subject: data.subject,
               style: data.style ?? "",
+              subject_context: data.subject_context ?? "",
             });
             // Bound the cache so a long session doesn't grow Map<> forever.
             // FIFO eviction is fine — cache entries are independent.
@@ -966,6 +1195,12 @@ export default function PlayPage() {
       if (phase === "generating") return;
       if (editMode) return;
       if (clickInFlightRef.current) return;
+      // Stroke release also fires `click` — suppress so we don't generate
+      // twice. The stroke handler already kicked off a generate.
+      if (strokeActiveRef.current) {
+        strokeActiveRef.current = false;
+        return;
+      }
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
       // Claim the slot synchronously before any await — protects the window
@@ -1036,8 +1271,12 @@ export default function PlayPage() {
           ? {
               prefetched_subject: cached.subject,
               prefetched_style: cached.style,
+              ...(cached.subject_context
+                ? { prefetched_subject_context: cached.subject_context }
+                : {}),
             }
           : {}),
+        ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     };
     const move = (evt: PointerEvent) => {
@@ -1049,6 +1288,32 @@ export default function PlayPage() {
       });
       if (phase === "generating" || editMode) return;
       if (streamStatus !== "off") return;
+      // While a stroke is active, accumulate points instead of prefetching.
+      if (strokeActiveRef.current) {
+        const click = normalizeClickOnImage(evt, img);
+        if (!click) return;
+        const last =
+          strokePointsRef.current[strokePointsRef.current.length - 1];
+        if (
+          last &&
+          Math.abs(last.x_pct - click.x_pct) < 0.005 &&
+          Math.abs(last.y_pct - click.y_pct) < 0.005
+        ) {
+          return;
+        }
+        strokePointsRef.current = [...strokePointsRef.current, click];
+        const px = evt.clientX - rect.left;
+        const py = evt.clientY - rect.top;
+        setStrokeState((prev) =>
+          prev
+            ? {
+                points: [...prev.points, click],
+                pxPoints: [...prev.pxPoints, { x: px, y: py }],
+              }
+            : prev
+        );
+        return;
+      }
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
       if (prefetchTimerRef.current !== null) {
@@ -1057,6 +1322,111 @@ export default function PlayPage() {
       prefetchTimerRef.current = window.setTimeout(() => {
         firePrefetch(click.x_pct, click.y_pct);
       }, 450);
+    };
+    const down = (evt: PointerEvent) => {
+      if (!evt.shiftKey) return;
+      if (evt.pointerType === "touch") return;
+      if (phase === "generating" || editMode) return;
+      if (streamStatus !== "off") return;
+      const click = normalizeClickOnImage(evt, img);
+      if (!click) return;
+      evt.preventDefault();
+      try {
+        img.setPointerCapture(evt.pointerId);
+      } catch {
+        /* no-op */
+      }
+      strokeActiveRef.current = true;
+      strokePointsRef.current = [click];
+      const rect = img.getBoundingClientRect();
+      const px = evt.clientX - rect.left;
+      const py = evt.clientY - rect.top;
+      setStrokeState({
+        points: [click],
+        pxPoints: [{ x: px, y: py }],
+      });
+    };
+    const up = async (evt: PointerEvent) => {
+      if (!strokeActiveRef.current) return;
+      try {
+        img.releasePointerCapture(evt.pointerId);
+      } catch {
+        /* no-op */
+      }
+      // Snapshot the stroke before clearing UI state. Read from the ref
+      // because state may not have flushed since the last pointermove.
+      const snapPoints = strokePointsRef.current;
+      const release = () => {
+        strokePointsRef.current = [];
+        setStrokeState(null);
+      };
+      // Need at least a few points to count as a stroke; otherwise treat as
+      // a Shift-click and just fall through to the regular click handler.
+      if (!snapPoints || snapPoints.length < 4) {
+        strokeActiveRef.current = false;
+        release();
+        return;
+      }
+      const summary = summarizeStroke(snapPoints);
+      if (!summary) {
+        strokeActiveRef.current = false;
+        release();
+        return;
+      }
+      // Centroid is the click anchor; suppression flag is reset inside the
+      // click handler when it sees strokeActiveRef.current === true.
+      const click = summary.centroid;
+      if (clickInFlightRef.current) {
+        strokeActiveRef.current = false;
+        release();
+        return;
+      }
+      clickInFlightRef.current = true;
+      const rect2 = img.getBoundingClientRect();
+      const px = click.x_pct * rect2.width;
+      const py = click.y_pct * rect2.height;
+      setClickRipple({ xPx: px, yPx: py, key: Date.now() });
+      const reduceMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      setMorphFx({
+        ox: px,
+        oy: py,
+        prevImg: currentImage,
+        nextImg: null,
+        phase: "wait",
+        isFinal: false,
+        startedAt: nowMs(),
+        reduceMotion,
+      });
+      hudEmit("morph:start", { ox: px, oy: py, t: nowMs() });
+      let annotated = currentImage;
+      try {
+        annotated = await annotateStroke(currentImage, summary);
+      } catch {
+        // Fall back to the raw image; VLM still gets numeric coords.
+      }
+      release();
+      // Stroke implies "user circled this region" — set click_hint so the
+      // planner emphasises the stroked area in the next page.
+      const strokeHint =
+        "User circled / annotated this region with a freehand stroke. Treat the stroked area as the focus.";
+      void generate({
+        query: page.query,
+        aspect_ratio: "16:9",
+        web_search: true,
+        session_id: page.sessionId,
+        current_node_id: page.nodeId ?? "",
+        mode: "tap",
+        image: annotated,
+        parent_query: page.query,
+        parent_title: page.title,
+        click,
+        click_hint: strokeHint,
+        image_tier: imageTier,
+        output_locale: resolveOutputLocale(outputLocale),
+        ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+      });
     };
     const leave = () => {
       setHoverPos(null);
@@ -1067,11 +1437,17 @@ export default function PlayPage() {
       prefetchCurrentKeyRef.current = null;
     };
     img.addEventListener("click", handler);
+    img.addEventListener("pointerdown", down);
     img.addEventListener("pointermove", move);
+    img.addEventListener("pointerup", up);
+    img.addEventListener("pointercancel", up);
     img.addEventListener("pointerleave", leave);
     return () => {
       img.removeEventListener("click", handler);
+      img.removeEventListener("pointerdown", down);
       img.removeEventListener("pointermove", move);
+      img.removeEventListener("pointerup", up);
+      img.removeEventListener("pointercancel", up);
       img.removeEventListener("pointerleave", leave);
       if (prefetchTimerRef.current !== null) {
         window.clearTimeout(prefetchTimerRef.current);
@@ -1083,7 +1459,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus]);
+  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -1110,8 +1486,9 @@ export default function PlayPage() {
       mode: "query",
       image_tier: imageTier,
       output_locale: resolveOutputLocale(outputLocale),
+      ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
     });
-  }, [generate, sessionId, imageTier, outputLocale]);
+  }, [generate, sessionId, imageTier, outputLocale, styleAnchor]);
 
   const animateAbortRef = useRef<AbortController | null>(null);
   const disconnectStream = useCallback(() => {
@@ -1381,7 +1758,7 @@ export default function PlayPage() {
         />
       ) : page?.imageDataUrl ? (
         <figure
-          className="overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg"
+          className="relative overflow-hidden rounded-2xl border border-[var(--color-ink)]/20 bg-white shadow-lg"
           onContextMenu={(e) => {
             if (!page?.imageDataUrl) return;
             e.preventDefault();
@@ -1390,6 +1767,43 @@ export default function PlayPage() {
             setContextMenu({ xPx: e.clientX, yPx: e.clientY });
           }}
         >
+          {page.sources && page.sources.length > 0 && (
+            <CitationsChip sources={page.sources} />
+          )}
+          {page.nodeId && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void togglePinStyle();
+              }}
+              disabled={styleAnchorPending}
+              aria-pressed={styleAnchor?.nodeId === page.nodeId}
+              title={
+                styleAnchor?.nodeId === page.nodeId
+                  ? "Style locked to this page — click to unlock"
+                  : styleAnchor
+                    ? "Pin this page's style for the rest of the session"
+                    : "Pin this page as the session's visual style"
+              }
+              className={
+                "pointer-events-auto absolute bottom-3 start-3 z-10 flex select-none items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium backdrop-blur transition " +
+                (styleAnchor?.nodeId === page.nodeId
+                  ? "border-amber-400/70 bg-amber-100/80 text-amber-900 hover:bg-amber-100"
+                  : "border-[var(--color-ink)]/30 bg-[var(--color-paper)]/80 text-[var(--color-ink)] hover:bg-[var(--color-paper)]") +
+                (styleAnchorPending ? " opacity-60" : "")
+              }
+            >
+              <span aria-hidden>📌</span>
+              <span>
+                {styleAnchorPending
+                  ? "Pinning…"
+                  : styleAnchor?.nodeId === page.nodeId
+                    ? "Style locked"
+                    : "Pin style"}
+              </span>
+            </button>
+          )}
           <div className="relative aspect-[16/9] w-full">
             <div className="relative h-full w-full">
               {fallbackVideoUrl && showVideo ? (
@@ -1448,6 +1862,9 @@ export default function PlayPage() {
                     className={
                       "absolute inset-0 block h-full w-full object-contain select-none " +
                       (morphFx ? "ec-morph-new " : "") +
+                      (progressiveDraft && phase === "generating"
+                        ? "ec-draft "
+                        : "") +
                       (streamStatus === "connecting"
                         ? "cursor-wait"
                         : phase === "generating" || editMode
@@ -1488,6 +1905,35 @@ export default function PlayPage() {
                   />
                 </>
               )}
+              {strokeState && strokeState.pxPoints.length >= 2 && (
+                <svg
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+                  style={{ overflow: "visible" }}
+                >
+                  <polyline
+                    points={strokeState.pxPoints
+                      .map((p) => `${p.x},${p.y}`)
+                      .join(" ")}
+                    fill="none"
+                    stroke="rgba(255,255,255,0.95)"
+                    strokeWidth={10}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                  <polyline
+                    points={strokeState.pxPoints
+                      .map((p) => `${p.x},${p.y}`)
+                      .join(" ")}
+                    fill="none"
+                    stroke="#ef4444"
+                    strokeWidth={5}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+
               {imgFailed && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center text-white">
                   <div className="max-w-md text-sm leading-relaxed">
@@ -1798,6 +2244,26 @@ export default function PlayPage() {
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
 
+      {scrubberOpen && page?.imageDataUrl && history.trail.length > 1 && (
+        <TimeScrubber
+          frames={history.trail
+            .map((id) => history.items.find((p) => p.nodeId === id))
+            .filter((p): p is Page => Boolean(p))
+            .map((p) => ({
+              nodeId: p.nodeId ?? "",
+              imageDataUrl: p.imageDataUrl,
+              title: p.title,
+            }))}
+          currentIdx={history.trailIdx}
+          onJump={(idx) => {
+            setHistory((prev) =>
+              idx === prev.trailIdx ? prev : navigateToTrailIdx(prev, idx)
+            );
+          }}
+          onClose={() => setScrubberOpen(false)}
+        />
+      )}
+
       {contextMenu && (
         <ContextMenu
           x={contextMenu.xPx}
@@ -1970,11 +2436,13 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           <Row k="→" v="Forward" />
           <Row k="Backspace" v="Back (Shift = forward)" />
           <Row k="M" v="Toggle map view" />
+          <Row k="T" v="Toggle time-scrubber" />
           <Row k="/" v="Jump to page…" />
           <Row k="?" v="This help" />
           <Row k="Esc" v="Close overlay" />
           <Row k="Right-click" v="Page menu" />
           <Row k="⌘/Ctrl-click" v="Click with a note" />
+          <Row k="Shift-drag" v="Circle a region to focus on it" />
         </dl>
         <button
           type="button"

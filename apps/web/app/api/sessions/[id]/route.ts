@@ -44,6 +44,7 @@ export async function GET(req: Request, { params }: Params) {
       prompt_author_model: row.prompt_author_model,
       aspect_ratio: row.aspect_ratio,
       click_in_parent: row.click_in_parent,
+      sources: row.sources,
       created_at: row.created_at,
     })),
   });

@@ -67,7 +67,25 @@ h3,
   will-change: transform, opacity;
 }
 
+/* Progressive-render draft. While the user-selected tier is still cooking,
+ * a fast-tier draft paints first; this gentle breathing blur signals "still
+ * sharpening" so the lower-quality preview reads as in-progress, not final.
+ * Disabled under prefers-reduced-motion (see media query below). */
+@keyframes ec-draft-breathe {
+  0%   { filter: blur(0.6px) saturate(0.96); opacity: 0.96; }
+  50%  { filter: blur(1.6px) saturate(1.02); opacity: 0.9; }
+  100% { filter: blur(0.6px) saturate(0.96); opacity: 0.96; }
+}
+
+.ec-draft {
+  animation: ec-draft-breathe 1.6s ease-in-out infinite;
+  will-change: filter, opacity;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .ec-draft {
+    animation: none !important;
+  }
   .ec-morph-old,
   .ec-morph-new {
     animation: none !important;

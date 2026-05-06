@@ -30,6 +30,12 @@ It's also a nice excuse to swap pieces around. The image model, the planner, the
   - Default: one-shot 5s MP4 from `fal-ai/ltx-video/image-to-video`. Cheap (~$0.02/clip), no GPU on your side.
   - Streaming: the same LTXF binary WebSocket protocol Flipbook uses, deployed to your own Modal account — true fragmented-MP4 streaming into a `<video>` tag via Media Source Extensions.
 - **Permalinks.** `/n/:id` hydrates from Mongo + R2 without regenerating.
+- **Pin a style.** Hit the 📌 on any page and every new page in the session inherits that look (palette, line work, perspective). Persists across reload.
+- **Citations.** When the planner runs with `:online`, the source URLs ride through to a tiny `📎` chip in the corner of the page — one click, you can see what it actually read.
+- **Shift-drag to circle a region.** Freehand stroke on the image, release, and the next page focuses on what you scribbled. Same VLM as the click path, just more pointed.
+- **Time-scrubber (`T`).** Linear film-strip of every page in your trail; drag the scrubber to time-travel through your own exploration.
+- **Faster clicks.** As soon as a page renders, the VLM precomputes the 3–4 most clickable regions in the background, so most taps skip the resolve round-trip.
+- **Progressive render.** On the balanced/pro tiers the cheap fast model paints a draft in parallel, so you get something on screen seconds before the final lands. Toggle off with `PROGRESSIVE_DRAFT=false` if you'd rather save the extra fal call.
 - **BYO keys.** No hosted backend. Clone it, run it, pay your own bills.
 
 ```

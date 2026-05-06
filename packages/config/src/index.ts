@@ -32,6 +32,15 @@ export interface GenerateRequestBody {
   // the VLM call entirely on tap mode, cutting ~600-1200ms off the hop.
   prefetched_subject?: string;
   prefetched_style?: string;
+  // Optional one-sentence disambiguation of the subject (e.g. "per-object
+  // memory store the SAM 2 tracker uses to keep object identity across
+  // frames"). Backend feeds this to plan_page as authoritative meaning so
+  // ambiguous phrases stay in the parent's domain.
+  prefetched_subject_context?: string;
+  // Session-level style lock. When set, the planner uses this as the
+  // visual style for ALL pages in the session, overriding the per-hop
+  // style derived from the parent. Pin a page in the UI to populate.
+  session_style_anchor?: string;
   trace_id?: string;
 }
 
@@ -48,6 +57,11 @@ export interface ResolveClickRequestBody {
 export interface ResolveClickResponse {
   subject: string;
   style: string;
+  // One-sentence definition of `subject` *as it appears in the parent
+  // illustration*. Threaded into the planner as the authoritative meaning
+  // so an ambiguous phrase like "Memory Bank" doesn't drift to the
+  // popular web meaning when the parent is a video-segmentation diagram.
+  subject_context?: string;
 }
 
 export interface GenerateProgressEvent {
@@ -55,6 +69,11 @@ export interface GenerateProgressEvent {
   frame_index: number;
   jpeg_b64: string;
   trace_id?: string;
+}
+
+export interface Citation {
+  url: string;
+  title?: string | null;
 }
 
 export interface GenerateFinalEvent {
@@ -65,6 +84,9 @@ export interface GenerateFinalEvent {
   prompt_author_model: string;
   session_id: string;
   final_prompt: string;
+  // Web-search citations the planner used. Empty when web search is off
+  // or the model returned none. Already domain-deduped, capped at ~3.
+  sources?: Citation[];
   trace_id?: string;
 }
 
