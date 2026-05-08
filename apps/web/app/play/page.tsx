@@ -52,6 +52,7 @@ import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { EditForm } from "@/components/PlayPage/EditForm";
 import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -734,53 +735,20 @@ export default function PlayPage() {
     setViewMode("page");
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const inField =
-        !!target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
-      // Esc always closes overlays even when typing in the quickbar.
-      if (e.key === "Escape") {
-        if (helpOpen || quickbarOpen || contextMenu) {
-          e.preventDefault();
-          setHelpOpen(false);
-          setQuickbarOpen(false);
-          setContextMenu(null);
-        }
-        return;
-      }
-      if (inField) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        goBack();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        goForward();
-      } else if (e.key === "Backspace") {
-        e.preventDefault();
-        if (e.shiftKey) goForward();
-        else goBack();
-      } else if (e.key.toLowerCase() === "m") {
-        e.preventDefault();
-        setViewMode((m) => (m === "map" ? "page" : "map"));
-      } else if (e.key.toLowerCase() === "t") {
-        e.preventDefault();
-        setScrubberOpen((s) => !s);
-      } else if (e.key === "/") {
-        e.preventDefault();
-        setQuickbarOpen(true);
-      } else if (e.key === "?") {
-        e.preventDefault();
-        setHelpOpen((h) => !h);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [goBack, goForward, helpOpen, quickbarOpen, contextMenu]);
+  useKeyboardShortcuts({
+    onBack: goBack,
+    onForward: goForward,
+    onToggleMap: () => setViewMode((m) => (m === "map" ? "page" : "map")),
+    onToggleScrubber: () => setScrubberOpen((s) => !s),
+    onOpenQuickbar: () => setQuickbarOpen(true),
+    onToggleHelp: () => setHelpOpen((h) => !h),
+    onCloseOverlays: () => {
+      setHelpOpen(false);
+      setQuickbarOpen(false);
+      setContextMenu(null);
+    },
+    anyOverlayOpen: helpOpen || quickbarOpen || contextMenu !== null,
+  });
 
   // Hydrate the session graph from the server when landing with ?continue=.
   // Pages are sorted by created_at on the server (see listNodesBySession).
