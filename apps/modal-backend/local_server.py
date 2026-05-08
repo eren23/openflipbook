@@ -33,8 +33,8 @@ for required in ("FAL_KEY", "OPENROUTER_API_KEY"):
         )
 
 import uvicorn  # noqa: E402
-from generate import fastapi_app  # noqa: E402
 
+from generate import fastapi_app  # noqa: E402
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))

@@ -7,28 +7,34 @@
  *   docker compose up -d --build              # stack on localhost:3000
  *   pnpm tsx scripts/perfbudget/run.ts        # one-shot run
  *
- * Tunables (env):
- *   PERF_BASE_URL                 default http://localhost:3000
- *   PERF_BUDGET_TTFP_MS           default 1500
- *   PERF_BUDGET_FIRST_STATUS_MS   default 4000  (LAN to local backend; cold-cache)
- *   PERF_BUDGET_FINAL_P95_MS      default 25000 (depends on fal/openrouter latency)
- *   PERF_BUDGET_CLS               default 0.1
+ * Budgets are read from scripts/perfbudget/budgets.json; env vars override
+ * for ad-hoc runs (PERF_BUDGET_TTFP_MS, PERF_BUDGET_FIRST_STATUS_MS,
+ * PERF_BUDGET_FINAL_P95_MS, PERF_BUDGET_CLS, PERF_BASE_URL).
  *
  * Exits non-zero on any breach. Writes scripts/perfbudget/report.json.
  */
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPORT = path.join(HERE, "report.json");
+const BUDGETS_FILE = path.join(HERE, "budgets.json");
+
+interface BudgetsFile {
+  ttfp_ms: number;
+  first_status_ms: number;
+  final_p95_ms: number;
+  cls: number;
+}
+const fileBudgets: BudgetsFile = JSON.parse(await readFile(BUDGETS_FILE, "utf8"));
 
 const BASE_URL = process.env.PERF_BASE_URL ?? "http://localhost:3000";
-const TTFP = Number(process.env.PERF_BUDGET_TTFP_MS ?? "1500");
-const FIRST_STATUS = Number(process.env.PERF_BUDGET_FIRST_STATUS_MS ?? "4000");
-const FINAL_P95 = Number(process.env.PERF_BUDGET_FINAL_P95_MS ?? "25000");
-const CLS_BUDGET = Number(process.env.PERF_BUDGET_CLS ?? "0.1");
+const TTFP = Number(process.env.PERF_BUDGET_TTFP_MS ?? fileBudgets.ttfp_ms);
+const FIRST_STATUS = Number(process.env.PERF_BUDGET_FIRST_STATUS_MS ?? fileBudgets.first_status_ms);
+const FINAL_P95 = Number(process.env.PERF_BUDGET_FINAL_P95_MS ?? fileBudgets.final_p95_ms);
+const CLS_BUDGET = Number(process.env.PERF_BUDGET_CLS ?? fileBudgets.cls);
 
 interface Sample {
   ttfp_ms: number;
@@ -139,17 +145,14 @@ async function main(): Promise<void> {
   if (report.final_p95_ms > FINAL_P95) breaches.push(`final_p95 > ${FINAL_P95}`);
   if (report.cls_max > CLS_BUDGET) breaches.push(`CLS > ${CLS_BUDGET}`);
 
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify(report, null, 2));
   if (breaches.length) {
-    // eslint-disable-next-line no-console
     console.error(`PERF BUDGET BREACH: ${breaches.join(", ")}`);
     process.exit(1);
   }
 }
 
 void main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err);
   process.exit(2);
 });

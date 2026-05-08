@@ -1,0 +1,6 @@
+{
+  "ttfp_ms": 1500,
+  "first_status_ms": 4000,
+  "final_p95_ms": 25000,
+  "cls": 0.1
+}

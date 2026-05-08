@@ -31,10 +31,26 @@
     "build": "pnpm --filter @openflipbook/web build",
     "start": "pnpm --filter @openflipbook/web start",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepare": "husky",
     "backend": "cd apps/modal-backend && PORT=8787 .venv/bin/python local_server.py",
     "modal:serve": "cd apps/modal-backend && modal serve generate.py ltx_stream.py",
     "modal:deploy": "cd apps/modal-backend && modal deploy generate.py ltx_stream.py",
     "record-demo": "cd scripts/record-demo && pnpm install --ignore-workspace --silent && pnpm start"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@next/eslint-plugin-next": "^15.1.0",
+    "eslint": "^9.15.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "globals": "^15.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "typescript-eslint": "^8.16.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs}": "eslint --fix --max-warnings=20",
+    "apps/modal-backend/**/*.py": "bash -lc 'cd apps/modal-backend && .venv/bin/ruff check --fix'"
   }
 }

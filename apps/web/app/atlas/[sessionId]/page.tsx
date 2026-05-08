@@ -35,7 +35,6 @@ const cachedSessionNodes = cache(async (sessionId: string): Promise<NodeRow[] | 
       cursor = next_cursor;
     }
     if (truncated) {
-      // eslint-disable-next-line no-console
       console.warn(
         `[atlas] session ${sessionId} hit pagination cap of 4000 nodes — DAG may be incomplete and orphan nodes may appear.`
       );

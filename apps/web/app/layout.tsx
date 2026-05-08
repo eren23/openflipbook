@@ -67,6 +67,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
           rel="stylesheet"
         />
+        {/* Sync script is intentional: must run before paint to avoid theme flash. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script src="/theme-init.js" />
       </head>
       <body className="min-h-dvh antialiased">{children}</body>

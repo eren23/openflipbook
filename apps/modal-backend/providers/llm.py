@@ -136,7 +136,7 @@ def _log_cache_usage(span_ctx: dict[str, Any], response: Any) -> None:
         prompt_tokens = getattr(usage, "prompt_tokens", None)
         if prompt_tokens is not None:
             span_ctx["prompt_tokens"] = prompt_tokens
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -157,10 +157,7 @@ def _web_search_enabled(online: bool) -> bool:
 def _supports_online_suffix(model: str) -> bool:
     # Gemini-family on OpenRouter requires the web plugin path; other models
     # accept the `:online` suffix shorthand.
-    lowered = model.lower()
-    if "gemini" in lowered:
-        return False
-    return True
+    return "gemini" not in model.lower()
 
 
 def _text_model(online: bool) -> str:
@@ -443,7 +440,7 @@ def _extract_citations(response: Any, max_sources: int = 3) -> list[Citation]:
             from urllib.parse import urlparse
 
             domain = urlparse(u).netloc.lower()
-        except Exception:  # noqa: BLE001
+        except Exception:
             domain = u
         if domain in seen:
             return
@@ -476,7 +473,7 @@ def _extract_citations(response: Any, max_sources: int = 3) -> list[Citation]:
                     _push(entry.get("url"), entry.get("title"))
                 if len(out) >= max_sources:
                     return out
-    except Exception:  # noqa: BLE001
+    except Exception:
         return out
     return out
 
@@ -566,7 +563,7 @@ async def rewrite_motion_prompt(
             _log_cache_usage(ctx, response)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten or seed
-    except Exception:  # noqa: BLE001
+    except Exception:
         return seed
 
 
@@ -618,7 +615,7 @@ async def polish_edit_instruction(
             _log_cache_usage(ctx, response)
         polished = (response.choices[0].message.content or "").strip()
         return polished or instruction
-    except Exception:  # noqa: BLE001
+    except Exception:
         return instruction
 
 

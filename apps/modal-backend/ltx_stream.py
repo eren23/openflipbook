@@ -22,6 +22,7 @@ path; otherwise it falls back to the cheap `POST /animate` → fal path.
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import json
 import os
@@ -97,10 +98,8 @@ class LTXStreamingEngine:
             cache_dir=VOLUME_MOUNT,
         ).to("cuda")
         # Memory-efficient attention where available.
-        try:
+        with contextlib.suppress(Exception):
             self._pipeline.enable_model_cpu_offload()  # type: ignore[attr-defined]
-        except Exception:
-            pass
 
     @modal.method()
     def generate_clip(
@@ -114,12 +113,11 @@ class LTXStreamingEngine:
         frame_rate: int,
     ) -> bytes:
         """Generate a fragmented MP4 (init+media) from an image+prompt."""
-        import io
         import av
         import torch
         from PIL import Image
 
-        mime, start_bytes = _parse_data_url(start_image_data_url)
+        _mime, start_bytes = _parse_data_url(start_image_data_url)
         start_image = Image.open(io.BytesIO(start_bytes)).convert("RGB")
         if (start_image.width, start_image.height) != (width, height):
             start_image = start_image.resize((width, height))

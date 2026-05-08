@@ -23,6 +23,13 @@ services:
     env_file:
       - path: apps/modal-backend/.env
         required: false
+    # Force public resolvers — Docker's default 127.0.0.11 link-local resolver
+    # has been flaking on the fal.ai / r2.cloudflarestorage.com hosts during
+    # E2E runs (sporadic ESERVFAIL / EAI_AGAIN), which manifests as
+    # ConnectError mid-stream and tanks the click-to-next + style-pin tests.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "8787:8787"
     healthcheck:
@@ -40,6 +47,9 @@ services:
     env_file:
       - path: apps/web/.env.local
         required: false
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0

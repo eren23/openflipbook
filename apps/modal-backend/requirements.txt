@@ -7,3 +7,4 @@ pydantic>=2.9
 uvicorn[standard]>=0.32
 python-dotenv>=1.0
 tenacity>=9.0
+sentry-sdk[fastapi]>=2.18

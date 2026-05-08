@@ -15,8 +15,9 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextvars import ContextVar
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import Request
 
@@ -31,10 +32,31 @@ _provider_health_cache: dict[str, tuple[float, bool]] = {}
 _PROVIDER_TTL_SEC = 30.0
 
 
+def _init_sentry() -> bool:
+    """No-op when SENTRY_DSN is unset, so this is safe to ship without Sentry."""
+    dsn = os.environ.get("SENTRY_DSN")
+    if not dsn:
+        return False
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.environ.get("SENTRY_ENVIRONMENT", os.environ.get("MODAL_ENVIRONMENT", "dev")),
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            send_default_pii=False,
+        )
+        return True
+    except Exception:
+        return False
+
+
+_SENTRY_ON = _init_sentry()
+
+
 def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".%03dZ" % int(
-        (time.time() % 1) * 1000
-    )
+    millis = int((time.time() % 1) * 1000)
+    return f"{time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())}.{millis:03d}Z"
 
 
 def log(level: str, span: str, **kv: Any) -> None:
@@ -54,7 +76,7 @@ def log(level: str, span: str, **kv: Any) -> None:
     try:
         sys.stdout.write(json.dumps(record, ensure_ascii=False) + "\n")
         sys.stdout.flush()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -73,7 +95,7 @@ async def span(name: str, **kv: Any) -> AsyncIterator[dict[str, Any]]:
     log("info", f"{name}.start", **kv)
     try:
         yield extra
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         _last_error_ts = time.time()
         log(
@@ -109,7 +131,7 @@ async def trace_id_dep(request: Request) -> str:
                     if isinstance(candidate, str) and candidate:
                         trace_id = candidate
             request._body = body_bytes  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     if not trace_id:
         trace_id = str(uuid.uuid4())
@@ -138,6 +160,20 @@ def record_error(kind: str, exc: Exception, **kv: Any) -> None:
         error=f"{type(exc).__name__}: {exc}",
         **kv,
     )
+    if _SENTRY_ON:
+        try:
+            import sentry_sdk
+
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("kind", kind)
+                tid = trace_var.get()
+                if tid:
+                    scope.set_tag("trace_id", tid)
+                for k, v in kv.items():
+                    scope.set_extra(k, v)
+                sentry_sdk.capture_exception(exc)
+        except Exception:
+            pass
 
 
 async def _ping(url: str) -> bool:
@@ -147,7 +183,7 @@ async def _ping(url: str) -> bool:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(url)
         return resp.status_code < 500
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 

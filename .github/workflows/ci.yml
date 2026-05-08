@@ -5,31 +5,203 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.12.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: ESLint
+        run: pnpm lint -- --max-warnings=20
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm -r typecheck
 
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Vitest
+        run: pnpm --filter @openflipbook/web test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Build web
         run: pnpm --filter @openflipbook/web build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+
+  python-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.x"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install backend deps (incl. dev tools)
+        working-directory: apps/modal-backend
+        run: |
+          uv venv --python 3.12 --seed
+          uv pip install -r requirements-dev.txt
+      - name: Ruff
+        working-directory: apps/modal-backend
+        run: |
+          source .venv/bin/activate
+          ruff check .
+      - name: Mypy
+        working-directory: apps/modal-backend
+        run: |
+          source .venv/bin/activate
+          mypy providers obs.py
+      - name: Pytest
+        working-directory: apps/modal-backend
+        run: |
+          source .venv/bin/activate
+          pytest
+
+  e2e:
+    # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +
+    # secrets, so don't fire on every push.
+    if: contains(github.event.pull_request.labels.*.name, 'e2e:run')
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Bring up backend stack
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB: ${{ secrets.MONGODB_DB }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: docker compose up -d --build
+      - name: Wait for /play to come up
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/status > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "stack did not come up in 120s"
+          exit 1
+      - name: Playwright
+        working-directory: apps/web
+        env:
+          E2E_BASE_URL: http://localhost:3000
+        run: pnpm e2e
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+
+  perfbudget:
+    # Gated on `perf:run` PR label so it doesn't burn fal/openrouter credits on
+    # every commit. Add the label to a PR to trigger; remove and re-add to rerun.
+    if: contains(github.event.pull_request.labels.*.name, 'perf:run')
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install web deps
+        run: pnpm install --frozen-lockfile
+      - name: Build web
+        run: pnpm --filter @openflipbook/web build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Bring up backend stack
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB: ${{ secrets.MONGODB_DB }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: docker compose up -d --build
+      - name: Wait for /play to come up
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/status > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "stack did not come up in 120s"
+          exit 1
+      - name: Install perfbudget deps
+        working-directory: scripts/perfbudget
+        run: pnpm install --ignore-workspace
+      - name: Run perfbudget
+        working-directory: scripts/perfbudget
+        run: pnpm start
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perfbudget-report
+          path: scripts/perfbudget/report.json

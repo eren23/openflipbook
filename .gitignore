@@ -39,3 +39,13 @@ ec-*.png
 # Demo recorder intermediates
 scripts/record-demo/artifacts/
 scripts/record-demo/node_modules/
+
+# Playwright artifacts (committing reports = noisy + binary churn).
+apps/web/test-results/
+apps/web/playwright-report/
+
+# Perfbudget run output (committed `budgets.json` is the gate; report.json is per-run).
+scripts/perfbudget/report.json
+
+# ESLint flat-config cache.
+.eslintcache
