@@ -41,6 +41,8 @@ import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
 import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
+import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
+import { ClickRipple } from "@/components/PlayPage/ClickRipple";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -1604,34 +1606,7 @@ export default function PlayPage() {
                   }}
                 />
               )}
-              {strokeState && strokeState.pxPoints.length >= 2 && (
-                <svg
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-                  style={{ overflow: "visible" }}
-                >
-                  <polyline
-                    points={strokeState.pxPoints
-                      .map((p) => `${p.x},${p.y}`)
-                      .join(" ")}
-                    fill="none"
-                    stroke="rgba(255,255,255,0.95)"
-                    strokeWidth={10}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                  <polyline
-                    points={strokeState.pxPoints
-                      .map((p) => `${p.x},${p.y}`)
-                      .join(" ")}
-                    fill="none"
-                    stroke="#ef4444"
-                    strokeWidth={5}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
+              {strokeState && <StrokeOverlay pxPoints={strokeState.pxPoints} />}
 
               {imgFailed && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center text-white">
@@ -1717,15 +1692,10 @@ export default function PlayPage() {
                 )}
 
               {clickRipple && phase === "generating" && (
-                <span
-                  key={clickRipple.key}
-                  aria-hidden
-                  className="pointer-events-none absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/90 shadow-lg"
-                  style={{
-                    left: `${clickRipple.xPx}px`,
-                    top: `${clickRipple.yPx}px`,
-                    animation: "ec-ripple 1.2s ease-out infinite",
-                  }}
+                <ClickRipple
+                  rippleKey={clickRipple.key}
+                  xPx={clickRipple.xPx}
+                  yPx={clickRipple.yPx}
                 />
               )}
             </div>
