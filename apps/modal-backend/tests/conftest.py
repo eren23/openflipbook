@@ -1,0 +1,41 @@
+"""Shared pytest fixtures and env scrubbing.
+
+Most tests set their own env values; the fixture here just guarantees we
+don't leak host config (FAL_KEY, OPENROUTER_API_KEY, etc.) into test runs.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+# Add repo's modal-backend root to sys.path so `from providers.image import …`
+# works without needing a wheel install.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+_SCRUB = (
+    "FAL_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_VLM_MODEL",
+    "OPENROUTER_TEXT_MODEL",
+    "OPENROUTER_ENABLE_WEB_SEARCH",
+    "OPENROUTER_CACHE",
+    "FAL_IMAGE_TIER",
+    "FAL_IMAGE_MODEL",
+    "FAL_IMAGE_MODEL_FAST",
+    "FAL_IMAGE_MODEL_BALANCED",
+    "FAL_IMAGE_MODEL_PRO",
+    "SENTRY_DSN",
+)
+
+
+@pytest.fixture(autouse=True)
+def scrub_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k in _SCRUB:
+        if k in os.environ:
+            monkeypatch.delenv(k, raising=False)
