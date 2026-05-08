@@ -39,6 +39,8 @@ import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
 import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
+import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
+import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -264,6 +266,7 @@ export default function PlayPage() {
     pending: styleAnchorPending,
     togglePin,
   } = useStyleAnchor(sessionId);
+  const [coachSeen, dismissCoach] = useFirstRunCoach();
   const togglePinStyle = useCallback(
     () =>
       togglePin({
@@ -1973,6 +1976,15 @@ export default function PlayPage() {
       )}
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {!coachSeen && phase === "ready" && !helpOpen && (
+        <FirstRunCoach
+          onDismiss={dismissCoach}
+          onShowHelp={() => {
+            dismissCoach();
+            setHelpOpen(true);
+          }}
+        />
+      )}
 
       {scrubberOpen && page?.imageDataUrl && history.trail.length > 1 && (
         <TimeScrubber
