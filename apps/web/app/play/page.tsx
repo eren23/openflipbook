@@ -49,6 +49,9 @@ import { Quickbar } from "@/components/PlayPage/Quickbar";
 import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
+import { EditForm } from "@/components/PlayPage/EditForm";
+import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
+import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -1419,13 +1422,7 @@ export default function PlayPage() {
         setImageTier={setImageTier}
       />
 
-      {isDraggingFile && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/40 text-center text-lg text-white">
-          <div className="rounded-2xl border-2 border-dashed border-white/80 px-10 py-8">
-            Drop an image to start from it
-          </div>
-        </div>
-      )}
+      {isDraggingFile && <DragDropOverlay />}
 
       {phase === "error" && (
         <div className="rounded-lg border border-red-500 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -1614,15 +1611,7 @@ export default function PlayPage() {
               )}
               {strokeState && <StrokeOverlay pxPoints={strokeState.pxPoints} />}
 
-              {imgFailed && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center text-white">
-                  <div className="max-w-md text-sm leading-relaxed">
-                    Couldn&apos;t load this page&apos;s image. The persisted R2
-                    link may have expired or the bucket&apos;s public access is
-                    off. Type a new query above and hit Go to start fresh.
-                  </div>
-                </div>
-              )}
+              {imgFailed && <ImageFailedOverlay />}
 
               {hoverPos &&
                 phase !== "generating" &&
@@ -1754,27 +1743,14 @@ export default function PlayPage() {
               </button>
             </div>
             {editMode ? (
-              <form
+              <EditForm
+                instruction={editInstruction}
+                setInstruction={setEditInstruction}
                 onSubmit={submitEdit}
-                className="absolute bottom-0 left-0 right-0 flex items-center gap-2 bg-black/65 px-3 py-2"
-              >
-                <input
-                  autoFocus
-                  value={editInstruction}
-                  onChange={(e) => setEditInstruction(e.target.value)}
-                  placeholder={t.editPlaceholder}
-                  className="flex-1 rounded-full bg-white/95 px-3 py-1 text-sm text-black outline-none placeholder:opacity-60"
-                />
-                <button
-                  type="submit"
-                  disabled={
-                    phase === "generating" || editInstruction.trim().length === 0
-                  }
-                  className="rounded-full bg-amber-500 px-3 py-1 text-xs text-black disabled:opacity-50"
-                >
-                  {t.apply}
-                </button>
-              </form>
+                busy={phase === "generating"}
+                placeholder={t.editPlaceholder}
+                applyLabel={t.apply}
+              />
             ) : (
               <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">
                 {t.tapHint}
