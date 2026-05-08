@@ -127,6 +127,7 @@ docs/
 
 ## Further reading
 
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — code layout, where things live, how the play surface is split into hooks vs components vs lib.
 - **[docs/STORY.md](docs/STORY.md)** — the backstory + reverse-engineered LTXF protocol.
 - **[docs/BYO-KEYS.md](docs/BYO-KEYS.md)** — credential + deploy walkthrough.
 - **[docs/DOCKER.md](docs/DOCKER.md)** — compose stack reference.
