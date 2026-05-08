@@ -883,6 +883,8 @@ export default function PlayPage() {
             parent_title: page.title,
             parent_query: page.query,
             output_locale: resolveOutputLocale(outputLocale),
+            // 8 candidates × tighter bucket grid = most taps land in the cache.
+            max_candidates: 8,
           }),
           signal: controller.signal,
         });

@@ -13,10 +13,12 @@ this endpoint. Flow:
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import base64
+import contextlib
 import json
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import modal
 from fastapi import FastAPI, Request
@@ -76,11 +78,16 @@ def _sse(data: dict, trace_id: str | None = None) -> bytes:
     can stamp it on its perf-HUD timeline without needing a side channel."""
     if trace_id and "trace_id" not in data:
         data = {**data, "trace_id": trace_id}
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
-async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[bytes]:
+async def _event_stream(
+    body: GenerateBody,
+    trace_id: str,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[bytes]:
     import time as _time
+
     from obs import bind_trace, log, record_error
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
@@ -89,6 +96,37 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
     bind_trace(trace_id)
     started = _time.perf_counter()
     log("info", "sse.generate.start", mode=body.mode, locale=body.output_locale)
+
+    async def _abort_if_disconnected(stage: str) -> None:
+        """Raise CancelledError when the client has dropped the SSE socket.
+
+        FastAPI exposes `Request.is_disconnected()` which polls the underlying
+        asgi receive channel. Calling it between expensive stages means a
+        client `AbortController.abort()` actually halts the planner / image-gen
+        path instead of letting it run to completion (and burn fal credits)
+        with no one listening.
+        """
+        if is_disconnected is None:
+            return
+        try:
+            if await is_disconnected():
+                log("info", "sse.generate.client_disconnect", stage=stage)
+                raise _asyncio.CancelledError()
+        except _asyncio.CancelledError:
+            raise
+        except Exception:
+            # Polling failure shouldn't block the pipeline.
+            pass
+
+    # Tap-mode disables web search by default. The planner already has the
+    # parent illustration, parent title, and subject_context as constraints,
+    # so an online lookup adds 500-2000ms of variance for marginal value and
+    # tends to drift the page out of the parent domain. Override with
+    # WEB_SEARCH_ON_TAP=true if you want the legacy behaviour back.
+    web_search_on_tap = os.environ.get("WEB_SEARCH_ON_TAP", "false").lower() in (
+        "1", "true", "yes",
+    )
+    effective_web_search = body.web_search and (body.mode != "tap" or web_search_on_tap)
     try:
         # Edit mode short-circuits the planner: we already have an image, the
         # user just wants to mutate it. Persisted as a child node so the
@@ -185,6 +223,7 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
                     trace_id,
                 )
             else:
+                await _abort_if_disconnected("pre-click-resolve")
                 resolution = await llm.click_to_subject(
                     image_data_url=body.image,
                     x_pct=body.click.x_pct,
@@ -225,10 +264,11 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
         #    parent + subject_context for semantic continuity — keeps an
         #    ambiguous click subject in the parent page's domain instead of
         #    drifting to whatever interpretation web search likes most).
+        await _abort_if_disconnected("pre-plan")
         yield _sse({"type": "status", "stage": "planning"}, trace_id)
         plan = await llm.plan_page(
             query=effective_query,
-            web_search=body.web_search,
+            web_search=effective_web_search,
             style_anchor=style_anchor,
             output_locale=body.output_locale,
             parent_title=body.parent_title,
@@ -247,6 +287,7 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
         if plan.facts:
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
 
+        await _abort_if_disconnected("pre-image-gen")
         yield _sse(
             {
                 "type": "status",
@@ -263,8 +304,6 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
         # parallel and emitting it via the existing `progress` event lets
         # the frontend paint a usable page seconds before the final lands.
         # Disabled by env if a deployer wants to save the extra fal call.
-        import asyncio as _asyncio
-
         progressive_enabled = os.environ.get(
             "PROGRESSIVE_DRAFT", "true"
         ).lower() in ("1", "true", "yes")
@@ -301,10 +340,8 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
                 # Main beat the draft — drop the draft, the user gets the
                 # final straight away.
                 draft_task.cancel()
-                try:
+                with contextlib.suppress(Exception, _asyncio.CancelledError):
                     await draft_task
-                except (Exception, _asyncio.CancelledError):  # noqa: BLE001
-                    pass
                 result = main_task.result()
             else:
                 # Draft finished first; surface it as a progress frame, then
@@ -312,11 +349,18 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
                 # skip the progress and continue — main is still running.
                 try:
                     draft_result = draft_task.result()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     draft_result = None
                 if draft_result is not None:
-                    draft_b64 = base64.b64encode(
-                        draft_result.jpeg_bytes
+                    # Encode in a thread so the event loop stays free for
+                    # main_task progress. Sync b64encode of a 1-3MB JPEG
+                    # otherwise stalls the loop for ~5-15ms — small per call,
+                    # but it's stalls in the hot path right when the user
+                    # cares most about latency.
+                    draft_b64 = (
+                        await _asyncio.to_thread(
+                            base64.b64encode, draft_result.jpeg_bytes
+                        )
                     ).decode("ascii")
                     yield _sse(
                         {
@@ -329,10 +373,15 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
                 result = await main_task
         else:
             result = await main_task
-        data_url = image_provider.encode_data_url(result.jpeg_bytes, result.mime_type)
+        # Final image is the largest payload (up to 3MB JPEG on the pro
+        # tier); offload the b64 encode the same way as the draft so the
+        # `final` SSE yield isn't gated on a sync CPU stall.
+        data_url = await _asyncio.to_thread(
+            image_provider.encode_data_url, result.jpeg_bytes, result.mime_type
+        )
 
         # 4. Final event. Matches GenerateFinalEvent in packages/config.
-        text_model = llm._text_model(online=body.web_search)
+        text_model = llm._text_model(online=effective_web_search)
         sources_payload = [
             {"url": c.url, "title": c.title}
             for c in (plan.sources or [])
@@ -355,7 +404,18 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
             "sse.generate.end",
             duration_ms=round((_time.perf_counter() - started) * 1000, 2),
         )
-    except Exception as exc:  # noqa: BLE001
+    except _asyncio.CancelledError:
+        # Client dropped the SSE socket — bail out cleanly without firing
+        # an `error` event into the (now-dead) stream and without paging
+        # Sentry. The downstream socket is already closed, so any further
+        # yield would no-op anyway.
+        log(
+            "info",
+            "sse.generate.cancelled",
+            duration_ms=round((_time.perf_counter() - started) * 1000, 2),
+        )
+        return
+    except Exception as exc:
         log(
             "error",
             "sse.generate.end",
@@ -368,18 +428,18 @@ async def _event_stream(body: GenerateBody, trace_id: str) -> AsyncIterator[byte
 
 @fastapi_app.post("/sse/generate")
 async def sse_generate(req: Request):
-    from obs import bind_trace, TRACE_HEADER
+    from obs import TRACE_HEADER, bind_trace
 
     raw = await req.json()
     try:
         body = GenerateBody.model_validate(raw)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
 
     return StreamingResponse(
-        _event_stream(body, trace_id),
+        _event_stream(body, trace_id, is_disconnected=req.is_disconnected),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -406,7 +466,6 @@ async def animate(req: Request, body: AnimateBody):
     invalid image format) instead of a generic 500.
     """
     from obs import TRACE_HEADER, bind_trace, log, record_error
-
     from providers import llm as llm_provider
     from providers import video as video_provider
 
@@ -438,7 +497,7 @@ async def animate(req: Request, body: AnimateBody):
             duration=body.duration,
             tier=body.video_tier,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         record_error("animate", exc, image_kb=img_size_kb)
         return JSONResponse(
             {
@@ -493,7 +552,7 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             parent_query=body.parent_query or "",
             output_locale=body.output_locale,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         record_error("resolve_click", exc)
         return JSONResponse(
             {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
@@ -516,7 +575,10 @@ class PrecomputeBody(BaseModel):
     parent_title: str | None = None
     parent_query: str | None = None
     output_locale: str | None = None
-    max_candidates: int = 4
+    # Frontend now requests 8 by default (was 4) — pairs with the tighter 3%
+    # bucket grid on the client to push tap-time cache hit-rate up. Server
+    # still caps at 8 to bound VLM cost.
+    max_candidates: int = 8
     trace_id: str | None = None
 
 
@@ -540,7 +602,7 @@ async def precompute_candidates(req: Request, body: PrecomputeBody):
             output_locale=body.output_locale,
             max_candidates=max(1, min(8, body.max_candidates)),
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         record_error("precompute_candidates", exc)
         return JSONResponse(
             {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
