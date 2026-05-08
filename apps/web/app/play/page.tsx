@@ -40,6 +40,7 @@ import { useStyleAnchor } from "@/hooks/useStyleAnchor";
 import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
 import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
+import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -1561,82 +1562,47 @@ export default function PlayPage() {
                   controls
                 />
               ) : (
-                <>
-                  {/* Outgoing image. While morphFx is in `wait` (decode
-                      pending) the old image shimmers/blurs slightly so it
-                      reads as "transition in progress" instead of "stuck".
-                      Once the new image takes over, this layer fades out. */}
-                  {morphFx ? (
-                    <img
-                      src={morphFx.prevImg ?? page.imageDataUrl}
-                      alt=""
-                      aria-hidden
-                      className={
-                        "absolute inset-0 block h-full w-full object-contain select-none " +
-                        (morphFx.phase === "wait" && !morphFx.reduceMotion
-                          ? "ec-morph-old"
-                          : "")
-                      }
-                      style={{
-                        opacity: morphFx.phase === "reveal" ? 0 : 1,
-                        transition:
-                          "opacity 480ms cubic-bezier(0.22, 0.61, 0.36, 1)",
-                      }}
-                      draggable={false}
-                    />
-                  ) : null}
-                  <img
-                    ref={imgRef}
-                    src={
-                      morphFx?.nextImg ?? page.imageDataUrl
-                    }
-                    alt={`Generated illustration for ${page.query}`}
-                    onError={() => setImgFailed(true)}
-                    className={
-                      "absolute inset-0 block h-full w-full object-contain select-none " +
-                      (morphFx ? "ec-morph-new " : "") +
-                      (progressiveDraft && phase === "generating"
-                        ? "ec-draft "
-                        : "") +
-                      (streamStatus === "connecting"
-                        ? "cursor-wait"
-                        : phase === "generating" || editMode
-                          ? "cursor-crosshair"
-                          : "cursor-none")
-                    }
-                    style={
-                      morphFx
-                        ? {
-                            transformOrigin: `${morphFx.ox}px ${morphFx.oy}px`,
-                            transform:
-                              morphFx.phase === "reveal" || morphFx.reduceMotion
-                                ? "scale(1)"
-                                : "scale(0.92)",
-                            opacity:
-                              morphFx.phase === "reveal" ? 1 : morphFx.reduceMotion ? 1 : 0,
-                            transition: morphFx.reduceMotion
-                              ? "opacity 200ms linear"
-                              : "transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 360ms ease-out",
-                          }
-                        : undefined
-                    }
-                    onTransitionEnd={(e) => {
-                      if (
-                        e.propertyName !== "transform" &&
-                        e.propertyName !== "opacity"
-                      )
-                        return;
-                      setMorphFx((prev) => {
-                        if (!prev || prev.phase !== "reveal") return prev;
-                        hudEmit("morph:end", {
-                          duration_ms: nowMs() - prev.startedAt,
-                        });
-                        return null;
-                      });
-                    }}
-                    draggable={false}
-                  />
-                </>
+                <MorphImagePair
+                  imgRef={imgRef}
+                  imageDataUrl={page.imageDataUrl}
+                  alt={`Generated illustration for ${page.query}`}
+                  morphFx={morphFx}
+                  onError={() => setImgFailed(true)}
+                  newImageClassName={
+                    "absolute inset-0 block h-full w-full object-contain select-none " +
+                    (morphFx ? "ec-morph-new " : "") +
+                    (progressiveDraft && phase === "generating" ? "ec-draft " : "") +
+                    (streamStatus === "connecting"
+                      ? "cursor-wait"
+                      : phase === "generating" || editMode
+                        ? "cursor-crosshair"
+                        : "cursor-none")
+                  }
+                  newImageStyle={
+                    morphFx
+                      ? {
+                          transformOrigin: `${morphFx.ox}px ${morphFx.oy}px`,
+                          transform:
+                            morphFx.phase === "reveal" || morphFx.reduceMotion
+                              ? "scale(1)"
+                              : "scale(0.92)",
+                          opacity:
+                            morphFx.phase === "reveal" ? 1 : morphFx.reduceMotion ? 1 : 0,
+                          transition: morphFx.reduceMotion
+                            ? "opacity 200ms linear"
+                            : "transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 360ms ease-out",
+                        }
+                      : undefined
+                  }
+                  onMorphTransitionEnd={(e) => {
+                    if (e.propertyName !== "transform" && e.propertyName !== "opacity") return;
+                    setMorphFx((prev) => {
+                      if (!prev || prev.phase !== "reveal") return prev;
+                      hudEmit("morph:end", { duration_ms: nowMs() - prev.startedAt });
+                      return null;
+                    });
+                  }}
+                />
               )}
               {strokeState && strokeState.pxPoints.length >= 2 && (
                 <svg
