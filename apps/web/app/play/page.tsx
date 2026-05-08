@@ -6,8 +6,6 @@ import type {
   Citation,
   GenerateRequestBody,
   GenerateEvent,
-  ImageTier,
-  VideoTier,
 } from "@openflipbook/config";
 import {
   annotateClickPoint,
@@ -33,18 +31,20 @@ import {
   emit as hudEmit,
   newTraceId,
   nowMs,
-  setLastTrace,
 } from "@/lib/trace";
+import { getStrings, resolveOutputLocale } from "@/lib/i18n";
+import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
+import { usePersistedLocale } from "@/hooks/usePersistedLocale";
+import { usePersistedTheme } from "@/hooks/usePersistedTheme";
+import { useStyleAnchor } from "@/hooks/useStyleAnchor";
+import { useTraceEmitter } from "@/hooks/useTraceEmitter";
+import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
+import { useImageMorph } from "@/hooks/useImageMorph";
 import {
-  SUPPORTED_LOCALES,
-  type SupportedLocale,
-  getStrings,
-  isRTL,
-  resolveOutputLocale,
-} from "@/lib/i18n";
-
-type Theme = "light" | "sepia" | "dark";
-const THEMES: readonly Theme[] = ["light", "sepia", "dark"] as const;
+  PREFETCH_LRU_MAX,
+  PREFETCH_PER_PAGE,
+  usePrefetchCache,
+} from "@/hooks/usePrefetchCache";
 
 type Phase = "idle" | "generating" | "ready" | "error";
 
@@ -137,6 +137,7 @@ export default function PlayPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
+  const { morphFx, setMorphFx } = useImageMorph(page?.imageDataUrl);
   const [sessionId] = useState(initialSessionId);
   // Surface the live session id to the landing's "open last atlas" link.
   // Wrapped in a try because localStorage can throw under privacy modes.
@@ -182,16 +183,6 @@ export default function PlayPage() {
   // progress partial and the user would see the partial revealed full-size,
   // then a hard cut to the final image. The flag is flipped only in the SSE
   // `final` branch.
-  const [morphFx, setMorphFx] = useState<{
-    ox: number;
-    oy: number;
-    prevImg: string | null;
-    nextImg: string | null;
-    phase: "wait" | "reveal";
-    isFinal: boolean;
-    startedAt: number;
-    reduceMotion: boolean;
-  } | null>(null);
   const [quickbarOpen, setQuickbarOpen] = useState(false);
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -205,7 +196,7 @@ export default function PlayPage() {
     xPx: number;
     yPx: number;
   } | null>(null);
-  const traceIdRef = useRef<string | null>(null);
+  const { bindTrace } = useTraceEmitter();
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -256,160 +247,33 @@ export default function PlayPage() {
   // settles. theme-init.js paints the correct `data-theme` on <html> before
   // hydration; the per-effect firstRun guards keep these effects from
   // overwriting that initial paint with the default values on mount.
-  const [imageTier, setImageTier] = useState<ImageTier>("balanced");
-  const [videoTier, setVideoTier] = useState<VideoTier>("fast");
-  const [outputLocale, setOutputLocale] = useState<SupportedLocale>("auto");
-  const [theme, setTheme] = useState<Theme>("light");
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const it = window.localStorage.getItem("openflipbook.tier");
-    if (it === "fast" || it === "balanced" || it === "pro") setImageTier(it);
-    const vt = window.localStorage.getItem("openflipbook.videoTier");
-    if (vt === "fast" || vt === "balanced" || vt === "pro") setVideoTier(vt);
-    const ol = window.localStorage.getItem("openflipbook.outputLocale");
-    if (ol && (SUPPORTED_LOCALES as readonly string[]).includes(ol)) {
-      setOutputLocale(ol as SupportedLocale);
-    }
-    const th = window.localStorage.getItem("openflipbook.theme");
-    if (th === "light" || th === "sepia" || th === "dark") setTheme(th);
-  }, []);
-
-  const firstImageTierRun = useRef(true);
-  useEffect(() => {
-    if (firstImageTierRun.current) {
-      firstImageTierRun.current = false;
-      return;
-    }
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("openflipbook.tier", imageTier);
-  }, [imageTier]);
-  const proWarnedRef = useRef(false);
-  useEffect(() => {
-    if (imageTier === "pro" && !proWarnedRef.current) {
-      proWarnedRef.current = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[openflipbook] pro tier uses a slower + pricier image model — switch back to balanced for snappier exploration."
-      );
-    }
-  }, [imageTier]);
-
-  const firstVideoTierRun = useRef(true);
-  useEffect(() => {
-    if (firstVideoTierRun.current) {
-      firstVideoTierRun.current = false;
-      return;
-    }
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("openflipbook.videoTier", videoTier);
-  }, [videoTier]);
+  const [imageTier, setImageTier] = useImageTier();
+  const [videoTier, setVideoTier] = useVideoTier();
+  const [outputLocale, setOutputLocale] = usePersistedLocale();
+  const [theme, setTheme] = usePersistedTheme();
+  const t = getStrings(outputLocale);
 
   const [editMode, setEditMode] = useState(false);
   const [editInstruction, setEditInstruction] = useState("");
 
-  const firstOutputLocaleRun = useRef(true);
-  useEffect(() => {
-    if (firstOutputLocaleRun.current) {
-      firstOutputLocaleRun.current = false;
-      return;
-    }
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("openflipbook.outputLocale", outputLocale);
-    const head = resolveOutputLocale(outputLocale);
-    document.documentElement.setAttribute("lang", head);
-    document.documentElement.setAttribute("dir", isRTL(head) ? "rtl" : "ltr");
-  }, [outputLocale]);
-  const t = getStrings(outputLocale);
-
-  const firstThemeRun = useRef(true);
-  useEffect(() => {
-    if (firstThemeRun.current) {
-      firstThemeRun.current = false;
-      return;
-    }
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("openflipbook.theme", theme);
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
   // Style DNA lock — when the user pins a page, every subsequent generate
-  // gets `session_style_anchor` set to that page's VLM-described style. The
-  // backend uses it to override the per-hop style derivation, keeping the
-  // session visually coherent even across unrelated subjects.
-  // `nodeId` is the pinned page; `style` is the cached VLM caption (we
-  // resolve it once on pin via /api/resolve-click and reuse). Persisted in
-  // localStorage keyed by sessionId so reload preserves the lock.
-  const [styleAnchor, setStyleAnchor] = useState<{
-    nodeId: string;
-    style: string;
-  } | null>(null);
-  const [styleAnchorPending, setStyleAnchorPending] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(
-        `openflipbook.styleAnchor.${sessionId}`
-      );
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        nodeId?: string;
-        style?: string;
-      };
-      if (parsed?.nodeId && parsed?.style) {
-        setStyleAnchor({ nodeId: parsed.nodeId, style: parsed.style });
-      }
-    } catch {
-      /* no-op */
-    }
-  }, [sessionId]);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const key = `openflipbook.styleAnchor.${sessionId}`;
-    try {
-      if (styleAnchor) {
-        window.localStorage.setItem(key, JSON.stringify(styleAnchor));
-      } else {
-        window.localStorage.removeItem(key);
-      }
-    } catch {
-      /* no-op */
-    }
-  }, [styleAnchor, sessionId]);
-
-  const togglePinStyle = useCallback(async () => {
-    if (!page?.imageDataUrl || !page.nodeId) return;
-    if (styleAnchor && styleAnchor.nodeId === page.nodeId) {
-      setStyleAnchor(null);
-      return;
-    }
-    setStyleAnchorPending(true);
-    try {
-      // Use the click-resolve endpoint at the centre of the image — it
-      // already returns a `style` description as part of its response, so
-      // we get the anchor caption for free without a new backend route.
-      const trace = newTraceId();
-      const res = await fetch("/api/resolve-click", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", [TRACE_HEADER]: trace },
-        body: JSON.stringify({
-          image_data_url: page.imageDataUrl,
-          x_pct: 0.5,
-          y_pct: 0.5,
-          parent_title: page.title,
-          parent_query: page.query,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { style?: string };
-      const style = (data.style || "").trim();
-      if (!style) throw new Error("empty style");
-      setStyleAnchor({ nodeId: page.nodeId, style });
-    } catch {
-      // Best-effort — leave anchor unchanged on failure.
-    } finally {
-      setStyleAnchorPending(false);
-    }
-  }, [page, styleAnchor]);
+  // gets `session_style_anchor` set to that page's VLM-described style.
+  // Hook owns load/save (keyed by sessionId) and the toggle round-trip.
+  const {
+    anchor: styleAnchor,
+    pending: styleAnchorPending,
+    togglePin,
+  } = useStyleAnchor(sessionId);
+  const togglePinStyle = useCallback(
+    () =>
+      togglePin({
+        nodeId: page?.nodeId ?? null,
+        imageDataUrl: page?.imageDataUrl ?? null,
+        title: page?.title ?? "",
+        query: page?.query ?? null,
+      }),
+    [page, togglePin],
+  );
 
   // Hover-prefetch cache. Keyed by `${nodeId}:${xBucket}:${yBucket}` so two
   // hovers within a 5% grid cell reuse the same VLM round-trip.
@@ -420,27 +284,14 @@ export default function PlayPage() {
   //   - per-page cap: at most PREFETCH_PER_PAGE distinct buckets warmed
   //   - LRU eviction at PREFETCH_LRU_MAX so long sessions don't grow Map<>
   //   - debounce 450ms below filters out fast pointer sweeps
-  const PREFETCH_PER_PAGE = 6;
-  const PREFETCH_LRU_MAX = 200;
-  const prefetchCacheRef = useRef<
-    Map<
-      string,
-      { subject: string; style: string; subject_context?: string }
-    >
-  >(new Map());
-  const prefetchInflightRef = useRef<Map<string, AbortController>>(new Map());
-  const prefetchTimerRef = useRef<number | null>(null);
-  const prefetchCurrentKeyRef = useRef<string | null>(null);
-  const prefetchPerPageCountRef = useRef<Map<string, number>>(new Map());
-
-  const bucketKey = useCallback(
-    (nodeId: string | null, xPct: number, yPct: number): string => {
-      const xb = Math.round(xPct * 20); // 5% grid
-      const yb = Math.round(yPct * 20);
-      return `${nodeId ?? "noid"}:${xb}:${yb}`;
-    },
-    []
-  );
+  const {
+    cacheRef: prefetchCacheRef,
+    inflightRef: prefetchInflightRef,
+    timerRef: prefetchTimerRef,
+    currentKeyRef: prefetchCurrentKeyRef,
+    perPageCountRef: prefetchPerPageCountRef,
+    bucketKey,
+  } = usePrefetchCache();
 
   const generate = useCallback(
     async (body: GenerateRequestBody) => {
@@ -453,9 +304,7 @@ export default function PlayPage() {
         body.mode === "tap" ? "Resolving what you tapped…" : "Planning page…"
       );
       const traceId = body.trace_id ?? newTraceId();
-      traceIdRef.current = traceId;
-      setLastTrace(traceId);
-      hudEmit("sse:status", { stage: "request", trace_id: traceId, t: nowMs() });
+      bindTrace(traceId, { announce: true });
 
       try {
         const response = await fetch("/api/generate-page", {
@@ -676,8 +525,7 @@ export default function PlayPage() {
         setError(null);
         setStatusMsg(null);
         const uploadTrace = newTraceId();
-        traceIdRef.current = uploadTrace;
-        setLastTrace(uploadTrace);
+        bindTrace(uploadTrace);
         void persistNode(
           {
             parent_id: null,
@@ -935,8 +783,7 @@ export default function PlayPage() {
     void (async () => {
       try {
         const hydrationTrace = newTraceId();
-        traceIdRef.current = hydrationTrace;
-        setLastTrace(hydrationTrace);
+        bindTrace(hydrationTrace);
         const res = await fetch(
           `/api/sessions/${encodeURIComponent(cont)}`,
           { headers: { [TRACE_HEADER]: hydrationTrace } }
@@ -997,38 +844,6 @@ export default function PlayPage() {
       clickInFlightRef.current = false;
     }
   }, [phase]);
-
-  // Decode the next image off-thread before flipping the morph from "wait"
-  // to "reveal". Without this the new <img> would paint mid-decode and the
-  // scale/opacity transition would visibly stutter for ~80–200 ms on large
-  // (3+ MB) data URLs. `Image().decode()` is well-supported in modern
-  // browsers; the catch path falls through so a decode-disallowed
-  // environment still gets a working (less smooth) reveal.
-  useEffect(() => {
-    if (!morphFx || morphFx.phase !== "wait") return;
-    if (!morphFx.isFinal) return;
-    if (!page?.imageDataUrl) return;
-    if (page.imageDataUrl === morphFx.prevImg) return;
-    let cancelled = false;
-    const url = page.imageDataUrl;
-    const im = new Image();
-    im.decoding = "async";
-    im.src = url;
-    const decodeStart = nowMs();
-    const finish = () => {
-      if (cancelled) return;
-      hudEmit("image:decode", { ms: nowMs() - decodeStart });
-      setMorphFx((prev) =>
-        prev && prev.phase === "wait"
-          ? { ...prev, nextImg: url, phase: "reveal" }
-          : prev
-      );
-    };
-    im.decode().then(finish).catch(finish);
-    return () => {
-      cancelled = true;
-    };
-  }, [page?.imageDataUrl, morphFx]);
 
   // Pre-resolve the 3-4 most click-worthy regions on the freshly rendered
   // page. Pumps each candidate into prefetchCacheRef so clicks landing near
@@ -1574,107 +1389,20 @@ export default function PlayPage() {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <form
+      <QueryToolbar
+        t={t}
+        input={input}
+        onInputChange={setInput}
         onSubmit={submitQuery}
-        className="flex flex-wrap items-center gap-2 rounded-full border border-[var(--color-edge)] bg-[var(--color-canvas)]/80 px-4 py-2 shadow-sm"
-      >
-        <input
-          autoFocus
-          className="min-w-[8rem] flex-1 bg-transparent outline-none placeholder:opacity-60"
-          placeholder={t.placeholder}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={phase === "generating"}
-          className="rounded-full border border-[var(--color-edge)] px-3 py-1 text-xs hover:bg-[var(--color-ink)]/5 disabled:opacity-40"
-          title="Upload an image as the starting page. Tap on it to explore regions."
-        >
-          {t.upload}
-        </button>
-        <select
-          value={outputLocale}
-          onChange={(e) => setOutputLocale(e.target.value as SupportedLocale)}
-          disabled={phase === "generating"}
-          aria-label={t.langLabel}
-          title={t.langLabel}
-          className="rounded-full border border-[var(--color-edge)] bg-transparent px-2 py-1 text-xs disabled:opacity-40"
-        >
-          {SUPPORTED_LOCALES.map((loc) => (
-            <option key={loc} value={loc}>
-              {loc === "auto" ? t.langAuto : loc}
-            </option>
-          ))}
-        </select>
-        <div
-          role="group"
-          aria-label="Theme"
-          className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
-          title="Theme — light / sepia / dark"
-        >
-          {THEMES.map((th) => (
-            <button
-              key={th}
-              type="button"
-              onClick={() => setTheme(th)}
-              aria-pressed={theme === th}
-              className={
-                "px-2.5 py-1 transition-colors " +
-                (theme === th
-                  ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
-                  : "hover:bg-[var(--color-ink)]/5")
-              }
-            >
-              {th === "light"
-                ? t.themeLight
-                : th === "sepia"
-                  ? t.themeSepia
-                  : t.themeDark}
-            </button>
-          ))}
-        </div>
-        <div
-          role="group"
-          aria-label="Image quality tier"
-          className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
-          title="Image quality tier — fast (cheap), balanced (default), pro (premium)"
-        >
-          <span className="px-2 py-1 opacity-60">image</span>
-          {(["fast", "balanced", "pro"] as const).map((tier) => (
-            <button
-              key={tier}
-              type="button"
-              onClick={() => setImageTier(tier)}
-              disabled={phase === "generating"}
-              aria-pressed={imageTier === tier}
-              className={
-                "px-2.5 py-1 transition-colors disabled:opacity-40 " +
-                (imageTier === tier
-                  ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
-                  : "hover:bg-[var(--color-ink)]/5")
-              }
-            >
-              {tier}
-            </button>
-          ))}
-        </div>
-        <button
-          type="submit"
-          disabled={phase === "generating" || input.trim().length === 0}
-          className="rounded-full bg-[var(--color-ink)] px-4 py-1 text-[var(--color-canvas)] disabled:opacity-40"
-        >
-          {phase === "generating" ? t.generating : t.go}
-        </button>
-      </form>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={onFileInputChange}
+        fileInputRef={fileInputRef}
+        onFileInputChange={onFileInputChange}
+        busy={phase === "generating"}
+        outputLocale={outputLocale}
+        setOutputLocale={setOutputLocale}
+        theme={theme}
+        setTheme={setTheme}
+        imageTier={imageTier}
+        setImageTier={setImageTier}
       />
 
       {isDraggingFile && (
