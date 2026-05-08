@@ -43,6 +43,8 @@ import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
 import { ClickRipple } from "@/components/PlayPage/ClickRipple";
+import { BranchBeacons } from "@/components/PlayPage/BranchBeacons";
+import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -1700,53 +1702,30 @@ export default function PlayPage() {
               )}
             </div>
 
-            {/* Beacons: small markers at click points where children exist. */}
             {page?.nodeId &&
               !beaconsHidden &&
-              (streamStatus === "off" || streamStatus === "error") &&
-              history.items
-                .filter(
-                  (
-                    p
-                  ): p is Page & {
-                    nodeId: string;
-                    clickInParent: { xPct: number; yPct: number };
-                  } =>
-                    Boolean(
-                      p.nodeId &&
-                        p.parentId === page.nodeId &&
-                        p.clickInParent
+              (streamStatus === "off" || streamStatus === "error") && (
+                <BranchBeacons
+                  beacons={history.items
+                    .filter(
+                      (
+                        p,
+                      ): p is Page & {
+                        nodeId: string;
+                        clickInParent: { xPct: number; yPct: number };
+                      } =>
+                        Boolean(p.nodeId && p.parentId === page.nodeId && p.clickInParent),
                     )
-                )
-                .map((kid) => (
-                  <button
-                    key={kid.nodeId}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      selectFromMap(kid.nodeId);
-                    }}
-                    className="group absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                    style={{
-                      left: `${kid.clickInParent.xPct * 100}%`,
-                      top: `${kid.clickInParent.yPct * 100}%`,
-                    }}
-                    title={`Branch: ${kid.title}`}
-                    aria-label={`Open branch: ${kid.title}`}
-                  >
-                    <span className="absolute inline-block h-7 w-7 rounded-full bg-white/0 ring-1 ring-white/0 transition-all group-hover:bg-white/30 group-hover:ring-white/80" />
-                    <span className="relative inline-block h-2.5 w-2.5 rounded-full bg-white/55 shadow-[0_0_0_1.5px_rgba(0,0,0,0.45)] transition-all group-hover:h-3.5 group-hover:w-3.5 group-hover:bg-red-400 group-hover:shadow-[0_0_0_2px_rgba(0,0,0,0.7)]" />
-                  </button>
-                ))}
+                    .map((p) => ({
+                      nodeId: p.nodeId,
+                      title: p.title,
+                      clickInParent: p.clickInParent,
+                    }))}
+                  onSelect={selectFromMap}
+                />
+              )}
 
-            {phase === "generating" && (
-              <div className="pointer-events-none absolute inset-0 flex items-end bg-black/35">
-                <div className="m-4 flex items-center gap-3 rounded-full bg-black/80 px-4 py-2 text-sm text-white shadow-lg">
-                  <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-white/90" />
-                  <span>{statusMsg ?? "Generating…"}</span>
-                </div>
-              </div>
-            )}
+            {phase === "generating" && <GeneratingBanner statusMsg={statusMsg} />}
 
             {phase !== "generating" &&
               streamStatus === "connecting" &&
