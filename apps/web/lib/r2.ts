@@ -34,6 +34,25 @@ export async function uploadJpeg(
   body: Buffer,
   contentType = "image/jpeg"
 ): Promise<UploadedObject> {
+  if (process.env.STORAGE_PROVIDER === "local") {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const root = process.env.LOCAL_STORAGE_DIR || "/app/public/generated";
+    const safeKey = key.replace(/[^a-zA-Z0-9._/-]/g, "_");
+    const target = path.join(root, safeKey);
+    const relative = path.relative(root, target);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("invalid storage key");
+    }
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, body);
+    return {
+      key: safeKey,
+      url: `/generated/${safeKey}`,
+      contentType,
+    };
+  }
+
   const { s3, bucket, publicBaseUrl } = r2Client();
   await s3.send(
     new PutObjectCommand({

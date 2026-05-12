@@ -28,6 +28,8 @@ RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/static ./apps/web/.next/static
+RUN mkdir -p /app/apps/web/public/generated \
+ && chown -R nextjs:nodejs /app/apps/web/public
 USER nextjs
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]

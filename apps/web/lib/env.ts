@@ -30,6 +30,16 @@ export class EnvMissingError extends Error {
 }
 
 export function requireR2(env: ServerEnv) {
+  if (process.env.STORAGE_PROVIDER === "local") {
+    return {
+      accountId: "local",
+      accessKeyId: "local",
+      secretAccessKey: "local",
+      bucket: "local",
+      publicBaseUrl: env.R2_PUBLIC_BASE_URL || "",
+    };
+  }
+
   const missing: string[] = [];
   if (!env.R2_ACCOUNT_ID) missing.push("R2_ACCOUNT_ID");
   if (!env.R2_ACCESS_KEY_ID) missing.push("R2_ACCESS_KEY_ID");

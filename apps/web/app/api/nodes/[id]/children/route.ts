@@ -12,7 +12,7 @@ interface Params {
 export async function GET(req: Request, { params }: Params) {
   const { id } = await params;
   const env = readServerEnv();
-  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_PUBLIC_BASE_URL) {
+  if (!env.MONGODB_URI || !env.MONGODB_DB) {
     return NextResponse.json(
       { error: "persistence not configured" },
       { status: 503 }
@@ -26,7 +26,7 @@ export async function GET(req: Request, { params }: Params) {
   const rows = await listNodesByParent(id, {
     limit: Number.isFinite(limit) ? limit : 200,
   });
-  const publicBase = env.R2_PUBLIC_BASE_URL!.replace(/\/$/, "");
+  const publicBase = (env.R2_PUBLIC_BASE_URL || "").replace(/\/$/, "");
 
   return NextResponse.json({
     parent_id: id,
@@ -35,7 +35,7 @@ export async function GET(req: Request, { params }: Params) {
       session_id: row.session_id,
       query: row.query,
       page_title: row.page_title,
-      image_url: `${publicBase}/${row.image_key}`,
+      image_url: publicBase ? `${publicBase}/${row.image_key}` : `/${row.image_key}`,
       click_in_parent: row.click_in_parent,
       created_at: row.created_at,
     })),

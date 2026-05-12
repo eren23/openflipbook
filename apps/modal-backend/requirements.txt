@@ -2,6 +2,7 @@ modal>=0.68
 fastapi>=0.115
 httpx>=0.27
 openai>=1.55
+pillow>=10.4
 fal-client>=0.5
 pydantic>=2.9
 uvicorn[standard]>=0.32

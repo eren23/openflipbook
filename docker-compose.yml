@@ -20,18 +20,17 @@ services:
       dockerfile: apps/modal-backend/Dockerfile
     container_name: openflipbook-backend
     restart: unless-stopped
+    network_mode: host
     env_file:
       - path: apps/modal-backend/.env
         required: false
-    # Force public resolvers — Docker's default 127.0.0.11 link-local resolver
-    # has been flaking on the fal.ai / r2.cloudflarestorage.com hosts during
-    # E2E runs (sporadic ESERVFAIL / EAI_AGAIN), which manifests as
-    # ConnectError mid-stream and tanks the click-to-next + style-pin tests.
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    ports:
-      - "8787:8787"
+    environment:
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-local}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://127.0.0.1:11434}
+      OLLAMA_TEXT_MODEL: ${OLLAMA_TEXT_MODEL:-qwen3.6:latest}
+      OLLAMA_VLM_MODEL: ${OLLAMA_VLM_MODEL:-gemma3:4b}
+      PYTHONPATH: /app
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/health"]
       interval: 15s
@@ -50,18 +49,24 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: "3000"
-      # Backend URL is fixed inside the compose network.
-      MODAL_API_URL: http://backend:8787
-      # MONGODB_URI + MONGODB_DB come from apps/web/.env.local.
-      # If you want the local `mongo` service instead, set
-      #   MONGODB_URI=mongodb://mongo:27017
-      # in that file.
+      # Backend uses host networking so it can reach loopback-bound Ollama.
+      MODAL_API_URL: http://host.docker.internal:8787
+      # Local-first defaults: MongoDB service + filesystem storage.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_DB: ${MONGODB_DB:-openflipbook}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      LOCAL_STORAGE_DIR: /app/apps/web/public/generated
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+    volumes:
+      - generated-images:/app/apps/web/public/generated
     ports:
-      - "3000:3000"
+      - "3003:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -70,3 +75,4 @@ services:
 
 volumes:
   mongo-data:
+  generated-images:

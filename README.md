@@ -70,6 +70,20 @@ It's also a nice excuse to swap pieces around. The image model, the planner, the
 
 ## Quickstart
 
+### Local Docker + Ollama
+
+For a local-first stack that uses host Ollama, local MongoDB, and local filesystem image storage:
+
+```bash
+ollama pull qwen3.6:latest
+docker compose up -d --build
+open http://localhost:3003/play
+```
+
+See [`docs/LOCAL_DOCKER_OLLAMA.md`](docs/LOCAL_DOCKER_OLLAMA.md) for model overrides and verification commands.
+
+### Hosted/BYO-key stack
+
 ```bash
 git clone https://github.com/eren23/openflipbook
 cd openflipbook
@@ -91,7 +105,7 @@ cp .env.example apps/web/.env.local
 
 # Dev loop
 docker compose up -d --build        # one-command E2E: mongo + backend + web
-open http://localhost:3000/play
+open http://localhost:3003/play
 ```
 
 Open `/status` in the browser for a live env check with green/red badges per missing variable.

@@ -22,11 +22,11 @@ interface CreateBody {
 
 export async function POST(req: Request) {
   const env = readServerEnv();
-  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_BUCKET) {
+  if (!env.MONGODB_URI || !env.MONGODB_DB) {
     return NextResponse.json(
       {
         error:
-          "MONGODB_URI/MONGODB_DB or R2_* not set. See docs/BYO-KEYS.md. Persistence is disabled; the generated image is still usable in-memory.",
+          "MONGODB_URI/MONGODB_DB not set. See docs/BYO-KEYS.md. Persistence is disabled; the generated image is still usable in-memory.",
       },
       { status: 503 }
     );

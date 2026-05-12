@@ -1,23 +1,21 @@
-"""OpenRouter-backed LLM/VLM client.
+"""LLM and VLM providers.
 
-Uses the openai SDK pointed at https://openrouter.ai/api/v1. Defaults are
-Gemini 3 Flash (multimodal) for both planning and click-resolution — strong
-JSON adherence, large context, cheap. Override via env to use Gemini 3 Pro
-or another OpenRouter slug.
-
-Web search: Gemini-family models on OpenRouter don't accept the legacy
-`:online` suffix universally, so for those we attach the OpenRouter web
-plugin (`extra_body={"plugins": [{"id": "web"}]}`) instead. Other models
-keep the `:online` suffix path.
+The default path uses OpenRouter for hosted planning and visual click
+resolution. Local Docker setups can set ``LLM_PROVIDER=ollama`` to route the
+same small provider interface to a host Ollama server. The Ollama path keeps
+OpenRouter optional for local experiments while preserving the public function
+contracts used by generate.py.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from openai import AsyncOpenAI
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -69,6 +67,83 @@ class ClickCandidate:
 
 
 _OPENAI_CLIENT: AsyncOpenAI | None = None
+_HTTPX_CLIENT: httpx.AsyncClient | None = None
+
+
+def _provider() -> str:
+    return os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+
+
+def _is_ollama() -> bool:
+    return _provider() == "ollama"
+
+
+def _ollama_base_url() -> str:
+    return os.environ.get(
+        "OLLAMA_BASE_URL", "http://host.docker.internal:11434"
+    ).rstrip("/")
+
+
+def _ollama_text_model() -> str:
+    return os.environ.get("OLLAMA_TEXT_MODEL", "qwen3.6:latest")
+
+
+def _ollama_vlm_model() -> str:
+    return os.environ.get("OLLAMA_VLM_MODEL", "gemma3:4b")
+
+
+def _http_client() -> httpx.AsyncClient:
+    global _HTTPX_CLIENT
+    if _HTTPX_CLIENT is None or _HTTPX_CLIENT.is_closed:
+        _HTTPX_CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _HTTPX_CLIENT
+
+
+async def _ollama_chat(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    json_mode: bool = False,
+    temperature: float = 0.4,
+) -> str:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if json_mode:
+        payload["format"] = "json"
+    resp = await _http_client().post(f"{_ollama_base_url()}/api/chat", json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    message = data.get("message") if isinstance(data, dict) else None
+    if not isinstance(message, dict):
+        raise RuntimeError("ollama response missing message")
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise RuntimeError("ollama response missing content")
+    return content.strip()
+
+
+def _data_url_to_ollama_image(data_url: str) -> str:
+    marker = ";base64,"
+    if marker not in data_url:
+        raise RuntimeError("image must be a base64 data URL")
+    b64 = data_url.split(marker, 1)[1]
+    # Validate before forwarding to avoid sending arbitrary oversized junk.
+    base64.b64decode(b64[:256] + "===", validate=False)
+    return b64
+
+
+def _json_from_text(raw: str) -> dict[str, Any]:
+    parsed = _safe_json(raw)
+    if parsed:
+        return parsed
+    return {}
 
 
 def _client() -> AsyncOpenAI:
@@ -161,6 +236,8 @@ def _supports_online_suffix(model: str) -> bool:
 
 
 def _text_model(online: bool) -> str:
+    if _is_ollama():
+        return _ollama_text_model()
     base = os.environ.get("OPENROUTER_TEXT_MODEL", DEFAULT_TEXT_MODEL)
     if _web_search_enabled(online) and _supports_online_suffix(base):
         return f"{base}:online"
@@ -188,8 +265,43 @@ async def click_to_subject(
     `apps/web/lib/image-click.ts:annotateClickPoint`); numeric coords are a
     fallback. We also ask the VLM to summarise the illustration's visual
     style so the next page can match it — cheapest way to keep aesthetic
-    continuity across hops without a second VLM round-trip.
     """
+    if _is_ollama():
+        locale_clause = (
+            f" Write the subject in language code '{output_locale}'."
+            if output_locale and output_locale.lower() not in ("en", "auto", "")
+            else ""
+        )
+        hint_clause = f" User hint: {user_hint}." if user_hint else ""
+        prompt = (
+            "A user clicked an illustrated page. Return JSON only with keys "
+            "subject, style, subject_context. Use the click position if needed: "
+            f"x={x_pct:.3f}, y={y_pct:.3f}. Parent title: {parent_title}. "
+            f"Parent query: {parent_query}.{locale_clause}{hint_clause}"
+        )
+        raw = await _ollama_chat(
+            model=_ollama_vlm_model(),
+            messages=[
+                {"role": "system", "content": "You are a precise visual click resolver."},
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [_data_url_to_ollama_image(image_data_url)],
+                },
+            ],
+            json_mode=True,
+            temperature=0.2,
+        )
+        parsed = _json_from_text(raw)
+        subject = str(parsed.get("subject", "")).strip()
+        style = str(parsed.get("style", "")).strip()
+        subject_context = str(parsed.get("subject_context", "")).strip()
+        return ClickResolution(
+            subject=subject or parent_title or parent_query,
+            style=style,
+            subject_context=subject_context,
+        )
+
     client = _client()
     locale_clause = (
         f" The `subject` MUST be written in language code '{output_locale}' — "
@@ -300,6 +412,52 @@ async def plan_page(
     per-object tracker memory). `subject_context` comes from the click VLM
     and is treated as authoritative — the planner must not contradict it.
     """
+    if _is_ollama():
+        parent_label = (parent_title or parent_query or "").strip()
+        has_parent_frame = bool(
+            parent_label or (subject_context and subject_context.strip())
+        )
+        locale_clause = (
+            f" Write page_title and facts in language code '{output_locale}'."
+            if output_locale and output_locale.lower() not in ("en", "auto", "")
+            else ""
+        )
+        frame_clause = ""
+        if has_parent_frame:
+            frame_clause = (
+                f" This page continues from parent page '{parent_label}'."
+                f" Subject context: {subject_context or ''}."
+            )
+        style_clause = f" Preserve this visual style: {style_anchor}." if style_anchor else ""
+        prompt_text = (
+            f"Query: {query}."
+            f"{frame_clause}{style_clause}{locale_clause} "
+            "Return JSON only with keys: page_title, prompt, facts. "
+            "The prompt must describe a readable 1280x720 illustrated explainer."
+        )
+        raw = await _ollama_chat(
+            model=_ollama_text_model(),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You design concise visual explainer pages and return strict JSON.",
+                },
+                {"role": "user", "content": prompt_text},
+            ],
+            json_mode=True,
+            temperature=0.7,
+        )
+        parsed = _json_from_text(raw)
+        page_title = str(parsed.get("page_title", query)).strip() or query
+        prompt = str(parsed.get("prompt", query)).strip() or query
+        facts_raw = parsed.get("facts", [])
+        facts: list[str] = []
+        if isinstance(facts_raw, list):
+            for f in facts_raw:
+                if isinstance(f, str) and f.strip():
+                    facts.append(f.strip())
+        return PagePlan(page_title=page_title, prompt=prompt, facts=facts, sources=[])
+
     client = _client()
     system_parts = [
         "You design a visual-explainer page for a given user query. Return JSON "
