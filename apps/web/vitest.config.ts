@@ -10,9 +10,8 @@ export default defineConfig({
     alias: { "@": HERE },
   },
   // tsconfig uses `jsx: "preserve"` so Next.js can run its own transform.
-  // Vitest goes through esbuild, which needs to be told to use the modern
-  // automatic runtime — otherwise JSX compiles to bare React.createElement
-  // calls with no React import in scope.
+  // Vitest goes through esbuild, which needs the modern automatic runtime
+  // or JSX compiles to bare React.createElement with no React import.
   esbuild: { jsx: "automatic" },
   test: {
     // happy-dom over jsdom: faster cold-start, and jsdom's localStorage in
@@ -21,6 +20,7 @@ export default defineConfig({
     include: [
       "lib/**/*.test.{ts,tsx}",
       "hooks/**/*.test.{ts,tsx}",
+      "components/**/*.test.{ts,tsx}",
       "tests/**/*.test.{ts,tsx}",
     ],
     globals: false,
@@ -28,7 +28,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      include: ["lib/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}"],
+      include: ["lib/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}", "components/**/*.{ts,tsx}"],
       exclude: ["**/*.test.{ts,tsx}"],
     },
   },
