@@ -215,6 +215,48 @@ function nearestEdgePoint(
 }
 
 /**
+ * SVG cubic-bezier `d` attribute connecting two world points, with a
+ * perpendicular bend so parallel connectors don't read as a single straight
+ * line. Extracted from atlas-view.tsx so the same arc geometry can be
+ * shared with future overlays (and unit-tested).
+ */
+export function arcPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): string {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  // Degenerate (same point): emit a zero-length curve. Still a valid SVG path.
+  if (len < 1e-3) {
+    return `M ${from.x} ${from.y} C ${from.x} ${from.y}, ${from.x} ${from.y}, ${to.x} ${to.y}`;
+  }
+  const px = -dy / len;
+  const py = dx / len;
+  const bend = len * 0.18;
+  const c1x = from.x + dx * 0.33 + px * bend;
+  const c1y = from.y + dy * 0.33 + py * bend;
+  const c2x = from.x + dx * 0.67 - px * bend;
+  const c2y = from.y + dy * 0.67 - py * bend;
+  return `M ${from.x} ${from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.x} ${to.y}`;
+}
+
+/**
+ * Per-depth visual tint that lets the atlas read as a layered scene without
+ * any per-node colorimetry: deeper nodes are slightly less saturated and
+ * less opaque, so the focused / root area pops. Clamped so very deep paths
+ * stay legible.
+ */
+export function depthTint(depth: number): { saturation: number; opacity: number } {
+  const d = Math.max(0, depth);
+  // Saturation drops by 0.08 per level, floored at 0.5.
+  const saturation = Math.max(0.5, 1 - 0.08 * d);
+  // Opacity drops by 0.05 per level, floored at 0.6.
+  const opacity = Math.max(0.6, 1 - 0.05 * d);
+  return { saturation, opacity };
+}
+
+/**
  * Compute camera (cx, cy, zoom) that fits `rect` in a viewport of size
  * (vw, vh) with `padding` fraction of slack (0.1 = 10% margin around).
  */
