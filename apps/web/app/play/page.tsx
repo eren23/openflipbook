@@ -37,6 +37,7 @@ import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
+import { useStyleGalleryDismissed } from "@/hooks/useStyleGalleryDismissed";
 import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
 import { StyleGallery } from "@/components/PlayPage/StyleGallery";
@@ -281,7 +282,8 @@ export default function PlayPage() {
     togglePin,
     setFromPreset,
   } = useStyleAnchor(sessionId);
-  const [styleGalleryDismissed, setStyleGalleryDismissed] = useState(false);
+  const [styleGalleryDismissed, dismissStyleGallery] =
+    useStyleGalleryDismissed(sessionId);
   const [coachSeen, dismissCoach] = useFirstRunCoach();
   const togglePinStyle = useCallback(
     () =>
@@ -1736,9 +1738,9 @@ export default function PlayPage() {
         <StyleGallery
           onPick={(presetId) => {
             setFromPreset(presetId);
-            setStyleGalleryDismissed(true);
+            dismissStyleGallery();
           }}
-          onSkip={() => setStyleGalleryDismissed(true)}
+          onSkip={dismissStyleGallery}
         />
       ) : (
         <div className="flex h-[60dvh] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--color-ink)]/30 text-center opacity-70">
