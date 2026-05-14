@@ -122,6 +122,15 @@ describe("arcPath", () => {
     expect(coordsAfterC.split(/[\s,]+/).filter(Boolean)).toHaveLength(6);
   });
 
+  it("pins the exact control-point coords for a horizontal segment", () => {
+    // For a horizontal from→to, the perpendicular bend shows up entirely in
+    // c1y / c2y. With bend factor 0.18 and len 100, that's ±18. Any drift in
+    // the bend constant or the 0.33 / 0.67 anchor splits trips this test.
+    expect(arcPath({ x: 0, y: 0 }, { x: 100, y: 0 })).toBe(
+      "M 0 0 C 33 18, 67 -18, 100 0",
+    );
+  });
+
   it("bends perpendicular to the from→to direction", () => {
     // A straight horizontal arc should curve out of the y=0 axis.
     const d = arcPath({ x: 0, y: 0 }, { x: 100, y: 0 });
