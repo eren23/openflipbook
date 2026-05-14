@@ -64,7 +64,7 @@ h3,
 }
 
 .ec-morph-new {
-  will-change: transform, opacity;
+  will-change: mask-size, -webkit-mask-size;
 }
 
 /* Progressive-render draft. While the user-selected tier is still cooking,

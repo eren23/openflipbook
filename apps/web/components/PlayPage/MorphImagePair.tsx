@@ -1,8 +1,9 @@
 "use client";
 
-import type { CSSProperties, RefObject, TransitionEvent } from "react";
+import type { RefObject, TransitionEvent } from "react";
 
 import type { MorphFx } from "@/hooks/useImageMorph";
+import { inkMorphStyle } from "@/lib/morph-style";
 
 interface Props {
   imgRef: RefObject<HTMLImageElement | null>;
@@ -15,19 +16,12 @@ interface Props {
   /** Visual hints derived from the page state — kept as plain strings to
    *  avoid pulling tier/phase types into the component. */
   newImageClassName: string;
-  /** Style for the incoming image, only meaningful while `morphFx` exists. */
-  newImageStyle: CSSProperties | undefined;
 }
 
 /**
- * Two-layer morph rendering for the page image: outgoing (prev) layer
- * shimmers/fades while the incoming layer scales-from-origin into view.
- * Pulled out of `play/page.tsx` so the morph behaviour can be unit-styled
- * (and eventually unit-tested) without dragging the whole canvas in.
- *
- * Stays close to the original markup — no behaviour change. Click /
- * pointer / cursor classes still live on the page.tsx side and get
- * threaded through `newImageClassName`.
+ * Two-layer morph rendering for the page image. Outgoing layer shimmers /
+ * fades while the incoming layer ink-blooms outward from the click origin
+ * via an animated radial mask (see `lib/morph-style.ts`).
  */
 export function MorphImagePair({
   imgRef,
@@ -37,8 +31,8 @@ export function MorphImagePair({
   onError,
   onMorphTransitionEnd,
   newImageClassName,
-  newImageStyle,
 }: Props) {
+  const newImageStyle = inkMorphStyle(morphFx);
   return (
     <>
       {/* Outgoing image. While morphFx is in `wait` (decode pending) the old

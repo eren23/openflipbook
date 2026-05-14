@@ -49,3 +49,6 @@ scripts/perfbudget/report.json
 
 # ESLint flat-config cache.
 .eslintcache
+
+# Superpowers brainstorm companion (ephemeral mockup files).
+.superpowers/

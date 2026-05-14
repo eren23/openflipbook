@@ -1551,24 +1551,17 @@ export default function PlayPage() {
                         ? "cursor-crosshair"
                         : "cursor-none")
                   }
-                  newImageStyle={
-                    morphFx
-                      ? {
-                          transformOrigin: `${morphFx.ox}px ${morphFx.oy}px`,
-                          transform:
-                            morphFx.phase === "reveal" || morphFx.reduceMotion
-                              ? "scale(1)"
-                              : "scale(0.92)",
-                          opacity:
-                            morphFx.phase === "reveal" ? 1 : morphFx.reduceMotion ? 1 : 0,
-                          transition: morphFx.reduceMotion
-                            ? "opacity 200ms linear"
-                            : "transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 360ms ease-out",
-                        }
-                      : undefined
-                  }
                   onMorphTransitionEnd={(e) => {
-                    if (e.propertyName !== "transform" && e.propertyName !== "opacity") return;
+                    // Ink-bloom transitions on `mask-size` / `-webkit-mask-size`;
+                    // the reduced-motion path falls back to opacity. Accept all
+                    // three so transition-end fires on every supported path.
+                    if (
+                      e.propertyName !== "mask-size" &&
+                      e.propertyName !== "-webkit-mask-size" &&
+                      e.propertyName !== "opacity"
+                    ) {
+                      return;
+                    }
                     setMorphFx((prev) => {
                       if (!prev || prev.phase !== "reveal") return prev;
                       hudEmit("morph:end", { duration_ms: nowMs() - prev.startedAt });
