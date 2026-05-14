@@ -3,7 +3,18 @@
  * `window.localStorage` in this stack (vitest 2.1 + React 19), so we install
  * a real in-memory Storage shim before each test file. Behavior matches the
  * spec closely enough for our hooks (set / get / remove / clear / length).
+ *
+ * Also wires the @testing-library/react auto-cleanup between tests — needed
+ * because we set `globals: false` in vitest.config, which disables the
+ * library's own implicit afterEach hook.
  */
+
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => {
+  cleanup();
+});
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();

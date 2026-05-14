@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { getStylePreset, presetNodeId } from "@/lib/styles";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export interface StyleAnchor {
@@ -93,5 +94,11 @@ export function useStyleAnchor(sessionId: string) {
     [anchor],
   );
 
-  return { anchor, setAnchor, pending, togglePin } as const;
+  const setFromPreset = useCallback((presetId: string): void => {
+    const preset = getStylePreset(presetId);
+    if (!preset) return;
+    setAnchor({ nodeId: presetNodeId(preset.id), style: preset.promptFragment });
+  }, []);
+
+  return { anchor, setAnchor, pending, togglePin, setFromPreset } as const;
 }

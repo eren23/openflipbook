@@ -39,6 +39,7 @@ import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
 import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
+import { StyleGallery } from "@/components/PlayPage/StyleGallery";
 import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
@@ -278,7 +279,9 @@ export default function PlayPage() {
     anchor: styleAnchor,
     pending: styleAnchorPending,
     togglePin,
+    setFromPreset,
   } = useStyleAnchor(sessionId);
+  const [styleGalleryDismissed, setStyleGalleryDismissed] = useState(false);
   const [coachSeen, dismissCoach] = useFirstRunCoach();
   const togglePinStyle = useCallback(
     () =>
@@ -1726,6 +1729,17 @@ export default function PlayPage() {
             )}
           </div>
         </figure>
+      ) : phase !== "generating" &&
+        history.items.length === 0 &&
+        styleAnchor === null &&
+        !styleGalleryDismissed ? (
+        <StyleGallery
+          onPick={(presetId) => {
+            setFromPreset(presetId);
+            setStyleGalleryDismissed(true);
+          }}
+          onSkip={() => setStyleGalleryDismissed(true)}
+        />
       ) : (
         <div className="flex h-[60dvh] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--color-ink)]/30 text-center opacity-70">
           {phase === "generating" ? (
