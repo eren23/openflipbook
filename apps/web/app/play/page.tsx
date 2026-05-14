@@ -1813,10 +1813,17 @@ export default function PlayPage() {
             !!page?.nodeId &&
             history.items.some((p) => p.nodeId === page?.nodeId)
           }
+          canSavePostcard={!!page?.nodeId}
           onCopyPermalink={() => {
             if (page?.nodeId) {
               const link = `${window.location.origin}/n/${page.nodeId}`;
               void navigator.clipboard?.writeText(link);
+            }
+            setContextMenu(null);
+          }}
+          onSavePostcard={() => {
+            if (page?.nodeId) {
+              window.open(`/api/postcard/${page.nodeId}?download=1`, "_blank");
             }
             setContextMenu(null);
           }}

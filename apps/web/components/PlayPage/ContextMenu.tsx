@@ -6,16 +6,18 @@ interface Props {
   beaconsHidden: boolean;
   canCopy: boolean;
   canPrune: boolean;
+  canSavePostcard: boolean;
   onCopyPermalink: () => void;
   onPrune: () => void;
   onToggleBeacons: () => void;
+  onSavePostcard: () => void;
   onClose: () => void;
 }
 
 /**
- * Right-click page menu: copy permalink, toggle beacons, prune branch.
- * Positioned absolutely at the click coordinates; click-outside on the
- * full-screen backdrop dismisses.
+ * Right-click page menu: copy permalink, save postcard, toggle beacons,
+ * prune branch. Positioned absolutely at the click coordinates; click-outside
+ * on the full-screen backdrop dismisses.
  */
 export function ContextMenu({
   x,
@@ -23,9 +25,11 @@ export function ContextMenu({
   beaconsHidden,
   canCopy,
   canPrune,
+  canSavePostcard,
   onCopyPermalink,
   onPrune,
   onToggleBeacons,
+  onSavePostcard,
   onClose,
 }: Props) {
   return (
@@ -42,6 +46,14 @@ export function ContextMenu({
           onClick={onCopyPermalink}
         >
           Copy permalink
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left hover:bg-[var(--color-ink)]/10 disabled:opacity-50"
+          disabled={!canSavePostcard}
+          onClick={onSavePostcard}
+        >
+          Save as postcard
         </button>
         <button
           type="button"
