@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 import {
+  arcPath,
+  depthTint,
   fitAllCamera,
   fitCamera,
   layoutPages,
@@ -381,33 +383,23 @@ export default function AtlasView({
                 </marker>
               </defs>
               {connectors.map((c) => {
-                const dx = c.to.x - c.from.x;
-                const dy = c.to.y - c.from.y;
-                const len = Math.hypot(dx, dy) || 1;
-                const px = -dy / len;
-                const py = dx / len;
-                const bend = len * 0.18;
-                const c1x = c.from.x + dx * 0.33 + px * bend;
-                const c1y = c.from.y + dy * 0.33 + py * bend;
-                const c2x = c.from.x + dx * 0.67 - px * bend;
-                const c2y = c.from.y + dy * 0.67 - py * bend;
                 const childDepth = depthById.get(c.toNodeId) ?? 0;
                 const delay = reduced ? 0 : childDepth * STAGGER_MS;
                 return (
                   <g key={c.fromNodeId + "->" + c.toNodeId}>
                     <path
-                      d={`M ${c.from.x} ${c.from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${c.to.x} ${c.to.y}`}
+                      d={arcPath(c.from, c.to)}
                       fill="none"
                       stroke="rgba(15,15,15,0.55)"
                       strokeWidth={8}
                       strokeLinecap="round"
                       strokeDasharray="2 22"
                       markerEnd="url(#ofb-atlas-arrow)"
-                      className={reduced ? undefined : "ofb-edge-draw"}
+                      className={reduced ? undefined : "ofb-edge-draw ofb-edge-flow"}
                       style={
                         reduced
                           ? undefined
-                          : { animationDelay: `${delay}ms` }
+                          : { animationDelay: `${delay}ms, ${delay}ms` }
                       }
                     />
                     <circle
@@ -436,6 +428,7 @@ export default function AtlasView({
             const showHeatmap = p.nodeId === heatmapId;
             const depth = depthById.get(p.nodeId) ?? 0;
             const delay = reduced ? 0 : depth * STAGGER_MS;
+            const tint = depthTint(depth);
             return (
               <div
                 key={p.nodeId}
@@ -475,12 +468,17 @@ export default function AtlasView({
                     setFocusedId(p.nodeId);
                     window.location.href = `/n/${encodeURIComponent(p.nodeId)}`;
                   }}
-                  className="block h-full w-full cursor-pointer overflow-hidden rounded-md border bg-white shadow-sm transition-shadow hover:shadow-2xl"
+                  className={
+                    "block h-full w-full cursor-pointer overflow-hidden rounded-md border bg-white shadow-sm transition-shadow hover:shadow-2xl" +
+                    (isFocused && !reduced ? " ofb-tile-glow" : "")
+                  }
                   style={{
                     borderColor: isFocused
                       ? "rgba(239, 68, 68, 0.95)"
                       : "rgba(0,0,0,0.2)",
                     borderWidth: isFocused ? 6 : 2,
+                    filter: `saturate(${tint.saturation})`,
+                    opacity: isFocused ? 1 : tint.opacity,
                   }}
                   title={`${p.title} — click to open · shift-click to focus`}
                 >

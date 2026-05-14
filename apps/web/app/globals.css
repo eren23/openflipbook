@@ -117,6 +117,38 @@ h3,
   animation: ofb-edge-draw 320ms ease-out both;
 }
 
+/* Continuous downstream flow on connector arcs.
+ * The dasharray is "2 22" (24px period), so shifting the offset by 24px
+ * cycles seamlessly. Layered after `ofb-edge-draw` (same selector) so the
+ * initial fade-in delays the start without breaking the loop. */
+@keyframes ofb-edge-flow {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -24; }
+}
+
+.ofb-edge-flow {
+  animation: ofb-edge-flow 1.8s linear infinite;
+}
+
+/* When both ofb-edge-draw and ofb-edge-flow apply to the same element,
+ * `animation` is a list — the draw runs once, the flow loops. The shared
+ * `animation-delay` (set inline as "Xms, Xms") staggers both by depth. */
+.ofb-edge-draw.ofb-edge-flow {
+  animation:
+    ofb-edge-draw 320ms ease-out both,
+    ofb-edge-flow 1.8s linear infinite;
+}
+
+/* Warm pulsing halo around the focused atlas tile. */
+@keyframes ofb-tile-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 140, 68, 0.55), 0 6px 24px rgba(0, 0, 0, 0.15); }
+  50%      { box-shadow: 0 0 0 18px rgba(239, 140, 68, 0), 0 12px 36px rgba(0, 0, 0, 0.22); }
+}
+
+.ofb-tile-glow {
+  animation: ofb-tile-glow 2.4s ease-in-out infinite;
+}
+
 @keyframes ofb-mini-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
   50%      { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
@@ -137,6 +169,9 @@ h3,
 @media (prefers-reduced-motion: reduce) {
   .ofb-tile-in,
   .ofb-edge-draw,
+  .ofb-edge-flow,
+  .ofb-edge-draw.ofb-edge-flow,
+  .ofb-tile-glow,
   .ofb-mini-active {
     animation: none !important;
   }
