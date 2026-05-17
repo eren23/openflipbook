@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import type { GenerateRequestBody } from "@openflipbook/config";
+import { resolveEntitiesForPrompt } from "@/lib/world";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -6,6 +8,12 @@ export const dynamic = "force-dynamic";
 
 /**
  * Proxies to the user's Modal-hosted generate endpoint as SSE.
+ *
+ * Phase 3 — before forwarding, we resolve the session's world-memory
+ * registry and attach a slim continuity slice (`world_context`) to the
+ * outgoing body so the planner can preserve recurring characters /
+ * places without the user having to re-describe them. Mongo lives on
+ * this side; the backend stays stateless.
  */
 export async function POST(req: Request) {
   const modalUrl = process.env.MODAL_API_URL;
@@ -20,13 +28,38 @@ export async function POST(req: Request) {
   }
 
   const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
+  // Parse once so we can inject world_context. Fall back to the raw text
+  // path if anything looks malformed — we don't want this enrichment to
+  // ever block generation.
+  const rawText = await req.text();
+  let upstreamBody = rawText;
+  try {
+    const parsed = JSON.parse(rawText) as GenerateRequestBody;
+    if (parsed && parsed.session_id && parsed.query && !parsed.world_context) {
+      const world_context = await resolveEntitiesForPrompt({
+        sessionId: parsed.session_id,
+        query: parsed.query,
+        parentTitle: parsed.parent_title ?? null,
+        parentQuery: parsed.parent_query ?? null,
+        parentNodeId: parsed.current_node_id || null,
+      });
+      if (world_context.length > 0) {
+        upstreamBody = JSON.stringify({ ...parsed, world_context });
+      }
+    }
+  } catch {
+    // Body is presumably already the right shape (or malformed enough
+    // that the backend will surface the error). Forward verbatim.
+    upstreamBody = rawText;
+  }
+
   const upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/sse/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       [TRACE_HEADER]: traceId,
     },
-    body: await req.text(),
+    body: upstreamBody,
   });
 
   if (!upstream.ok || !upstream.body) {

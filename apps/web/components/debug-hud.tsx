@@ -33,6 +33,15 @@ function copy(s: string): void {
 /** Dev-only perf overlay for /play. Subscribes to the in-process pubsub
  *  in `lib/trace.ts`; never enabled in production unless explicitly
  *  toggled via `?debug=1` or `localStorage.flipbookDebug=1`. */
+interface WorldEntry {
+  added: number;
+  updated: number;
+  added_names: string[];
+  updated_names: string[];
+  dur_ms: number;
+  t: number;
+}
+
 export default function DebugHud() {
   const [enabled, setEnabled] = useState(false);
   const [trace, setTrace] = useState<string | null>(null);
@@ -42,6 +51,11 @@ export default function DebugHud() {
   const [prefetchHits, setPrefetchHits] = useState(0);
   const [prefetchMisses, setPrefetchMisses] = useState(0);
   const [prefetchInflight, setPrefetchInflight] = useState(0);
+  const [worldEntities, setWorldEntities] = useState<{
+    total: number;
+    recent: WorldEntry[];
+    last_error: { status: number; t: number } | null;
+  }>({ total: 0, recent: [], last_error: null });
   const commitCountRef = useRef(0);
   const [, setTick] = useState(0);
 
@@ -96,6 +110,36 @@ export default function DebugHud() {
     sub("prefetch:inflight", (p: unknown) => {
       const n = (p as { n?: number })?.n;
       if (typeof n === "number") setPrefetchInflight(n);
+    });
+    sub("world:extracted", (p: unknown) => {
+      const v = p as {
+        added?: number;
+        updated?: number;
+        added_entities?: { name: string }[];
+        updated_entities?: { name: string }[];
+        dur_ms?: number;
+        t?: number;
+      };
+      const entry: WorldEntry = {
+        added: v.added ?? 0,
+        updated: v.updated ?? 0,
+        added_names: (v.added_entities ?? []).map((e) => e.name),
+        updated_names: (v.updated_entities ?? []).map((e) => e.name),
+        dur_ms: v.dur_ms ?? 0,
+        t: v.t ?? 0,
+      };
+      setWorldEntities((prev) => ({
+        total: prev.total + entry.added,
+        recent: [...prev.recent.slice(-3), entry],
+        last_error: prev.last_error,
+      }));
+    });
+    sub("world:extract_error", (p: unknown) => {
+      const v = p as { status?: number; t?: number };
+      setWorldEntities((prev) => ({
+        ...prev,
+        last_error: { status: v.status ?? 0, t: v.t ?? 0 },
+      }));
     });
     const id = setInterval(() => setTick((n) => n + 1), 1000);
     offs.push(() => clearInterval(id));
@@ -165,6 +209,33 @@ export default function DebugHud() {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {(worldEntities.recent.length > 0 || worldEntities.last_error) && (
+        <div className="mt-1 border-t border-green-200/20 pt-1">
+          <div className="mb-0.5 opacity-70">
+            world{" "}
+            <span className="opacity-60">
+              ({worldEntities.total} added total)
+            </span>
+          </div>
+          {worldEntities.recent.map((entry, i) => (
+            <div key={i} className="truncate">
+              <span className="opacity-60">+{entry.dur_ms}ms</span>{" "}
+              <span className="text-green-200">+{entry.added}</span>/
+              <span className="text-green-200">~{entry.updated}</span>{" "}
+              <span className="opacity-80">
+                {[...entry.added_names, ...entry.updated_names]
+                  .slice(0, 4)
+                  .join(", ") || "—"}
+              </span>
+            </div>
+          ))}
+          {worldEntities.last_error && (
+            <div className="truncate text-red-300">
+              extract err: HTTP {worldEntities.last_error.status}
+            </div>
+          )}
         </div>
       )}
     </div>

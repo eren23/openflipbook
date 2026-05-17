@@ -9,8 +9,9 @@ export interface KeyboardShortcutHandlers {
   onToggleScrubber: () => void;
   onOpenQuickbar: () => void;
   onToggleHelp: () => void;
+  onToggleCodex: () => void;
   onCloseOverlays: () => void;
-  /** True while at least one overlay (help / quickbar / context menu) is open. */
+  /** True while at least one overlay (help / quickbar / context menu / codex) is open. */
   anyOverlayOpen: boolean;
 }
 
@@ -30,6 +31,7 @@ export interface KeyboardShortcutHandlers {
  *   Backspace          Back (Shift = forward)
  *   M / m    Toggle map view
  *   T / t    Toggle time-scrubber
+ *   K / k    Toggle codex panel
  *   /        Open quickbar
  *   ?        Toggle help overlay
  *   Esc      Close any open overlay
@@ -42,6 +44,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onToggleScrubber,
     onOpenQuickbar,
     onToggleHelp,
+    onToggleCodex,
     onCloseOverlays,
     anyOverlayOpen,
   } = handlers;
@@ -83,6 +86,9 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
       } else if (e.key.toLowerCase() === "t") {
         e.preventDefault();
         onToggleScrubber();
+      } else if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        onToggleCodex();
       } else if (e.key === "/") {
         e.preventDefault();
         onOpenQuickbar();
@@ -102,6 +108,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onToggleScrubber,
     onOpenQuickbar,
     onToggleHelp,
+    onToggleCodex,
     onCloseOverlays,
   ]);
 }

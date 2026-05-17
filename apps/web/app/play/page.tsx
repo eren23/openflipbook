@@ -49,12 +49,15 @@ import { BranchBeacons } from "@/components/PlayPage/BranchBeacons";
 import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
 import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
+import { CodexPanel } from "@/components/PlayPage/CodexPanel";
+import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { EditForm } from "@/components/PlayPage/EditForm";
 import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useWorldState } from "@/hooks/useWorldState";
 import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -146,6 +149,75 @@ async function persistNode(
   }
 }
 
+// Fire-and-forget extraction trigger. The world-memory pass runs on the
+// modal backend (one VLM call) and the diff is merged into Mongo by
+// /api/world/[sessionId]/extract. Off the critical path: failure here
+// is silent — the codex just stays thinner this turn. The HUD emits a
+// span so latency + cache hits land on the perf timeline.
+//
+// `caption` is the page title (≤8 words). `sceneDescription` is the
+// planner's `final_prompt` — the rich paragraph the image model rendered
+// from. The VLM needs both to reliably name entities; a title alone is
+// usually too thin ("Lantern Room" without the keeper's name in scope).
+function triggerExtraction(args: {
+  sessionId: string;
+  nodeId: string;
+  imageDataUrl: string;
+  caption: string;
+  sceneDescription?: string | null;
+  traceId: string | null;
+}): void {
+  const t0 = nowMs();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (args.traceId) headers[TRACE_HEADER] = args.traceId;
+  void fetch(
+    `/api/world/${encodeURIComponent(args.sessionId)}/extract`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        node_id: args.nodeId,
+        image_data_url: args.imageDataUrl,
+        caption: args.caption,
+        scene_description: args.sceneDescription ?? null,
+      }),
+    }
+  )
+    .then(async (res) => {
+      if (!res.ok) {
+        hudEmit("world:extract_error", {
+          status: res.status,
+          trace_id: args.traceId,
+          t: nowMs(),
+        });
+        return;
+      }
+      const payload = (await res.json()) as {
+        added_ids?: string[];
+        updated_ids?: string[];
+        added_entities?: { id: string; name: string; kind: string }[];
+        updated_entities?: { id: string; name: string; kind: string }[];
+      };
+      hudEmit("world:extracted", {
+        session_id: args.sessionId,
+        node_id: args.nodeId,
+        added: payload.added_ids?.length ?? 0,
+        updated: payload.updated_ids?.length ?? 0,
+        added_entities: payload.added_entities ?? [],
+        updated_entities: payload.updated_entities ?? [],
+        dur_ms: Math.round(nowMs() - t0),
+        trace_id: args.traceId,
+        t: nowMs(),
+      });
+    })
+    .catch(() => {
+      // Best-effort. The codex view will refetch on its own if a user
+      // opens it; nothing to roll back here.
+    });
+}
+
 export default function PlayPage() {
   const [input, setInput] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -203,6 +275,13 @@ export default function PlayPage() {
   const [quickbarOpen, setQuickbarOpen] = useState(false);
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [codexOpen, setCodexOpen] = useState(false);
+  // In-image entity chips are opt-in to keep the rendered illustration
+  // visually quiet by default. Toggle alongside the codex pill (Alt-K
+  // would conflict with keyboard tab-order; we expose a small toggle
+  // inside the codex header instead). Persisted only in component state
+  // for now — Phase 5's user preferences will move this to localStorage.
+  const [entityChipsEnabled, setEntityChipsEnabled] = useState(false);
   const [scrubberOpen, setScrubberOpen] = useState(false);
   // True between an SSE `progress` (fast-tier draft) and the matching
   // `final` event. Used to overlay a subtle breathing blur so the user
@@ -214,6 +293,8 @@ export default function PlayPage() {
     yPx: number;
   } | null>(null);
   const { bindTrace } = useTraceEmitter();
+  const { state: worldState, mutate: mutateWorldEntity } =
+    useWorldState(sessionId);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -480,6 +561,14 @@ export default function PlayPage() {
                   const url = new URL(window.location.href);
                   url.pathname = `/n/${saved.id}`;
                   window.history.replaceState({}, "", url.toString());
+                  triggerExtraction({
+                    sessionId: evt.session_id,
+                    nodeId: saved.id,
+                    imageDataUrl: evt.image_data_url,
+                    caption: evt.page_title,
+                    sceneDescription: evt.final_prompt ?? null,
+                    traceId,
+                  });
                 }
               });
             } else if (evt.type === "error") {
@@ -591,6 +680,13 @@ export default function PlayPage() {
             const url = new URL(window.location.href);
             url.pathname = `/n/${saved.id}`;
             window.history.replaceState({}, "", url.toString());
+            triggerExtraction({
+              sessionId,
+              nodeId: saved.id,
+              imageDataUrl: dataUrl,
+              caption: seedTitle,
+              traceId: uploadTrace,
+            });
           }
         });
       } catch (err) {
@@ -598,7 +694,7 @@ export default function PlayPage() {
         setPhase("error");
       }
     },
-    [sessionId]
+    [sessionId, bindTrace]
   );
 
   const onFileInputChange = useCallback(
@@ -747,12 +843,15 @@ export default function PlayPage() {
     onToggleScrubber: () => setScrubberOpen((s) => !s),
     onOpenQuickbar: () => setQuickbarOpen(true),
     onToggleHelp: () => setHelpOpen((h) => !h),
+    onToggleCodex: () => setCodexOpen((c) => !c),
     onCloseOverlays: () => {
       setHelpOpen(false);
       setQuickbarOpen(false);
       setContextMenu(null);
+      setCodexOpen(false);
     },
-    anyOverlayOpen: helpOpen || quickbarOpen || contextMenu !== null,
+    anyOverlayOpen:
+      helpOpen || quickbarOpen || codexOpen || contextMenu !== null,
   });
 
   // Hydrate the session graph from the server when landing with ?continue=.
@@ -1593,6 +1692,16 @@ export default function PlayPage() {
                   yPx={clickRipple.yPx}
                 />
               )}
+              <EntityHoverOverlay
+                nodeId={page?.nodeId ?? null}
+                entities={worldState.entities}
+                enabled={
+                  entityChipsEnabled &&
+                  phase !== "generating" &&
+                  streamStatus === "off"
+                }
+                onSelect={() => setCodexOpen(true)}
+              />
             </div>
 
             {page?.nodeId &&
@@ -1635,6 +1744,25 @@ export default function PlayPage() {
               )}
 
             <div className="absolute right-3 top-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCodexOpen((c) => !c)}
+                aria-pressed={codexOpen}
+                className={
+                  "rounded-full px-3 py-1 text-xs text-white " +
+                  (codexOpen
+                    ? "bg-[var(--color-ink)]"
+                    : "bg-black/60 hover:bg-black/75")
+                }
+                title="Open the world codex (K). Lists every character, place, and item the explorer has seen."
+              >
+                Codex
+                {worldState.entities.length > 0 && (
+                  <span className="ml-1.5 rounded-full bg-white/15 px-1.5 text-[10px] tabular-nums">
+                    {worldState.entities.length}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1782,6 +1910,18 @@ export default function PlayPage() {
       )}
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      <CodexPanel
+        open={codexOpen}
+        onClose={() => setCodexOpen(false)}
+        entities={worldState.entities}
+        loading={worldState.loading}
+        error={worldState.error}
+        chipsEnabled={entityChipsEnabled}
+        onToggleChips={() => setEntityChipsEnabled((v) => !v)}
+        overrideEnabled={worldState.overrideEnabled}
+        onMutate={mutateWorldEntity}
+      />
+
       {!coachSeen && phase === "ready" && !helpOpen && (
         <FirstRunCoach
           onDismiss={dismissCoach}

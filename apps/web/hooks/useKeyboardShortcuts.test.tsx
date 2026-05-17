@@ -11,6 +11,7 @@ function makeHandlers(overrides: Partial<KeyboardShortcutHandlers> = {}): Keyboa
     onToggleScrubber: vi.fn(),
     onOpenQuickbar: vi.fn(),
     onToggleHelp: vi.fn(),
+    onToggleCodex: vi.fn(),
     onCloseOverlays: vi.fn(),
     anyOverlayOpen: false,
     ...overrides,

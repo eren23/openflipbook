@@ -3,7 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { listNodesBySession, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
-import AtlasView, { type AtlasNode } from "@/components/atlas-view";
+import { getWorldState } from "@/lib/world";
+import AtlasView, {
+  type AtlasEntity,
+  type AtlasNode,
+} from "@/components/atlas-view";
 
 interface AtlasPageProps {
   params: Promise<{ sessionId: string }>;
@@ -149,6 +153,24 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
     promptAuthorModel: row.prompt_author_model,
   }));
 
+  // Hydrate the world-memory registry for the entity-pin overlay. Best-
+  // effort: if Mongo is misconfigured or the session has no entities yet
+  // we fall through to an empty list and the atlas renders exactly like
+  // pre-Phase-4. Caught so a transient world-state error never breaks
+  // the (still fully useful) atlas view itself.
+  let atlasEntities: AtlasEntity[] = [];
+  try {
+    const snapshot = await getWorldState(sessionId);
+    atlasEntities = snapshot.entities.map((e) => ({
+      id: e.id,
+      kind: e.kind,
+      name: e.name,
+      appears_on_node_ids: e.appears_on_node_ids,
+    }));
+  } catch {
+    atlasEntities = [];
+  }
+
   const latest = nodes[nodes.length - 1];
   const root = nodes.find((n) => n.parentId == null) ?? nodes[0];
 
@@ -158,6 +180,7 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
       nodes={nodes}
       latestNodeId={latest?.id ?? null}
       rootTitle={root?.title ?? "session"}
+      entities={atlasEntities}
     />
   );
 }

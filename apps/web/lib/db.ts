@@ -2,28 +2,57 @@ import { MongoClient, type Collection, type Db, type Document } from "mongodb";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
+  // Singleton pool sentinel. Both `lib/db.ts` and `lib/world.ts` share this
+  // — they MUST go through `getDb()` here so the index-init runs exactly
+  // once per Node worker regardless of which module gets called first on a
+  // cold start. Earlier we had two duplicate sentinels; whichever module
+  // won the race would skip the other's index init.
   var __endlessCanvasMongo: { client: MongoClient; db: Db } | undefined;
+  // In-flight bootstrap promise. Memoised so concurrent first callers
+  // (e.g. two parallel SSE routes hitting the worker right after cold
+  // start) share one client + one ensureIndexes call. Without this the
+  // un-memoised `if (!globalThis.__endlessCanvasMongo) connect()` opens
+  // two MongoClients per worker and runs ensureIndexes twice on the same
+  // collection.
+  var __endlessCanvasMongoBootstrap: Promise<Db> | undefined;
 }
 
-async function connect(): Promise<Db> {
+/** Shared Mongo handle. Lazily connects, registers indexes once. */
+export async function getDb(): Promise<Db> {
   if (globalThis.__endlessCanvasMongo) {
     return globalThis.__endlessCanvasMongo.db;
   }
-  const cfg = requireMongo(readServerEnv());
-  const client = new MongoClient(cfg.uri, {
-    maxPoolSize: 5,
-    serverSelectionTimeoutMS: 10_000,
-  });
-  await client.connect();
-  const db = client.db(cfg.db);
-  await ensureIndexes(db);
-  globalThis.__endlessCanvasMongo = { client, db };
-  return db;
+  if (globalThis.__endlessCanvasMongoBootstrap) {
+    return globalThis.__endlessCanvasMongoBootstrap;
+  }
+  const bootstrap = (async () => {
+    const cfg = requireMongo(readServerEnv());
+    const client = new MongoClient(cfg.uri, {
+      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 10_000,
+    });
+    await client.connect();
+    const db = client.db(cfg.db);
+    await ensureIndexes(db);
+    globalThis.__endlessCanvasMongo = { client, db };
+    return db;
+  })();
+  globalThis.__endlessCanvasMongoBootstrap = bootstrap;
+  try {
+    return await bootstrap;
+  } finally {
+    // Once settled, drop the in-flight memo so a later transient failure
+    // (e.g. process recovers from a network blip) can retry. The
+    // happy-path returns above via `__endlessCanvasMongo` and never
+    // hits this branch again.
+    globalThis.__endlessCanvasMongoBootstrap = undefined;
+  }
 }
 
 async function ensureIndexes(db: Db): Promise<void> {
   const nodes = db.collection<NodeDoc>("nodes");
   const errors = db.collection<ErrorDoc>("errors");
+  const world = db.collection("world_state");
   await Promise.all([
     nodes.createIndex(
       { session_id: 1, created_at: -1 },
@@ -35,11 +64,18 @@ async function ensureIndexes(db: Db): Promise<void> {
       { name: "parent_created_idx" }
     ),
     errors.createIndex({ ts: -1 }, { name: "errors_ts_idx" }),
+    // World-memory layer. `_id` is the session id (auto-indexed). The
+    // secondary index supports atlas-overlay queries that will land in
+    // Phase 4 — added now so we don't migrate a populated collection later.
+    world.createIndex(
+      { "entities.appears_on_node_ids": 1 },
+      { name: "world_entity_appears_idx", sparse: true }
+    ),
   ]);
 }
 
 async function nodes(): Promise<Collection<NodeDoc>> {
-  return (await connect()).collection<NodeDoc>("nodes");
+  return (await getDb()).collection<NodeDoc>("nodes");
 }
 
 export interface ClickInParent {
@@ -219,7 +255,7 @@ export interface ErrorRow {
 }
 
 export async function recordError(input: Omit<ErrorRow, "ts">): Promise<void> {
-  const db = await connect();
+  const db = await getDb();
   const collection = db.collection<ErrorDoc>("errors");
   await collection.insertOne({
     _id: crypto.randomUUID(),
@@ -234,7 +270,7 @@ export async function recordError(input: Omit<ErrorRow, "ts">): Promise<void> {
 }
 
 export async function listRecentErrors(limit = 50): Promise<ErrorRow[]> {
-  const db = await connect();
+  const db = await getDb();
   const collection = db.collection<ErrorDoc>("errors");
   const docs = await collection
     .find({})

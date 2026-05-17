@@ -37,7 +37,9 @@ export type HudEventName =
   | "precompute:candidates"
   | "morph:start"
   | "morph:end"
-  | "react:commit";
+  | "react:commit"
+  | "world:extracted"
+  | "world:extract_error";
 
 type Listener = (payload: unknown) => void;
 

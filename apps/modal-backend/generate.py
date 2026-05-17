@@ -19,6 +19,7 @@ import contextlib
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import modal
 from fastapi import FastAPI, Request
@@ -50,6 +51,16 @@ class Click(BaseModel):
     y_pct: float = Field(ge=0.0, le=1.0)
 
 
+class WorldContextEntity(BaseModel):
+    id: str
+    kind: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    appearance: str
+    reference_image_url: str | None = None
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
 class GenerateBody(BaseModel):
     query: str
     aspect_ratio: str = "16:9"
@@ -70,6 +81,13 @@ class GenerateBody(BaseModel):
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
     session_style_anchor: str | None = None
+    # Phase 3 — world-memory continuity. Web proxy resolves a slim slice
+    # of the session's registry before forwarding; planner injects each
+    # entity's `appearance` into the image prompt so recurring characters
+    # / places stay visually consistent across pages. Capped server-side.
+    world_context: list[WorldContextEntity] = Field(
+        default_factory=list, max_length=16
+    )
     trace_id: str | None = None
 
 
@@ -264,8 +282,18 @@ async def _event_stream(
         #    parent + subject_context for semantic continuity — keeps an
         #    ambiguous click subject in the parent page's domain instead of
         #    drifting to whatever interpretation web search likes most).
+        #    Phase 3: `world_context` carries recurring-entity appearance
+        #    descriptors that the planner injects into the image prompt.
         await _abort_if_disconnected("pre-plan")
         yield _sse({"type": "status", "stage": "planning"}, trace_id)
+        world_context_payload = [e.model_dump() for e in body.world_context]
+        if world_context_payload:
+            log(
+                "info",
+                "plan.world_context",
+                entities=len(world_context_payload),
+                first_name=world_context_payload[0].get("name"),
+            )
         plan = await llm.plan_page(
             query=effective_query,
             web_search=effective_web_search,
@@ -274,6 +302,7 @@ async def _event_stream(
             parent_title=body.parent_title,
             parent_query=body.parent_query,
             subject_context=subject_context,
+            world_context=world_context_payload,
         )
 
         composed_prompt = plan.prompt
@@ -621,6 +650,105 @@ async def precompute_candidates(req: Request, body: PrecomputeBody):
                 }
                 for c in cands
             ],
+            "trace_id": trace_id,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
+class PriorEntity(BaseModel):
+    id: str | None = None
+    kind: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    appearance: str = ""
+
+
+class ExtractEntitiesBody(BaseModel):
+    session_id: str
+    node_id: str
+    image_data_url: str
+    # `caption` is the short page title (<= 8 words). `scene_description`
+    # is the planner's full image prompt — the rich paragraph the renderer
+    # produced from. The extractor needs both; a title alone is too thin.
+    caption: str = ""
+    scene_description: str | None = None
+    # Pre-filtered slice of the current world's entities so the VLM can
+    # diff. Web layer selects the relevant ones; we don't want the full
+    # registry on every call. Capped server-side regardless.
+    prior_entities: list[PriorEntity] = Field(default_factory=list, max_length=40)
+    trace_id: str | None = None
+
+
+@fastapi_app.post("/extract-entities")
+async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
+    """Run the world-memory extractor on a freshly-rendered page.
+
+    Web-side flow: after /sse/generate emits `final` and the image is
+    persisted as a node, the web layer posts here with the node id, image
+    data URL, page caption, and a small slice of the existing entity
+    registry. We return a diff (`added` + `updated`) which the web layer
+    merges into the `world_state` Mongo collection.
+
+    Pure read on the backend — no Mongo, no R2; the diff is just structured
+    JSON. Cost: one VLM call per page (default Gemini 3 Flash). Web side
+    runs this off the critical path so it doesn't block the next click.
+    """
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import llm as llm_provider
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    img_size_kb = len(body.image_data_url) // 1024
+    log(
+        "info",
+        "extract_entities.request",
+        node_id=body.node_id,
+        session_id=body.session_id,
+        prior_count=len(body.prior_entities),
+        caption_len=len(body.caption or ""),
+        scene_desc_len=len(body.scene_description or ""),
+        image_kb=img_size_kb,
+    )
+    try:
+        result = await llm_provider.extract_entities(
+            image_data_url=body.image_data_url,
+            caption=body.caption,
+            scene_description=body.scene_description,
+            prior_entities=[e.model_dump() for e in body.prior_entities],
+        )
+    except Exception as exc:
+        record_error("extract_entities", exc, node_id=body.node_id)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
+
+    def _entity_payload(e: llm_provider.ExtractedEntity) -> dict:
+        return {
+            "kind": e.kind,
+            "name": e.name,
+            "appearance": e.appearance,
+            "aliases": e.aliases,
+            "facts": e.facts,
+            "state": e.state,
+            "confidence": e.confidence,
+            "bbox": e.bbox,
+        }
+
+    return JSONResponse(
+        {
+            "result": {
+                "added": [_entity_payload(e) for e in result.added],
+                "updated": [
+                    {
+                        "match_name": u.match_name,
+                        "changes": u.changes,
+                        "confidence": u.confidence,
+                    }
+                    for u in result.updated
+                ],
+            },
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

@@ -27,6 +27,7 @@ export function HelpOverlay({ onClose }: Props) {
           <Row k="Backspace" v="Back (Shift = forward)" />
           <Row k="M" v="Toggle map view" />
           <Row k="T" v="Toggle time-scrubber" />
+          <Row k="K" v="Toggle codex" />
           <Row k="/" v="Jump to page…" />
           <Row k="?" v="This help" />
           <Row k="Esc" v="Close overlay" />

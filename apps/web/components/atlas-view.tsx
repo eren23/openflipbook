@@ -38,6 +38,18 @@ interface AtlasViewProps {
   nodes: AtlasNode[];
   latestNodeId: string | null;
   rootTitle: string;
+  // Phase 4 — world-memory pins overlay. Each tile gets dots for the
+  // entities that appear on it. Server-component hydrates these from
+  // Mongo (`getWorldState`); the prop is optional so the existing tests
+  // and pre-Phase-4 sessions render unchanged.
+  entities?: AtlasEntity[];
+}
+
+export interface AtlasEntity {
+  id: string;
+  kind: "person" | "place" | "item" | "creature";
+  name: string;
+  appears_on_node_ids: string[];
 }
 
 interface Camera {
@@ -58,11 +70,30 @@ function counterScale(zoom: number): number {
   return Math.min(1 / Math.max(zoom, 0.0001), MAX_COUNTER_SCALE);
 }
 
+// Same tint family as the codex panel's kind badge so the two surfaces
+// read as the same data. Slightly more saturated here since atlas pins
+// are 2x2 and need to pop against busy thumbnails.
+function atlasPinTint(kind: AtlasEntity["kind"]): string {
+  switch (kind) {
+    case "person":
+      return "bg-sky-400";
+    case "place":
+      return "bg-emerald-400";
+    case "item":
+      return "bg-amber-400";
+    case "creature":
+      return "bg-violet-400";
+    default:
+      return "bg-white";
+  }
+}
+
 export default function AtlasView({
   sessionId,
   nodes,
   latestNodeId,
   rootTitle,
+  entities,
 }: AtlasViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ w: 1280, h: 720 });
@@ -104,6 +135,25 @@ export default function AtlasView({
       })),
     [nodes]
   );
+
+  // node_id → entities appearing on that node. Memoized; recomputed only
+  // when the entities array reference changes. Cap entries per node so a
+  // crowded tile doesn't render a tower of dots that obscures the image.
+  const entitiesByNode = useMemo<Map<string, AtlasEntity[]>>(() => {
+    const m = new Map<string, AtlasEntity[]>();
+    if (!entities || entities.length === 0) return m;
+    for (const e of entities) {
+      for (const nid of e.appears_on_node_ids) {
+        const list = m.get(nid);
+        if (list) {
+          if (list.length < 5) list.push(e);
+        } else {
+          m.set(nid, [e]);
+        }
+      }
+    }
+    return m;
+  }, [entities]);
 
   const { laid, connectors, depthById, byId } = useMemo<{
     laid: LaidOutPage[];
@@ -497,6 +547,24 @@ export default function AtlasView({
                     </div>
                   )}
                 </button>
+
+                {entitiesByNode.get(p.nodeId)?.length ? (
+                  <div
+                    className="pointer-events-none absolute bottom-1 left-1 z-10 flex flex-wrap gap-0.5"
+                    aria-label={`${entitiesByNode.get(p.nodeId)?.length ?? 0} entities on this page`}
+                  >
+                    {entitiesByNode.get(p.nodeId)!.map((e) => (
+                      <span
+                        key={e.id}
+                        title={`${e.name} (${e.kind})`}
+                        className={
+                          "block h-2 w-2 rounded-full ring-1 ring-white/80 " +
+                          atlasPinTint(e.kind)
+                        }
+                      />
+                    ))}
+                  </div>
+                ) : null}
 
                 {showHeatmap && <HeatmapOverlay parentId={p.nodeId} />}
 
