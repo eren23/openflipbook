@@ -1072,12 +1072,24 @@ export default function PlayPage() {
             subject?: string;
             style?: string;
             subject_context?: string;
+            groundable?: boolean;
+            confidence?: number;
+            point?: { x: number; y: number } | null;
+            bbox?: { x: number; y: number; w: number; h: number } | null;
           };
           if (data.subject) {
             cache.set(key, {
               subject: data.subject,
               style: data.style ?? "",
               subject_context: data.subject_context ?? "",
+              ...(typeof data.groundable === "boolean"
+                ? { groundable: data.groundable }
+                : {}),
+              ...(typeof data.confidence === "number"
+                ? { confidence: data.confidence }
+                : {}),
+              ...(data.point ? { point: data.point } : {}),
+              ...(data.bbox ? { bbox: data.bbox } : {}),
             });
             // Bound the cache so a long session doesn't grow Map<> forever.
             // FIFO eviction is fine — cache entries are independent.

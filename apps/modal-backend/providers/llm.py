@@ -50,6 +50,20 @@ class ClickResolution:
     # Threaded into plan_page as ground truth so the planner can't drift
     # domains even when web search surfaces a more popular meaning.
     subject_context: str = ""
+    # Groundability: did the VLM actually see something meaningful under the
+    # crosshair, or is it confabulating? GroundingME (arXiv:2512.17495)
+    # reports ~0% rejection rate on current VLMs, so we ask explicitly.
+    # ``confidence`` is 0..1; the client can render a "tap something
+    # specific?" hint when low. Default True/1.0 keeps the field backward-
+    # compatible when older callers / models omit it.
+    groundable: bool = True
+    confidence: float = 1.0
+    # VLM's own best-estimate centroid + bounding box of the resolved
+    # subject (0..1 normalised in the image's own frame). Powers the
+    # "we think you tapped this — yes/try again" overlay UX. Both optional
+    # because not every VLM emits them; older payloads default to None.
+    point: tuple[float, float] | None = None
+    bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -270,6 +284,7 @@ async def click_to_subject(
     parent_query: str,
     output_locale: str | None = None,
     user_hint: str | None = None,
+    prior_rejected_subject: str | None = None,
 ) -> ClickResolution:
     """Resolve the click region to a subject phrase AND a style descriptor.
 
@@ -278,6 +293,16 @@ async def click_to_subject(
     fallback. We also ask the VLM to summarise the illustration's visual
     style so the next page can match it — cheapest way to keep aesthetic
     continuity across hops without a second VLM round-trip.
+
+    Also asks the VLM to self-report ``groundable`` + ``confidence`` and
+    its best-estimate ``point``/``bbox`` of the resolved subject. The
+    client uses these for the "we think you tapped this — yes/try again"
+    UX and to suppress page-generation on empty-region taps.
+
+    ``prior_rejected_subject`` lets the caller signal that the user just
+    rejected a previous resolution near this tap, which gives the VLM a
+    multi-turn conversational refer signal ("you said X — what else
+    could this be?"). Inspired by SAMA / MM-Conv dialog grounding.
     """
     client = _client()
     locale_clause = (
@@ -291,7 +316,7 @@ async def click_to_subject(
         "You examine a generated illustration of the page titled "
         f"'{parent_title}' (user query: '{parent_query}'). A red crosshair with "
         "a white halo has been drawn on the image to mark where the user "
-        "clicked. Do THREE things and return them as JSON: "
+        "clicked. Return ONE JSON object with these fields: "
         "(1) `subject` — a 2-8 word noun phrase naming the specific thing "
         "under the crosshair (ignore the crosshair itself); should make a "
         "good next query for a visual explainer. "
@@ -305,11 +330,21 @@ async def click_to_subject(
         "why it's there. This is the disambiguation. If `subject` is "
         "\"Memory Bank\" inside a video-segmentation architecture, the context "
         "is \"per-object memory store the tracker uses to keep object "
-        "identity across frames\" — NOT a generic definition. If the click "
-        "is on something purely decorative, give the most specific concrete "
-        "reading you can. "
-        "Return JSON: {\"subject\": \"...\", \"style\": \"...\", "
-        "\"subject_context\": \"...\"}."
+        "identity across frames\" — NOT a generic definition. "
+        "(4) `groundable` — boolean. true when the crosshair is on a "
+        "concrete, depicted object/label/region that you can name with "
+        "confidence; false when it is on empty background, decorative "
+        "stippling, or otherwise non-meaningful. Be honest: it is "
+        "better to return groundable=false with a best-guess subject "
+        "than to confabulate. "
+        "(5) `confidence` — number in [0,1]; how sure you are that the "
+        "subject you named is what the user intended to tap. "
+        "(6) `point` — your best-estimate centroid of the resolved "
+        "subject as {\"x\": <0-1>, \"y\": <0-1>} in the image's own frame "
+        "(0,0 top-left). Use the crosshair location as a strong prior. "
+        "(7) `bbox` — optional axis-aligned bounding box around the "
+        "subject as {\"x\": <0-1>, \"y\": <0-1>, \"w\": <0-1>, \"h\": <0-1>}. "
+        "Omit if you cannot give a tight box."
         + locale_clause
     )
     hint_clause = ""
@@ -321,6 +356,15 @@ async def click_to_subject(
             "keep the subject concrete and grounded in what's actually under "
             "the crosshair."
         )
+    refer_clause = ""
+    if prior_rejected_subject:
+        refer_clause = (
+            "\n\nMulti-turn refer: the user just rejected the previous "
+            f"resolution \"{prior_rejected_subject}\" near this tap. Pick a "
+            "DIFFERENT plausible subject under the crosshair — favour a "
+            "neighbouring element, a sibling label, or a part-of-X if the "
+            "previous reading was an X. Do NOT return the same subject again."
+        )
     user_text = (
         "Look at the red crosshair marker on the image and tell me the "
         "specific subject beneath it. Also describe the visual style of "
@@ -329,6 +373,7 @@ async def click_to_subject(
         f"numeric position x={x_pct:.3f}, y={y_pct:.3f} "
         "(0-1 normalized, origin top-left)."
         + hint_clause
+        + refer_clause
     )
     from obs import span
 
@@ -350,18 +395,114 @@ async def click_to_subject(
             ],
             **_maybe_response_format(_vlm_model()),
             temperature=0.2,
-            max_tokens=300,
+            max_tokens=400,
         )
         _log_cache_usage(ctx, response)
     raw = (response.choices[0].message.content or "{}").strip()
     parsed = _safe_json(raw)
+    return _build_click_resolution(parsed, x_pct=x_pct, y_pct=y_pct, fallback_subject=parent_title)
+
+
+def _coerce_unit(value: Any) -> float | None:
+    """Coerce a JSON value to a clamped [0,1] float, or None if non-numeric."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN
+        return None
+    if f < 0.0:
+        return 0.0
+    if f > 1.0:
+        return 1.0
+    return f
+
+
+def _parse_point(raw: Any) -> tuple[float, float] | None:
+    """Accept {"x": .., "y": ..} or [x, y] or null. Out-of-range → clamped."""
+    if isinstance(raw, dict):
+        x = _coerce_unit(raw.get("x"))
+        y = _coerce_unit(raw.get("y"))
+    elif isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        x = _coerce_unit(raw[0])
+        y = _coerce_unit(raw[1])
+    else:
+        return None
+    if x is None or y is None:
+        return None
+    return (x, y)
+
+
+def _parse_bbox(raw: Any) -> tuple[float, float, float, float] | None:
+    """Accept {x,y,w,h} or [x,y,w,h]. Returns None if any component invalid."""
+    if isinstance(raw, dict):
+        x = _coerce_unit(raw.get("x"))
+        y = _coerce_unit(raw.get("y"))
+        w = _coerce_unit(raw.get("w") or raw.get("width"))
+        h = _coerce_unit(raw.get("h") or raw.get("height"))
+    elif isinstance(raw, (list, tuple)) and len(raw) >= 4:
+        x = _coerce_unit(raw[0])
+        y = _coerce_unit(raw[1])
+        w = _coerce_unit(raw[2])
+        h = _coerce_unit(raw[3])
+    else:
+        return None
+    if x is None or y is None or w is None or h is None:
+        return None
+    if w == 0.0 or h == 0.0:
+        return None
+    return (x, y, w, h)
+
+
+def _build_click_resolution(
+    parsed: dict[str, Any],
+    *,
+    x_pct: float,
+    y_pct: float,
+    fallback_subject: str,
+) -> ClickResolution:
+    """Map the VLM's JSON payload onto a ClickResolution with safe defaults.
+
+    Older models / out-of-distribution prompts may omit the groundability /
+    point / bbox fields entirely. We fill them in with conservative
+    defaults (groundable=True, confidence=1.0, point=crosshair) so the
+    upstream UX never breaks; downstream code can still inspect for
+    explicit ``False`` to render the low-confidence warning.
+    """
     subject = str(parsed.get("subject", "")).strip()
     style = str(parsed.get("style", "")).strip()
     subject_context = str(parsed.get("subject_context", "")).strip()
+
+    groundable_raw = parsed.get("groundable")
+    if isinstance(groundable_raw, bool):
+        groundable = groundable_raw
+    elif isinstance(groundable_raw, str):
+        groundable = groundable_raw.lower() not in ("false", "no", "0")
+    else:
+        groundable = True
+
+    confidence = _coerce_unit(parsed.get("confidence"))
+    if confidence is None:
+        confidence = 1.0
+
+    point = _parse_point(parsed.get("point"))
+    if point is None:
+        # Crosshair location is the strongest fallback — that's where the
+        # user actually tapped, even if the VLM didn't echo it back.
+        point = (
+            _coerce_unit(x_pct) or 0.0,
+            _coerce_unit(y_pct) or 0.0,
+        )
+    bbox = _parse_bbox(parsed.get("bbox"))
+
     return ClickResolution(
-        subject=subject or parent_title,
+        subject=subject or fallback_subject,
         style=style,
         subject_context=subject_context,
+        groundable=groundable,
+        confidence=confidence,
+        point=point,
+        bbox=bbox,
     )
 
 

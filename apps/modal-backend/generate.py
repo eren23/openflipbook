@@ -80,6 +80,10 @@ class GenerateBody(BaseModel):
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
+    # Multi-turn refer (SAMA / MM-Conv pattern): when the user rejects a
+    # resolved subject and taps again nearby, the client forwards the
+    # rejected phrase so the VLM picks something different.
+    prior_rejected_subject: str | None = None
     session_style_anchor: str | None = None
     # Phase 3 — world-memory continuity. Web proxy resolves a slim slice
     # of the session's registry before forwarding; planner injects each
@@ -267,6 +271,7 @@ async def _event_stream(
                     parent_query=body.parent_query or body.query,
                     output_locale=body.output_locale,
                     user_hint=cleaned_user_hint or None,
+                    prior_rejected_subject=body.prior_rejected_subject,
                 )
                 if resolution.subject:
                     effective_query = resolution.subject
@@ -275,6 +280,23 @@ async def _event_stream(
                             "type": "status",
                             "stage": "click_resolved",
                             "subject": resolution.subject,
+                            "groundable": resolution.groundable,
+                            "confidence": resolution.confidence,
+                            "point": (
+                                {"x": resolution.point[0], "y": resolution.point[1]}
+                                if resolution.point is not None
+                                else None
+                            ),
+                            "bbox": (
+                                {
+                                    "x": resolution.bbox[0],
+                                    "y": resolution.bbox[1],
+                                    "w": resolution.bbox[2],
+                                    "h": resolution.bbox[3],
+                                }
+                                if resolution.bbox is not None
+                                else None
+                            ),
                         },
                         trace_id,
                     )
@@ -574,6 +596,7 @@ class ResolveClickBody(BaseModel):
     parent_title: str | None = None
     parent_query: str | None = None
     output_locale: str | None = None
+    prior_rejected_subject: str | None = None
     trace_id: str | None = None
 
 
@@ -581,9 +604,10 @@ class ResolveClickBody(BaseModel):
 async def resolve_click(req: Request, body: ResolveClickBody):
     """Hover-prefetch endpoint.
 
-    Returns just the click→subject+style mapping so the frontend can warm a
-    tap before the user commits, then forward `prefetched_subject` /
-    `prefetched_style` into `/sse/generate` to skip the VLM step there.
+    Returns the click→subject+style mapping plus groundability + bounding
+    box so the frontend can: (a) warm a tap before the user commits, (b)
+    render the "we think you tapped this — yes / try again" overlay, and
+    (c) suppress page generation when ``groundable`` is false.
     """
     from obs import TRACE_HEADER, bind_trace, record_error
     from providers import llm as llm_provider
@@ -597,6 +621,7 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             parent_title=body.parent_title or "",
             parent_query=body.parent_query or "",
             output_locale=body.output_locale,
+            prior_rejected_subject=body.prior_rejected_subject,
         )
     except Exception as exc:
         record_error("resolve_click", exc)
@@ -610,6 +635,23 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             "subject": resolution.subject,
             "style": resolution.style,
             "subject_context": resolution.subject_context,
+            "groundable": resolution.groundable,
+            "confidence": resolution.confidence,
+            "point": (
+                {"x": resolution.point[0], "y": resolution.point[1]}
+                if resolution.point is not None
+                else None
+            ),
+            "bbox": (
+                {
+                    "x": resolution.bbox[0],
+                    "y": resolution.bbox[1],
+                    "w": resolution.bbox[2],
+                    "h": resolution.bbox[3],
+                }
+                if resolution.bbox is not None
+                else None
+            ),
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

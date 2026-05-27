@@ -2,10 +2,30 @@
 
 import { useCallback, useRef } from "react";
 
+export interface PrefetchPoint {
+  x: number;
+  y: number;
+}
+
+export interface PrefetchBBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface PrefetchEntry {
   subject: string;
   style: string;
   subject_context?: string;
+  /**
+   * Resolver self-reported groundability + confidence. Default ``true`` /
+   * ``1.0`` keeps older cached entries backward-compatible.
+   */
+  groundable?: boolean;
+  confidence?: number;
+  point?: PrefetchPoint | null;
+  bbox?: PrefetchBBox | null;
 }
 
 export const PREFETCH_PER_PAGE = 6;
