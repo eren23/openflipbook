@@ -1,0 +1,134 @@
+"""VLM-judge scoring for the continuity bench.
+
+Three metrics, all rendered through a VLM-as-judge against pairs/triples
+of (image, image) or (image, text):
+
+  - style_drift: 0..10, "are these two images in the same visual style?"
+  - entity_consistency: 0..10, "do these crops depict the same X?"
+  - prompt_alignment: 0..10, "does this image render this prompt?"
+
+The judge VLM is configurable via CONTINUITY_BENCH_JUDGE_MODEL (defaults
+to the same VLM the resolver uses). Each judgement returns a score plus
+a short free-text rationale so the bench output is human-readable.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+from dataclasses import dataclass
+
+_SCORE_RE = re.compile(r"\"score\"\s*:\s*(\d+(?:\.\d+)?)")
+
+
+@dataclass(frozen=True)
+class JudgeResult:
+    score: float
+    rationale: str
+    raw: str
+
+
+def _judge_model() -> str:
+    return os.environ.get(
+        "CONTINUITY_BENCH_JUDGE_MODEL",
+        os.environ.get("OPENROUTER_VLM_MODEL", "google/gemini-3-flash-preview"),
+    )
+
+
+def _image_block(image_bytes: bytes) -> dict[str, object]:
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
+    }
+
+
+def _parse_judgement(raw: str) -> JudgeResult:
+    cleaned = raw.strip()
+    match = _SCORE_RE.search(cleaned)
+    score = float(match.group(1)) if match else 0.0
+    rationale = ""
+    try:
+        parsed = json.loads(cleaned[cleaned.find("{") : cleaned.rfind("}") + 1])
+        rationale = str(parsed.get("rationale", ""))[:300]
+        if "score" in parsed:
+            score = float(parsed["score"])
+    except Exception:
+        rationale = cleaned[:300]
+    return JudgeResult(score=score, rationale=rationale, raw=cleaned[:500])
+
+
+async def _ask_judge(
+    system: str, user_text: str, image_blocks: list[dict[str, object]]
+) -> JudgeResult:
+    from providers import llm
+
+    client = llm._client()
+    response = await client.chat.completions.create(
+        model=_judge_model(),
+        messages=[
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": user_text}, *image_blocks],
+            },
+        ],
+        temperature=0.0,
+        max_tokens=200,
+    )
+    raw = response.choices[0].message.content or ""
+    return _parse_judgement(raw)
+
+
+async def score_style_pair(image_a: bytes, image_b: bytes) -> JudgeResult:
+    system = (
+        "You are a strict visual-style judge. Compare two illustrations and "
+        "score how well the SECOND image matches the FIRST image's visual "
+        "style: medium (flat infographic, watercolor, photoreal, line "
+        "drawing, etc.), palette, line work, level of stylization, "
+        "perspective. Ignore subject matter — score style only."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        "Image 1 is the reference style. Image 2 is the candidate. Score "
+        "how well image 2 matches image 1's style on a 0-10 scale (10 = "
+        "indistinguishable, 0 = completely different medium/palette)."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(image_a), _image_block(image_b)]
+    )
+
+
+async def score_entity_consistency(
+    entity_name: str, appearance: str, image_a: bytes, image_b: bytes
+) -> JudgeResult:
+    system = (
+        "You are an identity-consistency judge. You are shown two pages of "
+        "an illustrated explorable. Both pages should contain the same "
+        f"entity: \"{entity_name}\". Stated appearance: \"{appearance}\". "
+        "Score 0-10 how confidently the entity in image 2 is visually the "
+        "same instance as in image 1: shape, color, proportions, "
+        "distinctive features. Score 0 if the entity is absent in image 2."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        f"Both pages should depict \"{entity_name}\". Score the visual "
+        "identity match on a 0-10 scale."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(image_a), _image_block(image_b)]
+    )
+
+
+async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
+    system = (
+        "You are a prompt-alignment judge. Score on a 0-10 scale how "
+        "faithfully the image renders the given prompt. 10 = every "
+        "explicit element is present and visually correct, 0 = the image "
+        "ignores the prompt. Mention any missing or misrendered elements."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = f"Prompt:\n{prompt}\n\nScore the rendering on a 0-10 scale."
+    return await _ask_judge(system, user_text, [_image_block(image)])

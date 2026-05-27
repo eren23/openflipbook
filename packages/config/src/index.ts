@@ -37,6 +37,10 @@ export interface GenerateRequestBody {
   // frames"). Backend feeds this to plan_page as authoritative meaning so
   // ambiguous phrases stay in the parent's domain.
   prefetched_subject_context?: string;
+  // Multi-turn refer (SAMA / MM-Conv): when the user rejects a resolved
+  // subject and taps again nearby, the client forwards the rejected
+  // phrase so the VLM picks something different next time.
+  prior_rejected_subject?: string;
   // Session-level style lock. When set, the planner uses this as the
   // visual style for ALL pages in the session, overriding the per-hop
   // style derived from the parent. Pin a page in the UI to populate.
@@ -72,7 +76,24 @@ export interface ResolveClickRequestBody {
   parent_title?: string;
   parent_query?: string;
   output_locale?: string;
+  prior_rejected_subject?: string;
   trace_id?: string;
+}
+
+// VLM's best-estimate centroid of the resolved subject (0..1 in image
+// frame). Powers the "we think you tapped this — yes/try again" overlay.
+export interface ResolveClickPoint {
+  x: number;
+  y: number;
+}
+
+// Optional bounding box around the resolved subject. Omitted when the
+// VLM cannot give a tight box (cf. GroundingME findings on rejection).
+export interface ResolveClickBBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface ResolveClickResponse {
@@ -83,6 +104,12 @@ export interface ResolveClickResponse {
   // so an ambiguous phrase like "Memory Bank" doesn't drift to the
   // popular web meaning when the parent is a video-segmentation diagram.
   subject_context?: string;
+  // VLM's self-reported groundability + confidence + best-estimate region.
+  // Default behaviour when omitted: treat as groundable=true, confidence=1.
+  groundable?: boolean;
+  confidence?: number;
+  point?: ResolveClickPoint | null;
+  bbox?: ResolveClickBBox | null;
 }
 
 export interface GenerateProgressEvent {
@@ -128,6 +155,13 @@ export interface GenerateStatusEvent {
   stage: GenerateStage;
   page_title?: string;
   subject?: string;
+  // Resolver self-report when stage === "click_resolved". Web client can
+  // render the bounding-box overlay or a "tap something specific?" toast
+  // when groundable is false / confidence is low.
+  groundable?: boolean;
+  confidence?: number;
+  point?: ResolveClickPoint | null;
+  bbox?: ResolveClickBBox | null;
   trace_id?: string;
 }
 

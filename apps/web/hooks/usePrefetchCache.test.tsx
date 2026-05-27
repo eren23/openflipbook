@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { PrefetchEntry } from "./usePrefetchCache";
 import { PREFETCH_LRU_MAX, PREFETCH_PER_PAGE, usePrefetchCache } from "./usePrefetchCache";
 
 describe("usePrefetchCache constants", () => {
@@ -61,5 +62,43 @@ describe("clearTimer / reset", () => {
     expect(abortSpy1).toHaveBeenCalledTimes(1);
     expect(abortSpy2).toHaveBeenCalledTimes(1);
     expect(result.current.inflightRef.current.size).toBe(0);
+  });
+});
+
+describe("PrefetchEntry shape", () => {
+  it("accepts the legacy minimal shape (backward compat)", () => {
+    const legacy: PrefetchEntry = { subject: "boiler", style: "" };
+    expect(legacy.groundable).toBeUndefined();
+    expect(legacy.confidence).toBeUndefined();
+    expect(legacy.point).toBeUndefined();
+    expect(legacy.bbox).toBeUndefined();
+  });
+
+  it("accepts the full groundability payload", () => {
+    const full: PrefetchEntry = {
+      subject: "boiler",
+      style: "flat infographic",
+      subject_context: "the steam generator",
+      groundable: true,
+      confidence: 0.92,
+      point: { x: 0.42, y: 0.61 },
+      bbox: { x: 0.3, y: 0.5, w: 0.25, h: 0.3 },
+    };
+    expect(full.groundable).toBe(true);
+    expect(full.confidence).toBe(0.92);
+    expect(full.point?.x).toBe(0.42);
+    expect(full.bbox?.w).toBe(0.25);
+  });
+
+  it("treats groundable=false as a low-confidence flag", () => {
+    const blocked: PrefetchEntry = {
+      subject: "background sky",
+      style: "",
+      groundable: false,
+      confidence: 0.1,
+    };
+    expect(blocked.groundable).toBe(false);
+    // Consumers should suppress page-gen on this entry.
+    expect(blocked.groundable === false && (blocked.confidence ?? 1) < 0.5).toBe(true);
   });
 });
