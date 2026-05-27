@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "bench_version": 1,
+    "description": "Seed fixtures for the click-resolver micro-bench. Each case needs an image checked into fixtures/images/ and a labelled tap target. The harness annotates with the same crosshair the web client draws and calls providers.llm.click_to_subject against it.",
+    "field_reference": {
+      "case_id": "stable id, used in reports",
+      "image_path": "relative to this JSON file's directory",
+      "x_pct": "0..1, normalized X of click point (origin top-left)",
+      "y_pct": "0..1, normalized Y of click point",
+      "parent_title": "title of the page being clicked on (passed to VLM as context)",
+      "parent_query": "the original user query that produced the parent page",
+      "expected_subject": "human-labelled ground-truth subject phrase",
+      "alternates": "optional list of acceptable phrasings",
+      "groundable": "false when the tap point is on a non-meaningful region (sky, decoration); used for the rejection-rate metric",
+      "output_locale": "optional locale code for non-English bench cases",
+      "notes": "free-text human notes about the case"
+    },
+    "how_to_add_cases": [
+      "1. Save the source illustration to fixtures/images/{case_id}.jpg",
+      "2. Pick a click point, record x_pct and y_pct",
+      "3. Write the expected subject phrase as a human reader would name it",
+      "4. Add alternate phrasings if there's reasonable ambiguity",
+      "5. Re-run: .venv/bin/python -m tests.click_bench.runner --fixtures tests/click_bench/fixtures/v1.json --out tests/click_bench/reports/$(date +%F).json"
+    ]
+  },
+  "cases": []
+}

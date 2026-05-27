@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "bench_version": 1,
+    "description": "Schema example for a captured openflipbook session. Drop real session pages here (or load from Mongo via a separate adapter). The runner scores style drift across consecutive pages, entity-identity consistency across an entity's appearances, and prompt→image alignment per page.",
+    "how_to_capture": [
+      "Option A — disk replay: after a session, dump each page's image to images/page-N.jpg and append an entry to manifest.pages with the prompt and entity manifest at that moment.",
+      "Option B — Mongo loader: TODO. Mongo schema lives in apps/web/lib/* and the modal backend; build a separate _mongo.py loader that produces the same SessionRecord shape."
+    ]
+  },
+  "session_id": "example-empty",
+  "started_at": "2026-05-27T00:00:00Z",
+  "pages": []
+}

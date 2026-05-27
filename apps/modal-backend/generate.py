@@ -80,6 +80,10 @@ class GenerateBody(BaseModel):
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
+    # Multi-turn refer (SAMA / MM-Conv pattern): when the user rejects a
+    # resolved subject and taps again nearby, the client forwards the
+    # rejected phrase so the VLM picks something different.
+    prior_rejected_subject: str | None = None
     session_style_anchor: str | None = None
     # Phase 3 — world-memory continuity. Web proxy resolves a slim slice
     # of the session's registry before forwarding; planner injects each
@@ -123,12 +127,29 @@ async def _event_stream(
         client `AbortController.abort()` actually halts the planner / image-gen
         path instead of letting it run to completion (and burn fal credits)
         with no one listening.
+
+        Each abort is recorded in obs so /trace/abort-stats can show how
+        much wall-time (and $) we save by polling here.
         """
         if is_disconnected is None:
             return
         try:
             if await is_disconnected():
-                log("info", "sse.generate.client_disconnect", stage=stage)
+                from obs import record_abort
+
+                elapsed_ms = (_time.perf_counter() - started) * 1000.0
+                log(
+                    "info",
+                    "sse.generate.client_disconnect",
+                    stage=stage,
+                    elapsed_ms=round(elapsed_ms, 2),
+                )
+                record_abort(
+                    stage,
+                    elapsed_ms,
+                    trace_id=trace_id,
+                    extra={"mode": body.mode},
+                )
                 raise _asyncio.CancelledError()
         except _asyncio.CancelledError:
             raise
@@ -250,6 +271,7 @@ async def _event_stream(
                     parent_query=body.parent_query or body.query,
                     output_locale=body.output_locale,
                     user_hint=cleaned_user_hint or None,
+                    prior_rejected_subject=body.prior_rejected_subject,
                 )
                 if resolution.subject:
                     effective_query = resolution.subject
@@ -258,6 +280,23 @@ async def _event_stream(
                             "type": "status",
                             "stage": "click_resolved",
                             "subject": resolution.subject,
+                            "groundable": resolution.groundable,
+                            "confidence": resolution.confidence,
+                            "point": (
+                                {"x": resolution.point[0], "y": resolution.point[1]}
+                                if resolution.point is not None
+                                else None
+                            ),
+                            "bbox": (
+                                {
+                                    "x": resolution.bbox[0],
+                                    "y": resolution.bbox[1],
+                                    "w": resolution.bbox[2],
+                                    "h": resolution.bbox[3],
+                                }
+                                if resolution.bbox is not None
+                                else None
+                            ),
                         },
                         trace_id,
                     )
@@ -557,6 +596,7 @@ class ResolveClickBody(BaseModel):
     parent_title: str | None = None
     parent_query: str | None = None
     output_locale: str | None = None
+    prior_rejected_subject: str | None = None
     trace_id: str | None = None
 
 
@@ -564,9 +604,10 @@ class ResolveClickBody(BaseModel):
 async def resolve_click(req: Request, body: ResolveClickBody):
     """Hover-prefetch endpoint.
 
-    Returns just the click→subject+style mapping so the frontend can warm a
-    tap before the user commits, then forward `prefetched_subject` /
-    `prefetched_style` into `/sse/generate` to skip the VLM step there.
+    Returns the click→subject+style mapping plus groundability + bounding
+    box so the frontend can: (a) warm a tap before the user commits, (b)
+    render the "we think you tapped this — yes / try again" overlay, and
+    (c) suppress page generation when ``groundable`` is false.
     """
     from obs import TRACE_HEADER, bind_trace, record_error
     from providers import llm as llm_provider
@@ -580,6 +621,7 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             parent_title=body.parent_title or "",
             parent_query=body.parent_query or "",
             output_locale=body.output_locale,
+            prior_rejected_subject=body.prior_rejected_subject,
         )
     except Exception as exc:
         record_error("resolve_click", exc)
@@ -593,6 +635,23 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             "subject": resolution.subject,
             "style": resolution.style,
             "subject_context": resolution.subject_context,
+            "groundable": resolution.groundable,
+            "confidence": resolution.confidence,
+            "point": (
+                {"x": resolution.point[0], "y": resolution.point[1]}
+                if resolution.point is not None
+                else None
+            ),
+            "bbox": (
+                {
+                    "x": resolution.bbox[0],
+                    "y": resolution.bbox[1],
+                    "w": resolution.bbox[2],
+                    "h": resolution.bbox[3],
+                }
+                if resolution.bbox is not None
+                else None
+            ),
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},
@@ -765,6 +824,34 @@ async def status() -> dict:
     from obs import status_payload
 
     return await status_payload(APP_NAME)
+
+
+@fastapi_app.get("/trace/recent")
+async def trace_recent(limit: int = 50) -> dict:
+    """Return the in-memory ring buffer of recent completed traces.
+
+    Powers the /admin/trace dashboard. Buffer is bounded (TRACE_BUFFER_MAX,
+    default 200) and process-local, so this is for ops/dev visibility, not
+    a long-term store.
+    """
+    from obs import recent_traces
+
+    clamped = max(1, min(int(limit), 200))
+    return {"ok": True, "service": APP_NAME, "traces": recent_traces(clamped)}
+
+
+@fastapi_app.get("/trace/abort-stats")
+async def trace_abort_stats(limit: int = 100) -> dict:
+    """Return aggregated stale-click stats: counts + wasted ms + $ per stage.
+
+    The bench/audit deliverable from the Bet E plan — confirms or refutes
+    the $200-400/month stale-click waste estimate by tracking every
+    client-disconnect during the SSE pipeline.
+    """
+    from obs import abort_stats
+
+    clamped = max(0, min(int(limit), 500))
+    return {"ok": True, "service": APP_NAME, **abort_stats(clamped)}
 
 
 @app.function(secrets=secrets, min_containers=0, timeout=600)
