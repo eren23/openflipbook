@@ -123,12 +123,29 @@ async def _event_stream(
         client `AbortController.abort()` actually halts the planner / image-gen
         path instead of letting it run to completion (and burn fal credits)
         with no one listening.
+
+        Each abort is recorded in obs so /trace/abort-stats can show how
+        much wall-time (and $) we save by polling here.
         """
         if is_disconnected is None:
             return
         try:
             if await is_disconnected():
-                log("info", "sse.generate.client_disconnect", stage=stage)
+                from obs import record_abort
+
+                elapsed_ms = (_time.perf_counter() - started) * 1000.0
+                log(
+                    "info",
+                    "sse.generate.client_disconnect",
+                    stage=stage,
+                    elapsed_ms=round(elapsed_ms, 2),
+                )
+                record_abort(
+                    stage,
+                    elapsed_ms,
+                    trace_id=trace_id,
+                    extra={"mode": body.mode},
+                )
                 raise _asyncio.CancelledError()
         except _asyncio.CancelledError:
             raise
@@ -765,6 +782,34 @@ async def status() -> dict:
     from obs import status_payload
 
     return await status_payload(APP_NAME)
+
+
+@fastapi_app.get("/trace/recent")
+async def trace_recent(limit: int = 50) -> dict:
+    """Return the in-memory ring buffer of recent completed traces.
+
+    Powers the /admin/trace dashboard. Buffer is bounded (TRACE_BUFFER_MAX,
+    default 200) and process-local, so this is for ops/dev visibility, not
+    a long-term store.
+    """
+    from obs import recent_traces
+
+    clamped = max(1, min(int(limit), 200))
+    return {"ok": True, "service": APP_NAME, "traces": recent_traces(clamped)}
+
+
+@fastapi_app.get("/trace/abort-stats")
+async def trace_abort_stats(limit: int = 100) -> dict:
+    """Return aggregated stale-click stats: counts + wasted ms + $ per stage.
+
+    The bench/audit deliverable from the Bet E plan — confirms or refutes
+    the $200-400/month stale-click waste estimate by tracking every
+    client-disconnect during the SSE pipeline.
+    """
+    from obs import abort_stats
+
+    clamped = max(0, min(int(limit), 500))
+    return {"ok": True, "service": APP_NAME, **abort_stats(clamped)}
 
 
 @app.function(secrets=secrets, min_containers=0, timeout=600)
