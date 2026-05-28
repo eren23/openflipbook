@@ -44,6 +44,9 @@ scripts/record-demo/node_modules/
 apps/web/test-results/
 apps/web/playwright-report/
 
+# Vitest coverage HTML/json output.
+apps/web/coverage/
+
 # Perfbudget run output (committed `budgets.json` is the gate; report.json is per-run).
 scripts/perfbudget/report.json
 
