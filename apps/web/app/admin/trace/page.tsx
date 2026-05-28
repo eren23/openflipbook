@@ -35,26 +35,28 @@ export default async function TracePage() {
     fetchBackend<AbortStatsResponse>("/trace/abort-stats?limit=20"),
   ]);
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-6 py-10 text-zinc-100">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-xl font-semibold">trace dashboard</h1>
-        <span className="text-xs text-zinc-500">
-          in-memory ring buffer (TRACE_BUFFER_MAX, default 200) • process-local
-        </span>
-      </header>
+    <div className="min-h-screen bg-zinc-950 font-sans">
+      <main className="mx-auto max-w-6xl space-y-6 px-6 py-10 text-zinc-100">
+        <header className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold">trace dashboard</h1>
+          <span className="text-xs text-zinc-400">
+            in-memory ring buffer (TRACE_BUFFER_MAX, default 200) • process-local
+          </span>
+        </header>
 
-      <AbortPanel initial={initialAborts} />
+        <AbortPanel initial={initialAborts} />
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-zinc-200">recent traces</h2>
-        <p className="max-w-3xl text-sm text-zinc-400">
-          Recent completed traces grouped by{" "}
-          <code className="text-zinc-300">x-trace-id</code>. Click a row to expand
-          its flamegraph. Categories are coloured by span-name prefix (vlm,
-          planner, image, video, world, prefetch, persist, network).
-        </p>
-        <TraceList initial={initialTraces} />
-      </section>
-    </main>
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-zinc-100">recent traces</h2>
+          <p className="max-w-3xl text-sm text-zinc-300">
+            Recent completed traces grouped by{" "}
+            <code className="text-zinc-100">x-trace-id</code>. Click a row to expand
+            its flamegraph. Categories are coloured by span-name prefix (vlm,
+            planner, image, video, world, prefetch, persist, network).
+          </p>
+          <TraceList initial={initialTraces} />
+        </section>
+      </main>
+    </div>
   );
 }

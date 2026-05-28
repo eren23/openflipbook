@@ -1,17 +1,16 @@
 "use client";
 
 interface Props {
-  onDismiss: () => void;
   onShowHelp: () => void;
 }
 
 /**
- * Bottom-of-page hint chip shown once per browser. Surfaces the three
- * shortcut keys most people miss without reading docs (`?` for help, `/`
- * for jump-to, `T` for the time-scrubber). Stays out of the visual centre
- * — the rendered illustration is what matters.
+ * Persistent bottom-of-page hint chip. Surfaces the two shortcut keys most
+ * people miss without reading docs (`?` for the full help overlay, `T` for
+ * the time-scrubber). Stays out of the visual centre — the rendered
+ * illustration is what matters.
  */
-export function FirstRunCoach({ onDismiss, onShowHelp }: Props) {
+export function FirstRunCoach({ onShowHelp }: Props) {
   return (
     <div
       role="status"
@@ -33,14 +32,6 @@ export function FirstRunCoach({ onDismiss, onShowHelp }: Props) {
         <span className="opacity-40">·</span>
         <span className="font-mono text-xs opacity-80">T</span>
         <span className="opacity-80">scrubber</span>
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss tip"
-          className="ml-1 rounded-full px-2 py-0.5 text-xs opacity-60 hover:opacity-100"
-        >
-          ✕
-        </button>
       </div>
     </div>
   );
