@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 
@@ -178,7 +178,7 @@ def _cache_enabled() -> bool:
     return os.environ.get("OPENROUTER_CACHE", "true").lower() in ("1", "true", "yes")
 
 
-def _system_message(text: str) -> dict[str, Any]:
+def _system_message(text: str) -> Any:
     """System message body. Wraps in a content-block list with `cache_control`
     when caching is enabled, so OpenRouter passes the marker through to
     backends that honour it (Anthropic, Gemini-on-Vertex). Backends that
@@ -1361,13 +1361,13 @@ def _coerce_bbox(raw: Any) -> dict[str, float] | None:
 
 def _safe_json(raw: str) -> dict[str, Any]:
     try:
-        return json.loads(raw)
+        return cast(dict[str, Any], json.loads(raw))
     except json.JSONDecodeError:
         start = raw.find("{")
         end = raw.rfind("}")
         if start >= 0 and end > start:
             try:
-                return json.loads(raw[start : end + 1])
+                return cast(dict[str, Any], json.loads(raw[start : end + 1]))
             except json.JSONDecodeError:
                 return {}
     return {}

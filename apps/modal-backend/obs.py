@@ -340,7 +340,7 @@ async def trace_id_dep(request: Request) -> str:
                     candidate = parsed.get("trace_id")
                     if isinstance(candidate, str) and candidate:
                         trace_id = candidate
-            request._body = body_bytes  # type: ignore[attr-defined]
+            request._body = body_bytes
         except Exception:
             pass
     if not trace_id:

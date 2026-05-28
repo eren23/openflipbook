@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: ESLint
-        run: pnpm lint -- --max-warnings=20
+        run: pnpm lint --max-warnings=20
 
   typecheck:
     runs-on: ubuntu-latest
