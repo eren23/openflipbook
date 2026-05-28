@@ -53,12 +53,12 @@ import { CodexPanel } from "@/components/PlayPage/CodexPanel";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
+import { HintPrompt } from "@/components/PlayPage/HintPrompt";
 import { EditForm } from "@/components/PlayPage/EditForm";
 import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
-import { useFirstRunCoach } from "@/hooks/useFirstRunCoach";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -259,6 +259,23 @@ export default function PlayPage() {
     yPx: number;
     key: number;
   } | null>(null);
+  // ⌘/Ctrl-click hint capture. Replaces the old `window.prompt` with an
+  // inline floating input anchored at the click point. The promise resolves
+  // to the typed hint (or null on cancel/Esc) so the click handler can stay
+  // a single async function.
+  const [hintPrompt, setHintPrompt] = useState<{
+    xPx: number;
+    yPx: number;
+    resolve: (text: string | null) => void;
+  } | null>(null);
+  const promptForHint = useCallback(
+    (xPx: number, yPx: number): Promise<string | null> => {
+      return new Promise((resolve) => {
+        setHintPrompt({ xPx, yPx, resolve });
+      });
+    },
+    []
+  );
   // Morph state. The new page is rendered as a second <img> above the old
   // one, scaling from the click origin while the old layer fades. See
   // globals.css `.ec-morph-old`/`.ec-morph-new` for the animation surface.
@@ -365,7 +382,6 @@ export default function PlayPage() {
   } = useStyleAnchor(sessionId);
   const [styleGalleryDismissed, dismissStyleGallery] =
     useStyleGalleryDismissed(sessionId);
-  const [coachSeen, dismissCoach] = useFirstRunCoach();
   const togglePinStyle = useCallback(
     () =>
       togglePin({
@@ -1123,16 +1139,22 @@ export default function PlayPage() {
       // between setMorphFx and React installing a new effect with
       // phase==="generating".
       clickInFlightRef.current = true;
-      // Cmd (mac) / Ctrl (other) + click → ask the user for an extra angle on
-      // the click point ("cross-section view", "explain like I'm 5"). Captured
-      // before any zoom/ripple state so the prompt is the first thing they see.
+      // ⌘/Ctrl + click → float an inline hint input at the click point
+      // and await the user's note (or null on cancel). Captured before any
+      // ripple/morph state so the bubble is the first thing they see; on
+      // cancel we release the in-flight slot so the next click is honored.
       let hint = "";
       if (evt.metaKey || evt.ctrlKey) {
-        const raw = window.prompt(
-          "Add a note for this click (optional — e.g. 'cross-section', 'for a 5-year-old'):"
+        const rect = img.getBoundingClientRect();
+        const raw = await promptForHint(
+          evt.clientX - rect.left,
+          evt.clientY - rect.top
         );
-        if (raw === null) return; // user cancelled
-        hint = raw.trim().slice(0, 240);
+        if (raw === null) {
+          clickInFlightRef.current = false;
+          return;
+        }
+        hint = raw;
       }
       const rect = img.getBoundingClientRect();
       const px = evt.clientX - rect.left;
@@ -1375,7 +1397,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor]);
+  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -1704,6 +1726,21 @@ export default function PlayPage() {
                   yPx={clickRipple.yPx}
                 />
               )}
+
+              {hintPrompt && (
+                <HintPrompt
+                  xPx={hintPrompt.xPx}
+                  yPx={hintPrompt.yPx}
+                  onSubmit={(text) => {
+                    hintPrompt.resolve(text);
+                    setHintPrompt(null);
+                  }}
+                  onCancel={() => {
+                    hintPrompt.resolve(null);
+                    setHintPrompt(null);
+                  }}
+                />
+              )}
               <EntityHoverOverlay
                 nodeId={page?.nodeId ?? null}
                 entities={worldState.entities}
@@ -1934,14 +1971,8 @@ export default function PlayPage() {
         onMutate={mutateWorldEntity}
       />
 
-      {!coachSeen && phase === "ready" && !helpOpen && (
-        <FirstRunCoach
-          onDismiss={dismissCoach}
-          onShowHelp={() => {
-            dismissCoach();
-            setHelpOpen(true);
-          }}
-        />
+      {phase === "ready" && !helpOpen && (
+        <FirstRunCoach onShowHelp={() => setHelpOpen(true)} />
       )}
 
       {scrubberOpen && page?.imageDataUrl && history.trail.length > 1 && (
