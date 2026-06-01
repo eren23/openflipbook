@@ -7,6 +7,9 @@ is never invoked.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from providers import llm
@@ -475,3 +478,444 @@ def test_world_context_clause_state_survives_for_multiple_entities() -> None:
     assert "wounded=True" in out
     assert "lantern=lit" in out
     assert "defeated=True" in out
+
+
+# ---------- provider resolution (multi-provider, PR1) --------------------
+
+
+def test_resolve_provider_defaults_to_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    provider, base_url, api_key, headers = llm._resolve_provider()
+    assert provider == "openrouter"
+    assert base_url == llm.OPENROUTER_BASE_URL
+    assert api_key == "or-key"
+    # OpenRouter attribution headers preserved exactly as today.
+    assert headers["HTTP-Referer"]
+    assert headers["X-Title"] == "Endless Canvas"
+
+
+def test_resolve_provider_openrouter_missing_key_raises() -> None:
+    # OPENROUTER_API_KEY scrubbed by conftest; the default path must raise
+    # rather than build a keyless client.
+    with pytest.raises(RuntimeError):
+        llm._resolve_provider()
+
+
+def test_resolve_provider_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_API_KEY", "sk-openai")
+    provider, base_url, api_key, headers = llm._resolve_provider()
+    assert provider == "openai"
+    assert base_url == "https://api.openai.com/v1"
+    assert api_key == "sk-openai"
+    # No OpenRouter-specific headers leak onto direct providers.
+    assert "HTTP-Referer" not in headers
+
+
+def test_resolve_provider_anthropic_compat_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_API_KEY", "sk-ant")
+    _, base_url, _, _ = llm._resolve_provider()
+    assert base_url == "https://api.anthropic.com/v1"
+
+
+def test_resolve_provider_google_compat_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "google")
+    monkeypatch.setenv("LLM_API_KEY", "g-key")
+    _, base_url, _, _ = llm._resolve_provider()
+    assert base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def test_resolve_provider_custom_requires_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_API_KEY", "x")
+    with pytest.raises(RuntimeError):
+        llm._resolve_provider()
+
+
+def test_resolve_provider_custom_local_defaults_noauth_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    # No LLM_API_KEY — local servers (Ollama/LM Studio) usually need none, but
+    # the OpenAI SDK requires a non-empty string, so we default it.
+    provider, base_url, api_key, _ = llm._resolve_provider()
+    assert provider == "custom"
+    assert base_url == "http://localhost:11434/v1"
+    assert api_key == "sk-noauth"
+
+
+def test_resolve_provider_base_url_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "http://proxy.local/v1")
+    _, base_url, _, _ = llm._resolve_provider()
+    assert base_url == "http://proxy.local/v1"
+
+
+def test_resolve_provider_direct_missing_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    with pytest.raises(RuntimeError):
+        llm._resolve_provider()
+
+
+# ---------- model resolution: LLM_* overrides, OPENROUTER_* back-compat ----
+
+
+def test_vlm_model_prefers_llm_vlm_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_VLM_MODEL", "or/vlm")
+    monkeypatch.setenv("LLM_VLM_MODEL", "direct/vlm")
+    assert llm._vlm_model() == "direct/vlm"
+
+
+def test_vlm_model_falls_back_to_openrouter_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Back-compat: when LLM_VLM_MODEL is unset the old var still drives it.
+    monkeypatch.setenv("OPENROUTER_VLM_MODEL", "or/vlm")
+    assert llm._vlm_model() == "or/vlm"
+
+
+def test_text_model_prefers_llm_text_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_TEXT_MODEL", "or/text")
+    monkeypatch.setenv("LLM_TEXT_MODEL", "direct/text")
+    assert llm._text_model(online=False) == "direct/text"
+
+
+def test_web_search_disabled_on_direct_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    # OpenRouter brokers web search via :online / the web plugin; that only
+    # exists on the openrouter provider, so direct providers report disabled.
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    assert llm._web_search_enabled(True) is False
+
+
+def test_text_model_no_online_suffix_on_direct_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_TEXT_MODEL", "qwen2.5")
+    # qwen takes the :online suffix on openrouter, but we're not on openrouter.
+    assert llm._text_model(online=True) == "qwen2.5"
+
+
+# ---------- structured-output capability ladder: tier resolver -----------
+
+
+def test_tier_openrouter_supported_family_is_json_object() -> None:
+    # Back-compat: the default OpenRouter path keeps today's json_object call.
+    assert (
+        llm._resolve_structured_tier("openrouter", "google/gemini-3-flash-preview")
+        == "json_object"
+    )
+    assert llm._resolve_structured_tier("openrouter", "qwen/qwen-2.5-72b") == "json_object"
+
+
+def test_tier_openrouter_unsupported_family_is_prompt() -> None:
+    # Today these silently strip response_format; the prompt rung recovers
+    # best-effort instead of returning empty.
+    assert llm._resolve_structured_tier("openrouter", "mistralai/mistral-large") == "prompt"
+    assert llm._resolve_structured_tier("openrouter", "x-ai/grok-3") == "prompt"
+
+
+def test_tier_cloud_direct_providers_are_json_object() -> None:
+    assert llm._resolve_structured_tier("openai", "gpt-4o") == "json_object"
+    assert llm._resolve_structured_tier("google", "gemini-2.5-flash") == "json_object"
+    assert llm._resolve_structured_tier("anthropic", "claude-3.5-sonnet") == "json_object"
+
+
+def test_tier_custom_tool_family_is_tool() -> None:
+    assert llm._resolve_structured_tier("custom", "llama-3.1-8b-instruct") == "tool"
+    assert llm._resolve_structured_tier("custom", "mistral-7b-instruct") == "tool"
+
+
+def test_tier_custom_json_family_is_json_object() -> None:
+    assert llm._resolve_structured_tier("custom", "qwen2.5vl") == "json_object"
+
+
+def test_tier_custom_unknown_small_model_is_prompt() -> None:
+    assert llm._resolve_structured_tier("custom", "phi-3-mini") == "prompt"
+
+
+def test_tier_override_forces_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT", "tool")
+    # Operator override beats the auto table, even for a gemini default.
+    assert (
+        llm._resolve_structured_tier("openrouter", "google/gemini-3-flash-preview") == "tool"
+    )
+
+
+def test_tier_override_auto_uses_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT", "auto")
+    assert llm._resolve_structured_tier("openai", "gpt-4o") == "json_object"
+
+
+# ---------- _complete_json capability ladder (mock client, no network) ----
+
+
+def _fake_response(content: str | None = None, tool_args: str | None = None) -> Any:
+    msg = SimpleNamespace(content=content, tool_calls=None)
+    if tool_args is not None:
+        msg.tool_calls = [SimpleNamespace(function=SimpleNamespace(arguments=tool_args))]
+    choice = SimpleNamespace(message=msg, finish_reason="stop")
+    return SimpleNamespace(choices=[choice], usage=None)
+
+
+class _FakeCompletions:
+    def __init__(self, script: list[Any]) -> None:
+        self.script = list(script)
+        self.calls: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        action = self.script.pop(0)
+        if isinstance(action, Exception):
+            raise action
+        return action
+
+
+class _FakeClient:
+    def __init__(self, script: list[Any]) -> None:
+        self.chat = SimpleNamespace(completions=_FakeCompletions(script))
+
+
+def _bad_request() -> Exception:
+    import httpx
+    from openai import BadRequestError
+
+    req = httpx.Request("POST", "http://test/v1/chat/completions")
+    return BadRequestError("bad", response=httpx.Response(400, request=req), body=None)
+
+
+async def test_complete_json_json_object_rung_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient([_fake_response(content='{"subject": "Boiler"}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        schema_name="click",
+    )
+    assert parsed == {"subject": "Boiler"}
+    call = fake.chat.completions.calls[0]
+    assert call["response_format"] == {"type": "json_object"}
+
+
+async def test_complete_json_tool_rung_reads_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    fake = _FakeClient([_fake_response(tool_args='{"subject": "Valve"}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="llama-3.1-8b-instruct",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        schema_name="click",
+    )
+    assert parsed == {"subject": "Valve"}
+    call = fake.chat.completions.calls[0]
+    assert call["tool_choice"]["function"]["name"] == "click"
+    assert "response_format" not in call
+
+
+async def test_complete_json_prompt_rung_recovers_fenced_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://x/v1")
+    fake = _FakeClient([_fake_response(content='Sure!\n```json\n{"subject": "Sky"}\n```')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="phi-3-mini",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+    )
+    assert parsed == {"subject": "Sky"}
+    call = fake.chat.completions.calls[0]
+    assert "response_format" not in call
+    assert "tools" not in call
+
+
+async def test_complete_json_prompt_rung_repair_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://x/v1")
+    fake = _FakeClient(
+        [
+            _fake_response(content="I cannot comply."),
+            _fake_response(content='{"subject": "Door"}'),
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="phi-3-mini",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+    )
+    assert parsed == {"subject": "Door"}
+    # The repair pass fires exactly once when the first reply isn't JSON.
+    assert len(fake.chat.completions.calls) == 2
+
+
+async def test_complete_json_prompt_rung_no_retry_when_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "http://x/v1")
+    fake = _FakeClient([_fake_response(content='{"subject": "X"}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="phi-3-mini",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+    )
+    assert parsed == {"subject": "X"}
+    assert len(fake.chat.completions.calls) == 1
+
+
+async def test_complete_json_downgrades_on_bad_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        llm, "_safe_log", lambda level, event, **kv: events.append((event, kv))
+    )
+    # gemini on openrouter starts at json_object; a 400 must drop a rung and the
+    # next rung (tool) succeeds within the same call.
+    fake = _FakeClient([_bad_request(), _fake_response(tool_args='{"subject": "Y"}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        schema_name="click",
+    )
+    assert parsed == {"subject": "Y"}
+    assert len(fake.chat.completions.calls) == 2
+    assert any(name == "llm.tier_downgrade" for name, _ in events)
+
+
+async def test_complete_json_empty_choices_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeClient([SimpleNamespace(choices=[], usage=None)])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+    )
+    assert parsed == {}
+
+
+# ---------- contract-function integration (fake client end-to-end) --------
+
+
+async def test_click_to_subject_builds_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient(
+        [
+            _fake_response(
+                content=(
+                    '{"subject": "Boiler", "style": "flat infographic", '
+                    '"groundable": true, "confidence": 0.9, '
+                    '"point": {"x": 0.5, "y": 0.4}}'
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    res = await llm.click_to_subject(
+        "data:image/jpeg;base64,abc",
+        0.5,
+        0.4,
+        "Steam Engine",
+        "how does a steam engine work",
+    )
+    assert isinstance(res, llm.ClickResolution)
+    assert res.subject == "Boiler"
+    assert res.groundable is True
+    assert res.confidence == 0.9
+    assert res.point == (0.5, 0.4)
+
+
+async def test_click_to_subject_falls_back_to_parent_on_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An empty/garbage model reply must not crash — subject falls back to the
+    # parent title and the crosshair becomes the point.
+    fake = _FakeClient([_fake_response(content="no json here")])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    res = await llm.click_to_subject(
+        "data:image/jpeg;base64,abc", 0.25, 0.75, "Steam Engine", "q"
+    )
+    assert res.subject == "Steam Engine"
+    assert res.point == (0.25, 0.75)
+
+
+async def test_extract_entities_returns_added(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient(
+        [
+            _fake_response(
+                content=(
+                    '{"added": [{"kind": "person", "name": "Mira", '
+                    '"appearance": "tall keeper in navy coat"}], "updated": []}'
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    res = await llm.extract_entities("data:image/jpeg;base64,abc", "The Lighthouse")
+    assert len(res.added) == 1
+    assert res.added[0].name == "Mira"
+
+
+async def test_plan_page_builds_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient(
+        [
+            _fake_response(
+                content=(
+                    '{"page_title": "How Boilers Work", '
+                    '"prompt": "A flat infographic of a boiler", '
+                    '"facts": ["Water boils", "Steam rises"]}'
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    plan = await llm.plan_page("how do boilers work", web_search=False)
+    assert plan.page_title == "How Boilers Work"
+    assert "boiler" in plan.prompt.lower()
+    assert plan.facts == ["Water boils", "Steam rises"]
+
+
+async def test_precompute_candidates_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient(
+        [
+            _fake_response(
+                content=(
+                    '{"candidates": [{"x_pct": 0.3, "y_pct": 0.4, '
+                    '"subject": "Valve", "style": "flat", "salience": 0.8}]}'
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    out = await llm.precompute_click_candidates("data:image/jpeg;base64,abc", "Engine", "q")
+    assert len(out) == 1
+    assert out[0].subject == "Valve"

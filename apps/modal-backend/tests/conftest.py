@@ -25,11 +25,25 @@ _SCRUB = (
     "OPENROUTER_TEXT_MODEL",
     "OPENROUTER_ENABLE_WEB_SEARCH",
     "OPENROUTER_CACHE",
+    # Multi-provider LLM selection (PR1) — scrub so a host-set provider can't
+    # make provider/model/tier resolution tests non-hermetic.
+    "LLM_PROVIDER",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_VLM_MODEL",
+    "LLM_TEXT_MODEL",
+    "LLM_STRUCTURED_OUTPUT",
     "FAL_IMAGE_TIER",
     "FAL_IMAGE_MODEL",
     "FAL_IMAGE_MODEL_FAST",
     "FAL_IMAGE_MODEL_BALANCED",
     "FAL_IMAGE_MODEL_PRO",
+    # Multi-provider image backend (PR2).
+    "IMAGE_PROVIDER",
+    "IMAGE_BASE_URL",
+    "IMAGE_API_KEY",
+    "IMAGE_MODEL",
+    "IMAGE_SIZE",
     "SENTRY_DSN",
 )
 
