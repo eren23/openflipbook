@@ -54,6 +54,12 @@ class CaseResult:
     latency_ms: float
     ok: bool
     error: str | None = None
+    # Groundability: the case's expected flag vs the VLM's self-reported one,
+    # so `_summarize` can grade rejection of empty/decoration taps separately
+    # from subject accuracy.
+    expected_groundable: bool = True
+    predicted_groundable: bool = True
+    predicted_confidence: float = 1.0
 
 
 @dataclass
@@ -105,6 +111,7 @@ async def _run_case(
             latency_ms=latency_ms,
             ok=False,
             error=f"{type(exc).__name__}: {exc}",
+            expected_groundable=case.groundable,
         )
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
 
@@ -120,6 +127,9 @@ async def _run_case(
         score=asdict(score),
         latency_ms=latency_ms,
         ok=score.passed(),
+        expected_groundable=case.groundable,
+        predicted_groundable=resolution.groundable,
+        predicted_confidence=resolution.confidence,
     )
 
 
@@ -127,22 +137,36 @@ def _summarize(results: list[CaseResult]) -> dict[str, Any]:
     if not results:
         return {"n": 0}
     completed = [r for r in results if r.error is None]
-    composites = [r.score.get("composite", 0.0) for r in completed]
-    latencies = [r.latency_ms for r in completed]
+    # Subject accuracy is only meaningful where there IS a real subject under
+    # the tap. Score it over groundable-true cases so a deliberate empty-space
+    # case (expected_subject is a non-target) can't deflate the numbers.
+    groundable = [r for r in completed if r.expected_groundable]
+    non_groundable = [r for r in completed if not r.expected_groundable]
     summary: dict[str, Any] = {
         "n": len(results),
         "n_completed": len(completed),
         "n_errored": len(results) - len(completed),
-        "n_passed": sum(1 for r in results if r.ok),
-        "pass_rate": (
-            round(sum(1 for r in results if r.ok) / len(results), 4)
-            if results
-            else 0.0
-        ),
+        "n_groundable": len(groundable),
+        "n_passed": sum(1 for r in groundable if r.ok),
     }
-    if composites:
+    if groundable:
+        summary["subject_pass_rate"] = round(
+            sum(1 for r in groundable if r.ok) / len(groundable), 4
+        )
+        composites = [r.score.get("composite", 0.0) for r in groundable]
         summary["composite_mean"] = round(statistics.mean(composites), 4)
         summary["composite_median"] = round(statistics.median(composites), 4)
+    if non_groundable:
+        # Rejection recall: of the taps that land on empty space / decoration,
+        # how many did the VLM correctly flag groundable=false instead of
+        # confabulating a subject? This is the groundability gate's report card.
+        correct_rejections = sum(1 for r in non_groundable if not r.predicted_groundable)
+        summary["n_groundable_false"] = len(non_groundable)
+        summary["rejection_recall"] = round(correct_rejections / len(non_groundable), 4)
+    if completed:
+        correct = sum(1 for r in completed if r.predicted_groundable == r.expected_groundable)
+        summary["groundable_accuracy"] = round(correct / len(completed), 4)
+    latencies = [r.latency_ms for r in completed]
     if latencies:
         summary["latency_p50_ms"] = round(statistics.median(latencies), 2)
         summary["latency_p95_ms"] = round(
