@@ -24,7 +24,7 @@ import WorldMap from "@/components/world-map";
 import DebugHud from "@/components/debug-hud";
 import SessionMinimap from "@/components/session-minimap";
 import WaterfallHUD from "@/components/waterfall-hud";
-import NeighbourTray, { type NeighbourItem } from "@/components/PlayPage/NeighbourTray";
+import NeighbourTray from "@/components/PlayPage/NeighbourTray";
 import CitationsChip from "@/components/citations-chip";
 import TimeScrubber from "@/components/time-scrubber";
 import {
@@ -35,6 +35,7 @@ import {
 } from "@/lib/trace";
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
+import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
@@ -258,13 +259,12 @@ export default function PlayPage() {
   const [viewMode, setViewMode] = useState<"page" | "map">("page");
   // Expand-outward bloom: the neighbours streaming into the tray (null = no
   // bloom). Independent of the main `phase` so the focal page stays put.
-  const [bloom, setBloom] = useState<
-    { items: NeighbourItem[]; total: number; done: boolean } | null
-  >(null);
-  // Aborts the in-flight bloom stream when the tray closes or a new bloom
-  // starts, so late `neighbor` events can't resurrect a closed tray or mix
-  // two blooms into one tray.
-  const bloomAbortRef = useRef<AbortController | null>(null);
+  // Expand-outward bloom (own SSE loop, abort-on-close) — see useExpandBloom.
+  const {
+    bloom,
+    start: startBloom,
+    close: closeBloom,
+  } = useExpandBloom(persistNode);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [clickRipple, setClickRipple] = useState<{
     xPx: number;
@@ -642,108 +642,12 @@ export default function PlayPage() {
     []
   );
 
-  // Expand outward: bloom the world AROUND the current page. Self-contained
-  // (its own fetch + SSE loop) so the tap/query/edit generate() path is
-  // untouched. Neighbour pages stream in as `neighbor` events, fill the tray,
-  // and persist as relation:"expand" children; `expand_done` ends the bloom.
-  const runExpand = useCallback(async (body: GenerateRequestBody) => {
-    const traceId = newTraceId();
-    const ac = new AbortController();
-    bloomAbortRef.current = ac;
-    try {
-      const response = await fetch("/api/generate-page", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          [TRACE_HEADER]: traceId,
-        },
-        body: JSON.stringify({ ...body, trace_id: traceId }),
-        signal: ac.signal,
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(`expand failed: HTTP ${response.status}`);
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-        for (const chunk of chunks) {
-          const trimmed = chunk.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const payload = trimmed.slice(5).trim();
-          if (!payload) continue;
-          const evt = JSON.parse(payload) as GenerateEvent;
-          // Stop touching bloom state the moment this stream is superseded /
-          // closed, so a buffered late event can't revive a closed tray.
-          if (ac.signal.aborted) return;
-          if (evt.type === "neighbor") {
-            const item: NeighbourItem = {
-              key: `${body.current_node_id}-${evt.index}-${evt.subject}`,
-              subject: evt.subject,
-              scale: evt.scale,
-              imageDataUrl: evt.image_data_url,
-              nodeId: null,
-            };
-            setBloom((prev) => ({
-              items: [...(prev?.items ?? []), item],
-              total: evt.total,
-              done: prev?.done ?? false,
-            }));
-            void persistNode(
-              {
-                parent_id: body.current_node_id || null,
-                session_id: evt.session_id,
-                query: evt.subject,
-                page_title: evt.page_title,
-                image_data_url: evt.image_data_url,
-                image_model: evt.image_model,
-                prompt_author_model: evt.prompt_author_model,
-                aspect_ratio: body.aspect_ratio,
-                final_prompt: evt.final_prompt,
-                relation: "expand",
-                scale: evt.scale,
-              },
-              traceId
-            ).then((saved) => {
-              if (saved) {
-                setBloom((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        items: prev.items.map((it) =>
-                          it.key === item.key ? { ...it, nodeId: saved.id } : it
-                        ),
-                      }
-                    : prev
-                );
-              }
-            });
-          } else if (evt.type === "expand_done") {
-            setBloom((prev) => (prev ? { ...prev, done: true } : prev));
-          } else if (evt.type === "error") {
-            throw new Error(evt.message);
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      // A failed bloom shouldn't disturb the focal page — just stop the
-      // tray's pending spinner and keep whatever neighbours arrived.
-      setBloom((prev) => (prev ? { ...prev, done: true } : prev));
-    }
-  }, []);
-
+  // Build the expand body from the current page + session state and hand it to
+  // the bloom hook (which owns the SSE loop, tray state, persistence + abort).
   const triggerExpand = useCallback(() => {
     if (!page || !page.imageDataUrl || phase === "generating") return;
     if (bloom && !bloom.done) return;
-    bloomAbortRef.current?.abort();
-    setBloom({ items: [], total: 0, done: false });
-    void runExpand({
+    startBloom({
       query: page.query,
       aspect_ratio: "16:9",
       web_search: false,
@@ -757,7 +661,7 @@ export default function PlayPage() {
       output_locale: resolveOutputLocale(outputLocale),
       ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
     });
-  }, [page, phase, bloom, runExpand, imageTier, outputLocale, styleAnchor]);
+  }, [page, phase, bloom, startBloom, imageTier, outputLocale, styleAnchor]);
 
   const acceptUploadedImage = useCallback(
     async (file: File) => {
@@ -2146,10 +2050,7 @@ export default function PlayPage() {
           onPick={(item) => {
             if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
           }}
-          onClose={() => {
-            bloomAbortRef.current?.abort();
-            setBloom(null);
-          }}
+          onClose={closeBloom}
         />
       )}
 
