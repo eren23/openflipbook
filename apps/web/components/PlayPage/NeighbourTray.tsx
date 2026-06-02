@@ -64,11 +64,13 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
         {items.map((it) => {
           const meta = SCALE_META[it.scale];
           const loading = !it.imageDataUrl;
+          // Clickable only once persisted — onPick navigates to the node's
+          // permalink, so a not-yet-saved card would be a dead click.
           return (
             <button
               key={it.key}
               type="button"
-              disabled={loading}
+              disabled={loading || !it.nodeId}
               aria-label={`Explore ${it.subject}`}
               title={`${it.subject} · ${it.scale}`}
               onClick={() => onPick(it)}
@@ -104,13 +106,16 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
             </button>
           );
         })}
-        {Array.from({ length: pendingCount }).map((_, i) => (
-          <span
-            key={`pending-${i}`}
-            aria-hidden
-            className="h-16 w-24 shrink-0 animate-pulse rounded-lg border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/10"
-          />
-        ))}
+        {/* Trailing "still proposing" slots — hidden once done, so a bloom
+            with a failed neighbour doesn't leave a slot shimmering forever. */}
+        {!done &&
+          Array.from({ length: pendingCount }).map((_, i) => (
+            <span
+              key={`pending-${i}`}
+              aria-hidden
+              className="h-16 w-24 shrink-0 animate-pulse rounded-lg border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/10"
+            />
+          ))}
       </div>
     </div>
   );

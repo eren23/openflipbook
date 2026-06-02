@@ -264,6 +264,9 @@ async def _event_stream(
                 )
                 return idx, neighbor, plan, img
 
+            # Last gate before we spend on ~4 concurrent fal jobs: if the client
+            # dropped during propose_neighbors, bail before launching any.
+            await _abort_if_disconnected("pre-bloom")
             tasks = [
                 _asyncio.create_task(_bloom_one(i, n)) for i, n in enumerate(neighbors)
             ]
@@ -273,15 +276,20 @@ async def _event_stream(
                     try:
                         idx, neighbor, plan, img = await fut
                     except Exception as exc:
-                        # One neighbour failing shouldn't sink the whole bloom.
+                        # One neighbour failing shouldn't sink the whole bloom,
+                        # but a systematic failure (quota, bad style lock) should
+                        # still surface in Sentry rather than vanish into a warn.
                         log(
                             "warn",
                             "expand.neighbor_failed",
                             error=f"{type(exc).__name__}: {exc}",
                         )
+                        record_error("expand_neighbor", exc)
                         continue
-                    data_url = image_provider.encode_data_url(
-                        img.jpeg_bytes, img.mime_type
+                    # Offload the sync base64 of a multi-MB JPEG so it doesn't
+                    # stall the event loop between yields (matches the tap path).
+                    data_url = await _asyncio.to_thread(
+                        image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
                     )
                     emitted += 1
                     yield _sse(
