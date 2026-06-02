@@ -24,6 +24,7 @@ import WorldMap from "@/components/world-map";
 import DebugHud from "@/components/debug-hud";
 import SessionMinimap from "@/components/session-minimap";
 import WaterfallHUD from "@/components/waterfall-hud";
+import NeighbourTray from "@/components/PlayPage/NeighbourTray";
 import CitationsChip from "@/components/citations-chip";
 import TimeScrubber from "@/components/time-scrubber";
 import {
@@ -34,6 +35,7 @@ import {
 } from "@/lib/trace";
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
+import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
@@ -110,6 +112,8 @@ interface PersistBody {
   final_prompt: string;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
+  relation?: "descend" | "expand";
+  scale?: "component" | "peer" | "container";
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -253,6 +257,14 @@ export default function PlayPage() {
     trailIdx: -1,
   });
   const [viewMode, setViewMode] = useState<"page" | "map">("page");
+  // Expand-outward bloom: the neighbours streaming into the tray (null = no
+  // bloom). Independent of the main `phase` so the focal page stays put.
+  // Expand-outward bloom (own SSE loop, abort-on-close) — see useExpandBloom.
+  const {
+    bloom,
+    start: startBloom,
+    close: closeBloom,
+  } = useExpandBloom(persistNode);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [clickRipple, setClickRipple] = useState<{
     xPx: number;
@@ -630,6 +642,27 @@ export default function PlayPage() {
     []
   );
 
+  // Build the expand body from the current page + session state and hand it to
+  // the bloom hook (which owns the SSE loop, tray state, persistence + abort).
+  const triggerExpand = useCallback(() => {
+    if (!page || !page.imageDataUrl || phase === "generating") return;
+    if (bloom && !bloom.done) return;
+    startBloom({
+      query: page.query,
+      aspect_ratio: "16:9",
+      web_search: false,
+      session_id: page.sessionId,
+      current_node_id: page.nodeId ?? "",
+      mode: "expand",
+      image: page.imageDataUrl,
+      parent_query: page.query,
+      parent_title: page.title,
+      image_tier: imageTier,
+      output_locale: resolveOutputLocale(outputLocale),
+      ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+    });
+  }, [page, phase, bloom, startBloom, imageTier, outputLocale, styleAnchor]);
+
   const acceptUploadedImage = useCallback(
     async (file: File) => {
       if (!file.type.startsWith("image/")) {
@@ -860,6 +893,7 @@ export default function PlayPage() {
     onOpenQuickbar: () => setQuickbarOpen(true),
     onToggleHelp: () => setHelpOpen((h) => !h),
     onToggleCodex: () => setCodexOpen((c) => !c),
+    onExpandOutward: triggerExpand,
     onCloseOverlays: () => {
       setHelpOpen(false);
       setQuickbarOpen(false);
@@ -1795,6 +1829,19 @@ export default function PlayPage() {
             <div className="absolute right-3 top-3 flex gap-2">
               <button
                 type="button"
+                onClick={triggerExpand}
+                disabled={
+                  phase === "generating" ||
+                  !page?.imageDataUrl ||
+                  (bloom !== null && !bloom.done)
+                }
+                className="rounded-full bg-black/60 px-3 py-1 text-xs text-white hover:bg-black/75 disabled:opacity-50"
+                title="Expand outward (E) — bloom the world around this page"
+              >
+                Expand
+              </button>
+              <button
+                type="button"
                 onClick={() => setCodexOpen((c) => !c)}
                 aria-pressed={codexOpen}
                 className={
@@ -1992,6 +2039,18 @@ export default function PlayPage() {
             );
           }}
           onClose={() => setScrubberOpen(false)}
+        />
+      )}
+
+      {bloom && (
+        <NeighbourTray
+          items={bloom.items}
+          total={bloom.total}
+          done={bloom.done}
+          onPick={(item) => {
+            if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
+          }}
+          onClose={closeBloom}
         />
       )}
 

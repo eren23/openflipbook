@@ -77,6 +77,11 @@ class ClickResolution:
     # because not every VLM emits them; older payloads default to None.
     point: tuple[float, float] | None = None
     bbox: tuple[float, float, float, float] | None = None
+    # Scale of `subject` relative to the parent's focal subject: "component"
+    # (a part of it / smaller), "peer" (beside it / similar), or "container"
+    # (it is part of this / bigger). Powers the scale-space map + zoom
+    # level-of-detail. Default "peer" keeps older payloads valid.
+    scale: str = "peer"
 
 
 @dataclass
@@ -95,9 +100,35 @@ class ClickCandidate:
     salience: float
 
 
+@dataclass
+class Neighbor:
+    """One proposed neighbouring subject for the expand-outward bloom.
+
+    `scale` is relative to the page's focal subject (see SCALE_KINDS):
+    "component" (smaller / a part), "peer" (similar), "container" (bigger).
+    """
+
+    subject: str
+    scale: str = "peer"
+    note: str = ""
+
+
 # Allowed kinds match the EntityKind union in packages/config. Strings only —
 # wire format is JSON. Any other kind emitted by the VLM is dropped on parse.
 ENTITY_KINDS = ("person", "place", "item", "creature")
+
+# Relative scale buckets for the scale-space map (M3). Composed into an integer
+# scale-level (component=-1, peer=0, container=+1) for zoom level-of-detail.
+SCALE_KINDS = ("component", "peer", "container")
+
+
+def _coerce_scale(raw: Any) -> str:
+    """Coerce a VLM-emitted scale to one of SCALE_KINDS; default 'peer'."""
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        if s in SCALE_KINDS:
+            return s
+    return "peer"
 
 
 @dataclass
@@ -403,6 +434,7 @@ CLICK_SCHEMA: dict[str, Any] = {
                 "h": {"type": "number"},
             },
         },
+        "scale": {"type": "string", "enum": ["component", "peer", "container"]},
     },
     "required": ["subject"],
 }
@@ -436,6 +468,28 @@ CANDIDATES_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["candidates"],
+}
+
+NEIGHBORS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "neighbors": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string"},
+                    "scale": {
+                        "type": "string",
+                        "enum": ["component", "peer", "container"],
+                    },
+                    "note": {"type": "string"},
+                },
+                "required": ["subject"],
+            },
+        }
+    },
+    "required": ["neighbors"],
 }
 
 EXTRACTION_SCHEMA: dict[str, Any] = {
@@ -709,7 +763,11 @@ async def click_to_subject(
         "(0,0 top-left). Use the crosshair location as a strong prior. "
         "(7) `bbox` — optional axis-aligned bounding box around the "
         "subject as {\"x\": <0-1>, \"y\": <0-1>, \"w\": <0-1>, \"h\": <0-1>}. "
-        "Omit if you cannot give a tight box."
+        "Omit if you cannot give a tight box. "
+        "(8) `scale` — the subject's size relative to the page's overall focal "
+        "subject: \"component\" (a part of it / smaller), \"peer\" (a separate "
+        "thing of similar size), or \"container\" (a larger thing the focal "
+        "subject is part of). Default to \"peer\" when unsure."
         + locale_clause
     )
     hint_clause = ""
@@ -858,6 +916,7 @@ def _build_click_resolution(
             _coerce_unit(y_pct) or 0.0,
         )
     bbox = _parse_bbox(parsed.get("bbox"))
+    scale = _coerce_scale(parsed.get("scale"))
 
     return ClickResolution(
         subject=subject or fallback_subject,
@@ -867,6 +926,7 @@ def _build_click_resolution(
         confidence=confidence,
         point=point,
         bbox=bbox,
+        scale=scale,
     )
 
 
@@ -1379,6 +1439,107 @@ async def precompute_click_candidates(
         if len(out) >= max_candidates:
             break
     out.sort(key=lambda c: c.salience, reverse=True)
+    return out
+
+
+async def propose_neighbors(
+    image_data_url: str,
+    parent_title: str,
+    parent_query: str,
+    subject_context: str | None = None,
+    output_locale: str | None = None,
+    max_neighbors: int = 4,
+) -> list[Neighbor]:
+    """Survey the neighbourhood of a page's focal subject for "expand outward".
+
+    Returns up to ``max_neighbors`` notable neighbouring subjects across scales
+    (component / peer / container), each a good next page to bloom. Falls back
+    to an empty list on parse failure — the caller just blooms nothing.
+    """
+    locale_clause = (
+        f" Each `subject` MUST be written in language code '{output_locale}'."
+        if output_locale and output_locale.lower() not in ("en", "auto", "")
+        else ""
+    )
+    context_clause = (
+        f" The focal subject is: {subject_context.strip()}."
+        if subject_context and subject_context.strip()
+        else ""
+    )
+    system = (
+        f"You examine an illustrated page titled '{parent_title}' (user query: "
+        f"'{parent_query}'). The user wants to EXPAND OUTWARD — to see the "
+        f"wider world this page's focal subject sits in.{context_clause} "
+        f"Propose up to {max_neighbors} notable NEIGHBOURING subjects: things "
+        "adjacent to it, larger things that contain it, and notable things it "
+        "is composed of — each of which would make a good next page to explore. "
+        "Favour variety across scales and do NOT repeat the focal subject "
+        "itself. Return JSON: {\"neighbors\": [{\"subject\": \"2-8 word noun "
+        "phrase\", \"scale\": \"component|peer|container\", \"note\": \"<=15 "
+        "word reason it neighbours the focal subject\"}]}. `scale` is the "
+        "neighbour's size relative to the focal subject: \"component\" (a part "
+        "of it / smaller), \"peer\" (beside it / similar size), \"container\" "
+        "(a larger thing it is part of)."
+        + locale_clause
+    )
+    user_text = (
+        "List the most interesting neighbouring subjects to explore around "
+        f"this page. Return at most {max_neighbors}; fewer is fine."
+    )
+    from obs import span
+
+    async with span("vlm.propose_neighbors", model=_vlm_model()) as ctx:
+        parsed = await _complete_json(
+            model=_vlm_model(),
+            messages=[
+                _system_message(system),
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_data_url, "detail": "high"},
+                        },
+                    ],
+                },
+            ],
+            schema=NEIGHBORS_SCHEMA,
+            schema_name="neighbors",
+            temperature=0.4,
+            max_tokens=700,
+            span_ctx=ctx,
+        )
+    return _build_neighbors(parsed, max_neighbors)
+
+
+def _build_neighbors(parsed: dict[str, Any], max_neighbors: int) -> list[Neighbor]:
+    """Coerce the planner's JSON into typed Neighbors. Drops empty/duplicate
+    subjects, defaults bad scales to "peer", caps at ``max_neighbors``."""
+    items = parsed.get("neighbors", [])
+    out: list[Neighbor] = []
+    if not isinstance(items, list):
+        return out
+    seen: set[str] = set()
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        subject = str(entry.get("subject", "")).strip()[:120]
+        if not subject:
+            continue
+        key = subject.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            Neighbor(
+                subject=subject,
+                scale=_coerce_scale(entry.get("scale")),
+                note=str(entry.get("note", "")).strip()[:200],
+            )
+        )
+        if len(out) >= max_neighbors:
+            break
     return out
 
 

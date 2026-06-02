@@ -18,6 +18,8 @@ interface CreateBody {
   final_prompt?: string | null;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
+  relation?: "descend" | "expand";
+  scale?: "component" | "peer" | "container";
 }
 
 export async function POST(req: Request) {
@@ -59,6 +61,8 @@ export async function POST(req: Request) {
     final_prompt: body.final_prompt ?? null,
     click_in_parent: body.click_in_parent ?? null,
     sources: Array.isArray(body.sources) ? body.sources.slice(0, 3) : null,
+    relation: body.relation ?? "descend",
+    scale: body.scale ?? "peer",
   });
 
   return NextResponse.json({

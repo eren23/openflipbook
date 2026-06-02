@@ -214,6 +214,109 @@ async def _event_stream(
             )
             return
 
+        # Expand mode blooms the world AROUND the focal subject: propose a few
+        # neighbouring subjects across scales (component/peer/container), then
+        # generate their pages concurrently and stream one `neighbor` event per
+        # page as it lands. Self-contained like edit — the tap/query single-
+        # `final` path below is untouched.
+        if body.mode == "expand":
+            if not body.image:
+                yield _sse(
+                    {"type": "error", "message": "expand mode requires an image"},
+                    trace_id,
+                )
+                return
+            expand_style_lock = (body.session_style_anchor or "").strip() or None
+            expand_world_context = [e.model_dump() for e in body.world_context]
+            yield _sse({"type": "status", "stage": "planning"}, trace_id)
+            await _abort_if_disconnected("pre-expand-plan")
+            neighbors = await llm.propose_neighbors(
+                image_data_url=body.image,
+                parent_title=body.parent_title or body.query,
+                parent_query=body.parent_query or body.query,
+                output_locale=body.output_locale,
+            )
+            total = len(neighbors)
+            if total == 0:
+                yield _sse({"type": "expand_done", "count": 0}, trace_id)
+                return
+
+            async def _bloom_one(idx, neighbor):
+                plan = await llm.plan_page(
+                    query=neighbor.subject,
+                    web_search=False,
+                    style_anchor=expand_style_lock,
+                    output_locale=body.output_locale,
+                    parent_title=body.parent_title,
+                    parent_query=body.parent_query,
+                    world_context=expand_world_context,
+                )
+                prompt = plan.prompt
+                if expand_style_lock:
+                    prompt = f"Style: {expand_style_lock}\n\n{prompt}"
+                if plan.facts:
+                    prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+                img = await image_provider.generate_image(
+                    prompt=prompt,
+                    aspect_ratio=body.aspect_ratio,
+                    tier=body.image_tier,
+                    model_override=body.image_model,
+                )
+                return idx, neighbor, plan, img
+
+            # Last gate before we spend on ~4 concurrent fal jobs: if the client
+            # dropped during propose_neighbors, bail before launching any.
+            await _abort_if_disconnected("pre-bloom")
+            tasks = [
+                _asyncio.create_task(_bloom_one(i, n)) for i, n in enumerate(neighbors)
+            ]
+            emitted = 0
+            try:
+                for fut in _asyncio.as_completed(tasks):
+                    try:
+                        idx, neighbor, plan, img = await fut
+                    except Exception as exc:
+                        # One neighbour failing shouldn't sink the whole bloom,
+                        # but a systematic failure (quota, bad style lock) should
+                        # still surface in Sentry rather than vanish into a warn.
+                        log(
+                            "warn",
+                            "expand.neighbor_failed",
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                        record_error("expand_neighbor", exc)
+                        continue
+                    # Offload the sync base64 of a multi-MB JPEG so it doesn't
+                    # stall the event loop between yields (matches the tap path).
+                    data_url = await _asyncio.to_thread(
+                        image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
+                    )
+                    emitted += 1
+                    yield _sse(
+                        {
+                            "type": "neighbor",
+                            "subject": neighbor.subject,
+                            "scale": neighbor.scale,
+                            "page_title": plan.page_title,
+                            "image_data_url": data_url,
+                            "image_model": img.model,
+                            "prompt_author_model": llm._text_model(online=False),
+                            "final_prompt": plan.prompt,
+                            "session_id": body.session_id,
+                            "index": idx,
+                            "total": total,
+                        },
+                        trace_id,
+                    )
+            finally:
+                # Client disconnect / early exit cancels any in-flight pages so
+                # we don't keep burning fal credits with no one listening.
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+            yield _sse({"type": "expand_done", "count": emitted}, trace_id)
+            return
+
         # 1. Resolve click → subject phrase + style anchor (style is empty for
         #    text-only queries; only set on tap mode). When the client has
         #    already prefetched on hover, skip the VLM round-trip entirely.
