@@ -18,11 +18,24 @@ import os
 from dataclasses import dataclass
 from typing import Any, cast
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
 DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
+
+# Built-in base URLs per provider. This is DATA, not a behavior registry —
+# every target speaks the OpenAI wire protocol, so the only thing that varies
+# is the endpoint + key. `custom` (or any unknown value) must supply
+# LLM_BASE_URL, which covers OpenAI-compatible local servers (Ollama,
+# LM Studio, vLLM) and self-hosted proxies. Anthropic/Google entries are their
+# OpenAI-compatibility endpoints so the single AsyncOpenAI code path is reused.
+_LLM_BASE_URLS = {
+    "openrouter": OPENROUTER_BASE_URL,
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai/",
+}
 
 
 @dataclass
@@ -115,6 +128,51 @@ class EntityExtractionResult:
 _OPENAI_CLIENT: AsyncOpenAI | None = None
 
 
+def _llm_provider() -> str:
+    """The active LLM provider, normalised. Defaults to `openrouter`."""
+    return (os.environ.get("LLM_PROVIDER", "") or "openrouter").strip().lower() or "openrouter"
+
+
+def _resolve_provider() -> tuple[str, str, str, dict[str, str]]:
+    """Resolve (provider, base_url, api_key, default_headers) from env.
+
+    Selection is env-var only — no registry, no YAML. `LLM_PROVIDER` unset (or
+    `openrouter`) reproduces today's request byte-for-byte: OPENROUTER_API_KEY,
+    the OpenRouter base URL, and the HTTP-Referer/X-Title attribution headers.
+    Any other provider speaks the same OpenAI wire protocol at a different base
+    URL with LLM_API_KEY. `custom` (or an unknown value) targets an
+    OpenAI-compatible server (Ollama/LM Studio/vLLM) via LLM_BASE_URL.
+    """
+    provider = _llm_provider()
+    base_override = os.environ.get("LLM_BASE_URL", "").strip()
+    if provider == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        headers = {
+            "HTTP-Referer": os.environ.get(
+                "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
+            ),
+            "X-Title": "Endless Canvas",
+        }
+        return provider, base_override or OPENROUTER_BASE_URL, api_key, headers
+    base_url = base_override or _LLM_BASE_URLS.get(provider, "")
+    if not base_url:
+        raise RuntimeError(
+            f"LLM_BASE_URL must be set for LLM_PROVIDER={provider!r} "
+            "(e.g. http://localhost:11434/v1 for Ollama)"
+        )
+    api_key = os.environ.get("LLM_API_KEY", "").strip()
+    if not api_key:
+        if provider == "custom":
+            # Local OpenAI-compatible servers usually need no auth, but the
+            # SDK requires a non-empty string.
+            api_key = "sk-noauth"
+        else:
+            raise RuntimeError(f"LLM_API_KEY is not set for LLM_PROVIDER={provider!r}")
+    return provider, base_url, api_key, {}
+
+
 def _client() -> AsyncOpenAI:
     """Module-level singleton AsyncOpenAI client.
 
@@ -124,23 +182,16 @@ def _client() -> AsyncOpenAI:
     """
     global _OPENAI_CLIENT
     if _OPENAI_CLIENT is None:
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        provider, base_url, api_key, headers = _resolve_provider()
         _OPENAI_CLIENT = AsyncOpenAI(
             api_key=api_key,
-            base_url=OPENROUTER_BASE_URL,
-            default_headers={
-                "HTTP-Referer": os.environ.get(
-                    "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
-                ),
-                "X-Title": "Endless Canvas",
-            },
+            base_url=base_url,
+            default_headers=headers or None,
         )
-        # Phase 7d — surface model capability posture on cold start so a
-        # deployer who swapped to a non-structured-output model sees the
-        # silent downgrade in the logs rather than discovering it through
-        # degraded extraction quality weeks later.
+        # Surface the resolved provider + structured-output tier on cold start
+        # so a deployer who swapped providers/models sees a weak model fall to
+        # the prompt+repair tier in the logs, rather than discovering degraded
+        # click-grounding / extraction quality weeks later.
         try:
             from obs import log
 
@@ -149,25 +200,24 @@ def _client() -> AsyncOpenAI:
             log(
                 "info",
                 "llm.startup",
+                provider=provider,
+                base_url=base_url,
                 vlm_model=vlm,
                 text_model=txt,
-                vlm_structured=_supports_structured_output(vlm),
-                text_structured=_supports_structured_output(txt),
+                vlm_tier=_resolve_structured_tier(provider, vlm),
+                text_tier=_resolve_structured_tier(provider, txt),
             )
-            if not _supports_structured_output(vlm):
-                log(
-                    "warn",
-                    "llm.no_structured_output_vlm",
-                    model=vlm,
-                    note="Falling back to freeform parsing — _safe_json recovers best-effort but extraction quality may degrade.",
-                )
-            if not _supports_structured_output(txt):
-                log(
-                    "warn",
-                    "llm.no_structured_output_text",
-                    model=txt,
-                    note="Falling back to freeform parsing for the planner.",
-                )
+            for role, model in (("vlm", vlm), ("text", txt)):
+                if _resolve_structured_tier(provider, model) == "prompt":
+                    log(
+                        "warn",
+                        "llm.weak_structured_output",
+                        role=role,
+                        model=model,
+                        note="No JSON mode / tool-calling detected — using prompt+repair. "
+                        "Structured quality (click grounding, extraction) may degrade. "
+                        "Set LLM_STRUCTURED_OUTPUT to override.",
+                    )
         except Exception:
             # `obs` import or log call should never block client init.
             pass
@@ -219,11 +269,23 @@ def _log_cache_usage(span_ctx: dict[str, Any], response: Any) -> None:
 
 
 def _vlm_model() -> str:
-    return os.environ.get("OPENROUTER_VLM_MODEL", DEFAULT_VLM_MODEL)
+    # LLM_VLM_MODEL (provider-native slug) wins; OPENROUTER_VLM_MODEL is the
+    # back-compat path; then the built-in default.
+    return (
+        os.environ.get("LLM_VLM_MODEL")
+        or os.environ.get("OPENROUTER_VLM_MODEL")
+        or DEFAULT_VLM_MODEL
+    )
 
 
 def _web_search_enabled(online: bool) -> bool:
     if not online:
+        return False
+    # Web search here is OpenRouter's :online / web-plugin brokering, which
+    # only exists on the openrouter provider. On direct providers there is no
+    # equivalent on this path, so report disabled (the planner still works,
+    # just without OpenRouter-brokered grounding).
+    if _llm_provider() != "openrouter":
         return False
     return os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
         "1",
@@ -247,10 +309,46 @@ def _supports_online_suffix(model: str) -> bool:
 # losing structured output.
 _STRUCTURED_OUTPUT_FAMILIES = ("gemini", "gpt", "claude", "qwen")
 
+# Instruct tunes that follow forced tool-calls more reliably than JSON mode.
+# Used only on direct/custom providers (e.g. a local Ollama/vLLM server); the
+# openrouter path never selects the tool rung, preserving today's behavior.
+_TOOL_CALL_FAMILIES = ("llama", "mistral", "mixtral", "hermes", "command")
+
 
 def _supports_structured_output(model: str) -> bool:
     m = model.lower()
     return any(family in m for family in _STRUCTURED_OUTPUT_FAMILIES)
+
+
+def _resolve_structured_tier(provider: str, model: str) -> str:
+    """Pick how to coax structured JSON out of (provider, model).
+
+    Returns one of ``json_object`` | ``tool`` | ``prompt`` (descending
+    fidelity). `LLM_STRUCTURED_OUTPUT` (default ``auto``) lets an operator pin
+    a tier explicitly. This is a pure substring ladder — data, not a registry.
+
+    Back-compat is load-bearing: on the **openrouter** provider a known-good
+    family resolves to ``json_object`` exactly as today, and everything else
+    falls to ``prompt`` (which today already happens via the empty
+    response_format, just without the repair pass). The ``tool`` rung is
+    reserved for direct/custom providers so the default deployment is byte
+    unchanged.
+    """
+    override = os.environ.get("LLM_STRUCTURED_OUTPUT", "auto").strip().lower()
+    if override and override != "auto":
+        return override
+    m = model.lower()
+    if provider in ("openai", "google", "anthropic"):
+        # All three honour json_object on their OpenAI-compatible endpoints.
+        return "json_object"
+    if provider == "openrouter":
+        return "json_object" if _supports_structured_output(model) else "prompt"
+    # custom / unknown (local OpenAI-compatible servers): decide by family.
+    if any(fam in m for fam in _STRUCTURED_OUTPUT_FAMILIES):
+        return "json_object"
+    if any(fam in m for fam in _TOOL_CALL_FAMILIES):
+        return "tool"
+    return "prompt"
 
 
 def _maybe_response_format(model: str) -> dict[str, Any]:
@@ -264,7 +362,11 @@ def _maybe_response_format(model: str) -> dict[str, Any]:
 
 
 def _text_model(online: bool) -> str:
-    base = os.environ.get("OPENROUTER_TEXT_MODEL", DEFAULT_TEXT_MODEL)
+    base = (
+        os.environ.get("LLM_TEXT_MODEL")
+        or os.environ.get("OPENROUTER_TEXT_MODEL")
+        or DEFAULT_TEXT_MODEL
+    )
     if _web_search_enabled(online) and _supports_online_suffix(base):
         return f"{base}:online"
     return base
@@ -273,6 +375,270 @@ def _text_model(online: bool) -> str:
 def _web_plugin_extra(model: str, online: bool) -> dict[str, Any]:
     if _web_search_enabled(online) and not _supports_online_suffix(model):
         return {"plugins": [{"id": "web"}]}
+    return {}
+
+
+# JSON Schemas for the structured-output ladder. Used as the `tool` rung's
+# function parameters and as a shape hint for the `prompt` rung. They are an
+# upstream nudge only — the `_build_*` / `_parse_*` coercers below remain the
+# source of truth, which is why a weak model degrades to "thinner but valid".
+CLICK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string"},
+        "style": {"type": "string"},
+        "subject_context": {"type": "string"},
+        "groundable": {"type": "boolean"},
+        "confidence": {"type": "number"},
+        "point": {
+            "type": "object",
+            "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+        },
+        "bbox": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "w": {"type": "number"},
+                "h": {"type": "number"},
+            },
+        },
+    },
+    "required": ["subject"],
+}
+
+PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "page_title": {"type": "string"},
+        "prompt": {"type": "string"},
+        "facts": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["page_title", "prompt"],
+}
+
+CANDIDATES_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "x_pct": {"type": "number"},
+                    "y_pct": {"type": "number"},
+                    "subject": {"type": "string"},
+                    "style": {"type": "string"},
+                    "salience": {"type": "number"},
+                },
+                "required": ["x_pct", "y_pct", "subject"],
+            },
+        }
+    },
+    "required": ["candidates"],
+}
+
+EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "added": {"type": "array", "items": {"type": "object"}},
+        "updated": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["added", "updated"],
+}
+
+_TIER_LADDER = ("json_object", "tool", "prompt")
+
+_JSON_ONLY_HINT = (
+    "IMPORTANT: Respond with ONLY a single JSON object matching the shape "
+    "described above. No prose, no explanation, no markdown code fences."
+)
+_JSON_REPAIR_HINT = (
+    "Your previous reply was not valid JSON. Output ONLY the JSON object — "
+    "no prose, no code fences, nothing else."
+)
+
+
+def _safe_log(level: str, event: str, **kv: Any) -> None:
+    """Best-effort structured log that never raises into the request path."""
+    try:
+        from obs import log
+
+        log(level, event, **kv)
+    except Exception:
+        pass
+
+
+def _tier_attempts(tier: str) -> list[str]:
+    """The ordered rungs to try for a starting tier (degrade-on-error path).
+
+    `json_schema` is not implemented yet, so it maps to `json_object` (the
+    closest structured rung); an unknown override starts at the top so it still
+    walks the full ladder.
+    """
+    start = "json_object" if tier == "json_schema" else tier
+    if start not in _TIER_LADDER:
+        start = "json_object"
+    idx = _TIER_LADDER.index(start)
+    return list(_TIER_LADDER[idx:])
+
+
+def _rung_kwargs(rung: str, schema: dict[str, Any] | None, schema_name: str) -> dict[str, Any]:
+    """The create() kwargs specific to a rung. Spread by the caller so the
+    structured params bypass the SDK's strict per-arg typing, matching the
+    existing `**_maybe_response_format(...)` pattern."""
+    if rung == "json_object":
+        return {"response_format": {"type": "json_object"}}
+    if rung == "tool":
+        return {
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": schema_name,
+                        "parameters": schema or {"type": "object"},
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "function": {"name": schema_name}},
+        }
+    return {}
+
+
+def _with_json_hint(messages: list[Any], hint: str) -> list[Any]:
+    """Append a JSON-only instruction to the last user turn.
+
+    Weak local models often ignore a trailing system message, so the hint
+    rides on the user turn. Handles both string content and the multimodal
+    block-list shape (text + image_url).
+    """
+    out: list[Any] = [dict(m) for m in messages]
+    for m in reversed(out):
+        if m.get("role") == "user":
+            content = m.get("content")
+            if isinstance(content, str):
+                m["content"] = f"{content}\n\n{hint}"
+            elif isinstance(content, list):
+                m["content"] = [*content, {"type": "text", "text": hint}]
+            return out
+    out.append({"role": "system", "content": hint})
+    return out
+
+
+def _choice_content(response: Any) -> str:
+    try:
+        if not response.choices:
+            return ""
+        return response.choices[0].message.content or ""
+    except Exception:
+        return ""
+
+
+def _parse_choice_json(response: Any) -> dict[str, Any]:
+    return _safe_json(_choice_content(response).strip() or "{}")
+
+
+def _parse_tool_json(response: Any) -> dict[str, Any]:
+    try:
+        if not response.choices:
+            return {}
+        msg = response.choices[0].message
+        tool_calls = getattr(msg, "tool_calls", None)
+        if tool_calls:
+            args = tool_calls[0].function.arguments
+            if args:
+                return _safe_json(args)
+        # Some servers ignore tool_choice and answer in content instead.
+        return _safe_json((msg.content or "{}").strip())
+    except Exception:
+        return {}
+
+
+async def _complete_json(
+    *,
+    model: str,
+    messages: list[Any],
+    max_tokens: int,
+    temperature: float,
+    schema: dict[str, Any] | None = None,
+    schema_name: str = "result",
+    extra_body: dict[str, Any] | None = None,
+    span_ctx: dict[str, Any] | None = None,
+    response_sink: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Issue a chat completion and return parsed JSON, degrading gracefully.
+
+    Picks a structured-output strategy via `_resolve_structured_tier`, then
+    walks DOWN the ladder (json_object -> tool -> prompt) if a provider rejects
+    the chosen mechanism with a 400. The prompt rung adds a JSON-only hint and
+    one repair retry. The caller's existing `_build_*` / `_parse_*` coercers
+    stay the source of truth, so a weak model degrades to "thinner but valid"
+    rather than crashing. On the default OpenRouter path this issues the exact
+    same json_object request as before.
+
+    `response_sink`, when provided, receives the final raw response object so a
+    caller that needs more than the parsed JSON (e.g. the planner reading
+    OpenRouter citation annotations) can reach it without changing the return.
+    """
+    client = _client()
+    provider = _llm_provider()
+    tier = _resolve_structured_tier(provider, model)
+    if span_ctx is not None:
+        span_ctx["structured_tier"] = tier
+    attempts = _tier_attempts(tier)
+    eb = extra_body or None
+    last_error: BadRequestError | None = None
+
+    for i, rung in enumerate(attempts):
+        kw = _rung_kwargs(rung, schema, schema_name)
+        call_messages = (
+            _with_json_hint(messages, _JSON_ONLY_HINT) if rung == "prompt" else messages
+        )
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=call_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_body=eb,
+                **kw,
+            )
+            parsed = _parse_tool_json(response) if rung == "tool" else _parse_choice_json(response)
+            if rung == "prompt" and not parsed and _choice_content(response).strip():
+                # ONE repair retry — the model emitted prose, nudge harder.
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=_with_json_hint(messages, _JSON_REPAIR_HINT),
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    extra_body=eb,
+                )
+                parsed = _parse_choice_json(response)
+            if span_ctx is not None:
+                _log_cache_usage(span_ctx, response)
+                finish_reason = (
+                    getattr(response.choices[0], "finish_reason", None)
+                    if response.choices
+                    else None
+                )
+                if finish_reason:
+                    span_ctx["finish_reason"] = finish_reason
+            if response_sink is not None:
+                response_sink.append(response)
+            return parsed
+        except BadRequestError as err:
+            last_error = err
+            next_tier = attempts[i + 1] if i + 1 < len(attempts) else None
+            _safe_log(
+                "warn",
+                "llm.tier_downgrade",
+                model=model,
+                from_tier=rung,
+                next_tier=next_tier,
+            )
+            continue
+    if last_error is not None:
+        raise last_error
     return {}
 
 
@@ -304,7 +670,6 @@ async def click_to_subject(
     multi-turn conversational refer signal ("you said X — what else
     could this be?"). Inspired by SAMA / MM-Conv dialog grounding.
     """
-    client = _client()
     locale_clause = (
         f" The `subject` MUST be written in language code '{output_locale}' — "
         "the next page is being generated in that language and the subject "
@@ -378,7 +743,7 @@ async def click_to_subject(
     from obs import span
 
     async with span("vlm.click_to_subject", model=_vlm_model()) as ctx:
-        response = await client.chat.completions.create(
+        parsed = await _complete_json(
             model=_vlm_model(),
             messages=[
                 _system_message(system),
@@ -393,13 +758,12 @@ async def click_to_subject(
                     ],
                 },
             ],
-            **_maybe_response_format(_vlm_model()),
+            schema=CLICK_SCHEMA,
+            schema_name="click_resolution",
             temperature=0.2,
             max_tokens=400,
+            span_ctx=ctx,
         )
-        _log_cache_usage(ctx, response)
-    raw = (response.choices[0].message.content or "{}").strip()
-    parsed = _safe_json(raw)
     return _build_click_resolution(parsed, x_pct=x_pct, y_pct=y_pct, fallback_subject=parent_title)
 
 
@@ -531,7 +895,6 @@ async def plan_page(
     per-object tracker memory). `subject_context` comes from the click VLM
     and is treated as authoritative — the planner must not contradict it.
     """
-    client = _client()
     system_parts = [
         "You design a visual-explainer page for a given user query. Return JSON "
         "with keys: page_title (<=8 words, title case), prompt (<=120 words, a "
@@ -623,21 +986,22 @@ async def plan_page(
     from obs import span
 
     text_model = _text_model(online=web_search)
+    response_sink: list[Any] = []
     async with span("planner.plan_page", model=text_model, web_search=web_search) as ctx:
-        response = await client.chat.completions.create(
+        parsed = await _complete_json(
             model=text_model,
             messages=[
                 _system_message(system),
                 {"role": "user", "content": user},
             ],
-            **_maybe_response_format(text_model),
+            schema=PLAN_SCHEMA,
+            schema_name="page_plan",
             temperature=0.7,
             max_tokens=900,
             extra_body=_web_plugin_extra(text_model, online=web_search) or None,
+            span_ctx=ctx,
+            response_sink=response_sink,
         )
-        _log_cache_usage(ctx, response)
-    raw = (response.choices[0].message.content or "{}").strip()
-    parsed = _safe_json(raw)
     page_title = str(parsed.get("page_title", query)).strip() or query
     prompt = str(parsed.get("prompt", query)).strip() or query
     facts_raw = parsed.get("facts", [])
@@ -646,7 +1010,7 @@ async def plan_page(
         for f in facts_raw:
             if isinstance(f, str) and f.strip():
                 facts.append(f.strip())
-    sources = _extract_citations(response)
+    sources = _extract_citations(response_sink[0]) if response_sink else []
     return PagePlan(page_title=page_title, prompt=prompt, facts=facts, sources=sources)
 
 
@@ -936,7 +1300,6 @@ async def precompute_click_candidates(
     Coordinates are 0..1 in the image's frame. Falls back to an empty list on
     parse failure — the click handler still works via on-demand resolution.
     """
-    client = _client()
     locale_clause = (
         f" Each `subject` MUST be written in language code '{output_locale}'."
         if output_locale and output_locale.lower() not in ("en", "auto", "")
@@ -964,7 +1327,7 @@ async def precompute_click_candidates(
     from obs import span
 
     async with span("vlm.precompute_candidates", model=_vlm_model()) as ctx:
-        response = await client.chat.completions.create(
+        parsed = await _complete_json(
             model=_vlm_model(),
             messages=[
                 _system_message(system),
@@ -979,13 +1342,12 @@ async def precompute_click_candidates(
                     ],
                 },
             ],
-            **_maybe_response_format(_vlm_model()),
+            schema=CANDIDATES_SCHEMA,
+            schema_name="click_candidates",
             temperature=0.2,
             max_tokens=600,
+            span_ctx=ctx,
         )
-        _log_cache_usage(ctx, response)
-    raw = (response.choices[0].message.content or "{}").strip()
-    parsed = _safe_json(raw)
     items = parsed.get("candidates", [])
     out: list[ClickCandidate] = []
     if not isinstance(items, list):
@@ -1040,7 +1402,6 @@ async def extract_entities(
     or "the obsidian dagger" is. This filtering happens in the prompt
     rather than post-hoc because the VLM has the whole scene in view.
     """
-    client = _client()
     prior_blob = ""
     if prior_entities:
         # Compact rendering — the VLM only needs name/kind/appearance to
@@ -1168,7 +1529,13 @@ async def extract_entities(
     from obs import span
 
     async with span("vlm.extract_entities", model=_vlm_model()) as ctx:
-        response = await client.chat.completions.create(
+        # max_tokens is generous: a busy scene with ~30 prior entities easily
+        # crosses 1.5k tokens (appearance + facts + state + bbox each). A
+        # tighter cap truncates mid-JSON and the parse collapses to empty.
+        # `_complete_json` stamps finish_reason into the span and returns {}
+        # on the empty-choices stub OpenRouter sometimes relays as HTTP 200,
+        # so the merge layer just sees an empty diff and keeps moving.
+        parsed = await _complete_json(
             model=_vlm_model(),
             messages=[
                 _system_message(system),
@@ -1183,41 +1550,26 @@ async def extract_entities(
                     ],
                 },
             ],
-            **_maybe_response_format(_vlm_model()),
+            schema=EXTRACTION_SCHEMA,
+            schema_name="entity_extraction",
             temperature=0.2,
-            # Real responses for a busy scene with 30 prior entities easily
-            # cross 1.5k tokens (each entity is appearance sentence + facts
-            # list + state + bbox). The earlier 1100 cap truncated mid-JSON
-            # and `_safe_json` silently swallowed the whole turn as `{}`.
             max_tokens=2200,
+            span_ctx=ctx,
         )
-        _log_cache_usage(ctx, response)
-        # Surface truncations so they're observable in traces instead of
-        # silently dropping the entire extraction.
-        try:
-            choice = response.choices[0] if response.choices else None
-            finish_reason = getattr(choice, "finish_reason", None) if choice else None
-            if finish_reason:
-                ctx["finish_reason"] = finish_reason
-        except Exception:
-            pass
-    # Defensive: OpenRouter occasionally relays upstream errors as HTTP 200
-    # with an empty `choices` list (rate-limit stub, content filter, etc.).
-    # Return an empty diff in that case so the merge layer keeps moving;
-    # the next page's extraction will retry naturally.
-    if not response.choices:
-        return EntityExtractionResult(added=[], updated=[])
-    raw = (response.choices[0].message.content or "{}").strip()
-    return _parse_extraction(raw)
+    return _build_extraction(parsed)
 
 
 def _parse_extraction(raw: str) -> EntityExtractionResult:
-    """Tolerantly parse the extraction VLM's JSON output into typed records.
+    """Tolerantly parse the extraction VLM's raw JSON text into typed records."""
+    return _build_extraction(_safe_json(raw))
+
+
+def _build_extraction(parsed: dict[str, Any]) -> EntityExtractionResult:
+    """Map an already-parsed extraction payload onto typed records.
 
     Garbage entries are dropped, not raised — the extractor is permitted to
     miss things; the worst case is a thinner codex this turn.
     """
-    parsed = _safe_json(raw)
     added_raw = parsed.get("added", [])
     updated_raw = parsed.get("updated", [])
     added: list[ExtractedEntity] = []

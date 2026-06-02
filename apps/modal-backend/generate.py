@@ -380,6 +380,11 @@ async def _event_stream(
             progressive_enabled
             and target_tier != "fast"
             and not body.image_model  # honour explicit model_override
+            # The draft race is a fal tier optimisation (cheap fast-tier model
+            # in parallel with the requested tier). Non-fal backends collapse
+            # tiers to one model, so a draft would just regenerate the same
+            # image — skip it.
+            and image_provider.active_provider() == "fal"
         )
         draft_task: _asyncio.Task | None = None
         if wants_draft:
