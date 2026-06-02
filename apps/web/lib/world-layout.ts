@@ -291,6 +291,44 @@ export function depthTint(depth: number): { saturation: number; opacity: number 
 }
 
 /**
+ * Scale bucket → integer step on the scale ladder, relative to the parent.
+ * A container is one level *up* (bigger / zoom-out), a component one level
+ * *down* (smaller / zoom-in), a peer/scale-less node stays level (0). BFS over
+ * the tree (parentLevel + scaleStep(child)) yields each node's absolute level.
+ */
+export function scaleStep(scale?: ScaleKind): number {
+  if (scale === "container") return 1;
+  if (scale === "component") return -1;
+  return 0;
+}
+
+/**
+ * Level-of-detail visibility for a node at absolute `scaleLevel`, given the
+ * camera `zoom` and the map's fit-all `fitZoom`. Each scale-level owns a band
+ * of zoom (measured in octaves = log2 zoom ratio): bigger things (higher
+ * level) are centred when zoomed *out*, smaller things (lower level) when
+ * zoomed *in*. Inside the band → fully visible (1); outside it fades linearly
+ * to a floor so a node never vanishes entirely (the map stays legible). Peers
+ * (level 0) peak at the fit-all zoom. This is the "small stuff reveals when
+ * you zoom in" payoff; callers gate it off when a session has no scale spread.
+ */
+export function lodOpacity(
+  scaleLevel: number,
+  zoom: number,
+  fitZoom: number
+): number {
+  const SPREAD = 1.4; // octaves of zoom per scale-level
+  const BAND = 1.2; // half-width of the full-opacity plateau (octaves)
+  const FEATHER = 1.6; // fade distance beyond the band (octaves)
+  const FLOOR = 0.12; // never fully hide — keep the map readable
+  const octave = Math.log2(Math.max(zoom, 1e-6) / Math.max(fitZoom, 1e-6));
+  const center = -SPREAD * scaleLevel;
+  const dist = Math.abs(octave - center);
+  if (dist <= BAND) return 1;
+  return Math.max(FLOOR, 1 - (dist - BAND) / FEATHER);
+}
+
+/**
  * Compute camera (cx, cy, zoom) that fits `rect` in a viewport of size
  * (vw, vh) with `padding` fraction of slack (0.1 = 10% margin around).
  */
