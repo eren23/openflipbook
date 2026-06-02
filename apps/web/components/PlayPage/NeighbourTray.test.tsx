@@ -43,17 +43,17 @@ describe("NeighbourTray", () => {
     expect(screen.getByText("part")).toBeTruthy();
   });
 
-  it("shows an 'N of M' progress read while blooming, 'Expanded' when done", () => {
+  it("shows an 'N of M' progress read while blooming, 'Around this page' when done", () => {
     const items = [item({ key: "a" }), item({ key: "b", imageDataUrl: null })];
     const { rerender } = render(
       <NeighbourTray items={items} total={4} done={false} onPick={noop} onClose={noop} />
     );
     // 1 of 2 have images → "1 of 4".
-    expect(screen.getByText(/Expanding outward · 1 of 4/)).toBeTruthy();
+    expect(screen.getByText(/Looking around · 1 of 4/)).toBeTruthy();
     rerender(
       <NeighbourTray items={[item({ key: "a" })]} total={4} done onPick={noop} onClose={noop} />
     );
-    expect(screen.getByText(/Expanded · 1 neighbour/)).toBeTruthy();
+    expect(screen.getByText(/Around this page · 1 neighbour/)).toBeTruthy();
   });
 
   it("hides trailing pending slots once done (no perpetual shimmer on partial failure)", () => {
