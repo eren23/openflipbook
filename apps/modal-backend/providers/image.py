@@ -15,7 +15,7 @@ from __future__ import annotations
 import base64
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import fal_client
 import httpx
@@ -45,6 +45,35 @@ SEEDREAM_SIZE_MAP: dict[str, str] = {
     "1:1":  "square_hd",
     "4:3":  "landscape_4_3",
     "3:4":  "portrait_4_3",
+}
+
+# Non-fal image backends. Every target speaks the OpenAI Images wire format
+# (`POST {base}/images/generations`), so the only thing that varies is the base
+# URL + key — data, not a registry. `custom` (or unknown) must supply
+# IMAGE_BASE_URL, covering OpenAI-compatible local servers (LocalAI, vLLM-image,
+# SD wrappers). fal stays the default and is handled separately.
+IMAGE_BASE_URLS: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+}
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
+
+# Aspect → image size. gpt-image-1 and dall-e-3 accept DIFFERENT size sets
+# (the only common one is 1024x1024), so pick per model family — otherwise the
+# default IMAGE_MODEL=gpt-image-1 would 400 on a 16:9 request (1792x1024 is a
+# dall-e size gpt-image rejects). Override wholesale with IMAGE_SIZE.
+GPT_IMAGE_SIZE_MAP: dict[str, str] = {
+    "16:9": "1536x1024",
+    "9:16": "1024x1536",
+    "1:1":  "1024x1024",
+    "4:3":  "1536x1024",
+    "3:4":  "1024x1536",
+}
+DALLE_SIZE_MAP: dict[str, str] = {
+    "16:9": "1792x1024",
+    "9:16": "1024x1792",
+    "1:1":  "1024x1024",
+    "4:3":  "1792x1024",
+    "3:4":  "1024x1792",
 }
 
 
@@ -87,6 +116,55 @@ def _args_for(model: str, prompt: str, aspect_ratio: str) -> dict[str, Any]:
     return {"prompt": prompt, "aspect_ratio": aspect_ratio}
 
 
+def _image_provider() -> str:
+    """The active image provider, normalised. Defaults to `fal`."""
+    return (os.environ.get("IMAGE_PROVIDER", "") or "fal").strip().lower() or "fal"
+
+
+def active_provider() -> str:
+    """Public accessor so callers (e.g. generate.py) can gate fal-only paths
+    such as the draft/final tier race without reaching into a private."""
+    return _image_provider()
+
+
+def _resolve_image_provider() -> tuple[str, str, str]:
+    """Resolve (provider, base_url, api_key) for a non-fal image backend.
+
+    fal is the default and is handled separately in `generate_image`; this only
+    runs for OpenAI-images-compatible targets. Mirrors the LLM provider seam:
+    env-var only, `custom` (or unknown) needs IMAGE_BASE_URL, and a keyless
+    local server defaults to a placeholder key.
+    """
+    provider = _image_provider()
+    base_url = os.environ.get("IMAGE_BASE_URL", "").strip() or IMAGE_BASE_URLS.get(
+        provider, ""
+    )
+    if not base_url:
+        raise RuntimeError(
+            f"IMAGE_BASE_URL must be set for IMAGE_PROVIDER={provider!r}"
+        )
+    api_key = os.environ.get("IMAGE_API_KEY", "").strip()
+    if not api_key:
+        if provider == "custom":
+            api_key = "sk-noauth"
+        else:
+            raise RuntimeError(f"IMAGE_API_KEY is not set for IMAGE_PROVIDER={provider!r}")
+    return provider, base_url, api_key
+
+
+def _image_model() -> str:
+    return os.environ.get("IMAGE_MODEL", "").strip() or DEFAULT_OPENAI_IMAGE_MODEL
+
+
+def _openai_size(aspect_ratio: str, model: str) -> str:
+    override = os.environ.get("IMAGE_SIZE", "").strip()
+    if override:
+        return override
+    m = model.lower()
+    table = DALLE_SIZE_MAP if ("dall-e" in m or "dalle" in m) else GPT_IMAGE_SIZE_MAP
+    return table.get(aspect_ratio, "1024x1024")
+
+
 async def generate_image(
     prompt: str,
     aspect_ratio: str,
@@ -95,9 +173,23 @@ async def generate_image(
 ) -> GeneratedImage:
     from obs import span
 
+    if _image_provider() != "fal":
+        prov, base_url, api_key = _resolve_image_provider()
+        model = model_override or _image_model()
+        async with span(
+            "image.generate", model=model, prompt_len=len(prompt), provider=prov
+        ) as ctx:
+            generated = await _openai_compatible_image(
+                base_url, api_key, model, prompt, aspect_ratio
+            )
+            ctx["bytes"] = len(generated.jpeg_bytes)
+        return generated
+
     _ensure_fal_key()
     model = _resolve_model(tier, model_override)
-    async with span("image.generate", model=model, prompt_len=len(prompt)) as ctx:
+    async with span(
+        "image.generate", model=model, prompt_len=len(prompt), provider="fal"
+    ) as ctx:
         result = await _fal_subscribe(model, _args_for(model, prompt, aspect_ratio))
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -148,6 +240,74 @@ async def _fetch_image_bytes(image_info: dict) -> tuple[bytes, str]:
     resp = await _http_client().get(url)
     resp.raise_for_status()
     return resp.content, mime
+
+
+async def _fetch_url_bytes(url: str) -> tuple[bytes, str]:
+    """Download an image URL (the dall-e-style response path)."""
+    resp = await _http_client().get(url)
+    resp.raise_for_status()
+    mime = (resp.headers.get("content-type") or "image/jpeg").split(";")[0].strip()
+    return resp.content, mime or "image/jpeg"
+
+
+async def _post_image_json(
+    url: str, headers: dict[str, str], payload: dict[str, Any]
+) -> dict[str, Any]:
+    """POST to an OpenAI-images-compatible endpoint with bounded retry,
+    reusing the same transient classifier as the fal path."""
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    ):
+        with attempt:
+            resp = await _http_client().post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            return cast(dict[str, Any], resp.json())
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+async def _openai_compatible_image(
+    base_url: str, api_key: str, model: str, prompt: str, aspect_ratio: str
+) -> GeneratedImage:
+    """Generate one image via the OpenAI Images API (or any compatible server).
+
+    Handles both response shapes: gpt-image-1 returns inline `b64_json`,
+    dall-e-style returns a `url` we then fetch. `response_format` is NOT sent —
+    gpt-image-1 rejects it — so we accept whichever shape the server emits.
+    """
+    url = f"{base_url.rstrip('/')}/images/generations"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "size": _openai_size(aspect_ratio, model),
+        "n": 1,
+    }
+    data = await _post_image_json(url, headers, payload)
+    items = data.get("data") or []
+    if not items or not isinstance(items[0], dict):
+        raise RuntimeError("image provider returned no images")
+    item = items[0]
+    b64 = item.get("b64_json")
+    if isinstance(b64, str) and b64:
+        return GeneratedImage(
+            jpeg_bytes=base64.b64decode(b64),
+            mime_type="image/png",
+            model=model,
+            provider_request_id=None,
+        )
+    img_url = item.get("url")
+    if isinstance(img_url, str) and img_url:
+        raw, mime = await _fetch_url_bytes(img_url)
+        return GeneratedImage(
+            jpeg_bytes=raw, mime_type=mime, model=model, provider_request_id=None
+        )
+    raise RuntimeError("image provider returned neither b64_json nor url")
 
 
 def _is_retryable(exc: BaseException) -> bool:

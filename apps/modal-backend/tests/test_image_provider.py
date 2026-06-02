@@ -7,6 +7,8 @@ mocking fal_client at the module level so no network hits are made.
 
 from __future__ import annotations
 
+import base64
+
 import fal_client
 import httpx
 import pytest
@@ -158,3 +160,164 @@ def test_not_retryable_httpx_status_400() -> None:
 
 def test_not_retryable_random_value_error() -> None:
     assert image._is_retryable(ValueError("unrelated")) is False
+
+
+# ---------- multi-provider image backend (PR2) --------------------------
+
+
+def test_image_provider_defaults_to_fal() -> None:
+    assert image._image_provider() == "fal"
+    assert image.active_provider() == "fal"
+
+
+def test_image_provider_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "openai")
+    assert image._image_provider() == "openai"
+
+
+def test_resolve_image_provider_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "openai")
+    monkeypatch.setenv("IMAGE_API_KEY", "sk-img")
+    prov, base, key = image._resolve_image_provider()
+    assert prov == "openai"
+    assert base == "https://api.openai.com/v1"
+    assert key == "sk-img"
+
+
+def test_resolve_image_provider_custom_requires_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "custom")
+    monkeypatch.setenv("IMAGE_API_KEY", "x")
+    with pytest.raises(RuntimeError):
+        image._resolve_image_provider()
+
+
+def test_resolve_image_provider_custom_noauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "custom")
+    monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8080/v1")
+    prov, base, key = image._resolve_image_provider()
+    assert prov == "custom"
+    assert base == "http://localhost:8080/v1"
+    assert key == "sk-noauth"
+
+
+def test_resolve_image_provider_openai_missing_key_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "openai")
+    with pytest.raises(RuntimeError):
+        image._resolve_image_provider()
+
+
+def test_resolve_image_provider_base_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "openai")
+    monkeypatch.setenv("IMAGE_API_KEY", "k")
+    monkeypatch.setenv("IMAGE_BASE_URL", "http://proxy/v1")
+    _, base, _ = image._resolve_image_provider()
+    assert base == "http://proxy/v1"
+
+
+def test_image_model_default() -> None:
+    assert image._image_model() == "gpt-image-1"
+
+
+def test_image_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_MODEL", "dall-e-3")
+    assert image._image_model() == "dall-e-3"
+
+
+def test_openai_size_maps_aspect_for_gpt_image() -> None:
+    # gpt-image-1 valid sizes: 1024x1024 / 1536x1024 / 1024x1536 / auto.
+    assert image._openai_size("1:1", "gpt-image-1") == "1024x1024"
+    assert image._openai_size("16:9", "gpt-image-1") == "1536x1024"
+    assert image._openai_size("9:16", "gpt-image-1") == "1024x1536"
+
+
+def test_openai_size_maps_aspect_for_dalle() -> None:
+    assert image._openai_size("16:9", "dall-e-3") == "1792x1024"
+    assert image._openai_size("1:1", "dall-e-3") == "1024x1024"
+
+
+def test_openai_size_default_model_is_gpt_image_valid() -> None:
+    # Regression: the documented default (IMAGE_MODEL=gpt-image-1) + the default
+    # 16:9 aspect must NOT emit a dall-e-only size that gpt-image rejects (400).
+    size = image._openai_size("16:9", image.DEFAULT_OPENAI_IMAGE_MODEL)
+    assert size in {"1024x1024", "1536x1024", "1024x1536", "auto"}
+
+
+def test_openai_size_env_override_beats_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_SIZE", "1536x1024")
+    assert image._openai_size("16:9", "dall-e-3") == "1536x1024"
+
+
+async def test_openai_compatible_image_b64(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_post(url: str, headers: dict, payload: dict) -> dict:
+        return {"data": [{"b64_json": base64.b64encode(b"PNGDATA").decode("ascii")}]}
+
+    monkeypatch.setattr(image, "_post_image_json", fake_post)
+    out = await image._openai_compatible_image(
+        "http://x/v1", "k", "gpt-image-1", "a cat", "1:1"
+    )
+    assert out.jpeg_bytes == b"PNGDATA"
+    assert out.mime_type == "image/png"
+    assert out.model == "gpt-image-1"
+
+
+async def test_openai_compatible_image_url_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_post(url: str, headers: dict, payload: dict) -> dict:
+        return {"data": [{"url": "http://cdn/img.jpg"}]}
+
+    async def fake_fetch(url: str) -> tuple[bytes, str]:
+        return b"JPEGDATA", "image/jpeg"
+
+    monkeypatch.setattr(image, "_post_image_json", fake_post)
+    monkeypatch.setattr(image, "_fetch_url_bytes", fake_fetch)
+    out = await image._openai_compatible_image(
+        "http://x/v1", "k", "dall-e-3", "a dog", "16:9"
+    )
+    assert out.jpeg_bytes == b"JPEGDATA"
+    assert out.mime_type == "image/jpeg"
+
+
+async def test_generate_image_routes_to_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMAGE_PROVIDER", "openai")
+    monkeypatch.setenv("IMAGE_API_KEY", "k")
+    sentinel = image.GeneratedImage(
+        jpeg_bytes=b"x", mime_type="image/png", model="gpt-image-1", provider_request_id=None
+    )
+    seen: dict[str, str] = {}
+
+    async def fake_openai(
+        base: str, key: str, model: str, prompt: str, aspect: str
+    ) -> image.GeneratedImage:
+        seen["base"] = base
+        seen["model"] = model
+        return sentinel
+
+    monkeypatch.setattr(image, "_openai_compatible_image", fake_openai)
+    out = await image.generate_image("a cat", "1:1")
+    assert out is sentinel
+    assert seen["base"] == "https://api.openai.com/v1"
+    assert seen["model"] == "gpt-image-1"
+
+
+async def test_generate_image_stays_on_fal_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAL_KEY", "fk")
+
+    async def fake_sub(model: str, args: dict) -> dict:
+        return {"images": [{"url": "http://x"}], "requestId": "r1"}
+
+    async def fake_fetch(info: dict) -> tuple[bytes, str]:
+        return b"jpeg", "image/jpeg"
+
+    monkeypatch.setattr(image, "_fal_subscribe", fake_sub)
+    monkeypatch.setattr(image, "_fetch_image_bytes", fake_fetch)
+    out = await image.generate_image("a cat", "16:9")
+    assert out.jpeg_bytes == b"jpeg"
+    assert out.model == image.TIER_MODELS["balanced"]
+    assert out.provider_request_id == "r1"

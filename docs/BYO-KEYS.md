@@ -80,6 +80,62 @@ pnpm dev
 # open http://localhost:3000/play
 ```
 
+## Use a different LLM provider (OpenAI / Anthropic / Google / local)
+
+By default everything routes through OpenRouter. If you'd rather use a direct
+vendor key or run the models locally, set `LLM_PROVIDER` (and friends) in the
+Modal secret — no code changes, no YAML. Leave it unset and nothing changes.
+
+Every target speaks the OpenAI wire protocol, so the only things that vary are
+the base URL and the key:
+
+| `LLM_PROVIDER` | Base URL | Models to set |
+|---|---|---|
+| `openrouter` (default) | OpenRouter | `OPENROUTER_VLM_MODEL` / `OPENROUTER_TEXT_MODEL` |
+| `openai` | `api.openai.com` | `LLM_VLM_MODEL=gpt-4o`, `LLM_TEXT_MODEL=gpt-4o-mini` |
+| `google` | Gemini OpenAI-compat | `LLM_VLM_MODEL=gemini-2.5-flash` |
+| `anthropic` | Anthropic OpenAI-compat | `LLM_VLM_MODEL=claude-3.5-sonnet` (runs at the `json_object` tier) |
+| `custom` | your `LLM_BASE_URL` | Ollama / LM Studio / vLLM — see below |
+
+Direct OpenAI, for example:
+
+```bash
+modal secret create openflipbook-secrets \
+  FAL_KEY="$FAL_KEY" \
+  LLM_PROVIDER=openai \
+  LLM_API_KEY="$OPENAI_API_KEY" \
+  LLM_VLM_MODEL=gpt-4o \
+  LLM_TEXT_MODEL=gpt-4o-mini
+```
+
+Local via Ollama (or LM Studio on `:1234`, vLLM on `:8000`):
+
+```bash
+LLM_PROVIDER=custom
+LLM_BASE_URL=http://localhost:11434/v1   # LLM_API_KEY can be blank for local
+LLM_VLM_MODEL=qwen2.5vl
+LLM_TEXT_MODEL=qwen2.5
+```
+
+**Honest caveat:** the whole UX rides on the click VLM grounding a tap into the
+right subject, and small local VLMs are weak at structured output. The backend
+detects this and walks a fallback ladder — `json_object` → forced tool-call →
+prompt-with-repair — so a weak model degrades to *thinner but valid* grounding
+instead of crashing. It does **not** make a 7B model ground like Gemini. Want to
+know which models actually hold up? That's what the click-bench (next milestone)
+is for. If your model supports JSON mode but isn't auto-detected, pin it with
+`LLM_STRUCTURED_OUTPUT=json_object`.
+
+Web search is OpenRouter-only; it's skipped on direct/local providers (the
+planner still runs, just without OpenRouter-brokered grounding).
+
+**Images** swap the same way with `IMAGE_PROVIDER` (default `fal`). Set it to
+`openai` (or `custom` + `IMAGE_BASE_URL` for an OpenAI-images-compatible local
+server) plus `IMAGE_API_KEY` / `IMAGE_MODEL`. fal keeps its fast/balanced/pro
+tiers; non-fal backends collapse to a single `IMAGE_MODEL`, and edit-mode stays
+on fal. Note fal is the expensive part of a page, so this is the bigger
+cost/lock-in lever — but image quality varies a lot by model.
+
 ## Cost notes
 
 - OpenRouter Qwen 2.5 72B Text ≈ $0.0005 / request; VLM 72B ≈ $0.0015 / click resolution.
