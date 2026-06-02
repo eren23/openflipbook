@@ -10,7 +10,7 @@ Endless Canvas has no hosted backend. To actually generate pages you need to pro
 
 Optional for v1:
 
-- Custom `OPENROUTER_VLM_MODEL` / `OPENROUTER_TEXT_MODEL` if you want to swap off the Qwen 2.5 defaults.
+- Custom `OPENROUTER_VLM_MODEL` / `OPENROUTER_TEXT_MODEL` if you want to swap off the Gemini 3 Flash defaults (e.g. `google/gemini-3-pro-preview` for sharper click-grounding, or a direct/local provider via `LLM_PROVIDER` — see below).
 
 ## 1. Accounts & keys
 
@@ -31,8 +31,8 @@ Modal reads secrets at runtime from a named secret, not your local `.env`. Creat
 modal secret create openflipbook-secrets \
   FAL_KEY="$FAL_KEY" \
   OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-  OPENROUTER_VLM_MODEL="qwen/qwen-2.5-vl-72b-instruct" \
-  OPENROUTER_TEXT_MODEL="qwen/qwen-2.5-72b-instruct" \
+  OPENROUTER_VLM_MODEL="google/gemini-3-flash-preview" \
+  OPENROUTER_TEXT_MODEL="google/gemini-3-flash-preview" \
   OPENROUTER_ENABLE_WEB_SEARCH=true
 ```
 
@@ -138,7 +138,7 @@ cost/lock-in lever — but image quality varies a lot by model.
 
 ## Cost notes
 
-- OpenRouter Qwen 2.5 72B Text ≈ $0.0005 / request; VLM 72B ≈ $0.0015 / click resolution.
+- OpenRouter Gemini 3 Flash ($0.50/M in, $3/M out): planner ≈ $0.0005 / request, VLM ≈ $0.0015 / click resolution.
 - fal nano-banana ≈ $0.02 / image (varies).
 - Modal CPU container (generate.py) idles at $0; wakes for a few seconds per request.
 - R2: storage is cheap, egress is free on the public dev URL.
