@@ -57,9 +57,18 @@ IMAGE_BASE_URLS: dict[str, str] = {
 }
 DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
 
-# Aspect → OpenAI image size. Defaults target dall-e-3 / gpt-image landscape +
-# portrait; override wholesale with IMAGE_SIZE for models with other valid sizes.
-OPENAI_SIZE_MAP: dict[str, str] = {
+# Aspect → image size. gpt-image-1 and dall-e-3 accept DIFFERENT size sets
+# (the only common one is 1024x1024), so pick per model family — otherwise the
+# default IMAGE_MODEL=gpt-image-1 would 400 on a 16:9 request (1792x1024 is a
+# dall-e size gpt-image rejects). Override wholesale with IMAGE_SIZE.
+GPT_IMAGE_SIZE_MAP: dict[str, str] = {
+    "16:9": "1536x1024",
+    "9:16": "1024x1536",
+    "1:1":  "1024x1024",
+    "4:3":  "1536x1024",
+    "3:4":  "1024x1536",
+}
+DALLE_SIZE_MAP: dict[str, str] = {
     "16:9": "1792x1024",
     "9:16": "1024x1792",
     "1:1":  "1024x1024",
@@ -147,10 +156,13 @@ def _image_model() -> str:
     return os.environ.get("IMAGE_MODEL", "").strip() or DEFAULT_OPENAI_IMAGE_MODEL
 
 
-def _openai_size(aspect_ratio: str) -> str:
-    return os.environ.get("IMAGE_SIZE", "").strip() or OPENAI_SIZE_MAP.get(
-        aspect_ratio, "1024x1024"
-    )
+def _openai_size(aspect_ratio: str, model: str) -> str:
+    override = os.environ.get("IMAGE_SIZE", "").strip()
+    if override:
+        return override
+    m = model.lower()
+    table = DALLE_SIZE_MAP if ("dall-e" in m or "dalle" in m) else GPT_IMAGE_SIZE_MAP
+    return table.get(aspect_ratio, "1024x1024")
 
 
 async def generate_image(
@@ -273,7 +285,7 @@ async def _openai_compatible_image(
     payload: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
-        "size": _openai_size(aspect_ratio),
+        "size": _openai_size(aspect_ratio, model),
         "n": 1,
     }
     data = await _post_image_json(url, headers, payload)

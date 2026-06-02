@@ -824,6 +824,68 @@ async def test_complete_json_empty_choices_returns_empty(
     assert parsed == {}
 
 
+# ---------- _with_json_hint + multi-step downgrade -----------------------
+
+
+def test_with_json_hint_appends_to_string_user_turn() -> None:
+    msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hello"}]
+    out = llm._with_json_hint(msgs, "HINTX")
+    assert out[-1]["content"].endswith("HINTX")
+    # The caller's original message is not mutated.
+    assert msgs[1]["content"] == "hello"
+
+
+def test_with_json_hint_appends_text_block_to_multimodal_user_turn() -> None:
+    # The click/extract/candidates hot path: content is [text, image_url]. The
+    # hint must ride as a trailing text block, preserve the image block, and not
+    # mutate the caller's list.
+    img_block = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abc"}}
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": [{"type": "text", "text": "q"}, img_block]},
+    ]
+    out = llm._with_json_hint(msgs, "HINTX")
+    last = out[-1]["content"]
+    assert isinstance(last, list)
+    assert last[-1] == {"type": "text", "text": "HINTX"}
+    assert img_block in last
+    assert len(msgs[1]["content"]) == 2
+
+
+async def test_complete_json_two_step_downgrade(monkeypatch: pytest.MonkeyPatch) -> None:
+    # gemini starts at json_object; json_object 400 -> tool 400 -> prompt succeeds.
+    fake = _FakeClient(
+        [_bad_request(), _bad_request(), _fake_response(content='{"subject": "Z"}')]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+    )
+    assert parsed == {"subject": "Z"}
+    assert len(fake.chat.completions.calls) == 3
+
+
+async def test_complete_json_reraises_when_all_rungs_400(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openai import BadRequestError
+
+    fake = _FakeClient([_bad_request(), _bad_request(), _bad_request()])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    with pytest.raises(BadRequestError):
+        await llm._complete_json(
+            model="google/gemini-3-flash-preview",
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=100,
+            temperature=0.2,
+            schema=llm.CLICK_SCHEMA,
+        )
+
+
 # ---------- contract-function integration (fake client end-to-end) --------
 
 

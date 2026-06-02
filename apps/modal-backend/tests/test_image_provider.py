@@ -227,14 +227,28 @@ def test_image_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert image._image_model() == "dall-e-3"
 
 
-def test_openai_size_maps_aspect() -> None:
-    assert image._openai_size("1:1") == "1024x1024"
-    assert image._openai_size("16:9") == "1792x1024"
+def test_openai_size_maps_aspect_for_gpt_image() -> None:
+    # gpt-image-1 valid sizes: 1024x1024 / 1536x1024 / 1024x1536 / auto.
+    assert image._openai_size("1:1", "gpt-image-1") == "1024x1024"
+    assert image._openai_size("16:9", "gpt-image-1") == "1536x1024"
+    assert image._openai_size("9:16", "gpt-image-1") == "1024x1536"
 
 
-def test_openai_size_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_size_maps_aspect_for_dalle() -> None:
+    assert image._openai_size("16:9", "dall-e-3") == "1792x1024"
+    assert image._openai_size("1:1", "dall-e-3") == "1024x1024"
+
+
+def test_openai_size_default_model_is_gpt_image_valid() -> None:
+    # Regression: the documented default (IMAGE_MODEL=gpt-image-1) + the default
+    # 16:9 aspect must NOT emit a dall-e-only size that gpt-image rejects (400).
+    size = image._openai_size("16:9", image.DEFAULT_OPENAI_IMAGE_MODEL)
+    assert size in {"1024x1024", "1536x1024", "1024x1536", "auto"}
+
+
+def test_openai_size_env_override_beats_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IMAGE_SIZE", "1536x1024")
-    assert image._openai_size("16:9") == "1536x1024"
+    assert image._openai_size("16:9", "dall-e-3") == "1536x1024"
 
 
 async def test_openai_compatible_image_b64(monkeypatch: pytest.MonkeyPatch) -> None:
