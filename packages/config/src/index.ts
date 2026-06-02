@@ -1,6 +1,11 @@
 export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 
-export type GenerateMode = "query" | "tap" | "edit";
+export type GenerateMode = "query" | "tap" | "edit" | "expand";
+
+// Scale of a node's subject relative to its parent's focal subject, for the
+// scale-space world map + zoom level-of-detail (M3). Composes into an integer
+// scale-level: component = -1, peer = 0, container = +1.
+export type ScaleKind = "component" | "peer" | "container";
 
 export type ImageTier = "fast" | "balanced" | "pro";
 
@@ -165,11 +170,40 @@ export interface GenerateStatusEvent {
   trace_id?: string;
 }
 
+// One bloomed neighbour from an "expand outward" pass (mode: "expand").
+// Streamed as each neighbour's page finishes generating, so the tray fills in
+// progressively. The client persists each as a relation:"expand" child of the
+// node that was expanded.
+export interface GenerateNeighborEvent {
+  type: "neighbor";
+  subject: string;
+  scale: ScaleKind;
+  page_title: string;
+  image_data_url: string;
+  image_model: string;
+  final_prompt: string;
+  session_id: string;
+  // Position within this bloom + how many were proposed, for tray ordering
+  // and a "3 of 4" progress read.
+  index: number;
+  total: number;
+  trace_id?: string;
+}
+
+// Terminal event of an expand bloom — the tray stops showing pending slots.
+export interface GenerateExpandDoneEvent {
+  type: "expand_done";
+  count: number;
+  trace_id?: string;
+}
+
 export type GenerateEvent =
   | GenerateStatusEvent
   | GenerateProgressEvent
   | GenerateFinalEvent
-  | GenerateErrorEvent;
+  | GenerateErrorEvent
+  | GenerateNeighborEvent
+  | GenerateExpandDoneEvent;
 
 export interface NodeRecord {
   id: string;
