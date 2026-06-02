@@ -1,5 +1,10 @@
 # BYO Keys — running Endless Canvas yourself
 
+> Just want to try it locally? Skip all of this — `cp .env.example .env`, add a
+> `FAL_KEY` (+ `OPENROUTER_API_KEY`), and `make demo`. The Docker stack runs
+> Mongo + blob storage locally so you don't provision R2/Mongo/Modal. See
+> [DOCKER.md](./DOCKER.md). This page is the hosted-production path.
+
 Endless Canvas has no hosted backend. To actually generate pages you need to provide:
 
 1. **OpenRouter API key** — planning + VLM click interpretation + web search.
