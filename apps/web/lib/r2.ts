@@ -3,18 +3,42 @@ import { readServerEnv, requireR2 } from "./env";
 
 let cachedClient: S3Client | null = null;
 
+export interface R2ClientConfig {
+  region: "auto";
+  endpoint: string;
+  forcePathStyle: boolean;
+  credentials: { accessKeyId: string; secretAccessKey: string };
+}
+
+/**
+ * S3Client config from resolved R2 settings. With no `endpoint` override we
+ * derive Cloudflare R2's account-scoped URL and use virtual-host addressing
+ * (today's behavior). With an explicit `endpoint` (e.g. a Minio container) we
+ * use it verbatim and switch to path-style addressing, which Minio needs.
+ * Pure so the endpoint/style decision is unit-tested without a live client.
+ */
+export function r2ClientConfig(r2: {
+  accountId: string | null;
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpoint: string | null;
+}): R2ClientConfig {
+  return {
+    region: "auto",
+    endpoint: r2.endpoint ?? `https://${r2.accountId}.r2.cloudflarestorage.com`,
+    forcePathStyle: Boolean(r2.endpoint),
+    credentials: {
+      accessKeyId: r2.accessKeyId,
+      secretAccessKey: r2.secretAccessKey,
+    },
+  };
+}
+
 function r2Client(): { s3: S3Client; bucket: string; publicBaseUrl: string } {
   const env = readServerEnv();
   const r2 = requireR2(env);
   if (!cachedClient) {
-    cachedClient = new S3Client({
-      region: "auto",
-      endpoint: `https://${r2.accountId}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: r2.accessKeyId,
-        secretAccessKey: r2.secretAccessKey,
-      },
-    });
+    cachedClient = new S3Client(r2ClientConfig(r2));
   }
   return {
     s3: cachedClient,
