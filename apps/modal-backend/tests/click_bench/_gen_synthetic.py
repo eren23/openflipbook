@@ -11,6 +11,11 @@ Run once to (re)generate images + synthetic.json::
     cd apps/modal-backend
     .venv/bin/python -m tests.click_bench._gen_synthetic
 
+Output is deterministic for a given Pillow version, but the default font + PNG
+encoder differ across Pillow releases, so regenerating on a different Pillow
+yields different image bytes (a dirty diff). The committed bytes keep the bench
+stable; only regenerate if you change the layout. Generated on Pillow 12.x.
+
 Replace these with real illustrations (see fixtures/v1.json _meta) for a
 meaningful leaderboard.
 """
@@ -65,8 +70,10 @@ PAGES: list[dict[str, Any]] = [
             {"label": "Mars", "shape": "circle", "box": (720, 250, 820, 350),
              "subject": "Mars", "alternates": ["the red planet", "planet mars"]},
         ],
-        "empty": {"point": (0.5, 0.08), "subject": "empty space",
-                  "notes": "dark sky above the bodies — no labelled object"},
+        # Clear sky BETWEEN the title (ends ~y72) and the bodies (start y210);
+        # y=0.08 used to land on the title text once the crosshair was drawn.
+        "empty": {"point": (0.5, 0.25), "subject": "empty space",
+                  "notes": "dark sky between the title and the bodies — no labelled object"},
     },
 ]
 

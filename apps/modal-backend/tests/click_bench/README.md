@@ -15,7 +15,8 @@ Per model, over a fixture set:
   (`groundable: false`), how many the VLM correctly flagged
   `groundable=false` instead of confabulating. This is the groundability
   gate's report card.
-- **Groundable accuracy** — predicted vs expected groundability over all cases.
+- **Groundable accuracy** — predicted vs expected groundability over all
+  completed (non-errored) cases.
 - **p50 ms** — median resolver latency.
 
 Subject metrics are computed over `groundable: true` cases only, so a

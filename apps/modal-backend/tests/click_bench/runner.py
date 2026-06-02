@@ -164,6 +164,8 @@ def _summarize(results: list[CaseResult]) -> dict[str, Any]:
         summary["n_groundable_false"] = len(non_groundable)
         summary["rejection_recall"] = round(correct_rejections / len(non_groundable), 4)
     if completed:
+        # Denominator is ALL completed cases (both classes), unlike the subject
+        # metrics above which are groundable-true only.
         correct = sum(1 for r in completed if r.predicted_groundable == r.expected_groundable)
         summary["groundable_accuracy"] = round(correct / len(completed), 4)
     latencies = [r.latency_ms for r in completed]
