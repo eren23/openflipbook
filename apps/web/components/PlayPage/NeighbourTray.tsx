@@ -34,7 +34,20 @@ const SCALE_META: Record<ScaleKind, { label: string; chip: string; width: string
 export default function NeighbourTray({ items, total, done, onPick, onClose }: Props) {
   const ready = items.filter((i) => i.imageDataUrl).length;
   const pendingCount = Math.max(0, total - items.length);
-  if (total === 0 && items.length === 0) return null;
+  // The bloom finished but proposed nothing usable (e.g. a weak VLM whose
+  // neighbours got dropped). Show a brief message instead of a blank bar — the
+  // page auto-closes it shortly after.
+  const empty = done && items.length === 0;
+  // Bloom started but no neighbours known yet (the VLM is still surveying):
+  // show activity rather than nothing while it thinks.
+  const proposing = !done && total === 0 && items.length === 0;
+  const status = empty
+    ? "No neighbours found nearby"
+    : done
+      ? `Around this page · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one`
+      : proposing
+        ? "Looking around…"
+        : `Looking around · ${ready} of ${total}`;
 
   return (
     <div
@@ -47,9 +60,7 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
           {!done && (
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-teal-500" />
           )}
-          {done
-            ? `Around this page · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one`
-            : `Looking around · ${ready} of ${total}`}
+          {status}
         </span>
         <button
           type="button"
@@ -112,6 +123,16 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
           Array.from({ length: pendingCount }).map((_, i) => (
             <span
               key={`pending-${i}`}
+              aria-hidden
+              className="h-16 w-24 shrink-0 animate-pulse rounded-lg border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/10"
+            />
+          ))}
+        {/* No total yet (still proposing) — a few placeholders so the survey
+            phase reads as "working", not a blank bar. */}
+        {proposing &&
+          Array.from({ length: 3 }).map((_, i) => (
+            <span
+              key={`proposing-${i}`}
               aria-hidden
               className="h-16 w-24 shrink-0 animate-pulse rounded-lg border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/10"
             />
