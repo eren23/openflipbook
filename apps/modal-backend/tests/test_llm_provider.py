@@ -981,3 +981,114 @@ async def test_precompute_candidates_parses(monkeypatch: pytest.MonkeyPatch) -> 
     out = await llm.precompute_click_candidates("data:image/jpeg;base64,abc", "Engine", "q")
     assert len(out) == 1
     assert out[0].subject == "Valve"
+
+
+# ---------- scale tag on click resolution (M3) ---------------------------
+
+
+def test_build_click_resolution_parses_scale() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "Factory", "scale": "container"},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="x",
+    )
+    assert res.scale == "container"
+
+
+def test_build_click_resolution_defaults_scale_to_peer() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "X"}, x_pct=0.5, y_pct=0.5, fallback_subject="x"
+    )
+    assert res.scale == "peer"
+
+
+def test_build_click_resolution_rejects_unknown_scale() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "X", "scale": "ginormous"},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="x",
+    )
+    assert res.scale == "peer"
+
+
+def test_build_click_resolution_scale_is_case_insensitive() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "X", "scale": "Component"},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="x",
+    )
+    assert res.scale == "component"
+
+
+# ---------- propose_neighbors (M3 expand bloom) --------------------------
+
+
+def test_build_neighbors_parses_and_tags_scale() -> None:
+    parsed = {
+        "neighbors": [
+            {"subject": "The Factory", "scale": "container", "note": "houses the boiler"},
+            {"subject": "Piston", "scale": "peer"},
+            {"subject": "Valve", "scale": "component"},
+        ]
+    }
+    out = llm._build_neighbors(parsed, max_neighbors=4)
+    assert [n.subject for n in out] == ["The Factory", "Piston", "Valve"]
+    assert [n.scale for n in out] == ["container", "peer", "component"]
+    assert out[0].note == "houses the boiler"
+
+
+def test_build_neighbors_defaults_bad_scale_to_peer() -> None:
+    out = llm._build_neighbors(
+        {"neighbors": [{"subject": "X", "scale": "weird"}]}, max_neighbors=4
+    )
+    assert out[0].scale == "peer"
+
+
+def test_build_neighbors_drops_empty_subject() -> None:
+    out = llm._build_neighbors(
+        {"neighbors": [{"subject": "  "}, {"subject": "Real"}]}, max_neighbors=4
+    )
+    assert [n.subject for n in out] == ["Real"]
+
+
+def test_build_neighbors_caps_at_max() -> None:
+    parsed = {"neighbors": [{"subject": f"N{i}"} for i in range(10)]}
+    out = llm._build_neighbors(parsed, max_neighbors=4)
+    assert len(out) == 4
+
+
+def test_build_neighbors_dedupes_by_normalized_subject() -> None:
+    parsed = {
+        "neighbors": [
+            {"subject": "The Boiler"},
+            {"subject": "the boiler"},
+            {"subject": "Coal"},
+        ]
+    }
+    out = llm._build_neighbors(parsed, max_neighbors=4)
+    assert [n.subject for n in out] == ["The Boiler", "Coal"]
+
+
+def test_build_neighbors_tolerates_garbage() -> None:
+    assert llm._build_neighbors({}, max_neighbors=4) == []
+    assert llm._build_neighbors({"neighbors": "nope"}, max_neighbors=4) == []
+
+
+async def test_propose_neighbors_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeClient(
+        [
+            _fake_response(
+                content='{"neighbors": [{"subject": "Factory", "scale": "container"}]}'
+            )
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    out = await llm.propose_neighbors(
+        "data:image/jpeg;base64,abc", "Boiler", "how a boiler works"
+    )
+    assert len(out) == 1
+    assert out[0].subject == "Factory"
+    assert out[0].scale == "container"

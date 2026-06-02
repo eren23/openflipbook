@@ -103,6 +103,11 @@ export interface NodeDoc extends Document {
   // Web-search citations the planner used. Backwards-compatible: missing on
   // pre-citations nodes and treated as []. Domain-deduped, max ~3.
   sources?: NodeSource[] | null;
+  // M3 scale-space: how this node relates to its parent ("descend" = tap-in /
+  // default, "expand" = bloomed neighbour) + its size vs the parent's focal
+  // subject. Optional + defaulted for back-compat with pre-M3 rows.
+  relation?: "descend" | "expand" | null;
+  scale?: "component" | "peer" | "container" | null;
   created_at: Date;
 }
 
@@ -118,6 +123,8 @@ export interface NodeInsert {
   final_prompt: string | null;
   click_in_parent?: ClickInParent | null;
   sources?: NodeSource[] | null;
+  relation?: "descend" | "expand" | null;
+  scale?: "component" | "peer" | "container" | null;
 }
 
 export interface NodeRow {
@@ -133,16 +140,20 @@ export interface NodeRow {
   final_prompt: string | null;
   click_in_parent: ClickInParent | null;
   sources: NodeSource[];
+  relation: "descend" | "expand";
+  scale: "component" | "peer" | "container";
   created_at: string;
 }
 
 function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, click_in_parent, sources, ...rest } = doc;
+  const { _id, created_at, click_in_parent, sources, relation, scale, ...rest } = doc;
   return {
     id: _id,
     ...rest,
     click_in_parent: click_in_parent ?? null,
     sources: Array.isArray(sources) ? sources : [],
+    relation: relation ?? "descend",
+    scale: scale ?? "peer",
     created_at: created_at.toISOString(),
   };
 }
@@ -162,6 +173,8 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     final_prompt: n.final_prompt,
     click_in_parent: n.click_in_parent ?? null,
     sources: n.sources ?? null,
+    relation: n.relation ?? "descend",
+    scale: n.scale ?? "peer",
     created_at: new Date(),
   };
   await collection.insertOne(doc);
