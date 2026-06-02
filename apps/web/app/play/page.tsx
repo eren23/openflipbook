@@ -44,6 +44,7 @@ import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
 import { StyleGallery } from "@/components/PlayPage/StyleGallery";
 import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
+import { BloomGlyph } from "@/components/PlayPage/BloomGlyph";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
 import { ClickRipple } from "@/components/PlayPage/ClickRipple";
@@ -1835,10 +1836,11 @@ export default function PlayPage() {
                   !page?.imageDataUrl ||
                   (bloom !== null && !bloom.done)
                 }
-                className="rounded-full bg-black/60 px-3 py-1 text-xs text-white hover:bg-black/75 disabled:opacity-50"
-                title="Expand outward (E) — bloom the world around this page"
+                className="flex items-center gap-1.5 rounded-full bg-teal-600/85 px-3 py-1 text-xs text-white hover:bg-teal-600 disabled:opacity-50"
+                title="Look around (E) — bloom the world around this page (vs tap a region to go in)"
               >
-                Expand
+                <BloomGlyph className="h-3.5 w-3.5" />
+                Around
               </button>
               <button
                 type="button"
