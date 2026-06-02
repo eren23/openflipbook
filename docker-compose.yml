@@ -1,3 +1,15 @@
+# openflipbook — one-command local stack.
+#
+#   cp .env.example .env          # drop in FAL_KEY (+ OPENROUTER_API_KEY)
+#   docker compose up --build     # → http://localhost:3000/play
+#
+# Stores run fully local: Mongo for metadata, Minio (S3-compatible) for image
+# blobs — so no Cloudflare R2 / hosted Mongo to provision. The AI still calls
+# out (OpenRouter for the planner/VLM, fal for images). For a no-cloud LLM too,
+# add the Ollama override:  make demo-local  (see docker-compose.local.yml).
+#
+# Overridable defaults are read from `.env` (compose auto-loads it); the values
+# below are the local-stack fallbacks, so a bare `docker compose up` just works.
 services:
   mongo:
     image: mongo:7
@@ -14,13 +26,58 @@ services:
       timeout: 5s
       retries: 5
 
+  # S3-compatible blob store — the local stand-in for Cloudflare R2. The web
+  # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
+  # URLs from the published port (R2_PUBLIC_BASE_URL=http://localhost:9000/...).
+  minio:
+    image: minio/minio:latest
+    container_name: openflipbook-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openflipbook}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+    ports:
+      - "9000:9000" # S3 API (also the browser's image origin)
+      - "9001:9001" # web console
+    volumes:
+      - minio-data:/data
+
+  # One-shot: create the bucket and make it anonymously readable, so the
+  # browser's <img src> GETs aren't 403'd. Retries until Minio answers, then
+  # exits — `web` waits on it completing.
+  minio-setup:
+    image: minio/mc:latest
+    container_name: openflipbook-minio-setup
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openflipbook}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      R2_BUCKET: ${R2_BUCKET:-openflipbook}
+    entrypoint: |
+      /bin/sh -c '
+      until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+        echo "waiting for minio..."; sleep 1;
+      done;
+      mc mb --ignore-existing "local/$${R2_BUCKET}";
+      mc anonymous set download "local/$${R2_BUCKET}";
+      echo "minio bucket $${R2_BUCKET} ready";
+      '
+    restart: "no"
+
   backend:
     build:
       context: .
       dockerfile: apps/modal-backend/Dockerfile
     container_name: openflipbook-backend
     restart: unless-stopped
+    # Keys come from the root .env (single-file demo) or, for power users, the
+    # backend's own .env which overrides it. Both optional; neither clobbers
+    # unset keys.
     env_file:
+      - path: .env
+        required: false
       - path: apps/modal-backend/.env
         required: false
     # Force public resolvers — Docker's default 127.0.0.11 link-local resolver
@@ -56,10 +113,16 @@ services:
       PORT: "3000"
       # Backend URL is fixed inside the compose network.
       MODAL_API_URL: http://backend:8787
-      # MONGODB_URI + MONGODB_DB come from apps/web/.env.local.
-      # If you want the local `mongo` service instead, set
-      #   MONGODB_URI=mongodb://mongo:27017
-      # in that file.
+      # Metadata → local Mongo by default.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_DB: ${MONGODB_DB:-openflipbook}
+      # Blobs → local Minio by default. R2_ENDPOINT makes the S3 client target
+      # Minio (path-style); the public base URL is what the browser fetches.
+      R2_ENDPOINT: ${R2_ENDPOINT:-http://minio:9000}
+      R2_BUCKET: ${R2_BUCKET:-openflipbook}
+      R2_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
+      R2_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:9000/openflipbook}
     ports:
       - "3000:3000"
     depends_on:
@@ -67,6 +130,9 @@ services:
         condition: service_healthy
       mongo:
         condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
 
 volumes:
   mongo-data:
+  minio-data:

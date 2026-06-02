@@ -28,6 +28,7 @@ function stubAllEmpty(): void {
 describe("readServerEnv", () => {
   it("returns all configured values when every var is set", () => {
     stubAll("x");
+    vi.stubEnv("R2_ENDPOINT", "x");
     const env = readServerEnv();
     expect(env).toEqual({
       MODAL_API_URL: "x",
@@ -38,6 +39,7 @@ describe("readServerEnv", () => {
       R2_SECRET_ACCESS_KEY: "x",
       R2_BUCKET: "x",
       R2_PUBLIC_BASE_URL: "x",
+      R2_ENDPOINT: "x",
     });
   });
 
@@ -69,6 +71,7 @@ describe("requireR2", () => {
       secretAccessKey: "present",
       bucket: "present",
       publicBaseUrl: "present",
+      endpoint: null,
     });
   });
 
@@ -96,6 +99,42 @@ describe("requireR2", () => {
       }
     });
   }
+});
+
+describe("R2_ENDPOINT seam (M4 local / Minio)", () => {
+  it("readServerEnv surfaces R2_ENDPOINT", () => {
+    vi.stubEnv("R2_ENDPOINT", "http://minio:9000");
+    expect(readServerEnv().R2_ENDPOINT).toBe("http://minio:9000");
+  });
+
+  it("readServerEnv R2_ENDPOINT is null when empty/unset", () => {
+    vi.stubEnv("R2_ENDPOINT", "");
+    expect(readServerEnv().R2_ENDPOINT).toBeNull();
+  });
+
+  it("requireR2 drops the R2_ACCOUNT_ID requirement when an explicit endpoint is set", () => {
+    stubAll("present");
+    vi.stubEnv("R2_ACCOUNT_ID", "");
+    vi.stubEnv("R2_ENDPOINT", "http://minio:9000");
+    const r2 = requireR2(readServerEnv());
+    expect(r2.endpoint).toBe("http://minio:9000");
+    expect(r2.accountId).toBeNull();
+  });
+
+  it("requireR2 still requires R2_ACCOUNT_ID when no endpoint is given", () => {
+    stubAll("present");
+    vi.stubEnv("R2_ACCOUNT_ID", "");
+    vi.stubEnv("R2_ENDPOINT", "");
+    try {
+      requireR2(readServerEnv());
+      throw new Error("expected requireR2 to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(EnvMissingError);
+      expect((e as Error).message).toBe(
+        "Missing required env vars: R2_ACCOUNT_ID"
+      );
+    }
+  });
 });
 
 describe("requireMongo", () => {
