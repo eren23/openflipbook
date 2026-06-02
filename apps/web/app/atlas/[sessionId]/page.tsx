@@ -151,6 +151,8 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
     createdAt: row.created_at,
     imageModel: row.image_model,
     promptAuthorModel: row.prompt_author_model,
+    relation: row.relation,
+    scale: row.scale,
   }));
 
   // Hydrate the world-memory registry for the entity-pin overlay. Best-
