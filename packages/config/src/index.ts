@@ -7,6 +7,10 @@ export type GenerateMode = "query" | "tap" | "edit" | "expand";
 // scale-level: component = -1, peer = 0, container = +1.
 export type ScaleKind = "component" | "peer" | "container";
 
+// How a node relates to its parent: "descend" = went IN (a tap child, the
+// default), "expand" = bloomed OUT (a neighbour from mode:"expand").
+export type NodeRelation = "descend" | "expand";
+
 export type ImageTier = "fast" | "balanced" | "pro";
 
 export type VideoTier = "fast" | "balanced" | "pro";
