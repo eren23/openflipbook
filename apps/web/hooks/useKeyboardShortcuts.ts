@@ -10,6 +10,8 @@ export interface KeyboardShortcutHandlers {
   onOpenQuickbar: () => void;
   onToggleHelp: () => void;
   onToggleCodex: () => void;
+  /** Bloom the world around the current page (mode:"expand"). */
+  onExpandOutward: () => void;
   onCloseOverlays: () => void;
   /** True while at least one overlay (help / quickbar / context menu / codex) is open. */
   anyOverlayOpen: boolean;
@@ -32,6 +34,7 @@ export interface KeyboardShortcutHandlers {
  *   M / m    Toggle map view
  *   T / t    Toggle time-scrubber
  *   K / k    Toggle codex panel
+ *   E / e    Expand outward (bloom neighbours)
  *   /        Open quickbar
  *   ?        Toggle help overlay
  *   Esc      Close any open overlay
@@ -45,6 +48,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onOpenQuickbar,
     onToggleHelp,
     onToggleCodex,
+    onExpandOutward,
     onCloseOverlays,
     anyOverlayOpen,
   } = handlers;
@@ -89,6 +93,9 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
       } else if (e.key.toLowerCase() === "k") {
         e.preventDefault();
         onToggleCodex();
+      } else if (e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        onExpandOutward();
       } else if (e.key === "/") {
         e.preventDefault();
         onOpenQuickbar();
@@ -109,6 +116,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onOpenQuickbar,
     onToggleHelp,
     onToggleCodex,
+    onExpandOutward,
     onCloseOverlays,
   ]);
 }

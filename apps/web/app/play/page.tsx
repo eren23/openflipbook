@@ -24,6 +24,7 @@ import WorldMap from "@/components/world-map";
 import DebugHud from "@/components/debug-hud";
 import SessionMinimap from "@/components/session-minimap";
 import WaterfallHUD from "@/components/waterfall-hud";
+import NeighbourTray, { type NeighbourItem } from "@/components/PlayPage/NeighbourTray";
 import CitationsChip from "@/components/citations-chip";
 import TimeScrubber from "@/components/time-scrubber";
 import {
@@ -110,6 +111,8 @@ interface PersistBody {
   final_prompt: string;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
+  relation?: "descend" | "expand";
+  scale?: "component" | "peer" | "container";
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -253,6 +256,11 @@ export default function PlayPage() {
     trailIdx: -1,
   });
   const [viewMode, setViewMode] = useState<"page" | "map">("page");
+  // Expand-outward bloom: the neighbours streaming into the tray (null = no
+  // bloom). Independent of the main `phase` so the focal page stays put.
+  const [bloom, setBloom] = useState<
+    { items: NeighbourItem[]; total: number; done: boolean } | null
+  >(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [clickRipple, setClickRipple] = useState<{
     xPx: number;
@@ -630,6 +638,116 @@ export default function PlayPage() {
     []
   );
 
+  // Expand outward: bloom the world AROUND the current page. Self-contained
+  // (its own fetch + SSE loop) so the tap/query/edit generate() path is
+  // untouched. Neighbour pages stream in as `neighbor` events, fill the tray,
+  // and persist as relation:"expand" children; `expand_done` ends the bloom.
+  const runExpand = useCallback(async (body: GenerateRequestBody) => {
+    const traceId = newTraceId();
+    try {
+      const response = await fetch("/api/generate-page", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [TRACE_HEADER]: traceId,
+        },
+        body: JSON.stringify({ ...body, trace_id: traceId }),
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`expand failed: HTTP ${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const trimmed = chunk.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload) continue;
+          const evt = JSON.parse(payload) as GenerateEvent;
+          if (evt.type === "neighbor") {
+            const item: NeighbourItem = {
+              key: `${body.current_node_id}-${evt.index}-${evt.subject}`,
+              subject: evt.subject,
+              scale: evt.scale,
+              imageDataUrl: evt.image_data_url,
+              nodeId: null,
+            };
+            setBloom((prev) => ({
+              items: [...(prev?.items ?? []), item],
+              total: evt.total,
+              done: prev?.done ?? false,
+            }));
+            void persistNode(
+              {
+                parent_id: body.current_node_id || null,
+                session_id: evt.session_id,
+                query: evt.subject,
+                page_title: evt.page_title,
+                image_data_url: evt.image_data_url,
+                image_model: evt.image_model,
+                prompt_author_model: evt.prompt_author_model,
+                aspect_ratio: body.aspect_ratio,
+                final_prompt: evt.final_prompt,
+                relation: "expand",
+                scale: evt.scale,
+              },
+              traceId
+            ).then((saved) => {
+              if (saved) {
+                setBloom((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        items: prev.items.map((it) =>
+                          it.key === item.key ? { ...it, nodeId: saved.id } : it
+                        ),
+                      }
+                    : prev
+                );
+              }
+            });
+          } else if (evt.type === "expand_done") {
+            setBloom((prev) => (prev ? { ...prev, done: true } : prev));
+          } else if (evt.type === "error") {
+            throw new Error(evt.message);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      // A failed bloom shouldn't disturb the focal page — just stop the
+      // tray's pending spinner and keep whatever neighbours arrived.
+      setBloom((prev) => (prev ? { ...prev, done: true } : prev));
+    }
+  }, []);
+
+  const triggerExpand = useCallback(() => {
+    if (!page || !page.imageDataUrl || phase === "generating") return;
+    if (bloom && !bloom.done) return;
+    setBloom({ items: [], total: 0, done: false });
+    void runExpand({
+      query: page.query,
+      aspect_ratio: "16:9",
+      web_search: false,
+      session_id: page.sessionId,
+      current_node_id: page.nodeId ?? "",
+      mode: "expand",
+      image: page.imageDataUrl,
+      parent_query: page.query,
+      parent_title: page.title,
+      image_tier: imageTier,
+      output_locale: resolveOutputLocale(outputLocale),
+      ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+    });
+  }, [page, phase, bloom, runExpand, imageTier, outputLocale, styleAnchor]);
+
   const acceptUploadedImage = useCallback(
     async (file: File) => {
       if (!file.type.startsWith("image/")) {
@@ -860,6 +978,7 @@ export default function PlayPage() {
     onOpenQuickbar: () => setQuickbarOpen(true),
     onToggleHelp: () => setHelpOpen((h) => !h),
     onToggleCodex: () => setCodexOpen((c) => !c),
+    onExpandOutward: triggerExpand,
     onCloseOverlays: () => {
       setHelpOpen(false);
       setQuickbarOpen(false);
@@ -1795,6 +1914,19 @@ export default function PlayPage() {
             <div className="absolute right-3 top-3 flex gap-2">
               <button
                 type="button"
+                onClick={triggerExpand}
+                disabled={
+                  phase === "generating" ||
+                  !page?.imageDataUrl ||
+                  (bloom !== null && !bloom.done)
+                }
+                className="rounded-full bg-black/60 px-3 py-1 text-xs text-white hover:bg-black/75 disabled:opacity-50"
+                title="Expand outward (E) — bloom the world around this page"
+              >
+                Expand
+              </button>
+              <button
+                type="button"
                 onClick={() => setCodexOpen((c) => !c)}
                 aria-pressed={codexOpen}
                 className={
@@ -1992,6 +2124,18 @@ export default function PlayPage() {
             );
           }}
           onClose={() => setScrubberOpen(false)}
+        />
+      )}
+
+      {bloom && (
+        <NeighbourTray
+          items={bloom.items}
+          total={bloom.total}
+          done={bloom.done}
+          onPick={(item) => {
+            if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
+          }}
+          onClose={() => setBloom(null)}
         />
       )}
 

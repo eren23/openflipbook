@@ -185,6 +185,7 @@ export interface GenerateNeighborEvent {
   page_title: string;
   image_data_url: string;
   image_model: string;
+  prompt_author_model: string;
   final_prompt: string;
   session_id: string;
   // Position within this bloom + how many were proposed, for tray ordering
