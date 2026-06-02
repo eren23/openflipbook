@@ -20,6 +20,7 @@ import {
   type LayoutInput,
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
+import type { NodeRelation, ScaleKind } from "@openflipbook/config";
 
 export interface AtlasNode {
   id: string;
@@ -31,6 +32,11 @@ export interface AtlasNode {
   createdAt: string;
   imageModel: string;
   promptAuthorModel: string;
+  // M3 scale-space: "descend" = tapped-in child (depth), "expand" = bloomed
+  // neighbour (breadth); scale sizes the tile. Optional so pre-M3 sessions and
+  // the existing fixtures render unchanged (default descend/peer).
+  relation?: NodeRelation;
+  scale?: ScaleKind;
 }
 
 interface AtlasViewProps {
@@ -132,6 +138,8 @@ export default function AtlasView({
         imageDataUrl: n.imageUrl,
         title: n.title,
         ...(n.clickInParent ? { clickInParent: n.clickInParent } : {}),
+        ...(n.relation ? { relation: n.relation } : {}),
+        ...(n.scale ? { scale: n.scale } : {}),
       })),
     [nodes]
   );
@@ -431,20 +439,43 @@ export default function AtlasView({
                 >
                   <path d="M0,0 L10,5 L0,10 z" fill="rgba(15,15,15,0.55)" />
                 </marker>
+                <marker
+                  id="ofb-atlas-arrow-expand"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0,0 L10,5 L0,10 z" fill="rgba(13,148,136,0.7)" />
+                </marker>
               </defs>
               {connectors.map((c) => {
                 const childDepth = depthById.get(c.toNodeId) ?? 0;
                 const delay = reduced ? 0 : childDepth * STAGGER_MS;
+                // Breadth (expand) edges read in teal with a hollow anchor —
+                // no tap happened, the world bloomed outward. Depth (descend)
+                // edges keep the ink line + red tap dot.
+                const isExpand =
+                  (byId.get(c.toNodeId)?.relation ?? "descend") === "expand";
                 return (
-                  <g key={c.fromNodeId + "->" + c.toNodeId}>
+                  <g
+                    key={c.fromNodeId + "->" + c.toNodeId}
+                    data-relation={isExpand ? "expand" : "descend"}
+                  >
                     <path
                       d={arcPath(c.from, c.to)}
                       fill="none"
-                      stroke="rgba(15,15,15,0.55)"
+                      stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
                       strokeWidth={8}
                       strokeLinecap="round"
                       strokeDasharray="2 22"
-                      markerEnd="url(#ofb-atlas-arrow)"
+                      markerEnd={
+                        isExpand
+                          ? "url(#ofb-atlas-arrow-expand)"
+                          : "url(#ofb-atlas-arrow)"
+                      }
                       className={reduced ? undefined : "ofb-edge-draw ofb-edge-flow"}
                       style={
                         reduced
@@ -456,8 +487,8 @@ export default function AtlasView({
                       cx={c.from.x}
                       cy={c.from.y}
                       r={14}
-                      fill="rgba(239,68,68,0.85)"
-                      stroke="white"
+                      fill={isExpand ? "none" : "rgba(239,68,68,0.85)"}
+                      stroke={isExpand ? "rgba(13,148,136,0.85)" : "white"}
                       strokeWidth={4}
                       className={reduced ? undefined : "ofb-edge-draw"}
                       style={
@@ -479,10 +510,13 @@ export default function AtlasView({
             const depth = depthById.get(p.nodeId) ?? 0;
             const delay = reduced ? 0 : depth * STAGGER_MS;
             const tint = depthTint(depth);
+            const isExpand = (p.relation ?? "descend") === "expand";
             return (
               <div
                 key={p.nodeId}
                 data-tile="1"
+                data-node-id={p.nodeId}
+                data-relation={isExpand ? "expand" : "descend"}
                 className={
                   "absolute overflow-visible " +
                   (reduced ? "" : "ofb-tile-in")
@@ -525,7 +559,9 @@ export default function AtlasView({
                   style={{
                     borderColor: isFocused
                       ? "rgba(239, 68, 68, 0.95)"
-                      : "rgba(0,0,0,0.2)",
+                      : isExpand
+                        ? "rgba(13,148,136,0.45)"
+                        : "rgba(0,0,0,0.2)",
                     borderWidth: isFocused ? 6 : 2,
                     filter: `saturate(${tint.saturation})`,
                     opacity: isFocused ? 1 : tint.opacity,
@@ -580,8 +616,9 @@ export default function AtlasView({
                     <div className="text-xs uppercase tracking-wide opacity-50">
                       depth {depth}
                       {p.parentId
-                        ? ` · child of ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
+                        ? ` · ${isExpand ? "expanded from" : "child of"} ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
                         : " · root"}
+                      {p.scale && p.scale !== "peer" ? ` · ${p.scale}` : ""}
                     </div>
                     <div className="mt-1 font-display text-base font-bold leading-tight">
                       {node.title}
