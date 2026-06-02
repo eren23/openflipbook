@@ -17,9 +17,18 @@ function item(over: Partial<NeighbourItem> = {}): NeighbourItem {
 const noop = () => {};
 
 describe("NeighbourTray", () => {
-  it("renders nothing when there's no bloom", () => {
+  it("shows a proposing state before any neighbour arrives (not a blank bar)", () => {
     render(<NeighbourTray items={[]} total={0} done={false} onPick={noop} onClose={noop} />);
-    expect(screen.queryByRole("region")).toBeNull();
+    expect(screen.getByRole("region")).toBeTruthy();
+    expect(screen.getByText(/Looking around/)).toBeTruthy();
+  });
+
+  it("shows a 'no neighbours found' message + stays closeable when a bloom finishes empty", () => {
+    const onClose = vi.fn();
+    render(<NeighbourTray items={[]} total={0} done onPick={noop} onClose={onClose} />);
+    expect(screen.getByText(/no neighbours found/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close neighbours" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("renders one card per neighbour with its subject + scale label", () => {
