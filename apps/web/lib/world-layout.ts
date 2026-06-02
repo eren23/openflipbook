@@ -1,3 +1,5 @@
+import type { NodeRelation, ScaleKind } from "@openflipbook/config";
+
 export interface WorldRect {
   x: number;
   y: number;
@@ -13,6 +15,10 @@ export interface LaidOutPage {
   parentId: string | null;
   /** World-coord point on the parent's rect where the user clicked. Null for roots. */
   parentClickPoint: { x: number; y: number } | null;
+  /** M3 scale-space: how this node relates to its parent + its relative size,
+   *  so the atlas can render expand-neighbours / scale distinctly. */
+  relation?: NodeRelation;
+  scale?: ScaleKind;
 }
 
 export interface Connector {
@@ -30,6 +36,8 @@ export interface LayoutInput {
   imageDataUrl: string | null;
   title: string;
   clickInParent?: { xPct: number; yPct: number };
+  relation?: NodeRelation;
+  scale?: ScaleKind;
 }
 
 export interface LayoutResult {
@@ -41,6 +49,22 @@ const PAGE_W = 1600;
 const PAGE_H = 900;
 const GAP = 280;
 const ROOT_GAP = 600;
+
+/** Rect size relative to a peer/default node — containers loom larger, parts
+ *  shrink. `undefined`/`peer` returns 1.0 so scale-less nodes are unchanged. */
+function sizeFactor(scale?: ScaleKind): number {
+  if (scale === "container") return 1.5;
+  if (scale === "component") return 0.6;
+  return 1.0;
+}
+
+/** Multiplier on the parent→child radius — bigger things sit farther out
+ *  (pan out to reach), smaller things nearer (zoom in). 1.0 for peer/default. */
+function radiusBias(scale?: ScaleKind): number {
+  if (scale === "container") return 1.5;
+  if (scale === "component") return 0.85;
+  return 1.0;
+}
 
 /**
  * Lay pages out as a branching land. Each child sits outside its parent
@@ -85,12 +109,14 @@ export function layoutPages(pages: LayoutInput[]): LayoutResult {
               y: parentRect.y + page.clickInParent.yPct * parentRect.h,
             }
           : null,
+      ...(page.relation ? { relation: page.relation } : {}),
+      ...(page.scale ? { scale: page.scale } : {}),
     });
     placed.push(rect);
 
     const kids = childrenOf.get(page.nodeId) ?? [];
     for (const kid of kids) {
-      const kidRect = positionChild(rect, kid.clickInParent, placed);
+      const kidRect = positionChild(rect, kid.clickInParent, placed, kid.scale);
       if (kid.clickInParent) {
         const clickWorld = {
           x: rect.x + kid.clickInParent.xPct * rect.w,
@@ -127,7 +153,8 @@ export function layoutPages(pages: LayoutInput[]): LayoutResult {
 function positionChild(
   parent: WorldRect,
   click: { xPct: number; yPct: number } | undefined,
-  placed: WorldRect[]
+  placed: WorldRect[],
+  scale?: ScaleKind
 ): WorldRect {
   const cx = parent.x + parent.w / 2;
   const cy = parent.y + parent.h / 2;
@@ -146,9 +173,16 @@ function positionChild(
     baseAngle = 0;
   }
 
-  // Distance from parent center to child center: enough that bounding boxes
-  // don't overlap on either axis. Use the larger of the two needed offsets.
-  const radius = Math.hypot(PAGE_W, PAGE_H) * 0.55 + GAP;
+  // Child size from scale: containers loom larger, components shrink.
+  const childW = PAGE_W * sizeFactor(scale);
+  const childH = PAGE_H * sizeFactor(scale);
+  // Distance from parent center to child center. For a peer/default child this
+  // equals the original radius (back-compat); it grows with child size so a
+  // bigger child still clears, and is biased by scale so bigger things sit
+  // farther out and smaller things nearer — the scale gradient.
+  const radius =
+    (Math.hypot(PAGE_W, PAGE_H) + Math.hypot(childW, childH)) * 0.275 * radiusBias(scale) +
+    GAP;
 
   // Try base angle first, then nudge ±15° outward up to ±90° each side.
   const tries = [0, 15, -15, 30, -30, 45, -45, 60, -60, 90, -90, 135, -135, 180];
@@ -157,10 +191,10 @@ function positionChild(
     const ccx = cx + Math.cos(ang) * radius;
     const ccy = cy + Math.sin(ang) * radius;
     const rect: WorldRect = {
-      x: ccx - PAGE_W / 2,
-      y: ccy - PAGE_H / 2,
-      w: PAGE_W,
-      h: PAGE_H,
+      x: ccx - childW / 2,
+      y: ccy - childH / 2,
+      w: childW,
+      h: childH,
     };
     if (!collidesAny(rect, placed)) return rect;
   }
@@ -170,10 +204,10 @@ function positionChild(
   const ccx = cx + Math.cos(ang) * radius * 1.6;
   const ccy = cy + Math.sin(ang) * radius * 1.6;
   return {
-    x: ccx - PAGE_W / 2,
-    y: ccy - PAGE_H / 2,
-    w: PAGE_W,
-    h: PAGE_H,
+    x: ccx - childW / 2,
+    y: ccy - childH / 2,
+    w: childW,
+    h: childH,
   };
 }
 
