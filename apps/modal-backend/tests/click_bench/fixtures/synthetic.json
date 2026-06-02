@@ -109,13 +109,13 @@
       "case_id": "solar_system_empty",
       "image_path": "images/synthetic/solar_system.png",
       "x_pct": 0.5,
-      "y_pct": 0.08,
+      "y_pct": 0.25,
       "parent_title": "Inner Solar System",
       "parent_query": "what is the inner solar system",
       "expected_subject": "empty space",
       "alternates": [],
       "groundable": false,
-      "notes": "dark sky above the bodies \u2014 no labelled object"
+      "notes": "dark sky between the title and the bodies \u2014 no labelled object"
     }
   ]
 }
