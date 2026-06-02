@@ -2020,7 +2020,10 @@ export default function PlayPage() {
         onMutate={mutateWorldEntity}
       />
 
-      {phase === "ready" && !helpOpen && (
+      {/* Hide the coach while the Around tray is open — both are pinned to
+          bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
+          It returns when the tray is closed. */}
+      {phase === "ready" && !helpOpen && !bloom && (
         <FirstRunCoach onShowHelp={() => setHelpOpen(true)} />
       )}
 
