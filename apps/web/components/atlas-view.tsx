@@ -15,11 +15,14 @@ import {
   fitAllCamera,
   fitCamera,
   layoutPages,
+  lodOpacity,
+  scaleStep,
   type Connector,
   type LaidOutPage,
   type LayoutInput,
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
+import type { NodeRelation, ScaleKind } from "@openflipbook/config";
 
 export interface AtlasNode {
   id: string;
@@ -31,6 +34,11 @@ export interface AtlasNode {
   createdAt: string;
   imageModel: string;
   promptAuthorModel: string;
+  // M3 scale-space: "descend" = tapped-in child (depth), "expand" = bloomed
+  // neighbour (breadth); scale sizes the tile. Optional so pre-M3 sessions and
+  // the existing fixtures render unchanged (default descend/peer).
+  relation?: NodeRelation;
+  scale?: ScaleKind;
 }
 
 interface AtlasViewProps {
@@ -132,6 +140,8 @@ export default function AtlasView({
         imageDataUrl: n.imageUrl,
         title: n.title,
         ...(n.clickInParent ? { clickInParent: n.clickInParent } : {}),
+        ...(n.relation ? { relation: n.relation } : {}),
+        ...(n.scale ? { scale: n.scale } : {}),
       })),
     [nodes]
   );
@@ -155,49 +165,77 @@ export default function AtlasView({
     return m;
   }, [entities]);
 
-  const { laid, connectors, depthById, byId } = useMemo<{
-    laid: LaidOutPage[];
-    connectors: Connector[];
-    depthById: Map<string, number>;
-    byId: Map<string, AtlasNode>;
-  }>(() => {
-    const result = layoutPages(layoutInputs);
-    const m = new Map<string, AtlasNode>();
-    for (const n of nodes) m.set(n.id, n);
-    // BFS depth from each root, used for stagger order on reveal.
-    const depth = new Map<string, number>();
-    const queue: { id: string; d: number }[] = [];
-    for (const n of nodes) if (n.parentId == null) queue.push({ id: n.id, d: 0 });
-    const childrenOf = new Map<string, string[]>();
-    for (const n of nodes) {
-      if (!n.parentId) continue;
-      const arr = childrenOf.get(n.parentId) ?? [];
-      arr.push(n.id);
-      childrenOf.set(n.parentId, arr);
-    }
-    while (queue.length) {
-      const { id, d } = queue.shift()!;
-      if (depth.has(id)) continue;
-      depth.set(id, d);
-      for (const child of childrenOf.get(id) ?? []) {
-        queue.push({ id: child, d: d + 1 });
+  const { laid, connectors, depthById, scaleLevelById, lodActive, byId } =
+    useMemo<{
+      laid: LaidOutPage[];
+      connectors: Connector[];
+      depthById: Map<string, number>;
+      scaleLevelById: Map<string, number>;
+      lodActive: boolean;
+      byId: Map<string, AtlasNode>;
+    }>(() => {
+      const result = layoutPages(layoutInputs);
+      const m = new Map<string, AtlasNode>();
+      for (const n of nodes) m.set(n.id, n);
+      // One BFS computes both depth (stagger order) and absolute scale-level
+      // (parent's level + this node's scale step) — the level the LOD band
+      // maps onto.
+      const depth = new Map<string, number>();
+      const level = new Map<string, number>();
+      const queue: { id: string; d: number; lvl: number }[] = [];
+      for (const n of nodes)
+        if (n.parentId == null) queue.push({ id: n.id, d: 0, lvl: 0 });
+      const childrenOf = new Map<string, string[]>();
+      for (const n of nodes) {
+        if (!n.parentId) continue;
+        const arr = childrenOf.get(n.parentId) ?? [];
+        arr.push(n.id);
+        childrenOf.set(n.parentId, arr);
       }
-    }
-    // Orphans (parent_id pointed outside this session) — give them their own
-    // depth bucket starting after the deepest known one.
-    let maxD = 0;
-    for (const v of depth.values()) if (v > maxD) maxD = v;
-    let orphanD = maxD + 1;
-    for (const n of nodes) {
-      if (!depth.has(n.id)) depth.set(n.id, orphanD++);
-    }
-    return {
-      laid: result.pages,
-      connectors: result.connectors,
-      depthById: depth,
-      byId: m,
-    };
-  }, [layoutInputs, nodes]);
+      while (queue.length) {
+        const { id, d, lvl } = queue.shift()!;
+        if (depth.has(id)) continue;
+        depth.set(id, d);
+        level.set(id, lvl);
+        for (const child of childrenOf.get(id) ?? []) {
+          queue.push({
+            id: child,
+            d: d + 1,
+            lvl: lvl + scaleStep(m.get(child)?.scale),
+          });
+        }
+      }
+      // Orphans (parent_id pointed outside this session) — give them their own
+      // depth bucket starting after the deepest known one, scale-level 0.
+      let maxD = 0;
+      for (const v of depth.values()) if (v > maxD) maxD = v;
+      let orphanD = maxD + 1;
+      for (const n of nodes) {
+        if (!depth.has(n.id)) {
+          depth.set(n.id, orphanD++);
+          level.set(n.id, 0);
+        }
+      }
+      // LOD only kicks in when the session actually spans multiple scale
+      // levels; an all-peer (pre-M3) session stays uniformly visible.
+      const active = new Set(level.values()).size > 1;
+      return {
+        laid: result.pages,
+        connectors: result.connectors,
+        depthById: depth,
+        scaleLevelById: level,
+        lodActive: active,
+        byId: m,
+      };
+    }, [layoutInputs, nodes]);
+
+  // Fit-all zoom is the reference the LOD bands are centred on (peers peak
+  // here). Recomputed when the map or viewport changes.
+  const fitZoom = useMemo(
+    () => fitAllCamera(laid, viewport.w, viewport.h).zoom,
+    [laid, viewport.w, viewport.h]
+  );
+  const lodOn = lodActive && fitZoom > 0 && Number.isFinite(fitZoom);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -431,20 +469,53 @@ export default function AtlasView({
                 >
                   <path d="M0,0 L10,5 L0,10 z" fill="rgba(15,15,15,0.55)" />
                 </marker>
+                <marker
+                  id="ofb-atlas-arrow-expand"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0,0 L10,5 L0,10 z" fill="rgba(13,148,136,0.7)" />
+                </marker>
               </defs>
               {connectors.map((c) => {
                 const childDepth = depthById.get(c.toNodeId) ?? 0;
                 const delay = reduced ? 0 : childDepth * STAGGER_MS;
+                // Breadth (expand) edges read in teal with a hollow anchor —
+                // no tap happened, the world bloomed outward. Depth (descend)
+                // edges keep the ink line + red tap dot.
+                const isExpand =
+                  (byId.get(c.toNodeId)?.relation ?? "descend") === "expand";
+                // Fade an edge with the node it points at, so it reveals/hides
+                // in lockstep with the LOD band.
+                const lod = lodOn
+                  ? lodOpacity(
+                      scaleLevelById.get(c.toNodeId) ?? 0,
+                      camera.zoom,
+                      fitZoom
+                    )
+                  : 1;
                 return (
-                  <g key={c.fromNodeId + "->" + c.toNodeId}>
+                  <g
+                    key={c.fromNodeId + "->" + c.toNodeId}
+                    data-relation={isExpand ? "expand" : "descend"}
+                    opacity={lod}
+                  >
                     <path
                       d={arcPath(c.from, c.to)}
                       fill="none"
-                      stroke="rgba(15,15,15,0.55)"
+                      stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
                       strokeWidth={8}
                       strokeLinecap="round"
                       strokeDasharray="2 22"
-                      markerEnd="url(#ofb-atlas-arrow)"
+                      markerEnd={
+                        isExpand
+                          ? "url(#ofb-atlas-arrow-expand)"
+                          : "url(#ofb-atlas-arrow)"
+                      }
                       className={reduced ? undefined : "ofb-edge-draw ofb-edge-flow"}
                       style={
                         reduced
@@ -456,8 +527,8 @@ export default function AtlasView({
                       cx={c.from.x}
                       cy={c.from.y}
                       r={14}
-                      fill="rgba(239,68,68,0.85)"
-                      stroke="white"
+                      fill={isExpand ? "none" : "rgba(239,68,68,0.85)"}
+                      stroke={isExpand ? "rgba(13,148,136,0.85)" : "white"}
                       strokeWidth={4}
                       className={reduced ? undefined : "ofb-edge-draw"}
                       style={
@@ -479,10 +550,18 @@ export default function AtlasView({
             const depth = depthById.get(p.nodeId) ?? 0;
             const delay = reduced ? 0 : depth * STAGGER_MS;
             const tint = depthTint(depth);
+            const isExpand = (p.relation ?? "descend") === "expand";
+            const scaleLevel = scaleLevelById.get(p.nodeId) ?? 0;
+            const lodFactor = lodOn
+              ? lodOpacity(scaleLevel, camera.zoom, fitZoom)
+              : 1;
             return (
               <div
                 key={p.nodeId}
                 data-tile="1"
+                data-node-id={p.nodeId}
+                data-relation={isExpand ? "expand" : "descend"}
+                data-scale-level={scaleLevel}
                 className={
                   "absolute overflow-visible " +
                   (reduced ? "" : "ofb-tile-in")
@@ -525,10 +604,12 @@ export default function AtlasView({
                   style={{
                     borderColor: isFocused
                       ? "rgba(239, 68, 68, 0.95)"
-                      : "rgba(0,0,0,0.2)",
+                      : isExpand
+                        ? "rgba(13,148,136,0.45)"
+                        : "rgba(0,0,0,0.2)",
                     borderWidth: isFocused ? 6 : 2,
                     filter: `saturate(${tint.saturation})`,
-                    opacity: isFocused ? 1 : tint.opacity,
+                    opacity: isFocused ? 1 : tint.opacity * lodFactor,
                   }}
                   title={`${p.title} — click to open · shift-click to focus`}
                 >
@@ -580,8 +661,9 @@ export default function AtlasView({
                     <div className="text-xs uppercase tracking-wide opacity-50">
                       depth {depth}
                       {p.parentId
-                        ? ` · child of ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
+                        ? ` · ${isExpand ? "expanded from" : "child of"} ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
                         : " · root"}
+                      {p.scale && p.scale !== "peer" ? ` · ${p.scale}` : ""}
                     </div>
                     <div className="mt-1 font-display text-base font-bold leading-tight">
                       {node.title}
