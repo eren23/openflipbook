@@ -266,6 +266,15 @@ export default function PlayPage() {
     start: startBloom,
     close: closeBloom,
   } = useExpandBloom(persistNode);
+  // An empty bloom (VLM proposed nothing usable) shows its brief "no neighbours
+  // found" message, then auto-dismisses — so the coach + Around return instead
+  // of a dead tray lingering at the bottom.
+  useEffect(() => {
+    if (bloom?.done && bloom.items.length === 0) {
+      const t = setTimeout(closeBloom, 2600);
+      return () => clearTimeout(t);
+    }
+  }, [bloom?.done, bloom?.items.length, closeBloom]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [clickRipple, setClickRipple] = useState<{
     xPx: number;

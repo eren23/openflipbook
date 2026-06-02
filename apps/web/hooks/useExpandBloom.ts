@@ -140,6 +140,13 @@ export function useExpandBloom(persist: PersistNeighbour): {
               }
             }
           }
+          // Stream closed cleanly. Make sure the bloom resolves even if the
+          // backend never sent an explicit expand_done (e.g. an early bail) —
+          // otherwise `done` would stay false: Around stuck disabled, the tray
+          // stuck on its spinner. Idempotent when expand_done already landed.
+          if (!ac.signal.aborted) {
+            setBloom((prev) => (prev ? { ...prev, done: true } : prev));
+          }
         } catch (err) {
           if ((err as Error).name === "AbortError") return;
           // A failed bloom shouldn't disturb the focal page — just stop the

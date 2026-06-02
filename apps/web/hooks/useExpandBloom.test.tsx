@@ -104,6 +104,23 @@ describe("useExpandBloom", () => {
     );
   });
 
+  it("resolves the bloom (done) when the stream closes without an expand_done", async () => {
+    // Defensive: if the backend ever closes the stream without a terminal
+    // expand_done (e.g. an early bail), the bloom must still flip to done so
+    // Around re-enables and the tray shows its terminal state — not spin forever.
+    const persist = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(cannedResponse([{ type: "status", stage: "planning" }])),
+    );
+    const { result } = renderHook(() =>
+      useExpandBloom(persist as unknown as PersistNeighbour),
+    );
+    act(() => result.current.start(BODY));
+    await waitFor(() => expect(result.current.bloom?.done).toBe(true));
+    expect(result.current.bloom?.items).toEqual([]);
+  });
+
   it("a stream error marks the bloom done instead of throwing", async () => {
     const persist = vi.fn();
     vi.stubGlobal(
