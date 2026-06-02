@@ -261,6 +261,10 @@ export default function PlayPage() {
   const [bloom, setBloom] = useState<
     { items: NeighbourItem[]; total: number; done: boolean } | null
   >(null);
+  // Aborts the in-flight bloom stream when the tray closes or a new bloom
+  // starts, so late `neighbor` events can't resurrect a closed tray or mix
+  // two blooms into one tray.
+  const bloomAbortRef = useRef<AbortController | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [clickRipple, setClickRipple] = useState<{
     xPx: number;
@@ -644,6 +648,8 @@ export default function PlayPage() {
   // and persist as relation:"expand" children; `expand_done` ends the bloom.
   const runExpand = useCallback(async (body: GenerateRequestBody) => {
     const traceId = newTraceId();
+    const ac = new AbortController();
+    bloomAbortRef.current = ac;
     try {
       const response = await fetch("/api/generate-page", {
         method: "POST",
@@ -652,6 +658,7 @@ export default function PlayPage() {
           [TRACE_HEADER]: traceId,
         },
         body: JSON.stringify({ ...body, trace_id: traceId }),
+        signal: ac.signal,
       });
       if (!response.ok || !response.body) {
         throw new Error(`expand failed: HTTP ${response.status}`);
@@ -671,6 +678,9 @@ export default function PlayPage() {
           const payload = trimmed.slice(5).trim();
           if (!payload) continue;
           const evt = JSON.parse(payload) as GenerateEvent;
+          // Stop touching bloom state the moment this stream is superseded /
+          // closed, so a buffered late event can't revive a closed tray.
+          if (ac.signal.aborted) return;
           if (evt.type === "neighbor") {
             const item: NeighbourItem = {
               key: `${body.current_node_id}-${evt.index}-${evt.subject}`,
@@ -731,6 +741,7 @@ export default function PlayPage() {
   const triggerExpand = useCallback(() => {
     if (!page || !page.imageDataUrl || phase === "generating") return;
     if (bloom && !bloom.done) return;
+    bloomAbortRef.current?.abort();
     setBloom({ items: [], total: 0, done: false });
     void runExpand({
       query: page.query,
@@ -2135,7 +2146,10 @@ export default function PlayPage() {
           onPick={(item) => {
             if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
           }}
-          onClose={() => setBloom(null)}
+          onClose={() => {
+            bloomAbortRef.current?.abort();
+            setBloom(null);
+          }}
         />
       )}
 
