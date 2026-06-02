@@ -12,6 +12,7 @@ function makeHandlers(overrides: Partial<KeyboardShortcutHandlers> = {}): Keyboa
     onOpenQuickbar: vi.fn(),
     onToggleHelp: vi.fn(),
     onToggleCodex: vi.fn(),
+    onExpandOutward: vi.fn(),
     onCloseOverlays: vi.fn(),
     anyOverlayOpen: false,
     ...overrides,
@@ -68,6 +69,14 @@ describe("useKeyboardShortcuts", () => {
     expect(handlers.onToggleScrubber).toHaveBeenCalledTimes(1);
     expect(handlers.onOpenQuickbar).toHaveBeenCalledTimes(1);
     expect(handlers.onToggleHelp).toHaveBeenCalledTimes(1);
+  });
+
+  it("E fires expand-outward (case-insensitive)", () => {
+    const handlers = makeHandlers();
+    cleanup = renderHook(() => useKeyboardShortcuts(handlers)).unmount;
+    press({ key: "E" });
+    press({ key: "e" });
+    expect(handlers.onExpandOutward).toHaveBeenCalledTimes(2);
   });
 
   it("Esc only fires close when an overlay is open", () => {

@@ -292,6 +292,7 @@ async def _event_stream(
                             "page_title": plan.page_title,
                             "image_data_url": data_url,
                             "image_model": img.model,
+                            "prompt_author_model": llm._text_model(online=False),
                             "final_prompt": plan.prompt,
                             "session_id": body.session_id,
                             "index": idx,
