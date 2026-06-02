@@ -39,17 +39,17 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
   return (
     <div
       role="region"
-      aria-label="Expanded neighbours"
+      aria-label="Neighbours around this page"
       className="pointer-events-auto fixed bottom-3 left-1/2 z-30 max-w-[min(960px,92vw)] -translate-x-1/2 rounded-2xl border border-[var(--color-ink)]/20 bg-[var(--color-paper)]/95 p-2 shadow-xl backdrop-blur"
     >
       <div className="flex items-center justify-between px-2 pb-1.5 text-[11px] opacity-70">
         <span className="flex items-center gap-1.5">
           {!done && (
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-teal-500" />
           )}
           {done
-            ? `Expanded · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one to explore`
-            : `Expanding outward · ${ready} of ${total}`}
+            ? `Around this page · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one`
+            : `Looking around · ${ready} of ${total}`}
         </span>
         <button
           type="button"
@@ -77,7 +77,7 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
               className={
                 "relative h-16 shrink-0 overflow-hidden rounded-lg border transition disabled:cursor-default " +
                 meta.width +
-                " border-[var(--color-ink)]/20 enabled:hover:border-[var(--color-ink)]/60 enabled:hover:ring-2 enabled:hover:ring-amber-200"
+                " border-[var(--color-ink)]/20 enabled:hover:border-teal-500/70 enabled:hover:ring-2 enabled:hover:ring-teal-300/60"
               }
             >
               {it.imageDataUrl ? (
