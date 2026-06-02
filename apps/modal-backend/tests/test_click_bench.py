@@ -16,10 +16,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from tests.click_bench import _score
+from tests.click_bench import _score, leaderboard, runner
 from tests.click_bench.runner import load_fixtures, run_bench
 
 _FIXTURES = Path(__file__).parent / "click_bench" / "fixtures" / "v1.json"
@@ -129,4 +130,188 @@ async def test_run_bench_against_vlm() -> None:
     report = await run_bench(_FIXTURES)
     assert report.summary["n"] == len(cases)
     # Loose floor; tighten as fixtures grow + baseline is established.
-    assert report.summary["pass_rate"] >= 0.0
+    assert report.summary.get("subject_pass_rate", 0.0) >= 0.0
+
+
+# ---------- _summarize: subject metrics + groundability rejection --------
+
+
+def _make_case(
+    case_id: str,
+    *,
+    composite: float,
+    ok: bool,
+    expected_groundable: bool = True,
+    predicted_groundable: bool = True,
+    latency: float = 100.0,
+    error: str | None = None,
+) -> runner.CaseResult:
+    return runner.CaseResult(
+        case_id=case_id,
+        predicted_subject="x",
+        predicted_style="",
+        predicted_context="",
+        expected_subject="y",
+        score={"composite": composite},
+        latency_ms=latency,
+        ok=ok,
+        error=error,
+        expected_groundable=expected_groundable,
+        predicted_groundable=predicted_groundable,
+        predicted_confidence=0.9,
+    )
+
+
+def test_summarize_empty_returns_n_zero() -> None:
+    assert runner._summarize([]) == {"n": 0}
+
+
+def test_summarize_subject_pass_rate_over_groundable_true() -> None:
+    results = [
+        _make_case("a", composite=0.9, ok=True),
+        _make_case("b", composite=0.5, ok=False),
+    ]
+    s = runner._summarize(results)
+    assert s["n"] == 2
+    assert s["n_groundable"] == 2
+    assert s["n_passed"] == 1
+    assert s["subject_pass_rate"] == 0.5
+    assert s["composite_mean"] == 0.7  # (0.9 + 0.5) / 2
+
+
+def test_summarize_excludes_non_groundable_from_subject_metrics() -> None:
+    # A non-groundable tap has a meaningless subject score; it must not drag
+    # down subject_pass_rate / composite_mean.
+    results = [
+        _make_case("a", composite=0.9, ok=True, expected_groundable=True),
+        _make_case(
+            "sky",
+            composite=0.0,
+            ok=False,
+            expected_groundable=False,
+            predicted_groundable=False,
+        ),
+    ]
+    s = runner._summarize(results)
+    assert s["n_groundable"] == 1
+    assert s["subject_pass_rate"] == 1.0
+    assert s["composite_mean"] == 0.9
+
+
+def test_summarize_rejection_recall() -> None:
+    results = [
+        _make_case("a", composite=0.9, ok=True, expected_groundable=True),
+        # correct rejection — VLM flagged empty space as non-groundable
+        _make_case(
+            "sky",
+            composite=0.0,
+            ok=False,
+            expected_groundable=False,
+            predicted_groundable=False,
+        ),
+        # missed rejection — VLM confabulated a subject on empty space
+        _make_case(
+            "deco",
+            composite=0.0,
+            ok=False,
+            expected_groundable=False,
+            predicted_groundable=True,
+        ),
+    ]
+    s = runner._summarize(results)
+    assert s["n_groundable_false"] == 2
+    assert s["rejection_recall"] == 0.5
+
+
+def test_summarize_groundable_accuracy_over_all_completed() -> None:
+    results = [
+        _make_case(
+            "a", composite=0.9, ok=True, expected_groundable=True, predicted_groundable=True
+        ),
+        _make_case(
+            "sky", composite=0.0, ok=False, expected_groundable=False, predicted_groundable=False
+        ),
+        _make_case(
+            "deco", composite=0.0, ok=False, expected_groundable=False, predicted_groundable=True
+        ),
+    ]
+    s = runner._summarize(results)
+    assert s["groundable_accuracy"] == round(2 / 3, 4)
+
+
+def test_summarize_counts_errors_separately() -> None:
+    results = [
+        _make_case("a", composite=0.9, ok=True),
+        _make_case("err", composite=0.0, ok=False, error="boom"),
+    ]
+    s = runner._summarize(results)
+    assert s["n"] == 2
+    assert s["n_completed"] == 1
+    assert s["n_errored"] == 1
+
+
+# ---------- leaderboard markdown rendering (pure, no network) ------------
+
+
+def _row(model: str, **summary: Any) -> dict[str, Any]:
+    return {"model": model, "summary": summary}
+
+
+def test_render_markdown_has_header_and_rows() -> None:
+    rows = [
+        _row(
+            "google/gemini-3-flash-preview",
+            n=10,
+            subject_pass_rate=0.8,
+            composite_mean=0.84,
+            rejection_recall=0.75,
+            groundable_accuracy=0.9,
+            latency_p50_ms=820.0,
+        ),
+        _row(
+            "qwen/qwen3-vl-8b-instruct",
+            n=10,
+            subject_pass_rate=0.5,
+            composite_mean=0.61,
+            rejection_recall=0.25,
+            groundable_accuracy=0.6,
+            latency_p50_ms=540.0,
+        ),
+    ]
+    md = leaderboard.render_markdown(rows)
+    assert "| Model |" in md
+    assert "google/gemini-3-flash-preview" in md
+    assert "qwen/qwen3-vl-8b-instruct" in md
+    # A markdown table separator row must be present.
+    assert "|---|" in md.replace(" ", "")
+
+
+def test_render_markdown_sorts_by_subject_pass_rate_desc() -> None:
+    rows = [
+        _row("weak", n=5, subject_pass_rate=0.2, composite_mean=0.3),
+        _row("strong", n=5, subject_pass_rate=0.9, composite_mean=0.91),
+    ]
+    md = leaderboard.render_markdown(rows)
+    assert md.index("strong") < md.index("weak")
+
+
+def test_render_markdown_tolerates_missing_metrics() -> None:
+    # An errored / empty run may lack most summary keys — render must not raise.
+    md = leaderboard.render_markdown([_row("broken", n=0)])
+    assert "broken" in md
+
+
+# ---------- synthetic smoke fixtures ------------------------------------
+
+
+def test_synthetic_fixtures_present_and_loadable() -> None:
+    path = Path(__file__).parent / "click_bench" / "fixtures" / "synthetic.json"
+    assert path.exists(), "run `python -m tests.click_bench._gen_synthetic`"
+    cases = load_fixtures(path)
+    assert len(cases) >= 4
+    # Must include both groundable elements and empty-region rejection cases.
+    assert any(c.groundable for c in cases)
+    assert any(not c.groundable for c in cases)
+    # Every referenced image actually exists on disk.
+    for c in cases:
+        assert (path.parent / c.image_path).exists(), f"missing image for {c.case_id}"
