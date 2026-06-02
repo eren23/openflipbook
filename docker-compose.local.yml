@@ -1,0 +1,63 @@
+# No-cloud LLM override — layer on top of docker-compose.yml to run the
+# planner + click VLM locally via Ollama instead of OpenRouter:
+#
+#   make demo-local
+#   # = docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+#
+# Only a FAL_KEY is still needed (images stay on fal — there's no local
+# nano-banana equivalent; point IMAGE_PROVIDER at a local OpenAI-images server
+# if you want fully offline, with a quality drop). Honest caveat: small local
+# VLMs ground clicks far worse than Gemini — the backend's capability ladder
+# degrades them to thinner-but-valid output rather than crashing. Fine for a
+# kick-the-tyres demo. Ollama here runs on CPU (slow); add GPU reservations if
+# you have them.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: openflipbook-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: pull the VLM + text models, then exit. `backend` waits on it so
+  # the first request doesn't race a cold model download (multi-GB; cached in
+  # the ollama-data volume after the first run).
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: openflipbook-ollama-pull
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      LLM_VLM_MODEL: ${LLM_VLM_MODEL:-qwen2.5vl}
+      LLM_TEXT_MODEL: ${LLM_TEXT_MODEL:-qwen2.5}
+    entrypoint: |
+      /bin/sh -c '
+      until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 1; done;
+      ollama pull "$${LLM_VLM_MODEL}";
+      ollama pull "$${LLM_TEXT_MODEL}";
+      echo "ollama models ready";
+      '
+    restart: "no"
+
+  backend:
+    environment:
+      # M1 provider seam: point the OpenAI-compatible client at Ollama.
+      LLM_PROVIDER: custom
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_API_KEY: ollama
+      LLM_VLM_MODEL: ${LLM_VLM_MODEL:-qwen2.5vl}
+      LLM_TEXT_MODEL: ${LLM_TEXT_MODEL:-qwen2.5}
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+
+volumes:
+  ollama-data:
