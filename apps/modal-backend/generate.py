@@ -92,6 +92,11 @@ class GenerateBody(BaseModel):
     world_context: list[WorldContextEntity] = Field(
         default_factory=list, max_length=16
     )
+    # Image conditioning — ordered reference data URLs (region crop → parent →
+    # anchor) the generator blends so the page stays in the same world.
+    # `condition_roles` labels each url in order. Built client-side. Capped.
+    condition_image_urls: list[str] | None = Field(default=None, max_length=4)
+    condition_roles: list[str] | None = None
     trace_id: str | None = None
 
 
@@ -498,12 +503,30 @@ async def _event_stream(
                     tier="fast",
                 )
             )
+        # Image conditioning (final image only; the fast draft stays a quick
+        # text-only preview). Blend the reference stack — region crop → parent →
+        # anchor — so the page belongs to the same world. Flag-gated; no refs →
+        # text-only exactly as before.
+        main_prompt = composed_prompt
+        cond_refs: list[str] | None = None
+        if (
+            os.environ.get("IMAGE_CONDITIONING", "true").lower() in ("1", "true", "yes")
+            and body.condition_image_urls
+        ):
+            cond_refs = body.condition_image_urls
+            main_prompt = (
+                image_provider.conditioning_preamble(
+                    body.condition_roles or [], body.mode
+                )
+                + composed_prompt
+            )
         main_task = _asyncio.create_task(
             image_provider.generate_image(
-                prompt=composed_prompt,
+                prompt=main_prompt,
                 aspect_ratio=body.aspect_ratio,
                 tier=body.image_tier,
                 model_override=body.image_model,
+                reference_urls=cond_refs,
             )
         )
         # Drive both tasks to completion. If the draft finishes first, emit
