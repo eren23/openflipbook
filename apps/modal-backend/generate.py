@@ -246,6 +246,21 @@ async def _event_stream(
                 yield _sse({"type": "expand_done", "count": 0}, trace_id)
                 return
 
+            # Image conditioning: every neighbour shares the parent's world + the
+            # session anchor so the whole bloom reads as one continuous place
+            # (same refs for all; directional edge-crops deferred). Flag-gated.
+            expand_cond_refs: list[str] | None = None
+            expand_cond_preamble = ""
+            if (
+                os.environ.get("IMAGE_CONDITIONING", "true").lower()
+                in ("1", "true", "yes")
+                and body.condition_image_urls
+            ):
+                expand_cond_refs = body.condition_image_urls
+                expand_cond_preamble = image_provider.conditioning_preamble(
+                    body.condition_roles or [], "expand"
+                )
+
             async def _bloom_one(idx, neighbor):
                 plan = await llm.plan_page(
                     query=neighbor.subject,
@@ -261,11 +276,14 @@ async def _event_stream(
                     prompt = f"Style: {expand_style_lock}\n\n{prompt}"
                 if plan.facts:
                     prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+                if expand_cond_preamble:
+                    prompt = expand_cond_preamble + prompt
                 img = await image_provider.generate_image(
                     prompt=prompt,
                     aspect_ratio=body.aspect_ratio,
                     tier=body.image_tier,
                     model_override=body.image_model,
+                    reference_urls=expand_cond_refs,
                 )
                 return idx, neighbor, plan, img
 
