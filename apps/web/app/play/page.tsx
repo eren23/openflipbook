@@ -36,6 +36,7 @@ import {
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
+import { buildConditionRefs } from "@/lib/image-condition";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
@@ -1235,6 +1236,22 @@ export default function PlayPage() {
       const cached = hint
         ? undefined
         : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
+      // Image conditioning: build the weighted reference stack from the CLEAN
+      // parent (not the marker-annotated one) — region crop at the tap → whole
+      // parent → session root as the anti-drift anchor (skipped when this page
+      // *is* the root). Best-effort; on failure we send nothing → text-only.
+      const anchorImage =
+        history.items.find((p) => p.parentId == null)?.imageDataUrl ?? null;
+      let condition = { urls: [] as string[], roles: [] as string[] };
+      try {
+        condition = await buildConditionRefs({
+          parentDataUrl: currentImage,
+          anchorDataUrl: anchorImage !== currentImage ? anchorImage : null,
+          click: { xPct: click.x_pct, yPct: click.y_pct },
+        });
+      } catch {
+        // leave condition empty → text-only generation
+      }
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -1248,6 +1265,12 @@ export default function PlayPage() {
         click,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(condition.urls.length
+          ? {
+              condition_image_urls: condition.urls,
+              condition_roles: condition.roles,
+            }
+          : {}),
         ...(hint ? { click_hint: hint } : {}),
         ...(cached
           ? {
