@@ -36,7 +36,7 @@ import {
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
-import { buildConditionRefs } from "@/lib/image-condition";
+import { buildConditionRefs, orderedRefs } from "@/lib/image-condition";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
@@ -658,6 +658,15 @@ export default function PlayPage() {
   const triggerExpand = useCallback(() => {
     if (!page || !page.imageDataUrl || phase === "generating") return;
     if (bloom && !bloom.done) return;
+    // Image conditioning: every neighbour shares the parent's world + the
+    // session anchor so the bloom reads as one place. No region crop — expand
+    // is whole-page outward (directional edge-crops are a later phase).
+    const anchorImage =
+      history.items.find((p) => p.parentId == null)?.imageDataUrl ?? null;
+    const condition = orderedRefs({
+      parent: page.imageDataUrl,
+      anchor: anchorImage !== page.imageDataUrl ? anchorImage : null,
+    });
     startBloom({
       query: page.query,
       aspect_ratio: "16:9",
@@ -670,9 +679,24 @@ export default function PlayPage() {
       parent_title: page.title,
       image_tier: imageTier,
       output_locale: resolveOutputLocale(outputLocale),
+      ...(condition.urls.length
+        ? {
+            condition_image_urls: condition.urls,
+            condition_roles: condition.roles,
+          }
+        : {}),
       ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
     });
-  }, [page, phase, bloom, startBloom, imageTier, outputLocale, styleAnchor]);
+  }, [
+    page,
+    phase,
+    bloom,
+    startBloom,
+    imageTier,
+    outputLocale,
+    styleAnchor,
+    history,
+  ]);
 
   const acceptUploadedImage = useCallback(
     async (file: File) => {
