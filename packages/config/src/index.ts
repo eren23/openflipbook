@@ -60,6 +60,13 @@ export interface GenerateRequestBody {
   // into the planner's prompt so recurring characters / places preserve
   // their look across pages without the user having to re-describe them.
   world_context?: WorldContextEntity[];
+  // Image conditioning — an ordered stack of reference images (data URLs) the
+  // generator blends so the page belongs to the same world: region crop (the
+  // spot you came from) → whole parent → global style anchor. `condition_roles`
+  // labels each url in order so the backend can phrase the conditioning prompt.
+  // Built client-side (lib/image-condition.ts). Omit → today's text-only gen.
+  condition_image_urls?: string[];
+  condition_roles?: string[];
   trace_id?: string;
 }
 
