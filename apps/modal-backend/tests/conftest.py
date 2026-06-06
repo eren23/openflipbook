@@ -44,6 +44,9 @@ _SCRUB = (
     "IMAGE_API_KEY",
     "IMAGE_MODEL",
     "IMAGE_SIZE",
+    # Map-pan expand (outpaint the world outward).
+    "EXPAND_MAP_PAN",
+    "FAL_EXPAND_MODEL",
     "SENTRY_DSN",
 )
 
