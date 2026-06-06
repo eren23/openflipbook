@@ -39,8 +39,9 @@ def test_fuzz_corpus_reproduces_from_engine() -> None:
             for f in _FLOATS:
                 assert got[f] == pytest.approx(exp[f], abs=1e-9)
         total += len(out)
-    # Guard against a degenerate corpus silently making the gate vacuous.
-    assert total >= 200
+    # Exact: the corpus is seed-pinned + deterministic, so a silently-trimmed
+    # regen (fewer projections) trips the gate, not just an all-culled corpus.
+    assert total == 244
 
 
 def test_left_right_mirror_symmetry() -> None:
@@ -50,8 +51,9 @@ def test_left_right_mirror_symmetry() -> None:
     d = 50.0
     for ang in (0.2, 0.6, 1.1, 1.3):  # all < half-fov (π/4 ≈ 0.785)? no — test cull too
         if ang >= math.pi / 4:
-            # past the edge → both mirror entities culled
+            # past the edge → both mirror entities culled (symmetry holds for None too)
             assert geometry.project({"id": "r", "pos": {"x": d * math.cos(ang), "y": d * math.sin(ang)}, "height": 5, "footprint": {"w": 4, "d": 4}}, obs, 1.0) is None
+            assert geometry.project({"id": "l", "pos": {"x": d * math.cos(-ang), "y": d * math.sin(-ang)}, "height": 5, "footprint": {"w": 4, "d": 4}}, obs, 1.0) is None
             continue
         left = geometry.project({"id": "l", "label": "l", "pos": {"x": d * math.cos(-ang), "y": d * math.sin(-ang)}, "height": 5, "footprint": {"w": 4, "d": 4}}, obs, 1.0)
         right = geometry.project({"id": "r", "label": "r", "pos": {"x": d * math.cos(ang), "y": d * math.sin(ang)}, "height": 5, "footprint": {"w": 4, "d": 4}}, obs, 1.0)

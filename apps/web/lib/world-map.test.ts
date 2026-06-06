@@ -29,11 +29,19 @@ function geo(
 }
 
 describe("world-map merge core", () => {
-  it("applyGeoUpsert is idempotent (same payload twice = same state)", () => {
+  it("applyGeoUpsert is truly idempotent (no-op re-apply keeps updated_at)", () => {
     const a = applyGeoUpsert([], [geo("a", "derived")], "t1");
     const b = applyGeoUpsert(a, [geo("a", "derived")], "t2");
     expect(b).toHaveLength(1);
     expect(b[0]!.pos).toEqual({ x: 0, y: 0 });
+    expect(b[0]!.updated_at).toBe("t1"); // unchanged data → no dirty write
+  });
+
+  it("equal-rank re-apply with CHANGED data does write (+ new updated_at)", () => {
+    const a = applyGeoUpsert([], [geo("a", "derived", 0, 0)], "t1");
+    const b = applyGeoUpsert(a, [geo("a", "derived", 5, 5)], "t2");
+    expect(b[0]!.pos).toEqual({ x: 5, y: 5 });
+    expect(b[0]!.updated_at).toBe("t2");
   });
 
   it("source authority: derived never clobbers user; user clobbers derived", () => {

@@ -64,6 +64,7 @@ export function project(
   observer: ObserverPose,
   aspect: number,
 ): ProjectedEntity | null {
+  if (aspect <= 0) return null; // degenerate frame — no vertical frustum
   const dx = entity.pos.x - observer.pos.x;
   const dy = entity.pos.y - observer.pos.y;
   const dist = Math.hypot(dx, dy);
