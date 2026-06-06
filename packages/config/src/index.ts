@@ -152,6 +152,10 @@ export interface ResolveClickResponse {
   // clarifying questions (semi autonomy only). Absent in classic mode.
   enter_as?: EnterAs;
   clarifiers?: string[];
+  // World Mode spatial anchor: what sits AROUND the tapped spot and in which
+  // direction ("river to the south, timbered houses west, market square NE"),
+  // so the entered place keeps its neighbours where the parent map had them.
+  surroundings?: string;
 }
 
 export interface GenerateProgressEvent {

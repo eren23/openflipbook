@@ -80,6 +80,10 @@ class GenerateBody(BaseModel):
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
+    # World Mode semi-autonomy already resolved the tap client-side; this carries
+    # the resolver's spatial-anchor note back so the planner can keep the
+    # entered place's neighbours where the parent map had them.
+    prefetched_surroundings: str | None = None
     # Multi-turn refer (SAMA / MM-Conv pattern): when the user rejects a
     # resolved subject and taps again nearby, the client forwards the
     # rejected phrase so the VLM picks something different.
@@ -383,6 +387,9 @@ async def _event_stream(
         render_mode = (body.render_mode or "").strip().lower()
         if render_mode not in ("place_scene", "place_submap", "explainer"):
             render_mode = ""
+        # World Mode spatial anchor — what's around the tapped spot + directions,
+        # threaded into the planner so the entered place keeps its neighbours.
+        surroundings_for_plan: str | None = None
         if body.mode == "tap" and body.click and body.image:
             # Trust-but-verify on client-supplied prefetch hints. The web
             # client computes these via the same VLM the backend would call,
@@ -404,11 +411,13 @@ async def _event_stream(
                 body.prefetched_subject_context, 400
             )
             cleaned_user_hint = _sanitize_hint(body.click_hint, 240)
+            cleaned_surroundings = _sanitize_hint(body.prefetched_surroundings, 240)
             prefetched_ok = bool(cleaned_subject)
             if prefetched_ok:
                 effective_query = cleaned_subject
                 style_anchor = cleaned_style or None
                 subject_context = cleaned_subject_context or None
+                surroundings_for_plan = cleaned_surroundings or None
                 yield _sse(
                     {
                         "type": "status",
@@ -470,6 +479,8 @@ async def _event_stream(
                     style_anchor = resolution.style
                 if resolution.subject_context:
                     subject_context = resolution.subject_context
+                if resolution.surroundings:
+                    surroundings_for_plan = resolution.surroundings
 
             # Fold the user's free-form note into the planner query so the next
             # page reflects their angle even when the prefetched-subject path
@@ -509,6 +520,7 @@ async def _event_stream(
             subject_context=subject_context,
             world_context=world_context_payload,
             render_mode=render_mode or "explainer",
+            surroundings=surroundings_for_plan,
         )
 
         composed_prompt = plan.prompt
@@ -853,6 +865,7 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             ),
             "enter_as": resolution.enter_as,
             "clarifiers": resolution.clarifiers,
+            "surroundings": resolution.surroundings,
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

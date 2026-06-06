@@ -241,3 +241,17 @@ def test_build_clarifiers_caps_at_two_and_filters_non_strings() -> None:
         fallback_subject="X",
     )
     assert res.clarifiers == ["Day or night?", "Busy?"]
+
+
+def test_build_parses_surroundings_and_defaults_empty() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "x", "surroundings": "  river to the south, market NE "},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="X",
+    )
+    assert res.surroundings == "river to the south, market NE"
+    bare = llm._build_click_resolution(
+        {"subject": "x"}, x_pct=0.5, y_pct=0.5, fallback_subject="X"
+    )
+    assert bare.surroundings == ""

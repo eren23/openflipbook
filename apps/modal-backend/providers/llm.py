@@ -90,6 +90,10 @@ class ClickResolution:
     # Semi-autonomy: up to two short clarifying questions to ask before entering
     # (e.g. "Day or night?"). Empty in auto mode and in classic (non-world) mode.
     clarifiers: list[str] = field(default_factory=list)
+    # World Mode spatial anchor: what is adjacent to the tapped spot and in which
+    # direction, so the entered place keeps its neighbours where the parent map
+    # had them. Empty in classic mode.
+    surroundings: str = ""
 
 
 @dataclass
@@ -445,6 +449,7 @@ CLICK_SCHEMA: dict[str, Any] = {
         "scale": {"type": "string", "enum": ["component", "peer", "container"]},
         "enter_as": {"type": "string", "enum": ["scene", "submap", "explainer"]},
         "clarifiers": {"type": "array", "items": {"type": "string"}},
+        "surroundings": {"type": "string"},
     },
     "required": ["subject"],
 }
@@ -755,10 +760,16 @@ async def click_to_subject(
             "interior); \"submap\" when it is a sub-region of a map or area best "
             "shown as a CLOSER MAP; \"explainer\" when it is an object, "
             "mechanism, or concept best shown as a labelled diagram."
+            " (10) `surroundings` — a short phrase (<=30 words) naming what sits "
+            "immediately AROUND the crosshair and in which direction, read from "
+            "the parent image's own layout (e.g. \"the river runs along the "
+            "south, a row of timbered houses to the west, a market square to the "
+            "north-east\"). This anchors the entered place so its neighbours "
+            "stay where they are. Empty string if nothing is discernible."
         )
         if autonomy == "semi":
             world_clause += (
-                " (10) `clarifiers` — an array of AT MOST 2 very short questions "
+                " (11) `clarifiers` — an array of AT MOST 2 very short questions "
                 "(<=8 words each) whose answers would change how this place is "
                 "drawn (e.g. \"Day or night?\", \"Bustling or abandoned?\"). "
                 "Return an empty array when you are confident or when `enter_as` "
@@ -963,6 +974,7 @@ def _build_click_resolution(
         if isinstance(clarifiers_raw, list)
         else []
     )
+    surroundings = str(parsed.get("surroundings", "")).strip()
 
     return ClickResolution(
         subject=subject or fallback_subject,
@@ -975,6 +987,25 @@ def _build_click_resolution(
         scale=scale,
         enter_as=enter_as,
         clarifiers=clarifiers,
+        surroundings=surroundings,
+    )
+
+
+def _spatial_anchor_clause(render_mode: str | None, surroundings: str | None) -> str:
+    """World Mode spatial anchor: keep the entered place's neighbours where the
+    parent map had them. Empty unless we're entering a place AND the resolver
+    reported surroundings — so classic + explainer pages are unaffected."""
+    rmode = (render_mode or "explainer").lower()
+    if rmode not in ("place_scene", "place_submap"):
+        return ""
+    if not surroundings or not surroundings.strip():
+        return ""
+    return (
+        "SPATIAL ANCHOR (CRITICAL): you are entering this exact spot on the "
+        "parent map — keep its neighbours where they are: "
+        f"{surroundings.strip()}. Place these surrounding features in the same "
+        "relative directions so the view continues the established map rather "
+        "than inventing a new layout."
     )
 
 
@@ -1030,6 +1061,7 @@ async def plan_page(
     subject_context: str | None = None,
     world_context: list[dict[str, Any]] | None = None,
     render_mode: str | None = None,
+    surroundings: str | None = None,
 ) -> PagePlan:
     """Produce a page title, image-gen prompt, and factual snippets for the query.
 
@@ -1096,6 +1128,9 @@ async def plan_page(
             "callouts, and text inside the illustration are written in "
             f"{output_locale}.\" near the start of the prompt."
         )
+    anchor_clause = _spatial_anchor_clause(rmode, surroundings)
+    if anchor_clause:
+        system_parts.append(anchor_clause)
     world_clause = _format_world_context_clause(world_context)
     if world_clause:
         system_parts.append(world_clause)

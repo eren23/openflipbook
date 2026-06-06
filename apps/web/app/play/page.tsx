@@ -1216,6 +1216,7 @@ export default function PlayPage() {
       subject_context?: string;
       enter_as?: string;
       clarifiers?: string[];
+      surroundings?: string;
     } | null> => {
       try {
         const res = await fetch("/api/resolve-click", {
@@ -1284,6 +1285,7 @@ export default function PlayPage() {
             subject_context?: string;
             enter_as?: string;
             clarifiers?: string[];
+            surroundings?: string;
           }
         | null = null;
       if (
@@ -1412,6 +1414,9 @@ export default function PlayPage() {
                 ? { prefetched_subject_context: worldResolved.subject_context }
                 : {}),
             }
+          : {}),
+        ...(worldResolved?.surroundings
+          ? { prefetched_surroundings: worldResolved.surroundings }
           : {}),
         ...(worldEnabled
           ? {
