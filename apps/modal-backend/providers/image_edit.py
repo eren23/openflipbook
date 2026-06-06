@@ -12,7 +12,9 @@ nano-banana-pro which handles both gen and edit on the same endpoint.
 
 from __future__ import annotations
 
+import base64
 import os
+import struct
 from typing import Any
 
 from ._common import to_fal_url
@@ -119,6 +121,50 @@ def _expand_args_for(
     }
 
 
+def _img_dims(data: bytes) -> tuple[int, int] | None:
+    """Read (width, height) straight from PNG/JPEG headers — Pillow isn't in the
+    runtime, and BRIA needs the parent's REAL pixel size or it rescales (and
+    seams) the original. Returns None for anything we can't measure."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+        w, h = struct.unpack(">II", data[16:24])
+        return int(w), int(h)
+    if data[:2] == b"\xff\xd8":  # JPEG: scan to the first SOF marker.
+        i, n = 2, len(data)
+        while i + 9 < n:
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h, w = struct.unpack(">HH", data[i + 5 : i + 9])
+                return int(w), int(h)
+            if marker == 0xD8 or marker == 0xD9 or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            i += 2 + struct.unpack(">H", data[i + 2 : i + 4])[0]
+    return None
+
+
+def _dims_from_data_url(data_url: str) -> tuple[int, int] | None:
+    """Parent dims from a `data:` URL (the fresh in-session path). http(s) URLs
+    fall back to the caller's width/height."""
+    if not data_url.startswith("data:") or "," not in data_url:
+        return None
+    try:
+        return _img_dims(base64.b64decode(data_url.split(",", 1)[1]))
+    except Exception:
+        return None
+
+
+def _expand_first_image(result: dict[str, Any]) -> dict[str, Any]:
+    """BRIA Expand answers with a singular `image` object; nano-banana-style
+    models use `images: [...]`. Accept either."""
+    image = result.get("image")
+    if isinstance(image, dict):
+        return image
+    return _first_image(result)
+
+
 async def expand_image(
     image_data_url: str,
     direction: str,
@@ -137,12 +183,15 @@ async def expand_image(
         or os.environ.get("FAL_EXPAND_MODEL")
         or EXPAND_MODEL_DEFAULT
     )
+    # BRIA places the parent at its true size on the bigger canvas; a wrong size
+    # rescales/seams it, so measure rather than trust the aspect-ratio default.
+    w, h = _dims_from_data_url(image_data_url) or (width, height)
     image_url = await to_fal_url(image_data_url)
-    async with span("image.expand", model=model, direction=direction) as ctx:
+    async with span("image.expand", model=model, direction=direction, w=w, h=h) as ctx:
         result = await _fal_subscribe(
-            model, _expand_args_for(image_url, direction, width, height)
+            model, _expand_args_for(image_url, direction, w, h)
         )
-        image_info = _first_image(result)
+        image_info = _expand_first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
         ctx["bytes"] = len(jpeg_bytes)
     return GeneratedImage(
