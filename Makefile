@@ -26,3 +26,33 @@ demo-clean:
 # Tail logs from the running stack.
 demo-logs:
 	docker compose logs -f --tail=100
+
+# ── Eval gates (geometric world model) ───────────────────────────────────────
+# Free gates run always (deterministic, no spend). Paid gates spend fal/openrouter
+# and only run when their *_BENCH_RUN flag is set — `make eval` excludes them.
+PY := apps/modal-backend/.venv/bin/python
+.PHONY: eval eval-geometry eval-layout eval-grounding eval-repair eval-edit eval-paid
+
+# The always-on gate: every free phase gate + lints + typechecks. Run between
+# phases — must be green before the next phase's commit.
+eval:
+	cd apps/modal-backend && .venv/bin/python -m pytest -m "not paid" -q
+	cd apps/modal-backend && .venv/bin/ruff check . && .venv/bin/mypy providers/geometry.py generate.py
+	cd apps/web && pnpm exec vitest run && pnpm exec tsc --noEmit
+
+# P1 — pure 2.5D projection parity (TS golden + Py golden + cross-lang fuzz).
+eval-geometry:
+	cd apps/modal-backend && .venv/bin/python -m pytest -m geometry -q
+	cd apps/web && pnpm exec vitest run lib/world-geometry.test.ts lib/world-geometry.fuzz.test.ts
+
+eval-layout:
+	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 .venv/bin/python -m pytest -m layout -q
+eval-grounding:
+	cd apps/modal-backend && GROUNDING_BENCH_RUN=1 .venv/bin/python -m pytest -m grounding -q
+eval-repair:
+	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
+eval-edit:
+	cd apps/modal-backend && EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m edit -q
+# The full paid sweep (spends fal/openrouter on the tiny golden set).
+eval-paid:
+	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
