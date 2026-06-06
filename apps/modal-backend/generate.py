@@ -164,6 +164,25 @@ def _world_mode_on(requested: bool) -> bool:
     )
 
 
+def _world_geometry_gen_on() -> bool:
+    """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
+    return os.environ.get("WORLD_GEOMETRY_GEN", "false").lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _layout_clause_for(body: GenerateBody) -> str:
+    """The geometry layout-constraint clause for this request, or "" when the
+    geometry-gen flag is off or no expected layout was sent."""
+    if not _world_geometry_gen_on() or not body.expected_layout:
+        return ""
+    from providers import geometry_prompt
+
+    return geometry_prompt.layout_constraints(
+        [e.model_dump() for e in body.expected_layout]
+    )
+
+
 # The click classifier's `enter_as` → the planner's render mode.
 _ENTER_AS_TO_RENDER: dict[str, str] = {
     "scene": "place_scene",
@@ -190,7 +209,7 @@ async def _event_stream(
     from obs import bind_trace, log, record_error
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
-    from providers import llm
+    from providers import llm, model_router
 
     bind_trace(trace_id)
     started = _time.perf_counter()
@@ -578,6 +597,11 @@ async def _event_stream(
             )
         if plan.facts:
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+        # Geometric world: append the engine's deterministic placement clause so
+        # the model aims entities at their projected positions. Flag-gated → "".
+        layout_clause = _layout_clause_for(body)
+        if layout_clause:
+            composed_prompt += "\n\n" + layout_clause
 
         await _abort_if_disconnected("pre-image-gen")
         yield _sse(
@@ -601,7 +625,12 @@ async def _event_stream(
                     break
             if region_ref is None:
                 region_ref = body.condition_image_urls[0]
-        use_continuation = render_mode == "place_submap" and region_ref is not None
+        # The model router owns the op decision (same result as before: a
+        # place_submap entry with a region crop zoom-continues, else fresh gen).
+        use_continuation = (
+            model_router.select_operation(render_mode, region_ref is not None)
+            == "zoom_continue"
+        )
         zoom_instruction = (
             f"Zoom in and draw a closer map of {plan.page_title} — the area at the "
             "centre of this image. Keep the same hand-drawn cartographic style, "
