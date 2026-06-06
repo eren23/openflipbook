@@ -72,6 +72,7 @@ class ObserverPose(BaseModel):
     pos: WorldVec2
     eye_height: float
     gaze: float
+    pitch: float = 0.0
     fov: float
 
 

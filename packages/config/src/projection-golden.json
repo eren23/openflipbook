@@ -290,6 +290,100 @@
       "culled": [
         "BehindNorth"
       ]
+    },
+    {
+      "name": "pitch-up-elevated",
+      "observer": {
+        "pos": {
+          "x": 0,
+          "y": 0
+        },
+        "eye_height": 1.7,
+        "gaze": 0.0,
+        "pitch": 0.3,
+        "fov": 1.5707963267948966
+      },
+      "entities": [
+        {
+          "id": "Tower",
+          "label": "Tower",
+          "pos": {
+            "x": 25,
+            "y": 0
+          },
+          "height": 30,
+          "footprint": {
+            "w": 6.0,
+            "d": 6.0
+          }
+        },
+        {
+          "id": "Lantern",
+          "label": "Lantern",
+          "pos": {
+            "x": 12,
+            "y": 4
+          },
+          "height": 1,
+          "footprint": {
+            "w": 2.0,
+            "d": 2.0
+          },
+          "elevation": 3.0
+        },
+        {
+          "id": "Cobble",
+          "label": "Cobble",
+          "pos": {
+            "x": 15,
+            "y": 0
+          },
+          "height": 1,
+          "footprint": {
+            "w": 6.0,
+            "d": 6.0
+          }
+        }
+      ],
+      "expected": [
+        {
+          "id": "Lantern",
+          "label": "Lantern",
+          "x_pct": 0.666666667,
+          "y_pct": 0.642628006,
+          "w_pct": 0.079056942,
+          "h_pct": 0.070650829,
+          "depth": 12.649110641,
+          "h_pos": "right",
+          "v_pos": "mid",
+          "size": "tiny"
+        },
+        {
+          "id": "Cobble",
+          "label": "Cobble",
+          "x_pct": 0.5,
+          "y_pct": 0.855219237,
+          "w_pct": 0.2,
+          "h_pct": 0.068274316,
+          "depth": 15.0,
+          "h_pos": "center",
+          "v_pos": "bottom",
+          "size": "medium"
+        },
+        {
+          "id": "Tower",
+          "label": "Tower",
+          "x_pct": 0.5,
+          "y_pct": 0.400506474,
+          "w_pct": 0.12,
+          "h_pct": 0.884220851,
+          "depth": 25.0,
+          "h_pos": "center",
+          "v_pos": "mid",
+          "size": "huge"
+        }
+      ],
+      "culled": []
     }
   ]
 }

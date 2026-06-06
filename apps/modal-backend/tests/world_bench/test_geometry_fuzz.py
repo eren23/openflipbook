@@ -41,7 +41,7 @@ def test_fuzz_corpus_reproduces_from_engine() -> None:
         total += len(out)
     # Exact: the corpus is seed-pinned + deterministic, so a silently-trimmed
     # regen (fewer projections) trips the gate, not just an all-culled corpus.
-    assert total == 244
+    assert total == 274
 
 
 def test_left_right_mirror_symmetry() -> None:

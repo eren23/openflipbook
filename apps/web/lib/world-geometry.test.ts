@@ -80,6 +80,31 @@ describe("world-geometry properties", () => {
     expect(f.w_pct).toBeLessThan(n.w_pct);
     expect(f.depth).toBeGreaterThan(n.depth);
   });
+  const elev = (
+    id: string,
+    x: number,
+    y: number,
+    height: number,
+    elevation: number,
+  ): ProjectInput => ({ id, label: id, pos: { x, y }, height, elevation, footprint: { w: 4, d: 4 } });
+  it("elevation raises on screen", () => {
+    const ground = project(ent("a", 40, 0, 2), OBS, ASPECT)!;
+    const raised = project(elev("a", 40, 0, 2, 20), OBS, ASPECT)!;
+    expect(raised.y_pct).toBeLessThan(ground.y_pct);
+  });
+  it("pitch up lowers the scene", () => {
+    const level = project(ent("a", 40, 0, 2), OBS, ASPECT)!;
+    const up = project(ent("a", 40, 0, 2), { ...OBS, pitch: 0.3 }, ASPECT)!;
+    expect(up.y_pct).toBeGreaterThan(level.y_pct);
+  });
+  it("pitch/elevation default is byte-identical", () => {
+    const a = project(ent("a", 40, 0, 8), OBS, ASPECT)!;
+    const b = project(elev("a", 40, 0, 8, 0), { ...OBS, pitch: 0 }, ASPECT)!;
+    expect(a.y_pct).toBeCloseTo(b.y_pct, 12);
+    expect(a.h_pct).toBeCloseTo(b.h_pct, 12);
+  });
+  it("vertical frustum cull (look down at a tall close entity)", () =>
+    expect(project(ent("a", 3, 0, 30), { ...OBS, pitch: -0.6 }, ASPECT)).toBeNull());
   it("crop window", () =>
     expect(
       cropEntities([ent("a", 5, 5), ent("b", 50, 50), ent("c", 9, 1)], {

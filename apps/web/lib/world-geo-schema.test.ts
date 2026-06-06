@@ -32,6 +32,7 @@ const observerPose: ObserverPose = {
   pos: { x: 0, y: 0 },
   eye_height: 1.7,
   gaze: 0,
+  pitch: 0,
   fov: 1.2,
 };
 const mapCrop: MapCrop = { x: 0, y: 0, w: 100, h: 60 };
@@ -60,6 +61,7 @@ const worldEntityGeo: WorldEntityGeo = {
   label: "Lighthouse",
   pos: { x: 10, y: 20 },
   height: 12,
+  elevation: 0,
   footprint: { w: 4, d: 4 },
   heading: 0,
   visual: "red-and-white striped tower",

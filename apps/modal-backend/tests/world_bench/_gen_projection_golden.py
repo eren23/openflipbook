@@ -22,14 +22,17 @@ from providers import geometry
 _HALF_PI = math.pi / 2.0
 
 
-def _ent(eid: str, x: float, y: float, height: float, fw: float = 6.0):
-    return {
+def _ent(eid: str, x: float, y: float, height: float, fw: float = 6.0, elevation: float = 0.0):
+    e = {
         "id": eid,
         "label": eid,
         "pos": {"x": x, "y": y},
         "height": height,
         "footprint": {"w": fw, "d": fw},
     }
+    if elevation:  # omit the key for ground entities (default 0 == on the ground)
+        e["elevation"] = elevation
+    return e
 
 
 SCENES = [
@@ -56,6 +59,18 @@ SCENES = [
             _ent("TallClose", 0, 10, 20),
             _ent("BehindNorth", 0, -40, 10),
             _ent("FarAhead", 0, 150, 10),
+        ],
+    },
+    {
+        # Camera tilted UP (+pitch) at a tall tower, with a lantern hanging
+        # ELEVATED off the ground. Exercises the Z fields: pitch drops the horizon
+        # (grounded pieces sit lower), elevation lifts the lantern higher.
+        "name": "pitch-up-elevated",
+        "observer": {"pos": {"x": 0, "y": 0}, "eye_height": 1.7, "gaze": 0.0, "pitch": 0.3, "fov": math.pi / 2},
+        "entities": [
+            _ent("Tower", 25, 0, 30),
+            _ent("Lantern", 12, 4, 1, fw=2.0, elevation=3.0),
+            _ent("Cobble", 15, 0, 1),
         ],
     },
 ]
