@@ -4,7 +4,8 @@ import type { EntityGeoEdit, WorldEntityGeo } from "@openflipbook/config";
 
 import { __test } from "./world-map";
 
-const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius } = __test;
+const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
+  __test;
 
 function geo(
   id: string,
@@ -139,5 +140,20 @@ describe("blastRadius (which saved scenes go stale)", () => {
   it("add (no target) contributes nothing; unknown target → empty", () => {
     expect(blastRadius([{ op: "add", label: "x", pos: { x: 0, y: 0 } }], {})).toEqual([]);
     expect(blastRadius([{ op: "remove", target: "ghost" }], { geo_a: ["n1"] })).toEqual([]);
+  });
+});
+
+describe("buildGeoReferences (geo id → node refs)", () => {
+  it("maps geo entities to their codex appears_on_node_ids", () => {
+    const geos = [
+      { id: "geo_a", entity_id: "e1" },
+      { id: "geo_b", entity_id: "e2" }, // linked but no appearances → omitted
+      { id: "geo_c", entity_id: null }, // map-only prop → omitted
+    ];
+    const codex = [
+      { id: "e1", appears_on_node_ids: ["n1", "n2"] },
+      { id: "e2", appears_on_node_ids: [] },
+    ];
+    expect(buildGeoReferences(geos, codex)).toEqual({ geo_a: ["n1", "n2"] });
   });
 });

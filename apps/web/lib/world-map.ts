@@ -1,5 +1,6 @@
 import type { Collection, Document } from "mongodb";
 import type {
+  Entity,
   EntityBBox,
   EntityGeoEdit,
   EntityKind,
@@ -176,6 +177,22 @@ export function blastRadius(
   return [...nodes].sort();
 }
 
+/** geo-id → node ids that show the entity (the blast-radius source), built from
+ *  the codex entities' appears_on_node_ids keyed by the geo entity's id. Geo
+ *  props with no linked entity_id (or no appearances) are omitted. */
+export function buildGeoReferences(
+  geos: Pick<WorldEntityGeo, "id" | "entity_id">[],
+  codex: Pick<Entity, "id" | "appears_on_node_ids">[],
+): Record<string, string[]> {
+  const byId = new Map(codex.map((e) => [e.id, e.appears_on_node_ids ?? []]));
+  const refs: Record<string, string[]> = {};
+  for (const g of geos) {
+    const nodes = g.entity_id ? byId.get(g.entity_id) : undefined;
+    if (nodes && nodes.length > 0) refs[g.id] = [...nodes];
+  }
+  return refs;
+}
+
 function snapshotFromDoc(doc: WorldMapDoc): WorldMapSnapshot {
   return {
     session_id: doc._id,
@@ -260,6 +277,55 @@ export async function upsertEntityGeos(
   }
 }
 
+/** Apply a sequence of structured geo edits to the session map under optimistic
+ *  concurrency (mirrors upsertEntityGeos). Each edit runs in order through the
+ *  pure applyEntityEdit; an empty edit list returns the current snapshot. */
+export async function applyEntityEdits(
+  sessionId: string,
+  edits: EntityGeoEdit[],
+): Promise<WorldMapSnapshot> {
+  if (edits.length === 0) return getWorldMap(sessionId);
+  const col = await collection();
+  let attempt = 0;
+  while (true) {
+    const existing = await col.findOne({ _id: sessionId });
+    const now = new Date();
+    const nowIso = now.toISOString();
+    let entities = existing ? existing.entities : [];
+    for (const edit of edits) entities = applyEntityEdit(entities, edit, nowIso);
+    const next: WorldMapDoc = {
+      _id: sessionId,
+      entities,
+      bounds: recomputeBounds(entities),
+      schema_version: SCHEMA_VERSION,
+      updated_at: now,
+    };
+    let ok = false;
+    if (existing) {
+      const write = await col.replaceOne(
+        { _id: sessionId, updated_at: existing.updated_at },
+        next,
+      );
+      ok = write.matchedCount === 1;
+    } else {
+      try {
+        await col.insertOne(next);
+        ok = true;
+      } catch (err) {
+        if (!isDuplicateKeyError(err)) throw err;
+        ok = false;
+      }
+    }
+    if (ok) return snapshotFromDoc(next);
+    attempt += 1;
+    if (attempt >= OPTIMISTIC_RETRY_LIMIT) {
+      throw new Error(
+        `applyEntityEdits: optimistic concurrency retry exhausted for ${sessionId}`,
+      );
+    }
+  }
+}
+
 // ── Seeding bridge: extraction → derived map geometry ────────────────────────
 
 export interface ExtractedGeoItem {
@@ -308,4 +374,5 @@ export const __test = {
   recomputeBounds,
   applyEntityEdit,
   blastRadius,
+  buildGeoReferences,
 };
