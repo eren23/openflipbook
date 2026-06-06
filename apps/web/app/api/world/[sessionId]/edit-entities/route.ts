@@ -19,6 +19,9 @@ interface Params {
 interface EditRequestBody {
   instruction?: string;
   scene_view?: unknown;
+  // Preview only: resolve + return the plan (edits + blast-radius) WITHOUT
+  // mutating the map, so the UI can confirm before applying. Default false.
+  dry_run?: boolean;
 }
 
 // NL edit of the geometric world map (Phase 5). Resolves the instruction →
@@ -124,6 +127,14 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json(
       { error: `edit upstream failed: ${(err as Error).message}`, trace_id: traceId },
       { status: 502, headers: { [TRACE_HEADER]: traceId } }
+    );
+  }
+
+  // Preview: hand back the plan + blast-radius without touching the map.
+  if (body.dry_run) {
+    return NextResponse.json(
+      { plan, trace_id: traceId },
+      { headers: { [TRACE_HEADER]: traceId } }
     );
   }
 
