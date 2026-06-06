@@ -1,0 +1,116 @@
+import { describe, expect, it } from "vitest";
+
+import type { MapCrop, ObserverPose, SceneView, WorldEntityGeo } from "@openflipbook/config";
+
+import { routeClick } from "./click-route";
+
+function geo(
+  id: string,
+  x: number,
+  y: number,
+  opts: Partial<WorldEntityGeo> = {},
+): WorldEntityGeo {
+  return {
+    id,
+    entity_id: id,
+    kind: "place",
+    label: id,
+    pos: { x, y },
+    height: 4,
+    footprint: { w: 6, d: 6 },
+    visual: "",
+    state: {},
+    confidence: 1,
+    source: "user",
+    updated_at: "t",
+    ...opts,
+  };
+}
+
+const ASPECT = 16 / 9;
+const CROP: MapCrop = { x: 0, y: 0, w: 100, h: 100 };
+const mapView = (crop: MapCrop): SceneView => ({
+  node_id: "n",
+  level: "map",
+  observer: null,
+  map_crop: crop,
+});
+const sceneView = (observer: ObserverPose): SceneView => ({
+  node_id: "n",
+  level: "street",
+  observer,
+  map_crop: null,
+});
+
+function norm(a: number): number {
+  let v = a;
+  while (v > Math.PI) v -= 2 * Math.PI;
+  while (v < -Math.PI) v += 2 * Math.PI;
+  return v;
+}
+
+describe("routeClick (P6 coordinate-driven mode detection)", () => {
+  it("tap a place on the map → enter a scene facing it", () => {
+    const map = { entities: [geo("tower", 50, 50, { height: 20 })], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.5, y_pct: 0.5 }, ASPECT);
+    expect(r.kind).toBe("scene");
+    if (r.kind === "scene") {
+      expect(r.focus_id).toBe("tower");
+      expect(r.level).toBe("building"); // tall → building level
+      // the synthesized observer gazes AT the tower
+      const dx = 50 - r.observer.pos.x;
+      const dy = 50 - r.observer.pos.y;
+      expect(Math.abs(norm(Math.atan2(dy, dx) - r.observer.gaze))).toBeLessThan(1e-9);
+      // …and stands off it (not on top of it)
+      expect(Math.hypot(r.observer.pos.x - 50, r.observer.pos.y - 50)).toBeGreaterThan(5);
+    }
+  });
+
+  it("short place → street level, not building", () => {
+    const map = { entities: [geo("hut", 50, 50, { height: 4 })], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.5, y_pct: 0.5 }, ASPECT);
+    expect(r.kind === "scene" && r.level).toBe("street");
+  });
+
+  it("tap empty map area with ≥2 nearby entities → submap crop", () => {
+    const map = { entities: [geo("a", 20, 20), geo("b", 30, 25)], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.25, y_pct: 0.225 }, ASPECT);
+    expect(r.kind).toBe("submap");
+    if (r.kind === "submap") {
+      expect(r.crop.w).toBeLessThan(CROP.w);
+      // the crop actually frames the cluster
+      expect(r.crop.x).toBeLessThanOrEqual(20);
+      expect(r.crop.x + r.crop.w).toBeGreaterThanOrEqual(30);
+    }
+  });
+
+  it("tap empty map area with no entities → explainer", () => {
+    const map = { entities: [geo("a", 90, 90)], bounds: CROP };
+    expect(routeClick(map, mapView(CROP), { x_pct: 0.1, y_pct: 0.1 }, ASPECT).kind).toBe(
+      "explainer",
+    );
+  });
+
+  it("tap a non-place entity (item) → explainer, but remembers the focus", () => {
+    const map = { entities: [geo("sword", 50, 50, { kind: "item" })], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.5, y_pct: 0.5 }, ASPECT);
+    expect(r.kind).toBe("explainer");
+    if (r.kind === "explainer") expect(r.focus_id).toBe("sword");
+  });
+
+  it("scene view: tap a projected place → enter it", () => {
+    const observer: ObserverPose = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    const map = { entities: [geo("hut", 50, 0, { height: 5 })], bounds: CROP };
+    const r = routeClick(map, sceneView(observer), { x_pct: 0.5, y_pct: 0.5 }, ASPECT);
+    expect(r.kind).toBe("scene");
+    if (r.kind === "scene") expect(r.focus_id).toBe("hut");
+  });
+
+  it("scene view: tap empty sky → explainer", () => {
+    const observer: ObserverPose = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    const map = { entities: [geo("hut", 50, 0)], bounds: CROP };
+    expect(
+      routeClick(map, sceneView(observer), { x_pct: 0.02, y_pct: 0.02 }, ASPECT).kind,
+    ).toBe("explainer");
+  });
+});
