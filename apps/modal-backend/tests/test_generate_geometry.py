@@ -83,8 +83,7 @@ def test_grounding_summary_shape() -> None:
         score=0.812345,
         mean_iou=0.654321,
     )
-    res = SimpleNamespace(repairs=1, iterations=1)
-    out = generate._grounding_summary(report, res)
+    out = generate._grounding_summary(report, repaired=True, iterations=1)
     assert out == {
         "score": 0.812,
         "mean_iou": 0.654,
@@ -139,6 +138,27 @@ async def test_run_grounding_degrades_on_detector_error(
         img, _EXP, repair_on=False, abort=_noop_abort
     )
     assert out_img is img and summary is None  # best-effort: never breaks gen
+
+
+async def test_run_grounding_verify_only_low_score_not_repaired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Verify-only on a render missing entities → low score, but NO repair was
+    # attempted, so the image is untouched and `repaired` is False. (The live
+    # demo caught this: an attempt-counter must not imply a *kept* repair.)
+    async def fake_detect(_bytes, _labels):
+        return []  # detector finds nothing → every expected entity is missing
+
+    monkeypatch.setattr(detector, "detect", fake_detect)
+    img = _fake_img()
+    out_img, summary = await generate._run_grounding(
+        img, _EXP, repair_on=False, abort=_noop_abort
+    )
+    assert out_img is img
+    assert summary is not None
+    assert summary["repaired"] is False
+    assert summary["iterations"] == 0
+    assert summary["matched"] == [] and summary["missing"] == ["tower"]
 
 
 async def test_run_grounding_empty_labels_is_noop() -> None:
