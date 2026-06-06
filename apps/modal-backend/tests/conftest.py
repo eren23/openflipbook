@@ -47,6 +47,20 @@ _SCRUB = (
     # World Mode (tap enters a place; gated off by default).
     "WORLD_MODE",
     "FAL_CONTINUE_MODEL",
+    # Geometric world model (numeric map, observer poses, grounded gen).
+    "GEOMETRIC_WORLD",
+    "WORLD_GEOMETRY_GEN",
+    "VLM_GROUNDING",
+    "FAL_OUTPAINT_MODEL",
+    "FAL_INPAINT_MODEL",
+    "FAL_UPSCALE_MODEL",
+    "FAL_DETECTOR_MODEL",
+    # world_bench eval gates — keep host-set run flags / judge pin out of tests.
+    "LAYOUT_BENCH_RUN",
+    "GROUNDING_BENCH_RUN",
+    "REPAIR_BENCH_RUN",
+    "EDIT_BENCH_RUN",
+    "WORLD_BENCH_JUDGE_MODEL",
     "SENTRY_DSN",
 )
 

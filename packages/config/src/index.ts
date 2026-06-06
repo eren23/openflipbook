@@ -84,6 +84,11 @@ export interface GenerateRequestBody {
   world_mode?: boolean;
   autonomy?: Autonomy;
   render_mode?: RenderMode;
+  // Geometric world (GEOMETRIC_WORLD). The scene's observer pose + level, and the
+  // geometry engine's expected per-entity layout for this frame, so the planner
+  // can constrain placement and the grounding loop has a target to check against.
+  scene_view?: SceneView;
+  expected_layout?: ProjectedEntity[];
   trace_id?: string;
 }
 
@@ -371,6 +376,94 @@ export interface Entity {
   // Extractor's 0..1 self-rated confidence. Codex UI may dim entries below a
   // threshold and offer a "delete junk" sweep.
   confidence: number;
+  updated_at: string;
+}
+
+// ── Geometric world model ────────────────────────────────────────────────────
+// A persistent 2D coordinate world: entities sit at numeric map positions with a
+// height + footprint; an observer has a pose; a rendered scene is a VIEW of the
+// in-frame entities from that pose (there is no single correct view). All
+// additive + dormant until GEOMETRIC_WORLD is enabled. The geometry engine
+// (apps/web/lib/world-geometry.ts ↔ apps/modal-backend/providers/geometry.py)
+// projects (map + observer) → the per-frame layout below.
+
+// A point in world units (arbitrary scale; origin top-left, +x east, +y south).
+export interface WorldVec2 {
+  x: number;
+  y: number;
+}
+
+// An entity placed on the map: where it is, how tall, how much ground it covers.
+export interface WorldEntityGeo {
+  id: string;
+  // The Codex Entity.id this geometry belongs to, or null for a map-only prop.
+  entity_id: string | null;
+  kind: EntityKind;
+  label: string;
+  pos: WorldVec2;
+  height: number; // world units above the ground plane
+  footprint: { w: number; d: number }; // ground extent: width (x) × depth (y)
+  heading?: number; // facing, radians, 0 = +x; optional
+  visual: string; // short appearance descriptor (mirrors Entity.appearance)
+  state: EntityState;
+  confidence: number; // 0..1
+  // How this geometry was set: "user" (hand-placed, authoritative), "extracted"
+  // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
+  source: "extracted" | "user" | "derived";
+  updated_at: string;
+}
+
+// Where the camera stands for a scene. Null observer ⇒ a top-down map view.
+export interface ObserverPose {
+  pos: WorldVec2;
+  eye_height: number;
+  gaze: number; // heading, radians, 0 = +x
+  fov: number; // horizontal field of view, radians
+}
+
+// A rectangular window into the world, in world units (sub-map crop / bounds).
+export interface MapCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// What level a scene renders at — there is no single correct view.
+export type ViewLevel = "map" | "building" | "street" | "eye";
+
+// The view a given node (scene) renders: its level + observer pose (non-map
+// levels) and/or the map crop (map level). Persisted on the node.
+export interface SceneView {
+  node_id: string;
+  level: ViewLevel;
+  observer: ObserverPose | null;
+  map_crop: MapCrop | null;
+}
+
+// One entity's projected place in a rendered frame (geometry-engine output),
+// 0..1 normalized in the frame. Drives prompt constraints + VLM verification.
+export interface ProjectedEntity {
+  id: string;
+  label: string;
+  x_pct: number; // screen centre
+  y_pct: number;
+  w_pct: number; // apparent size
+  h_pct: number;
+  depth: number; // distance from observer; lower = nearer (drawn on top)
+  // Coarse bins — what prompts + the VLM judge actually consume (honest: bins,
+  // not pixels). h_pos ∈ far-left..far-right, v_pos ∈ top|mid|bottom, size bin.
+  h_pos: string;
+  v_pos: string;
+  size: string;
+}
+
+// A per-session snapshot of the geometric world (the `world_map` collection).
+export interface WorldMapSnapshot {
+  session_id: string;
+  entities: WorldEntityGeo[];
+  bounds: MapCrop;
+  schema_version: number;
   updated_at: string;
 }
 
