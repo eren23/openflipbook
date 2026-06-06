@@ -199,3 +199,45 @@ def test_build_garbage_confidence_falls_back_to_one() -> None:
         payload, x_pct=0.0, y_pct=0.0, fallback_subject="X"
     )
     assert res.confidence == 1.0
+
+
+# ---------- World Mode: enter_as + clarifiers -----------------------------
+
+
+def test_build_defaults_enter_as_explainer_and_no_clarifiers() -> None:
+    # Classic (non-world) payloads omit these → explainer, no questions.
+    res = llm._build_click_resolution(
+        {"subject": "x"}, x_pct=0.5, y_pct=0.5, fallback_subject="X"
+    )
+    assert res.enter_as == "explainer"
+    assert res.clarifiers == []
+
+
+def test_build_parses_enter_as_scene() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "The Shades", "enter_as": "scene"},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="X",
+    )
+    assert res.enter_as == "scene"
+
+
+def test_build_invalid_enter_as_falls_back_to_explainer() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "x", "enter_as": "teleport"},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="X",
+    )
+    assert res.enter_as == "explainer"
+
+
+def test_build_clarifiers_caps_at_two_and_filters_non_strings() -> None:
+    res = llm._build_click_resolution(
+        {"subject": "x", "clarifiers": ["Day or night?", "  ", "Busy?", "Third?", 5]},
+        x_pct=0.5,
+        y_pct=0.5,
+        fallback_subject="X",
+    )
+    assert res.clarifiers == ["Day or night?", "Busy?"]

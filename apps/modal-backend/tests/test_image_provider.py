@@ -148,6 +148,14 @@ def test_conditioning_preamble_empty_is_blank() -> None:
     assert image.conditioning_preamble([], "tap") == ""
 
 
+def test_conditioning_preamble_place_scene_reveals_within() -> None:
+    # World Mode entering a place: the region ref should say to reveal the
+    # fuller place within (a scene), distinct from the explainer "inside".
+    out = image.conditioning_preamble(["region", "parent"], "place_scene")
+    assert "reveal the fuller place within" in out.lower()
+    assert "outward" not in out.lower()
+
+
 def test_first_image_extracts_first_dict() -> None:
     assert image._first_image({"images": [{"url": "x"}, {"url": "y"}]}) == {"url": "x"}
 
