@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorldEntityGeo } from "@openflipbook/config";
+import type { EntityGeoEdit, WorldEntityGeo } from "@openflipbook/config";
 
 import { __test } from "./world-map";
 
-const { applyGeoUpsert, recomputeBounds } = __test;
+const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius } = __test;
 
 function geo(
   id: string,
@@ -85,4 +85,59 @@ describe("world-map merge core", () => {
 
   it("empty map → zero bounds", () =>
     expect(recomputeBounds([])).toEqual({ x: 0, y: 0, w: 0, h: 0 }));
+});
+
+describe("applyEntityEdit (P5 structured geo edits)", () => {
+  const base = () => [geo("geo_a", "derived", 10, 10)];
+
+  it("move shifts pos by (dx,dy), stamps updated_at, claims user authority", () => {
+    const edit: EntityGeoEdit = { op: "move", target: "geo_a", dx: 5, dy: -3 };
+    const out = applyEntityEdit(base(), edit, "t9");
+    expect(out[0]!.pos).toEqual({ x: 15, y: 7 });
+    expect(out[0]!.updated_at).toBe("t9");
+    expect(out[0]!.source).toBe("user"); // a deliberate edit outranks re-seeds
+  });
+
+  it("set_height and set_appearance change only their field", () => {
+    expect(applyEntityEdit(base(), { op: "set_height", target: "geo_a", height: 30 }, "t")[0]!.height).toBe(30);
+    expect(
+      applyEntityEdit(base(), { op: "set_appearance", target: "geo_a", visual: "red brick" }, "t")[0]!.visual,
+    ).toBe("red brick");
+  });
+
+  it("remove drops the target", () => {
+    expect(applyEntityEdit(base(), { op: "remove", target: "geo_a" }, "t")).toEqual([]);
+  });
+
+  it("add appends a user entity with defaults + deterministic id", () => {
+    const out = applyEntityEdit(base(), { op: "add", label: "Well", pos: { x: 2, y: 4 } }, "t");
+    expect(out).toHaveLength(2);
+    const added = out.find((e) => e.label === "Well")!;
+    expect(added.id).toBe("geo_user_well");
+    expect(added.pos).toEqual({ x: 2, y: 4 });
+    expect(added.source).toBe("user");
+    expect(added.entity_id).toBeNull();
+    expect(added.height).toBeGreaterThan(0);
+  });
+
+  it("an edit targeting an unknown id is a no-op (never throws)", () => {
+    const before = base();
+    expect(applyEntityEdit(before, { op: "move", target: "nope", dx: 1, dy: 1 }, "t")).toEqual(before);
+  });
+});
+
+describe("blastRadius (which saved scenes go stale)", () => {
+  it("unions + sorts + dedupes node refs across edited targets", () => {
+    const refs = { geo_a: ["n3", "n1"], geo_b: ["n1", "n2"] };
+    const edits: EntityGeoEdit[] = [
+      { op: "move", target: "geo_a", dx: 1, dy: 0 },
+      { op: "set_height", target: "geo_b", height: 5 },
+    ];
+    expect(blastRadius(edits, refs)).toEqual(["n1", "n2", "n3"]);
+  });
+
+  it("add (no target) contributes nothing; unknown target → empty", () => {
+    expect(blastRadius([{ op: "add", label: "x", pos: { x: 0, y: 0 } }], {})).toEqual([]);
+    expect(blastRadius([{ op: "remove", target: "ghost" }], { geo_a: ["n1"] })).toEqual([]);
+  });
 });
