@@ -7,6 +7,8 @@ import type {
   WorldEntityMutation,
 } from "@openflipbook/config";
 
+import GeoEditSection from "./GeoEditSection";
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -25,6 +27,10 @@ interface Props {
   onMutate?: (
     mutation: WorldEntityMutation
   ) => Promise<{ ok: boolean; error?: string }>;
+  // Geometric world (GEOMETRIC_WORLD): pass the session id to surface the
+  // NL-editable map section. Omitted → the section is absent (no behaviour
+  // change), so this stays additive + opt-in.
+  geoEditSessionId?: string;
 }
 
 interface UndoToastState {
@@ -75,6 +81,7 @@ export function CodexPanel({
   onToggleChips,
   overrideEnabled,
   onMutate,
+  geoEditSessionId,
 }: Props) {
   const [tab, setTab] = useState<TabKind>("all");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -252,6 +259,14 @@ export function CodexPanel({
               />
             ))}
           </ul>
+          {overrideEnabled && geoEditSessionId && (
+            <section className="mt-4 border-t border-[var(--color-edge)] pt-3">
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-60">
+                Map · geometry
+              </h3>
+              <GeoEditSection sessionId={geoEditSessionId} />
+            </section>
+          )}
         </div>
         {undoToast && onMutate && (
           <div className="border-t border-[var(--color-edge)] bg-[var(--color-canvas)] px-3 py-2 text-xs">
