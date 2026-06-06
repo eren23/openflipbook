@@ -60,6 +60,7 @@ def repair_instruction(
     if not parts:
         return ""
     return (
-        "Keep everything else exactly as it is; only adjust these to match the "
-        "intended layout: " + "; ".join(parts) + "."
+        "Keep the existing scene, its art medium, colour palette and everything "
+        "else exactly as they are — only adjust these to match the intended "
+        "layout: " + "; ".join(parts) + "."
     )
