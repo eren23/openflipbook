@@ -85,10 +85,6 @@ services:
       # to A/B against the old text-only generation:
       #   IMAGE_CONDITIONING=false docker compose up -d backend
       IMAGE_CONDITIONING: ${IMAGE_CONDITIONING:-true}
-      # Go-in continuation: tap zooms INTO the region via FLUX Kontext instead
-      # of re-planning a fresh page (default off — opt in for the continuous
-      # world): CONTINUATION_MODE=true docker compose up -d backend
-      CONTINUATION_MODE: ${CONTINUATION_MODE:-false}
     # Force public resolvers — Docker's default 127.0.0.11 link-local resolver
     # has been flaking on the fal.ai / r2.cloudflarestorage.com hosts during
     # E2E runs (sporadic ESERVFAIL / EAI_AGAIN), which manifests as
