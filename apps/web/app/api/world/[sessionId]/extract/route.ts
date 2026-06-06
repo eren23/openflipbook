@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
+import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type {
@@ -134,6 +135,50 @@ export async function POST(req: Request, { params }: Params) {
       node_id: body.node_id,
       result: upstreamResult,
     });
+    // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
+    // entities localized on this node — the world map populates for free. Default
+    // scene_view = a top-down map so each bbox maps straight into a normalized
+    // world crop; P6 refines per-scene observer poses. Best-effort, off the
+    // response path.
+    const geoNodeId = body.node_id;
+    if (
+      geoNodeId &&
+      ["1", "true", "yes"].includes((process.env.GEOMETRIC_WORLD ?? "").toLowerCase())
+    ) {
+      try {
+        const items = merged.snapshot.entities
+          .map((e) => {
+            const bbox = e.appearance_bboxes?.[geoNodeId];
+            return bbox
+              ? {
+                  entity_id: e.id,
+                  kind: e.kind,
+                  label: e.name,
+                  bbox,
+                  visual: e.appearance,
+                  state: e.state,
+                  confidence: e.confidence,
+                }
+              : null;
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null);
+        if (items.length > 0) {
+          await deriveGeoFromExtraction(
+            sessionId,
+            {
+              node_id: geoNodeId,
+              level: "map",
+              observer: null,
+              map_crop: { x: 0, y: 0, w: 100, h: 60 },
+            },
+            16 / 9,
+            items,
+          );
+        }
+      } catch {
+        /* seeding is best-effort — never block the extraction response */
+      }
+    }
     // Inline projection of added/updated records so the debug HUD (and any
     // future hover-chip prefetch) can render names without a follow-up GET
     // on the snapshot. Cheap — these are already in memory from the merge.
