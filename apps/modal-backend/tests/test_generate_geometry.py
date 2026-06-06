@@ -167,3 +167,48 @@ async def test_run_grounding_empty_labels_is_noop() -> None:
         img, [], repair_on=False, abort=_noop_abort
     )
     assert out_img is img and summary is None
+
+
+# --- P5(b): /edit-entities endpoint ------------------------------------------
+
+import json as _json  # noqa: E402
+
+from providers import llm as _llm  # noqa: E402
+
+
+def _edit_body() -> generate.EditEntitiesBody:
+    return generate.EditEntitiesBody(
+        session_id="s",
+        instruction="move the lighthouse north",
+        entities=[generate.GeoEntityRef(id="g1", label="lighthouse",
+                                        pos=generate.WorldVec2(x=0, y=0))],
+        references={"g1": ["n1"]},
+    )
+
+
+async def test_edit_entities_endpoint_403_when_flag_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GEOMETRIC_WORLD", raising=False)
+    resp = await generate.edit_entities_endpoint(SimpleNamespace(headers={}), _edit_body())
+    assert resp.status_code == 403
+
+
+async def test_edit_entities_endpoint_returns_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+
+    async def fake_nl(instruction, entities, references=None, scene_view=None):
+        assert references == {"g1": ["n1"]}  # the endpoint forwards refs
+        return _llm.EditPlan(
+            edits=[{"op": "move", "target": "g1", "dx": 0.0, "dy": -5.0}],
+            blast_radius=["n1"],
+        )
+
+    monkeypatch.setattr(_llm, "edit_entities_nl", fake_nl)
+    resp = await generate.edit_entities_endpoint(SimpleNamespace(headers={}), _edit_body())
+    assert resp.status_code == 200
+    payload = _json.loads(resp.body)
+    assert payload["plan"]["edits"] == [{"op": "move", "target": "g1", "dx": 0.0, "dy": -5.0}]
+    assert payload["plan"]["blast_radius"] == ["n1"]
