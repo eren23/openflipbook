@@ -42,7 +42,9 @@ describe("world-geometry cross-language parity fuzz", () => {
       });
       total += out.length;
     }
-    expect(total).toBeGreaterThanOrEqual(200);
+    // Exact: corpus is seed-pinned + deterministic, so a silently-trimmed regen
+    // (fewer projections) trips the gate, not just an all-culled corpus.
+    expect(total).toBe(244);
   });
 
   it("left/right mirror symmetry (structural truth)", () => {
@@ -62,7 +64,9 @@ describe("world-geometry cross-language parity fuzz", () => {
     });
     for (const ang of [0.2, 0.6, 1.1, 1.3]) {
       if (ang >= Math.PI / 4) {
+        // past the edge → both mirror entities culled (symmetry holds for null too)
         expect(project(ent("r", ang), obs, 1.0)).toBeNull();
+        expect(project(ent("l", -ang), obs, 1.0)).toBeNull();
         continue;
       }
       const left = project(ent("l", -ang), obs, 1.0)!;

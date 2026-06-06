@@ -44,8 +44,26 @@ async function collection(): Promise<Collection<WorldMapDoc>> {
 
 // ── Pure merge core (unit-tested; no Mongo) ──────────────────────────────────
 
-/** Upsert geometry entries by id, honouring source authority. Idempotent:
- *  the same payload twice yields the same set. */
+function geoDiffers(a: WorldEntityGeo, b: WorldEntityGeo): boolean {
+  return (
+    a.pos.x !== b.pos.x ||
+    a.pos.y !== b.pos.y ||
+    a.height !== b.height ||
+    a.footprint.w !== b.footprint.w ||
+    a.footprint.d !== b.footprint.d ||
+    a.label !== b.label ||
+    a.visual !== b.visual ||
+    a.kind !== b.kind ||
+    a.entity_id !== b.entity_id ||
+    a.source !== b.source ||
+    a.confidence !== b.confidence ||
+    JSON.stringify(a.state) !== JSON.stringify(b.state)
+  );
+}
+
+/** Upsert geometry entries by id, honouring source authority. Truly idempotent:
+ *  re-applying the same payload is a no-op (keeps prev + its updated_at), so an
+ *  unchanged re-seed doesn't dirty the doc / amplify writes. */
 export function applyGeoUpsert(
   existing: WorldEntityGeo[],
   incoming: WorldEntityGeo[],
@@ -54,7 +72,14 @@ export function applyGeoUpsert(
   const byId = new Map(existing.map((e) => [e.id, e]));
   for (const g of incoming) {
     const prev = byId.get(g.id);
-    if (!prev || SOURCE_RANK[g.source] >= SOURCE_RANK[prev.source]) {
+    if (!prev) {
+      byId.set(g.id, { ...g, updated_at: nowIso });
+      continue;
+    }
+    const rg = SOURCE_RANK[g.source];
+    const rp = SOURCE_RANK[prev.source];
+    // Higher authority always wins; equal authority writes only on a real change.
+    if (rg > rp || (rg === rp && geoDiffers(prev, g))) {
       byId.set(g.id, { ...g, updated_at: nowIso });
     }
   }

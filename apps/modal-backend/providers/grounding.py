@@ -63,7 +63,8 @@ def diff(
     are centre-based {x_pct, y_pct, w_pct, h_pct} (matching ProjectedEntity)."""
     used: set[int] = set()
     matched: list[Match] = []
-    for e in expected:
+    matched_exp: set[int] = set()  # expected INDICES matched (not labels — dupes)
+    for ei, e in enumerate(expected):
         e_box = _to_corners(e["x_pct"], e["y_pct"], e["w_pct"], e["h_pct"])
         best: tuple[int, float, dict[str, Any]] | None = None
         for j, o in enumerate(observed):
@@ -80,14 +81,16 @@ def diff(
             # it; `missing` stays "truly absent / hallucinated-away").
             j, score, o = best
             used.add(j)
+            matched_exp.add(ei)
             pos_ok = (
                 score >= iou_thresh
                 and abs(o["x_pct"] - e["x_pct"]) < POS_TOL
                 and abs(o["y_pct"] - e["y_pct"]) < POS_TOL
             )
             matched.append(Match(label=str(e["label"]), iou=score, pos_ok=pos_ok))
-    matched_labels = {m.label for m in matched}
-    missing = [str(e["label"]) for e in expected if str(e["label"]) not in matched_labels]
+    # By expected INDEX so two same-label entities (e.g. two "tree") don't mask a
+    # genuinely missing one.
+    missing = [str(e["label"]) for ei, e in enumerate(expected) if ei not in matched_exp]
     extra = [str(o.get("label", "?")) for j, o in enumerate(observed) if j not in used]
     n_exp = len(expected) or 1
     presence = len(matched) / n_exp

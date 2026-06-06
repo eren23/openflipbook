@@ -62,3 +62,16 @@ def test_label_match_low_iou_is_present_but_misplaced() -> None:
 def test_truly_absent_label_is_missing() -> None:
     r = diff([_box("tower", 0.5, 0.5)], [_box("boat", 0.5, 0.5)])
     assert r.matched == [] and r.missing == ["tower"] and r.extra == ["boat"]
+
+
+def test_duplicate_label_one_detected_one_missing() -> None:
+    # Two same-label expected entities, only one detected. The OTHER must still
+    # report missing — an old label-set diff masked it ("tower" ∈ matched labels
+    # ⇒ never missing). Index-based matching keeps the second one honest.
+    r = diff(
+        [_box("tower", 0.2, 0.2), _box("tower", 0.8, 0.8)],
+        [_box("tower", 0.2, 0.2)],
+    )
+    assert len(r.matched) == 1
+    assert r.missing == ["tower"]  # the unmatched second tower
+    assert r.extra == []

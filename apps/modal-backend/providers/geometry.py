@@ -63,6 +63,8 @@ def project(
     entity: dict[str, Any], observer: dict[str, Any], aspect: float
 ) -> dict[str, Any] | None:
     """Project one entity into the observer's frame, or None if not visible."""
+    if aspect <= 0:
+        return None  # degenerate frame — no vertical frustum
     ex, ey = entity["pos"]["x"], entity["pos"]["y"]
     ox, oy = observer["pos"]["x"], observer["pos"]["y"]
     dx, dy = ex - ox, ey - oy
