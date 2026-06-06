@@ -45,6 +45,16 @@ secrets = [
 app = modal.App(APP_NAME, image=image)
 fastapi_app = FastAPI(title="Endless Canvas — generate")
 
+# Go-in continuation instruction for the in-context editor (FLUX Kontext) — the
+# wording is from the model bakeoff that picked Kontext over nano-banana (which
+# re-invents the scene). Used only when CONTINUATION_MODE is on.
+_CONTINUE_INSTRUCTION = (
+    "Move the camera INTO this exact spot. Keep the same scene, the same world, "
+    "and the same art style, palette and line work. Show a closer, zoomed-in "
+    "continuation of what is already here — do NOT invent a new scene, do not "
+    "redesign it as a page, do not change the subject. It is the same place, closer."
+)
+
 
 class Click(BaseModel):
     x_pct: float = Field(ge=0.0, le=1.0)
@@ -512,41 +522,66 @@ async def _event_stream(
             # image — skip it.
             and image_provider.active_provider() == "fal"
         )
-        draft_task: _asyncio.Task | None = None
-        if wants_draft:
-            draft_task = _asyncio.create_task(
-                image_provider.generate_image(
-                    prompt=composed_prompt,
-                    aspect_ratio=body.aspect_ratio,
-                    tier="fast",
-                )
-            )
-        # Image conditioning (final image only; the fast draft stays a quick
-        # text-only preview). Blend the reference stack — region crop → parent →
-        # anchor — so the page belongs to the same world. Flag-gated; no refs →
-        # text-only exactly as before.
-        main_prompt = composed_prompt
-        cond_refs: list[str] | None = None
-        if (
-            os.environ.get("IMAGE_CONDITIONING", "true").lower() in ("1", "true", "yes")
-            and body.condition_image_urls
-        ):
-            cond_refs = body.condition_image_urls
-            main_prompt = (
-                image_provider.conditioning_preamble(
-                    body.condition_roles or [], body.mode
-                )
-                + composed_prompt
-            )
-        main_task = _asyncio.create_task(
-            image_provider.generate_image(
-                prompt=main_prompt,
-                aspect_ratio=body.aspect_ratio,
-                tier=body.image_tier,
-                model_override=body.image_model,
-                reference_urls=cond_refs,
-            )
+        # Continuation (go-in): when CONTINUATION_MODE is on and this is a tap
+        # with a region crop, zoom INTO it with a strict in-context editor (FLUX
+        # Kontext) so the child continues the SAME scene + style instead of
+        # nano-banana re-planning a fresh page — settled by a model bakeoff.
+        # plan_page above still supplies page_title/facts for the map + entity
+        # extractor. One call, no draft race. Flag off → legacy path verbatim.
+        cont_region = (
+            os.environ.get("CONTINUATION_MODE", "false").lower()
+            in ("1", "true", "yes")
+            and body.mode == "tap"
+            and bool(body.condition_image_urls)
+            and (body.condition_roles or [""])[0] == "region"
         )
+        draft_task: _asyncio.Task | None = None
+        if cont_region and body.condition_image_urls:
+            instruction = _CONTINUE_INSTRUCTION
+            if effective_query:
+                instruction += (
+                    f" You are looking more closely at: {effective_query}."
+                )
+            main_task = _asyncio.create_task(
+                image_edit_provider.continue_image(
+                    body.condition_image_urls[0], instruction
+                )
+            )
+        else:
+            if wants_draft:
+                draft_task = _asyncio.create_task(
+                    image_provider.generate_image(
+                        prompt=composed_prompt,
+                        aspect_ratio=body.aspect_ratio,
+                        tier="fast",
+                    )
+                )
+            # Image conditioning (final image only; the fast draft stays a quick
+            # text-only preview). Blend the reference stack — region crop →
+            # parent → anchor. No refs → text-only exactly as before.
+            main_prompt = composed_prompt
+            cond_refs: list[str] | None = None
+            if (
+                os.environ.get("IMAGE_CONDITIONING", "true").lower()
+                in ("1", "true", "yes")
+                and body.condition_image_urls
+            ):
+                cond_refs = body.condition_image_urls
+                main_prompt = (
+                    image_provider.conditioning_preamble(
+                        body.condition_roles or [], body.mode
+                    )
+                    + composed_prompt
+                )
+            main_task = _asyncio.create_task(
+                image_provider.generate_image(
+                    prompt=main_prompt,
+                    aspect_ratio=body.aspect_ratio,
+                    tier=body.image_tier,
+                    model_override=body.image_model,
+                    reference_urls=cond_refs,
+                )
+            )
         # Drive both tasks to completion. If the draft finishes first, emit
         # `progress`; if the main finishes first, drop the draft.
         if draft_task is not None:

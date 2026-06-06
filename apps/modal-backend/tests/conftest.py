@@ -44,6 +44,10 @@ _SCRUB = (
     "IMAGE_API_KEY",
     "IMAGE_MODEL",
     "IMAGE_SIZE",
+    # Visual continuation (go-in via FLUX Kontext).
+    "CONTINUATION_MODE",
+    "FAL_CONTINUE_MODEL",
+    "FAL_EXPAND_MODEL",
     "SENTRY_DSN",
 )
 

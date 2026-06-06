@@ -88,3 +88,45 @@ async def edit_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+# --- Visual continuation (go-in zoom) ----------------------------------------
+
+# FLUX Kontext is a strict in-context editor that actually CONTINUES the parent
+# (zooms into the tapped region keeping the same scene + style), where
+# nano-banana invents a fresh page. Settled by a model bakeoff on a real page.
+CONTINUE_MODEL_DEFAULT = "fal-ai/flux-pro/kontext"
+
+
+async def continue_image(
+    image_data_url: str,
+    instruction: str,
+    model_override: str | None = None,
+) -> GeneratedImage:
+    """Go-in continuation: feed the tapped region crop to FLUX Kontext with a
+    "move the camera in, same scene/style" instruction, so the child is a closer
+    view of the SAME place — not a fresh re-planned page. Reuses the edit flow
+    (kontext takes `image_url` singular). Override with FAL_CONTINUE_MODEL."""
+    from obs import span
+
+    _ensure_fal_key()
+    model = (
+        model_override
+        or os.environ.get("FAL_CONTINUE_MODEL")
+        or CONTINUE_MODEL_DEFAULT
+    )
+    image_url = await to_fal_url(image_data_url)
+    async with span("image.continue", model=model, instr_len=len(instruction)) as ctx:
+        result = await _fal_subscribe(
+            model,
+            _edit_args_for(model, instruction, image_url),
+        )
+        image_info = _first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
+    return GeneratedImage(
+        jpeg_bytes=jpeg_bytes,
+        mime_type=mime,
+        model=model,
+        provider_request_id=str(result.get("requestId") or "") or None,
+    )
