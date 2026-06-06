@@ -165,6 +165,12 @@ def _world_mode_on(requested: bool) -> bool:
     )
 
 
+def _geometric_world_on() -> bool:
+    """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
+    endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
+    return os.environ.get("GEOMETRIC_WORLD", "false").lower() in ("1", "true", "yes")
+
+
 def _world_geometry_gen_on() -> bool:
     """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
     return os.environ.get("WORLD_GEOMETRY_GEN", "false").lower() in (
@@ -1184,6 +1190,28 @@ class ExtractEntitiesBody(BaseModel):
     trace_id: str | None = None
 
 
+class GeoEntityRef(BaseModel):
+    """The trimmed geo state the NL editor may target (mirrors the web's
+    EditEntitiesRequestBody.entities slice)."""
+    id: str
+    entity_id: str | None = None
+    label: str = ""
+    pos: WorldVec2
+    height: float = 0.0
+    footprint: dict[str, float] = Field(default_factory=dict)
+    visual: str = ""
+
+
+class EditEntitiesBody(BaseModel):
+    session_id: str
+    instruction: str
+    entities: list[GeoEntityRef] = Field(default_factory=list, max_length=120)
+    # geo-id → node ids that show it; lets us compute the blast-radius here.
+    references: dict[str, list[str]] = Field(default_factory=dict)
+    scene_view: SceneView | None = None
+    trace_id: str | None = None
+
+
 @fastapi_app.post("/extract-entities")
 async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     """Run the world-memory extractor on a freshly-rendered page.
@@ -1253,6 +1281,55 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     for u in result.updated
                 ],
             },
+            "trace_id": trace_id,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
+@fastapi_app.post("/edit-entities")
+async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
+    """Turn an NL instruction into structured geo edits + a blast-radius (P5).
+
+    Gated by GEOMETRIC_WORLD (403 when off → behaves as if absent). The web
+    layer applies the returned edits to the world_map and surfaces the
+    blast-radius as a "restage N scenes?" confirm. One text-LLM call; no
+    Mongo/R2 here — the edits are just structured JSON.
+    """
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import llm as llm_provider
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    if not _geometric_world_on():
+        return JSONResponse(
+            {"error": "geometric world disabled (set GEOMETRIC_WORLD=1)", "trace_id": trace_id},
+            status_code=403,
+            headers={"X-Trace-Id": trace_id},
+        )
+    log(
+        "info",
+        "edit_entities.request",
+        session_id=body.session_id,
+        instruction_len=len(body.instruction or ""),
+        entity_count=len(body.entities),
+    )
+    try:
+        plan = await llm_provider.edit_entities_nl(
+            instruction=body.instruction,
+            entities=[e.model_dump() for e in body.entities],
+            references=body.references,
+            scene_view=body.scene_view.model_dump() if body.scene_view else None,
+        )
+    except Exception as exc:
+        record_error("edit_entities", exc, session_id=body.session_id)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
+    return JSONResponse(
+        {
+            "plan": {"edits": plan.edits, "blast_radius": plan.blast_radius},
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},
