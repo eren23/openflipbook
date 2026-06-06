@@ -183,6 +183,96 @@ def _layout_clause_for(body: GenerateBody) -> str:
     )
 
 
+def _vlm_grounding_on() -> bool:
+    """Verify the rendered frame against the expected layout (VLM_GROUNDING).
+    Off → no detector call, `final` carries no grounding summary."""
+    return os.environ.get("VLM_GROUNDING", "false").lower() in ("1", "true", "yes")
+
+
+def _vlm_grounding_repair_on() -> bool:
+    """Let the grounding loop attempt a corrective edit (VLM_GROUNDING_REPAIR).
+    Off → verify-only: report the diff, never mutate the image."""
+    return os.environ.get("VLM_GROUNDING_REPAIR", "false").lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _grounding_summary(report: Any, res: Any) -> dict[str, Any]:
+    """The compact grounding payload attached to the `final` event."""
+    return {
+        "score": round(report.score, 3),
+        "mean_iou": round(report.mean_iou, 3),
+        "matched": [m.label for m in report.matched],
+        "missing": list(report.missing),
+        "extra": list(report.extra),
+        "repaired": res.repairs > 0,
+        "iterations": res.iterations,
+    }
+
+
+async def _no_repair(_img: Any, _report: Any) -> Any | None:
+    return None
+
+
+async def _run_grounding(
+    result: Any,
+    expected: list[dict[str, Any]],
+    *,
+    repair_on: bool,
+    abort: Callable[[str], Awaitable[None]],
+    accept_threshold: float = 0.7,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Verify the render against the expected layout (and optionally repair it),
+    returning the best image + a summary. Fully best-effort: ANY failure (detector
+    error/429, edit error) degrades to (original image, None) so grounding can
+    never break generation. The bounded loop itself is unit-tested in
+    test_repair_loop.py; this wires the live detector + edit into it."""
+    from providers import detector, geometry_prompt, grounding
+    from providers import image as image_provider
+    from providers import image_edit as image_edit_provider
+
+    labels = [
+        lbl
+        for lbl in dict.fromkeys(
+            str(e.get("label") or e.get("id") or "") for e in expected
+        )
+        if lbl
+    ]
+    if not labels:
+        return result, None
+
+    async def _verify(img: Any) -> Any:
+        observed = await detector.detect(img.jpeg_bytes, labels)
+        return grounding.diff(expected, observed)
+
+    async def _repair(img: Any, report: Any) -> Any | None:
+        misplaced = [m.label for m in report.matched if not m.pos_ok]
+        instruction = geometry_prompt.repair_instruction(
+            expected, list(report.missing), misplaced
+        )
+        if not instruction:
+            return None
+        await abort("grounding-repair")
+        data_url = image_provider.encode_data_url(img.jpeg_bytes, img.mime_type)
+        return await image_edit_provider.edit_image(data_url, instruction)
+
+    try:
+        loop_res = await grounding.run_grounding_loop(
+            result,
+            verify=_verify,
+            repair=_repair if repair_on else _no_repair,
+            accept_threshold=accept_threshold,
+        )
+    except Exception as exc:
+        # Grounding is strictly best-effort — a detector 429 or edit failure must
+        # never break generation, so any error degrades to (original, no summary).
+        from obs import log
+
+        log("info", "grounding.failed", error=f"{type(exc).__name__}: {exc}")
+        return result, None
+    return loop_res.image, _grounding_summary(loop_res.report, loop_res)
+
+
 # The click classifier's `enter_as` → the planner's render mode.
 _ENTER_AS_TO_RENDER: dict[str, str] = {
     "scene": "place_scene",
@@ -751,6 +841,29 @@ async def _event_stream(
                 result = await main_task
         else:
             result = await main_task
+
+        # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the
+        # expected layout and — when VLM_GROUNDING_REPAIR is also on — attempt one
+        # bounded corrective edit, keeping the best-scoring image. Best-effort +
+        # flag-gated, so off (the default) is byte-identical to before.
+        grounding_summary: dict | None = None
+        if _vlm_grounding_on() and body.expected_layout:
+            await _abort_if_disconnected("pre-grounding")
+            yield _sse(
+                {
+                    "type": "status",
+                    "stage": "verifying",
+                    "page_title": plan.page_title,
+                },
+                trace_id,
+            )
+            result, grounding_summary = await _run_grounding(
+                result,
+                [e.model_dump() for e in body.expected_layout],
+                repair_on=_vlm_grounding_repair_on(),
+                abort=_abort_if_disconnected,
+            )
+
         # Final image is the largest payload (up to 3MB JPEG on the pro
         # tier); offload the b64 encode the same way as the draft so the
         # `final` SSE yield isn't gated on a sync CPU stall.
@@ -764,19 +877,21 @@ async def _event_stream(
             {"url": c.url, "title": c.title}
             for c in (plan.sources or [])
         ]
-        yield _sse(
-            {
-                "type": "final",
-                "image_data_url": data_url,
-                "page_title": plan.page_title,
-                "image_model": result.model,
-                "prompt_author_model": text_model,
-                "session_id": body.session_id,
-                "final_prompt": zoom_instruction if use_continuation else composed_prompt,
-                "sources": sources_payload,
-            },
-            trace_id,
-        )
+        final_payload: dict[str, Any] = {
+            "type": "final",
+            "image_data_url": data_url,
+            "page_title": plan.page_title,
+            "image_model": result.model,
+            "prompt_author_model": text_model,
+            "session_id": body.session_id,
+            "final_prompt": zoom_instruction if use_continuation else composed_prompt,
+            "sources": sources_payload,
+        }
+        # Geometric grounding summary rides on `final` only when produced (flag
+        # off → key absent → unchanged wire shape).
+        if grounding_summary is not None:
+            final_payload["grounding"] = grounding_summary
+        yield _sse(final_payload, trace_id)
         log(
             "info",
             "sse.generate.end",

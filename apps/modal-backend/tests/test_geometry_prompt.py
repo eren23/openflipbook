@@ -25,3 +25,29 @@ def test_layout_falls_back_to_id_when_no_label() -> None:
         [{"id": "x", "size": "tiny", "h_pos": "right", "v_pos": "mid"}]
     )
     assert "x — tiny, right mid" in clause
+
+
+# --- repair_instruction (P4 grounding loop) ---------------------------------
+
+_EXPECTED = [
+    {"label": "lighthouse", "size": "large", "h_pos": "center", "v_pos": "top"},
+    {"label": "fishing boat", "size": "small", "h_pos": "far-left", "v_pos": "bottom"},
+]
+
+
+def test_repair_instruction_empty_when_nothing_actionable() -> None:
+    assert geometry_prompt.repair_instruction(_EXPECTED, [], []) == ""
+
+
+def test_repair_instruction_adds_missing_and_moves_misplaced() -> None:
+    out = geometry_prompt.repair_instruction(
+        _EXPECTED, missing=["fishing boat"], misplaced=["lighthouse"]
+    )
+    assert "add a fishing boat (small, far-left bottom)" in out
+    assert "move the lighthouse to center top" in out
+    assert out.startswith("Keep everything else exactly as it is")
+
+
+def test_repair_instruction_ignores_labels_not_in_expected() -> None:
+    # A label with no expected entry can't be placed → silently skipped.
+    assert geometry_prompt.repair_instruction(_EXPECTED, ["dragon"], []) == ""
