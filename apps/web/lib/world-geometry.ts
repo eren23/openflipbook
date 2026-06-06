@@ -1,8 +1,11 @@
 import type {
+  EntityBBox,
   MapCrop,
   ObserverPose,
   ProjectedEntity,
+  SceneView,
   WorldEntityGeo,
+  WorldVec2,
 } from "@openflipbook/config";
 
 /**
@@ -125,6 +128,67 @@ export interface Neighbor {
   id: string;
   bearing: number;
   dist: number;
+}
+
+// --- Seeding bridge: extraction bbox → approximate map geometry ---------------
+// Back-project an entity's image bbox into world coords so the world map can
+// populate from the extraction signal we already produce, without new VLM cost.
+// A heuristic, tagged source:"derived" + low confidence by the caller. The MAP
+// level is near-exact (a top-down map's bbox maps straight into the crop); the
+// perspective levels recover the BEARING exactly but guess the distance (a
+// single box is depth-ambiguous), assuming a default real footprint.
+export interface GeoEstimate {
+  pos: WorldVec2;
+  height: number;
+  footprint: { w: number; d: number };
+}
+
+const DEFAULT_FOOTPRINT = 6;
+const DEFAULT_HEIGHT = 4;
+
+export function estimateGeoFromBBox(
+  bbox: EntityBBox,
+  view: SceneView,
+  _aspect: number,
+): GeoEstimate {
+  const cx = bbox.x_pct + bbox.w_pct / 2;
+  const cy = bbox.y_pct + bbox.h_pct / 2;
+  if (view.level === "map" && view.map_crop) {
+    const crop: MapCrop = view.map_crop;
+    return {
+      pos: { x: crop.x + cx * crop.w, y: crop.y + cy * crop.h },
+      footprint: {
+        w: Math.max(bbox.w_pct * crop.w, 0.5),
+        d: Math.max(bbox.h_pct * crop.h, 0.5),
+      },
+      height: DEFAULT_HEIGHT,
+    };
+  }
+  const obs = view.observer;
+  if (!obs) {
+    return {
+      pos: { x: cx, y: cy },
+      footprint: { w: DEFAULT_FOOTPRINT, d: DEFAULT_FOOTPRINT },
+      height: DEFAULT_HEIGHT,
+    };
+  }
+  // Inverse of project(): x_pct = 0.5 + tan(rel)/(2 tan(halfFov)).
+  const halfFov = obs.fov / 2;
+  const rel = Math.atan((cx - 0.5) * 2 * Math.tan(halfFov));
+  const bearing = obs.gaze + rel;
+  // Distance is depth-ambiguous from one box → assume a default real footprint.
+  const dist = Math.max(
+    DEFAULT_FOOTPRINT / (Math.max(bbox.w_pct, 1e-3) * 2 * Math.tan(halfFov)),
+    1,
+  );
+  return {
+    pos: {
+      x: obs.pos.x + dist * Math.cos(bearing),
+      y: obs.pos.y + dist * Math.sin(bearing),
+    },
+    footprint: { w: DEFAULT_FOOTPRINT, d: DEFAULT_FOOTPRINT },
+    height: DEFAULT_HEIGHT,
+  };
 }
 
 export function neighborsOf(
