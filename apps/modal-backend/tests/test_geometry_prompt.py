@@ -45,7 +45,8 @@ def test_repair_instruction_adds_missing_and_moves_misplaced() -> None:
     )
     assert "add a fishing boat (small, far-left bottom)" in out
     assert "move the lighthouse to center top" in out
-    assert out.startswith("Keep everything else exactly as it is")
+    # Preserves the original medium/palette (Kontext otherwise restyles the scene).
+    assert out.startswith("Keep the existing scene, its art medium")
 
 
 def test_repair_instruction_ignores_labels_not_in_expected() -> None:
