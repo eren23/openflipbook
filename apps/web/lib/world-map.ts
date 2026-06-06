@@ -1,6 +1,7 @@
 import type { Collection, Document } from "mongodb";
 import type {
   EntityBBox,
+  EntityGeoEdit,
   EntityKind,
   EntityState,
   MapCrop,
@@ -102,6 +103,77 @@ export function recomputeBounds(entities: WorldEntityGeo[]): MapCrop {
     maxY = Math.max(maxY, e.pos.y + hd);
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+// ── Structured geo edits (Phase 5: NL-editable map) ──────────────────────────
+
+const DEFAULT_GEO_HEIGHT = 4;
+const DEFAULT_GEO_FOOTPRINT = 6;
+
+function slugLabel(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** Apply one structured geo edit to the entity list. Pure + total: an edit whose
+ *  target id isn't present is a no-op (never throws). Edited/added entities are
+ *  stamped `source:"user"` so a later derived re-seed can't clobber the change. */
+export function applyEntityEdit(
+  entities: WorldEntityGeo[],
+  edit: EntityGeoEdit,
+  nowIso: string,
+): WorldEntityGeo[] {
+  if (edit.op === "add") {
+    const added: WorldEntityGeo = {
+      id: `geo_user_${slugLabel(edit.label)}`,
+      entity_id: null,
+      kind: "place",
+      label: edit.label,
+      pos: edit.pos,
+      height: edit.height ?? DEFAULT_GEO_HEIGHT,
+      footprint: edit.footprint ?? { w: DEFAULT_GEO_FOOTPRINT, d: DEFAULT_GEO_FOOTPRINT },
+      visual: "",
+      state: {},
+      confidence: 1,
+      source: "user",
+      updated_at: nowIso,
+    };
+    return [...entities, added];
+  }
+  if (edit.op === "remove") {
+    return entities.filter((e) => e.id !== edit.target);
+  }
+  return entities.map((e) => {
+    if (e.id !== edit.target) return e;
+    const next: WorldEntityGeo = { ...e, source: "user", updated_at: nowIso };
+    if (edit.op === "move") {
+      next.pos = { x: e.pos.x + edit.dx, y: e.pos.y + edit.dy };
+    } else if (edit.op === "set_height") {
+      next.height = edit.height;
+    } else if (edit.op === "set_appearance") {
+      next.visual = edit.visual;
+    }
+    return next;
+  });
+}
+
+/** Node ids whose saved render references any edited entity → the re-stage
+ *  candidates. Pure union of `references[target]` over edits that carry a target
+ *  (an `add` introduces a new entity, so it stales nothing). */
+export function blastRadius(
+  edits: EntityGeoEdit[],
+  references: Record<string, string[]>,
+): string[] {
+  const nodes = new Set<string>();
+  for (const e of edits) {
+    if ("target" in e) {
+      for (const n of references[e.target] ?? []) nodes.add(n);
+    }
+  }
+  return [...nodes].sort();
 }
 
 function snapshotFromDoc(doc: WorldMapDoc): WorldMapSnapshot {
@@ -231,4 +303,9 @@ export async function deriveGeoFromExtraction(
   return upsertEntityGeos(sessionId, geos);
 }
 
-export const __test = { applyGeoUpsert, recomputeBounds };
+export const __test = {
+  applyGeoUpsert,
+  recomputeBounds,
+  applyEntityEdit,
+  blastRadius,
+};

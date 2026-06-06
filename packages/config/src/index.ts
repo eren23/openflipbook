@@ -550,3 +550,51 @@ export type WorldEntityMutation =
   | { op: "undo_delete"; id: string }
   | { op: "pin"; id: string; pinned: boolean }
   | { op: "set_appearance"; id: string; appearance: string; reference_image_url?: string | null };
+
+// ── Geometry edits (Phase 5): NL-editable map ────────────────────────────────
+// A structured edit to the geometric world map (WorldEntityGeo by id). These are
+// what `edit_entities_nl` turns a natural-language instruction into ("move the
+// lighthouse north" → {op:"move", target, dx, dy}). `target` is a WorldEntityGeo
+// id; deltas are op-specific and in world units. Applied by lib/world-map.ts.
+export type EntityGeoEdit =
+  | { op: "move"; target: string; dx: number; dy: number }
+  | { op: "set_height"; target: string; height: number }
+  | { op: "set_appearance"; target: string; visual: string }
+  | { op: "remove"; target: string }
+  | {
+      op: "add";
+      label: string;
+      pos: WorldVec2;
+      height?: number;
+      footprint?: { w: number; d: number };
+    };
+
+// The result of an NL edit: the structured ops plus the blast-radius — the node
+// ids whose saved render references an edited entity and so are now stale (the
+// codex can offer "editing this restages N scenes — restage now?").
+export interface EntityEditPlan {
+  edits: EntityGeoEdit[];
+  blast_radius: string[];
+}
+
+export interface EditEntitiesRequestBody {
+  session_id: string;
+  instruction: string;
+  // The geo entities the editor may target (current map state, trimmed).
+  entities: Array<
+    Pick<
+      WorldEntityGeo,
+      "id" | "entity_id" | "label" | "pos" | "height" | "footprint" | "visual"
+    >
+  >;
+  // geo-id → node ids that show it; lets the backend compute blast-radius
+  // without the full codex registry (web side builds it from appears_on_node_ids).
+  references?: Record<string, string[]>;
+  scene_view?: SceneView | null;
+  trace_id?: string;
+}
+
+export interface EditEntitiesResponse {
+  plan: EntityEditPlan;
+  trace_id?: string;
+}

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeGuard, cast
 
 from openai import AsyncOpenAI, BadRequestError
 
@@ -2016,3 +2016,165 @@ def _safe_json(raw: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 return {}
     return {}
+
+
+# ── P5: natural-language editing of the geometric world map ───────────────────
+# Turn an instruction ("move the lighthouse north", "make the tower taller") into
+# validated structured edits to WorldEntityGeo entities, plus the blast-radius
+# (which saved scenes now reference an edited entity → re-stage candidates). The
+# parse + blast are pure + tolerant (garbage drops, never raises); the LLM call is
+# mocked in tests. Edit shapes mirror EntityGeoEdit in packages/config.
+
+ENTITY_EDIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"edits": {"type": "array", "items": {"type": "object"}}},
+    "required": ["edits"],
+}
+
+ENTITY_EDIT_SYSTEM = (
+    "You translate a natural-language instruction into structured edits to a 2D "
+    "world map. World coords: origin top-left, +x EAST, +y SOUTH (so NORTH is "
+    "-y and WEST is -x). Distances are in world units — match the rough scale of "
+    'the positions you are given. Output JSON {"edits":[...]} where each edit is '
+    "exactly one of:\n"
+    '- {"op":"move","target":<id>,"dx":<number>,"dy":<number>}  (relative shift)\n'
+    '- {"op":"set_height","target":<id>,"height":<number>}\n'
+    '- {"op":"set_appearance","target":<id>,"visual":<short visual phrase>}\n'
+    '- {"op":"remove","target":<id>}\n'
+    '- {"op":"add","label":<name>,"pos":{"x":<number>,"y":<number>},"height":<number?>}\n'
+    "RULES: `target` MUST be one of the listed entity ids — never invent an id. "
+    "Only emit edits the instruction actually asks for; if nothing applies, emit "
+    'an empty list {"edits":[]}. No prose, no markdown.'
+)
+
+
+@dataclass(frozen=True)
+class EditPlan:
+    edits: list[dict[str, Any]]
+    blast_radius: list[str]
+
+
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_vec2(v: Any) -> TypeGuard[dict[str, Any]]:
+    return isinstance(v, dict) and _is_number(v.get("x")) and _is_number(v.get("y"))
+
+
+def parse_entity_edits(payload: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
+    """Coerce an NL-edit reply into validated EntityGeoEdit dicts. Tolerant: an
+    edit with an unknown op, a `target` not in `valid_ids`, or a missing/ill-typed
+    field is dropped — never raises (mirrors detector.parse_detections)."""
+    if isinstance(payload, dict):
+        payload = payload.get("edits", [])
+    if not isinstance(payload, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for d in payload:
+        if not isinstance(d, dict):
+            continue
+        op = str(d.get("op", "")).strip()
+        if op == "add":
+            label = str(d.get("label", "")).strip()
+            pos = d.get("pos")
+            if not label or not _is_vec2(pos):
+                continue
+            edit: dict[str, Any] = {
+                "op": "add",
+                "label": label,
+                "pos": {"x": float(pos["x"]), "y": float(pos["y"])},
+            }
+            if _is_number(d.get("height")):
+                edit["height"] = float(d["height"])
+            fp = d.get("footprint")
+            if isinstance(fp, dict) and _is_number(fp.get("w")) and _is_number(fp.get("d")):
+                edit["footprint"] = {"w": float(fp["w"]), "d": float(fp["d"])}
+            out.append(edit)
+            continue
+        target = str(d.get("target", "")).strip()
+        if op not in ("move", "set_height", "set_appearance", "remove"):
+            continue
+        if target not in valid_ids:
+            continue
+        if op == "move":
+            if not (_is_number(d.get("dx")) and _is_number(d.get("dy"))):
+                continue
+            out.append({"op": "move", "target": target,
+                        "dx": float(d["dx"]), "dy": float(d["dy"])})
+        elif op == "set_height":
+            if not _is_number(d.get("height")):
+                continue
+            out.append({"op": "set_height", "target": target, "height": float(d["height"])})
+        elif op == "set_appearance":
+            visual = str(d.get("visual", "")).strip()
+            if not visual:
+                continue
+            out.append({"op": "set_appearance", "target": target, "visual": visual})
+        else:  # remove
+            out.append({"op": "remove", "target": target})
+    return out
+
+
+def compute_blast_radius(
+    edits: list[dict[str, Any]], references: dict[str, list[str]]
+) -> list[str]:
+    """Node ids whose saved render references an edited entity → the re-stage
+    candidates. Union of `references[target]` over edits that carry a target (an
+    `add` introduces a new entity, so it stales nothing)."""
+    nodes: set[str] = set()
+    for e in edits:
+        target = e.get("target")
+        if isinstance(target, str):
+            for n in references.get(target, []):
+                if isinstance(n, str):
+                    nodes.add(n)
+    return sorted(nodes)
+
+
+def _edit_roster(entities: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for e in entities[:60]:  # bound the prompt
+        eid = str(e.get("id", "")).strip()
+        if not eid:
+            continue
+        label = str(e.get("label", "")).strip() or eid
+        pos = e.get("pos") or {}
+        lines.append(
+            f'- id="{eid}" label="{label}" at (x={pos.get("x")}, y={pos.get("y")}) '
+            f'height={e.get("height")}'
+        )
+    return "\n".join(lines)
+
+
+async def edit_entities_nl(
+    instruction: str,
+    entities: list[dict[str, Any]],
+    references: dict[str, list[str]] | None = None,
+    scene_view: dict[str, Any] | None = None,
+) -> EditPlan:
+    """Turn a natural-language instruction into validated structured geo edits +
+    a blast-radius. The model only sees the entities it may target (id + label +
+    current geo); ids it invents are dropped by parse_entity_edits, so a bad
+    completion degrades to a thinner/empty plan rather than a wrong mutation."""
+    from obs import span
+
+    references = references or {}
+    valid_ids = {str(e["id"]) for e in entities if e.get("id")}
+    roster = _edit_roster(entities)
+    user = f'Instruction: "{instruction.strip()}"\n\nEntities you may edit:\n{roster}'
+    async with span("llm.edit_entities", model=_text_model(online=False)) as ctx:
+        parsed = await _complete_json(
+            model=_text_model(online=False),
+            messages=[
+                _system_message(ENTITY_EDIT_SYSTEM),
+                {"role": "user", "content": user},
+            ],
+            schema=ENTITY_EDIT_SCHEMA,
+            schema_name="entity_edits",
+            temperature=0.0,
+            max_tokens=900,
+            span_ctx=ctx,
+        )
+    edits = parse_entity_edits(parsed, valid_ids)
+    return EditPlan(edits=edits, blast_radius=compute_blast_radius(edits, references))
