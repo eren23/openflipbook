@@ -59,18 +59,26 @@ export function orderedRefs(refs: {
 }
 
 /**
- * Crop a `frac`-sized region around (xPct,yPct) of `dataUrl` → a JPEG data URL.
- * Best-effort; on any failure the caller falls back to whole-parent conditioning.
+ * Crop a `frac`-sized region around (xPct,yPct) of `src` (a data URL or an
+ * http(s) URL) → a JPEG data URL. `crossOrigin="anonymous"` keeps the canvas
+ * untainted when `src` is a persisted blob on another origin (R2/Minio), so
+ * `toDataURL` doesn't throw a SecurityError — that's what made the region crop
+ * (the "from corners" signal) silently drop on continued sessions. Needs the
+ * blob store to send CORS headers (Minio does by default; R2 needs CORS
+ * enabled). Best-effort; on any failure the caller falls back to whole-parent
+ * conditioning.
  */
 export async function cropRegion(
-  dataUrl: string,
+  src: string,
   xPct: number,
   yPct: number,
   frac = 0.42,
 ): Promise<string> {
   const img = new Image();
+  // Must be set before `src`. No-op for same-origin data URLs.
+  img.crossOrigin = "anonymous";
   img.decoding = "async";
-  img.src = dataUrl;
+  img.src = src;
   await img.decode();
   const box = cropBox(xPct, yPct, frac);
   const sx = box.x * img.naturalWidth;
@@ -81,7 +89,7 @@ export async function cropRegion(
   canvas.width = Math.round(sw);
   canvas.height = Math.round(sh);
   const ctx = canvas.getContext("2d");
-  if (!ctx) return dataUrl;
+  if (!ctx) return src;
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.9);
 }
