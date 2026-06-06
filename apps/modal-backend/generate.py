@@ -61,6 +61,47 @@ class WorldContextEntity(BaseModel):
     state: dict[str, Any] = Field(default_factory=dict)
 
 
+# Geometric world model — Pydantic mirrors of the packages/config TS shapes.
+# Kept in field-parity with index.ts (the P0 schema-parity gate guards drift).
+class WorldVec2(BaseModel):
+    x: float
+    y: float
+
+
+class ObserverPose(BaseModel):
+    pos: WorldVec2
+    eye_height: float
+    gaze: float
+    fov: float
+
+
+class MapCrop(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class SceneView(BaseModel):
+    node_id: str
+    level: str
+    observer: ObserverPose | None = None
+    map_crop: MapCrop | None = None
+
+
+class ProjectedEntity(BaseModel):
+    id: str
+    label: str
+    x_pct: float
+    y_pct: float
+    w_pct: float
+    h_pct: float
+    depth: float
+    h_pos: str
+    v_pos: str
+    size: str
+
+
 class GenerateBody(BaseModel):
     query: str
     aspect_ratio: str = "16:9"
@@ -108,6 +149,10 @@ class GenerateBody(BaseModel):
     world_mode: bool = False
     autonomy: str = "auto"
     render_mode: str | None = None
+    # Geometric world (GEOMETRIC_WORLD): the scene's observer pose/level + the
+    # geometry engine's expected per-entity layout for this frame.
+    scene_view: SceneView | None = None
+    expected_layout: list[ProjectedEntity] = Field(default_factory=list)
     trace_id: str | None = None
 
 

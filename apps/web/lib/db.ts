@@ -1,4 +1,5 @@
 import { MongoClient, type Collection, type Db, type Document } from "mongodb";
+import type { SceneView } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -53,6 +54,11 @@ async function ensureIndexes(db: Db): Promise<void> {
   const nodes = db.collection<NodeDoc>("nodes");
   const errors = db.collection<ErrorDoc>("errors");
   const world = db.collection("world_state");
+  // Geometric world model — per-session map of entity coordinates. `_id` is the
+  // session id (auto-indexed); the sparse secondary index supports atlas anchor
+  // lookups that link a map entity back to its Codex Entity. Created up front so
+  // we don't migrate a populated collection later.
+  const worldMap = db.collection("world_map");
   await Promise.all([
     nodes.createIndex(
       { session_id: 1, created_at: -1 },
@@ -70,6 +76,10 @@ async function ensureIndexes(db: Db): Promise<void> {
     world.createIndex(
       { "entities.appears_on_node_ids": 1 },
       { name: "world_entity_appears_idx", sparse: true }
+    ),
+    worldMap.createIndex(
+      { "entities.entity_id": 1 },
+      { name: "world_map_entity_idx", sparse: true }
     ),
   ]);
 }
@@ -108,6 +118,9 @@ export interface NodeDoc extends Document {
   // subject. Optional + defaulted for back-compat with pre-M3 rows.
   relation?: "descend" | "expand" | null;
   scale?: "component" | "peer" | "container" | null;
+  // Geometric world (GEOMETRIC_WORLD): the observer pose + view level this
+  // scene was rendered from. Optional + null for pre-geometry / classic nodes.
+  scene_view?: SceneView | null;
   created_at: Date;
 }
 
@@ -125,6 +138,7 @@ export interface NodeInsert {
   sources?: NodeSource[] | null;
   relation?: "descend" | "expand" | null;
   scale?: "component" | "peer" | "container" | null;
+  scene_view?: SceneView | null;
 }
 
 export interface NodeRow {
