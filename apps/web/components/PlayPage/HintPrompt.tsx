@@ -8,6 +8,9 @@ interface Props {
   yPx: number;
   onSubmit: (text: string) => void;
   onCancel: () => void;
+  /** Override the placeholder — World Mode semi-autonomy seeds it with the
+   * resolver's clarifying question(s) so the bubble asks before entering. */
+  placeholder?: string;
 }
 
 const MAX_LEN = 240;
@@ -17,7 +20,13 @@ const MAX_LEN = 240;
  * a small text bubble anchored above the click point inside the image
  * figure. Enter submits, Esc cancels, click-outside cancels.
  */
-export function HintPrompt({ xPx, yPx, onSubmit, onCancel }: Props) {
+export function HintPrompt({
+  xPx,
+  yPx,
+  onSubmit,
+  onCancel,
+  placeholder,
+}: Props) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -54,7 +63,9 @@ export function HintPrompt({ xPx, yPx, onSubmit, onCancel }: Props) {
               onCancel();
             }
           }}
-          placeholder="add a note — e.g. cross-section, for a 5-year-old"
+          placeholder={
+            placeholder || "add a note — e.g. cross-section, for a 5-year-old"
+          }
           maxLength={MAX_LEN}
           aria-label="Click hint"
           className="w-80 bg-transparent text-sm leading-tight outline-none placeholder:text-[var(--color-ink)]/40"

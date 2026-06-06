@@ -37,9 +37,11 @@ import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { buildConditionRefs, orderedRefs } from "@/lib/image-condition";
+import { enterAsToRenderMode, findRevisitTarget } from "@/lib/world-mode";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
+import { useWorldMode } from "@/hooks/useWorldMode";
 import { useStyleGalleryDismissed } from "@/hooks/useStyleGalleryDismissed";
 import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
@@ -290,11 +292,13 @@ export default function PlayPage() {
     xPx: number;
     yPx: number;
     resolve: (text: string | null) => void;
+    // World Mode semi-autonomy seeds this with the resolver's question(s).
+    question?: string;
   } | null>(null);
   const promptForHint = useCallback(
-    (xPx: number, yPx: number): Promise<string | null> => {
+    (xPx: number, yPx: number, question?: string): Promise<string | null> => {
       return new Promise((resolve) => {
-        setHintPrompt({ xPx, yPx, resolve });
+        setHintPrompt({ xPx, yPx, resolve, ...(question ? { question } : {}) });
       });
     },
     []
@@ -403,6 +407,15 @@ export default function PlayPage() {
     togglePin,
     setFromPreset,
   } = useStyleAnchor(sessionId);
+  // World Mode (per-session, off by default): a tap ENTERS the tapped place
+  // instead of explaining it, and entered places persist + reopen. `autonomy`
+  // chooses auto (just go) vs semi (ask a quick question first).
+  const {
+    enabled: worldEnabled,
+    autonomy: worldAutonomy,
+    setEnabled: setWorldEnabled,
+    setAutonomy: setWorldAutonomy,
+  } = useWorldMode(sessionId);
   const [styleGalleryDismissed, dismissStyleGallery] =
     useStyleGalleryDismissed(sessionId);
   const togglePinStyle = useCallback(
@@ -1192,6 +1205,40 @@ export default function PlayPage() {
       })();
     };
 
+    // World Mode "semi": a blocking click resolve so we can ask the model's
+    // clarifying questions before entering. Returns the parsed payload or null.
+    const resolveClickRemote = async (
+      xPct: number,
+      yPct: number
+    ): Promise<{
+      subject?: string;
+      style?: string;
+      subject_context?: string;
+      enter_as?: string;
+      clarifiers?: string[];
+    } | null> => {
+      try {
+        const res = await fetch("/api/resolve-click", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_data_url: currentImage,
+            x_pct: xPct,
+            y_pct: yPct,
+            parent_title: page.title,
+            parent_query: page.query,
+            output_locale: resolveOutputLocale(outputLocale),
+            world_mode: true,
+            autonomy: "semi",
+          }),
+        });
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    };
+
     const handler = async (evt: MouseEvent) => {
       if (phase === "generating") return;
       if (editMode) return;
@@ -1208,12 +1255,59 @@ export default function PlayPage() {
       // between setMorphFx and React installing a new effect with
       // phase==="generating".
       clickInFlightRef.current = true;
+      // World Mode: a plain re-tap near an already-entered spot REOPENS that
+      // saved place instead of generating a new one — the persistence that
+      // makes the atlas read as one continuous world.
+      if (worldEnabled && !evt.metaKey && !evt.ctrlKey) {
+        const revisitId = findRevisitTarget(
+          history.items,
+          currentNodeId,
+          click
+        );
+        if (revisitId) {
+          clickInFlightRef.current = false;
+          selectFromMap(revisitId);
+          return;
+        }
+      }
       // ⌘/Ctrl + click → float an inline hint input at the click point
       // and await the user's note (or null on cancel). Captured before any
       // ripple/morph state so the bubble is the first thing they see; on
       // cancel we release the in-flight slot so the next click is honored.
       let hint = "";
-      if (evt.metaKey || evt.ctrlKey) {
+      // World Mode "semi": resolve the tap up front and, when the model has
+      // clarifying questions, ask them in the hint bubble before entering.
+      let worldResolved:
+        | {
+            subject?: string;
+            style?: string;
+            subject_context?: string;
+            enter_as?: string;
+            clarifiers?: string[];
+          }
+        | null = null;
+      if (
+        worldEnabled &&
+        worldAutonomy === "semi" &&
+        !evt.metaKey &&
+        !evt.ctrlKey
+      ) {
+        worldResolved = await resolveClickRemote(click.x_pct, click.y_pct);
+        const questions = (worldResolved?.clarifiers ?? []).join("  ·  ");
+        if (questions) {
+          const rect = img.getBoundingClientRect();
+          const raw = await promptForHint(
+            evt.clientX - rect.left,
+            evt.clientY - rect.top,
+            questions
+          );
+          if (raw === null) {
+            clickInFlightRef.current = false;
+            return;
+          }
+          hint = raw;
+        }
+      } else if (evt.metaKey || evt.ctrlKey) {
         const rect = img.getBoundingClientRect();
         const raw = await promptForHint(
           evt.clientX - rect.left,
@@ -1257,9 +1351,12 @@ export default function PlayPage() {
       // Skip the prefetched-subject shortcut when a hint is present — the
       // hover prefetch was resolved without the user's note, so it would
       // ignore the angle they just typed.
-      const cached = hint
-        ? undefined
-        : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
+      // In World Mode we skip the hover-prefetch shortcut so the backend always
+      // classifies the tap (scene / sub-map / explainer) and frames the page.
+      const cached =
+        hint || worldEnabled
+          ? undefined
+          : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
       // Image conditioning: build the weighted reference stack from the CLEAN
       // parent (not the marker-annotated one) — region crop at the tap → whole
       // parent → session root as the anti-drift anchor (skipped when this page
@@ -1302,6 +1399,26 @@ export default function PlayPage() {
               prefetched_style: cached.style,
               ...(cached.subject_context
                 ? { prefetched_subject_context: cached.subject_context }
+                : {}),
+            }
+          : {}),
+        // World Mode "semi" already resolved the tap → reuse it (skips the
+        // backend's own VLM round-trip) and carry the place framing.
+        ...(worldResolved?.subject
+          ? {
+              prefetched_subject: worldResolved.subject,
+              prefetched_style: worldResolved.style ?? "",
+              ...(worldResolved.subject_context
+                ? { prefetched_subject_context: worldResolved.subject_context }
+                : {}),
+            }
+          : {}),
+        ...(worldEnabled
+          ? {
+              world_mode: true,
+              autonomy: worldAutonomy,
+              ...(enterAsToRenderMode(worldResolved?.enter_as) !== "explainer"
+                ? { render_mode: enterAsToRenderMode(worldResolved?.enter_as) }
                 : {}),
             }
           : {}),
@@ -1488,7 +1605,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint]);
+  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -1617,6 +1734,10 @@ export default function PlayPage() {
         setTheme={setTheme}
         imageTier={imageTier}
         setImageTier={setImageTier}
+        worldMode={worldEnabled}
+        setWorldMode={setWorldEnabled}
+        autonomy={worldAutonomy}
+        setAutonomy={setWorldAutonomy}
       />
 
       {isDraggingFile && <DragDropOverlay />}
@@ -1822,6 +1943,7 @@ export default function PlayPage() {
                 <HintPrompt
                   xPx={hintPrompt.xPx}
                   yPx={hintPrompt.yPx}
+                  placeholder={hintPrompt.question ?? ""}
                   onSubmit={(text) => {
                     hintPrompt.resolve(text);
                     setHintPrompt(null);
