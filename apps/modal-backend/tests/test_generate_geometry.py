@@ -52,3 +52,98 @@ def test_layout_clause_empty_without_expected(
 ) -> None:
     monkeypatch.setenv("WORLD_GEOMETRY_GEN", "true")
     assert generate._layout_clause_for(_body([])) == ""
+
+
+# --- P4(c): grounding wiring -------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from providers import detector, grounding  # noqa: E402
+
+
+def test_vlm_grounding_flags_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VLM_GROUNDING", raising=False)
+    monkeypatch.delenv("VLM_GROUNDING_REPAIR", raising=False)
+    assert generate._vlm_grounding_on() is False
+    assert generate._vlm_grounding_repair_on() is False
+
+
+def test_vlm_grounding_flags_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VLM_GROUNDING", "true")
+    monkeypatch.setenv("VLM_GROUNDING_REPAIR", "yes")
+    assert generate._vlm_grounding_on() is True
+    assert generate._vlm_grounding_repair_on() is True
+
+
+def test_grounding_summary_shape() -> None:
+    report = grounding.GroundingReport(
+        matched=[grounding.Match("tower", 0.9, True)],
+        missing=["boat"],
+        extra=["dragon"],
+        score=0.812345,
+        mean_iou=0.654321,
+    )
+    res = SimpleNamespace(repairs=1, iterations=1)
+    out = generate._grounding_summary(report, res)
+    assert out == {
+        "score": 0.812,
+        "mean_iou": 0.654,
+        "matched": ["tower"],
+        "missing": ["boat"],
+        "extra": ["dragon"],
+        "repaired": True,
+        "iterations": 1,
+    }
+
+
+_EXP = [{"label": "tower", "size": "large", "h_pos": "center", "v_pos": "top",
+         "x_pct": 0.5, "y_pct": 0.3, "w_pct": 0.2, "h_pct": 0.5}]
+
+
+def _fake_img() -> SimpleNamespace:
+    return SimpleNamespace(jpeg_bytes=b"x", mime_type="image/jpeg", model="nano")
+
+
+async def _noop_abort(_stage: str) -> None:
+    return None
+
+
+async def test_run_grounding_verify_only_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_detect(_bytes, _labels):
+        return [{"label": "tower", "x_pct": 0.5, "y_pct": 0.3,
+                 "w_pct": 0.2, "h_pct": 0.5, "score": 1.0}]
+
+    monkeypatch.setattr(detector, "detect", fake_detect)
+    img = _fake_img()
+    out_img, summary = await generate._run_grounding(
+        img, _EXP, repair_on=False, abort=_noop_abort
+    )
+    assert out_img is img  # verify-only never mutates the image
+    assert summary is not None
+    assert summary["matched"] == ["tower"]
+    assert summary["missing"] == [] and summary["repaired"] is False
+    assert summary["score"] == pytest.approx(1.0)
+
+
+async def test_run_grounding_degrades_on_detector_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def boom(_bytes, _labels):
+        raise RuntimeError("vlm 429")
+
+    monkeypatch.setattr(detector, "detect", boom)
+    img = _fake_img()
+    out_img, summary = await generate._run_grounding(
+        img, _EXP, repair_on=False, abort=_noop_abort
+    )
+    assert out_img is img and summary is None  # best-effort: never breaks gen
+
+
+async def test_run_grounding_empty_labels_is_noop() -> None:
+    img = _fake_img()
+    out_img, summary = await generate._run_grounding(
+        img, [], repair_on=False, abort=_noop_abort
+    )
+    assert out_img is img and summary is None

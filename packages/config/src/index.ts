@@ -175,6 +175,19 @@ export interface Citation {
   title?: string | null;
 }
 
+// Geometric grounding result (VLM_GROUNDING): how well the rendered frame
+// matched the expected layout, plus whether a corrective edit ran. Present on
+// `final` only when grounding was enabled for the request.
+export interface GroundingSummary {
+  score: number; // 0..1 layout-fidelity (presence + IoU + position agreement)
+  mean_iou: number;
+  matched: string[]; // expected labels the detector found
+  missing: string[]; // expected labels with no detection
+  extra: string[]; // detections that weren't expected
+  repaired: boolean; // a corrective edit was applied + kept
+  iterations: number;
+}
+
 export interface GenerateFinalEvent {
   type: "final";
   image_data_url: string;
@@ -186,6 +199,8 @@ export interface GenerateFinalEvent {
   // Web-search citations the planner used. Empty when web search is off
   // or the model returned none. Already domain-deduped, capped at ~3.
   sources?: Citation[];
+  // Geometric grounding summary — present only when VLM_GROUNDING was on.
+  grounding?: GroundingSummary;
   trace_id?: string;
 }
 
@@ -199,7 +214,8 @@ export type GenerateStage =
   | "click_resolving"
   | "click_resolved"
   | "planning"
-  | "generating_image";
+  | "generating_image"
+  | "verifying";
 
 export interface GenerateStatusEvent {
   type: "status";
