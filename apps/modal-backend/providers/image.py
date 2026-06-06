@@ -106,14 +106,62 @@ def _resolve_model(tier: str | None, model_override: str | None) -> str:
     return os.environ.get(env_key) or legacy or TIER_MODELS[resolved_tier]
 
 
-def _args_for(model: str, prompt: str, aspect_ratio: str) -> dict[str, Any]:
+def _args_for(
+    model: str,
+    prompt: str,
+    aspect_ratio: str,
+    reference_urls: list[str] | None = None,
+) -> dict[str, Any]:
     if "seedream" in model:
+        # seedream is text-to-image only here — no reference conditioning.
         return {
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
         }
-    # nano-banana + nano-banana-pro both accept aspect_ratio directly.
-    return {"prompt": prompt, "aspect_ratio": aspect_ratio}
+    # nano-banana + nano-banana-pro both accept aspect_ratio directly, plus an
+    # optional `image_urls` list for multi-reference conditioning.
+    args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
+    if reference_urls and "nano-banana" in model:
+        args["image_urls"] = reference_urls
+    return args
+
+
+def conditioning_preamble(roles: list[str], mode: str) -> str:
+    """Prompt prefix telling nano-banana how to read the ordered reference
+    images (image 1, 2, …). The order encodes weight: the region you came from
+    is strongest, then the immediate parent's world, then the global style
+    anchor. Empty roles → no preamble (plain text-to-image)."""
+    if not roles:
+        return ""
+    enter = (
+        "Continue the scene outward from"
+        if mode == "expand"
+        else "Reveal what is inside"
+    )
+    lines: list[str] = []
+    for i, role in enumerate(roles, start=1):
+        if role == "region":
+            lines.append(
+                f"Image {i}: the spot you are entering — {enter.lower()} it, "
+                "keeping its composition, depth and framing."
+            )
+        elif role == "parent":
+            lines.append(
+                f"Image {i}: the surrounding scene — match its world, palette, "
+                "lighting and render style closely."
+            )
+        elif role == "anchor":
+            lines.append(
+                f"Image {i}: the overall look of this world — stay consistent with it."
+            )
+        else:
+            lines.append(f"Image {i}: visual reference — stay consistent with it.")
+    return (
+        "Use the reference images as visual grounding so this page belongs to the "
+        "same continuous world (do not copy them verbatim):\n"
+        + "\n".join(lines)
+        + "\n\n"
+    )
 
 
 def _image_provider() -> str:
@@ -170,10 +218,13 @@ async def generate_image(
     aspect_ratio: str,
     tier: str | None = None,
     model_override: str | None = None,
+    reference_urls: list[str] | None = None,
 ) -> GeneratedImage:
     from obs import span
 
     if _image_provider() != "fal":
+        # Reference conditioning is fal/nano-banana only — other providers stay
+        # text-only (refs ignored).
         prov, base_url, api_key = _resolve_image_provider()
         model = model_override or _image_model()
         async with span(
@@ -187,10 +238,24 @@ async def generate_image(
 
     _ensure_fal_key()
     model = _resolve_model(tier, model_override)
+    # Reference conditioning: upload each data URL to fal storage (queue
+    # endpoints choke on multi-MB inline data URLs) and pass them as image_urls.
+    # Only nano-banana accepts refs; other fal models stay text-only.
+    fal_refs: list[str] | None = None
+    if reference_urls and "nano-banana" in model:
+        from ._common import to_fal_url
+
+        fal_refs = [await to_fal_url(u) for u in reference_urls]
     async with span(
-        "image.generate", model=model, prompt_len=len(prompt), provider="fal"
+        "image.generate",
+        model=model,
+        prompt_len=len(prompt),
+        provider="fal",
+        refs=len(fal_refs or []),
     ) as ctx:
-        result = await _fal_subscribe(model, _args_for(model, prompt, aspect_ratio))
+        result = await _fal_subscribe(
+            model, _args_for(model, prompt, aspect_ratio, fal_refs)
+        )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
         ctx["bytes"] = len(jpeg_bytes)
