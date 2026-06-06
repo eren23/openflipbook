@@ -88,3 +88,66 @@ async def edit_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+# --- Map-pan (expand outward) -------------------------------------------------
+
+# BRIA Expand: seamless, pixel-preserving outpaint — the parent keeps its pixels,
+# the new margin is painted to match. A bakeoff picked it over nano-banana /
+# Kontext for "pan the world outward". Override with FAL_EXPAND_MODEL.
+EXPAND_MODEL_DEFAULT = "fal-ai/bria/expand"
+_EXPAND_GROW = 0.5  # extend by 50% of the parent in the chosen direction
+
+
+def _expand_args_for(
+    image_url: str, direction: str, width: int, height: int
+) -> dict[str, Any]:
+    """BRIA places the original on a larger canvas and paints the empty margin.
+    `original_image_location` is the parent's top-left on that canvas."""
+    gw, gh = int(width * _EXPAND_GROW), int(height * _EXPAND_GROW)
+    if direction in ("east", "west"):
+        canvas = [width + gw, height]
+        loc = [0, 0] if direction == "east" else [gw, 0]
+    else:  # north / south
+        canvas = [width, height + gh]
+        loc = [0, 0] if direction == "south" else [0, gh]
+    return {
+        "image_url": image_url,
+        "canvas_size": canvas,
+        "original_image_size": [width, height],
+        "original_image_location": loc,
+    }
+
+
+async def expand_image(
+    image_data_url: str,
+    direction: str,
+    width: int = 1600,
+    height: int = 900,
+    model_override: str | None = None,
+) -> GeneratedImage:
+    """Map-pan: outpaint the parent OUTWARD in `direction` (west/east/north/
+    south) so 'expand' extends the same place seamlessly rather than blooming
+    new subjects. Default BRIA Expand (bakeoff winner); FAL_EXPAND_MODEL override."""
+    from obs import span
+
+    _ensure_fal_key()
+    model = (
+        model_override
+        or os.environ.get("FAL_EXPAND_MODEL")
+        or EXPAND_MODEL_DEFAULT
+    )
+    image_url = await to_fal_url(image_data_url)
+    async with span("image.expand", model=model, direction=direction) as ctx:
+        result = await _fal_subscribe(
+            model, _expand_args_for(image_url, direction, width, height)
+        )
+        image_info = _first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
+    return GeneratedImage(
+        jpeg_bytes=jpeg_bytes,
+        mime_type=mime,
+        model=model,
+        provider_request_id=str(result.get("requestId") or "") or None,
+    )
