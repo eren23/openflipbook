@@ -79,6 +79,44 @@ def test_farther_is_smaller() -> None:
     assert far["depth"] > near["depth"]
 
 
+def _elev(eid, x, y, height, elevation, fw=4.0):
+    return {
+        "id": eid, "label": eid, "pos": {"x": x, "y": y},
+        "height": height, "elevation": elevation, "footprint": {"w": fw, "d": fw},
+    }
+
+
+def test_elevation_raises_on_screen() -> None:
+    # Same spot + size; lifting the base (elevation) moves the entity UP (smaller y).
+    ground = geometry.project(_ent("a", 40, 0, height=2), _OBS, _ASPECT)
+    raised = geometry.project(_elev("a", 40, 0, 2, 20.0), _OBS, _ASPECT)
+    assert ground is not None and raised is not None
+    assert raised["y_pct"] < ground["y_pct"]
+
+
+def test_pitch_up_lowers_scene() -> None:
+    # Tilting the camera UP (pitch>0) drops everything DOWN on screen (larger y).
+    level = geometry.project(_ent("a", 40, 0, height=2), _OBS, _ASPECT)
+    up = geometry.project(_ent("a", 40, 0, height=2), {**_OBS, "pitch": 0.3}, _ASPECT)
+    assert level is not None and up is not None
+    assert up["y_pct"] > level["y_pct"]
+
+
+def test_pitch_and_elevation_default_is_byte_identical() -> None:
+    # Omitting the fields == 0 (additive: existing projections are unchanged).
+    a = geometry.project(_ent("a", 40, 0, height=8), _OBS, _ASPECT)
+    b = geometry.project(_elev("a", 40, 0, 8, 0.0), {**_OBS, "pitch": 0.0}, _ASPECT)
+    assert a is not None and b is not None
+    assert a["y_pct"] == pytest.approx(b["y_pct"], abs=1e-12)
+    assert a["h_pct"] == pytest.approx(b["h_pct"], abs=1e-12)
+
+
+def test_vertical_frustum_cull() -> None:
+    # Looking down hard (pitch<0) at a tall, very close entity pushes its top
+    # past the vertical image plane → culled (the new Z guard).
+    assert geometry.project(_ent("a", 3, 0, height=30), {**_OBS, "pitch": -0.6}, _ASPECT) is None
+
+
 def test_crop_entities_window() -> None:
     ents = [_ent("a", 5, 5), _ent("b", 50, 50), _ent("c", 9, 1)]
     got = [e["id"] for e in geometry.crop_entities(ents, {"x": 0, "y": 0, "w": 10, "h": 10})]

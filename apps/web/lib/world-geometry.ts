@@ -13,8 +13,10 @@ import type {
  *
  * A flat-ground bearing/size approximation, NOT a full 3D camera. Output is
  * coarse bins (h_pos/v_pos/size) plus 0..1 normalized rects — what prompts and
- * the VLM judge consume (honest: bins, not pixels). LIMITS: no tall-building
- * vertical perspective, no terrain elevation, no interiors/occlusion-by-walls.
+ * the VLM judge consume (honest: bins, not pixels). Models the vertical axis via
+ * entity `height` + base `elevation` and observer `eye_height` + `pitch` (look
+ * up/down). LIMITS: still a flat-ground pinhole — no terrain mesh, no camera
+ * roll, no interiors/occlusion-by-walls.
  *
  * Kept line-for-line identical to the Python port
  * apps/modal-backend/providers/geometry.py; the P1 parity gate (a shared golden
@@ -25,10 +27,11 @@ import type {
 // Minimal shape the projector needs (WorldEntityGeo satisfies it).
 export type ProjectInput = Pick<
   WorldEntityGeo,
-  "id" | "label" | "pos" | "height" | "footprint"
+  "id" | "label" | "pos" | "height" | "footprint" | "elevation"
 >;
 
 const TWO_PI = 2.0 * Math.PI;
+const HALF_PI = Math.PI / 2.0;
 
 function normAngle(a: number): number {
   let v = a;
@@ -78,8 +81,15 @@ export function project(
   const halfVfov = Math.atan(tHalf / aspect);
   const tv = Math.tan(halfVfov);
   const eye = observer.eye_height;
-  const thBase = Math.atan((0.0 - eye) / dist);
-  const thTop = Math.atan((entity.height - eye) / dist);
+  const pitch = observer.pitch ?? 0;
+  const elev = entity.elevation ?? 0;
+  // Angle (relative to the camera's optical axis) to the entity's base + top:
+  // base at world-z = elev, top at elev + height; the camera is tilted by pitch.
+  const thBase = Math.atan((elev - eye) / dist) - pitch;
+  const thTop = Math.atan((elev + entity.height - eye) / dist) - pitch;
+  // Vertical frustum: past ±π/2 the point is behind the image plane (only
+  // reachable under pitch / extreme elevation) — cull, mirroring the h-FOV cull.
+  if (thTop >= HALF_PI || thBase <= -HALF_PI) return null;
   const yBase = 0.5 - Math.tan(thBase) / (2.0 * tv);
   const yTop = 0.5 - Math.tan(thTop) / (2.0 * tv);
   const yPct = (yTop + yBase) / 2.0;

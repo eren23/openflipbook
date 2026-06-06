@@ -39,6 +39,9 @@ def build() -> dict:
             "pos": {"x": round(rng.uniform(-100, 100), 4), "y": round(rng.uniform(-100, 100), 4)},
             "eye_height": round(rng.uniform(1.0, 6.0), 4),
             "gaze": round(rng.uniform(-math.pi, math.pi), 6),
+            # Modest tilt both ways → exercises the pitch term + the vertical cull
+            # (looking down at a tall close entity can push it behind the v-plane).
+            "pitch": round(rng.uniform(-0.4, 0.4), 6),
             "fov": round(rng.uniform(0.6, 2.4), 6),
         }
         aspect = rng.choice(_ASPECTS)
@@ -56,12 +59,16 @@ def build() -> dict:
             else:
                 ex = rng.uniform(-200, 200)
                 ey = rng.uniform(-200, 200)
+            # Half on the ground (the common case + a regression anchor), half
+            # lifted off it (bird / clifftop / wall-mounted) to exercise base z.
+            elevation = 0.0 if rng.random() < 0.5 else round(rng.uniform(0.0, 25.0), 4)
             entities.append(
                 {
                     "id": f"e{j}",
                     "label": f"e{j}",
                     "pos": {"x": round(ex, 4), "y": round(ey, 4)},
                     "height": round(rng.uniform(0.5, 40.0), 4),
+                    "elevation": elevation,
                     "footprint": {"w": fw, "d": fw},
                 }
             )

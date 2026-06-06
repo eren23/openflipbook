@@ -2,8 +2,10 @@
 
 A flat-ground bearing/size approximation, NOT a full 3D camera. Output is coarse
 *bins* (h_pos/v_pos/size) plus 0..1 normalized rects — what prompts and the VLM
-judge consume (honest: bins, not pixels). LIMITS: no tall-building vertical
-perspective, no terrain elevation, no interiors / occlusion-by-walls.
+judge consume (honest: bins, not pixels). Models the vertical axis via entity
+`height` + base `elevation` and observer `eye_height` + `pitch` (look up/down).
+LIMITS: still a flat-ground pinhole — no terrain mesh, no camera roll, no
+interiors / occlusion-by-walls.
 
 Kept line-for-line identical to the TS port apps/web/lib/world-geometry.ts; the
 P1 parity gate (a shared golden fixture both must reproduce) guards drift.
@@ -17,6 +19,7 @@ import math
 from typing import Any
 
 _TWO_PI = 2.0 * math.pi
+_HALF_PI = math.pi / 2.0
 
 
 def _norm_angle(a: float) -> float:
@@ -81,8 +84,16 @@ def project(
     half_vfov = math.atan(t_half / aspect)
     tv = math.tan(half_vfov)
     eye = observer["eye_height"]
-    th_base = math.atan((0.0 - eye) / dist)
-    th_top = math.atan((entity["height"] - eye) / dist)
+    pitch = observer.get("pitch", 0.0)
+    elev = entity.get("elevation", 0.0)
+    # Angle (relative to the camera's optical axis) to the entity's base + top:
+    # base at world-z = elev, top at elev + height; the camera is tilted by pitch.
+    th_base = math.atan((elev - eye) / dist) - pitch
+    th_top = math.atan((elev + entity["height"] - eye) / dist) - pitch
+    # Vertical frustum: past ±pi/2 the point is behind the image plane (only
+    # reachable under pitch / extreme elevation) — cull, mirroring the h-FOV cull.
+    if th_top >= _HALF_PI or th_base <= -_HALF_PI:
+        return None
     y_base = 0.5 - math.tan(th_base) / (2.0 * tv)
     y_top = 0.5 - math.tan(th_top) / (2.0 * tv)
     y_pct = (y_top + y_base) / 2.0

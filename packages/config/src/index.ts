@@ -417,7 +417,11 @@ export interface WorldEntityGeo {
   kind: EntityKind;
   label: string;
   pos: WorldVec2;
-  height: number; // world units above the ground plane
+  height: number; // world units, the entity's vertical extent (top = elevation+height)
+  // Base elevation: world-z of the entity's foot above the ground plane. 0 (the
+  // default) = sits on the ground; >0 lifts it (a bird aloft, a clifftop castle,
+  // a wall-mounted lantern). The projector reads `elevation ?? 0`.
+  elevation?: number;
   footprint: { w: number; d: number }; // ground extent: width (x) × depth (y)
   heading?: number; // facing, radians, 0 = +x; optional
   visual: string; // short appearance descriptor (mirrors Entity.appearance)
@@ -433,7 +437,11 @@ export interface WorldEntityGeo {
 export interface ObserverPose {
   pos: WorldVec2;
   eye_height: number;
-  gaze: number; // heading, radians, 0 = +x
+  gaze: number; // heading (yaw), radians, 0 = +x
+  // Camera tilt, radians, 0 (default) = level / horizon-locked. +pitch looks UP
+  // (the horizon drops on screen), -pitch looks down. The projector reads
+  // `pitch ?? 0`. Lets a scene tilt up at a tower or down a slope.
+  pitch?: number;
   fov: number; // horizontal field of view, radians
 }
 
