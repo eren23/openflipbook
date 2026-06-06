@@ -26,6 +26,8 @@ Optional for v1:
 | Modal | `brew install modal-cli && modal token new` | (stored on disk) |
 | Cloudflare R2 | Cloudflare dash → R2 → Manage tokens. Needs *Object Read & Write*. | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 | R2 public URL | Enable the R2 bucket's public dev URL, or attach a custom domain. | `R2_PUBLIC_BASE_URL` |
+
+> **Enable CORS on the R2 bucket** (Cloudflare dash → R2 → bucket → Settings → CORS) with `AllowedOrigins` = your web origin and `AllowedMethods: [GET]`. Image conditioning crops the parent on a canvas client-side; without CORS the cross-origin image taints the canvas and the "from corners" region crop silently falls back to whole-parent conditioning. Minio (the `make demo` stack) sends CORS by default, so this only applies to the hosted R2 path.
 | MongoDB | Railway → Add MongoDB (or Atlas M0 free). | `MONGODB_URI`, `MONGODB_DB` |
 
 ## 2. Set Modal secrets
