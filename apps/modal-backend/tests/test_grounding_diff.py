@@ -47,11 +47,18 @@ def test_fuzzy_label_match() -> None:
     assert len(r.matched) == 1  # "fountain" ⊂ "stone fountain"
 
 
-def test_below_iou_threshold_not_matched() -> None:
+def test_label_match_low_iou_is_present_but_misplaced() -> None:
+    # Same label, no overlap → PRESENT (matched) but pos_ok False — not
+    # missing+extra. `missing` stays for truly-absent labels only.
     r = diff(
         [_box("tower", 0.2, 0.2, 0.1, 0.1)],
         [_box("tower", 0.8, 0.8, 0.1, 0.1)],
         iou_thresh=0.2,
     )
-    assert r.matched == []
-    assert r.missing == ["tower"] and r.extra == ["tower"]
+    assert len(r.matched) == 1 and r.matched[0].pos_ok is False
+    assert r.missing == [] and r.extra == []
+
+
+def test_truly_absent_label_is_missing() -> None:
+    r = diff([_box("tower", 0.5, 0.5)], [_box("boat", 0.5, 0.5)])
+    assert r.matched == [] and r.missing == ["tower"] and r.extra == ["boat"]

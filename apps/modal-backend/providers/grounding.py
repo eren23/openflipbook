@@ -73,11 +73,16 @@ def diff(
             score = iou(e_box, o_box)
             if best is None or score > best[1]:
                 best = (j, score, o)
-        if best is not None and best[1] >= iou_thresh:
+        if best is not None:
+            # A label match means the entity is PRESENT; pos_ok captures whether
+            # it landed where the layout wanted it (so a present-but-misplaced
+            # entity is matched+pos_ok=False, not missing+extra — the loop repairs
+            # it; `missing` stays "truly absent / hallucinated-away").
             j, score, o = best
             used.add(j)
             pos_ok = (
-                abs(o["x_pct"] - e["x_pct"]) < POS_TOL
+                score >= iou_thresh
+                and abs(o["x_pct"] - e["x_pct"]) < POS_TOL
                 and abs(o["y_pct"] - e["y_pct"]) < POS_TOL
             )
             matched.append(Match(label=str(e["label"]), iou=score, pos_ok=pos_ok))

@@ -37,7 +37,7 @@ PY := apps/modal-backend/.venv/bin/python
 # phases — must be green before the next phase's commit.
 eval:
 	cd apps/modal-backend && .venv/bin/python -m pytest -m "not paid" -q
-	cd apps/modal-backend && .venv/bin/ruff check . && .venv/bin/mypy providers/geometry.py providers/geometry_prompt.py providers/model_router.py generate.py
+	cd apps/modal-backend && .venv/bin/ruff check . && .venv/bin/mypy providers/geometry.py providers/geometry_prompt.py providers/model_router.py providers/grounding.py providers/detector.py generate.py
 	cd apps/web && pnpm exec vitest run && pnpm exec tsc --noEmit
 
 # P1 — pure 2.5D projection parity (TS golden + Py golden + cross-lang fuzz).
@@ -50,8 +50,10 @@ eval-geometry:
 # FAL_KEY + OPENROUTER_API_KEY (auto-loaded from apps/modal-backend/.env).
 eval-layout:
 	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.layout_runner
+# P4 grounding-verify: generate from the layout clause, detect the expected
+# entities, diff vs intent → the grounded confirmation signal. PAID (fal + VLM).
 eval-grounding:
-	cd apps/modal-backend && GROUNDING_BENCH_RUN=1 .venv/bin/python -m pytest -m grounding -q
+	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.grounding_runner
 eval-repair:
 	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
 eval-edit:
