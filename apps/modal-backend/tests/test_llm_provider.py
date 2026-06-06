@@ -36,6 +36,17 @@ def test_render_base_place_submap_is_cartographic() -> None:
     assert "visual-explainer page" not in text
 
 
+def test_spatial_anchor_clause_only_for_places_with_surroundings() -> None:
+    s = "river to the south, market square NE"
+    assert "SPATIAL ANCHOR" in llm._spatial_anchor_clause("place_scene", s)
+    assert s in llm._spatial_anchor_clause("place_submap", s)
+    # No surroundings, or an explainer/classic page → no anchor clause.
+    assert llm._spatial_anchor_clause("place_scene", "") == ""
+    assert llm._spatial_anchor_clause("place_scene", None) == ""
+    assert llm._spatial_anchor_clause("explainer", s) == ""
+    assert llm._spatial_anchor_clause(None, s) == ""
+
+
 # ---------- _system_message + caching ------------------------------------
 
 
