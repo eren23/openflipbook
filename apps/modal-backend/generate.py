@@ -197,21 +197,21 @@ def _vlm_grounding_repair_on() -> bool:
     )
 
 
-def _grounding_summary(report: Any, res: Any) -> dict[str, Any]:
-    """The compact grounding payload attached to the `final` event."""
+def _grounding_summary(
+    report: Any, *, repaired: bool, iterations: int
+) -> dict[str, Any]:
+    """The compact grounding payload attached to the `final` event. `repaired`
+    means the returned image IS a kept corrective edit (not merely that one was
+    attempted) — a discarded / no-improvement repair reports False."""
     return {
         "score": round(report.score, 3),
         "mean_iou": round(report.mean_iou, 3),
         "matched": [m.label for m in report.matched],
         "missing": list(report.missing),
         "extra": list(report.extra),
-        "repaired": res.repairs > 0,
-        "iterations": res.iterations,
+        "repaired": repaired,
+        "iterations": iterations,
     }
-
-
-async def _no_repair(_img: Any, _report: Any) -> Any | None:
-    return None
 
 
 async def _run_grounding(
@@ -256,12 +256,16 @@ async def _run_grounding(
         data_url = image_provider.encode_data_url(img.jpeg_bytes, img.mime_type)
         return await image_edit_provider.edit_image(data_url, instruction)
 
+    # Verify-only ⇒ inpaint_budget=0 so the loop never even calls the edit model
+    # (no fal spend, iterations stays 0). Repair-on uses the default budget.
+    budget = grounding.Budget() if repair_on else grounding.Budget(inpaint_budget=0)
     try:
         loop_res = await grounding.run_grounding_loop(
             result,
             verify=_verify,
-            repair=_repair if repair_on else _no_repair,
+            repair=_repair,
             accept_threshold=accept_threshold,
+            budget=budget,
         )
     except Exception as exc:
         # Grounding is strictly best-effort — a detector 429 or edit failure must
@@ -270,7 +274,13 @@ async def _run_grounding(
 
         log("info", "grounding.failed", error=f"{type(exc).__name__}: {exc}")
         return result, None
-    return loop_res.image, _grounding_summary(loop_res.report, loop_res)
+    # `repaired` = the kept image differs from what we rendered (a corrective edit
+    # actually survived), not merely that a repair was attempted.
+    return loop_res.image, _grounding_summary(
+        loop_res.report,
+        repaired=loop_res.image is not result,
+        iterations=loop_res.iterations,
+    )
 
 
 # The click classifier's `enter_as` → the planner's render mode.
