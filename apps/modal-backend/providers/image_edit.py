@@ -88,3 +88,44 @@ async def edit_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+# --- Continuation (zoom-in that keeps the surroundings) ----------------------
+
+# FLUX Kontext: strict in-context reference editing — a bakeoff picked it for a
+# ZOOM continuation that keeps the parent's content/style/layout (vs nano-banana
+# which treats refs as loose inspiration). Used for World Mode sub-map entries so
+# a closer map literally continues the click region. Override FAL_CONTINUE_MODEL.
+CONTINUE_MODEL_DEFAULT = "fal-ai/flux-pro/kontext"
+
+
+async def continue_image(
+    image_data_url: str,
+    instruction: str,
+    model_override: str | None = None,
+) -> GeneratedImage:
+    """Zoom-continue `image_data_url` per `instruction`, keeping its content,
+    style and layout — a closer continuation rather than a fresh generation.
+    Default FLUX Kontext (bakeoff winner); FAL_CONTINUE_MODEL override."""
+    from obs import span
+
+    _ensure_fal_key()
+    model = (
+        model_override
+        or os.environ.get("FAL_CONTINUE_MODEL")
+        or CONTINUE_MODEL_DEFAULT
+    )
+    image_url = await to_fal_url(image_data_url)
+    async with span("image.continue", model=model, instr_len=len(instruction)) as ctx:
+        result = await _fal_subscribe(
+            model, _edit_args_for(model, instruction, image_url)
+        )
+        image_info = _first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
+    return GeneratedImage(
+        jpeg_bytes=jpeg_bytes,
+        mime_type=mime,
+        model=model,
+        provider_request_id=str(result.get("requestId") or "") or None,
+    )

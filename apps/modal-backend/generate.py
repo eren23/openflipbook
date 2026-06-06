@@ -544,6 +544,27 @@ async def _event_stream(
             trace_id,
         )
 
+        # World Mode sub-map: pixel-continue the click region with a continuation
+        # model (Kontext) so the closer map keeps the parent's streets/buildings
+        # in place instead of re-planning a fresh image. Needs the region crop.
+        region_ref: str | None = None
+        if body.condition_image_urls:
+            roles = body.condition_roles or []
+            for i, url in enumerate(body.condition_image_urls):
+                if i < len(roles) and roles[i] == "region":
+                    region_ref = url
+                    break
+            if region_ref is None:
+                region_ref = body.condition_image_urls[0]
+        use_continuation = render_mode == "place_submap" and region_ref is not None
+        zoom_instruction = (
+            f"Zoom in and draw a closer map of {plan.page_title} — the area at the "
+            "centre of this image. Keep the same hand-drawn cartographic style, "
+            "palette and line work; keep the existing streets, buildings and "
+            "landmarks where they are and continue them outward; label its "
+            "sub-areas. A closer continuation of this map, not a new scene."
+        )
+
         # 3. Image gen — with progressive fast-tier draft.
         #
         # When the user picked balanced/pro the cheap nano-banana model is
@@ -564,6 +585,9 @@ async def _event_stream(
             # tiers to one model, so a draft would just regenerate the same
             # image — skip it.
             and image_provider.active_provider() == "fal"
+            # Sub-map continuation is a single Kontext call on the region crop;
+            # a nano-banana text draft would just be an unrelated preview.
+            and not use_continuation
         )
         draft_task: _asyncio.Task | None = None
         if wants_draft:
@@ -594,15 +618,22 @@ async def _event_stream(
                 )
                 + composed_prompt
             )
-        main_task = _asyncio.create_task(
-            image_provider.generate_image(
-                prompt=main_prompt,
-                aspect_ratio=body.aspect_ratio,
-                tier=body.image_tier,
-                model_override=body.image_model,
-                reference_urls=cond_refs,
+        if use_continuation and region_ref is not None:
+            main_task = _asyncio.create_task(
+                image_edit_provider.continue_image(
+                    region_ref, zoom_instruction, model_override=body.image_model
+                )
             )
-        )
+        else:
+            main_task = _asyncio.create_task(
+                image_provider.generate_image(
+                    prompt=main_prompt,
+                    aspect_ratio=body.aspect_ratio,
+                    tier=body.image_tier,
+                    model_override=body.image_model,
+                    reference_urls=cond_refs,
+                )
+            )
         # Drive both tasks to completion. If the draft finishes first, emit
         # `progress`; if the main finishes first, drop the draft.
         if draft_task is not None:
@@ -667,7 +698,7 @@ async def _event_stream(
                 "image_model": result.model,
                 "prompt_author_model": text_model,
                 "session_id": body.session_id,
-                "final_prompt": composed_prompt,
+                "final_prompt": zoom_instruction if use_continuation else composed_prompt,
                 "sources": sources_payload,
             },
             trace_id,

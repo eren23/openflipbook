@@ -46,6 +46,7 @@ _SCRUB = (
     "IMAGE_SIZE",
     # World Mode (tap enters a place; gated off by default).
     "WORLD_MODE",
+    "FAL_CONTINUE_MODEL",
     "SENTRY_DSN",
 )
 
