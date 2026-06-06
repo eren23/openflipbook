@@ -78,6 +78,76 @@ def test_args_for_nano_banana_passes_aspect() -> None:
     assert args == {"prompt": "hello", "aspect_ratio": "9:16"}
 
 
+# --- image conditioning (multi-reference) -----------------------------------
+
+
+def test_args_for_nano_banana_includes_reference_urls() -> None:
+    args = image._args_for("fal-ai/nano-banana-pro", "p", "16:9", ["u1", "u2"])
+    assert args["prompt"] == "p"
+    assert args["aspect_ratio"] == "16:9"
+    assert args["image_urls"] == ["u1", "u2"]
+
+
+def test_args_for_seedream_ignores_reference_urls() -> None:
+    # seedream is text-to-image only here — refs must never leak into its args.
+    args = image._args_for(
+        "fal-ai/bytedance/seedream/v4/text-to-image", "p", "16:9", ["u1"]
+    )
+    assert "image_urls" not in args
+
+
+def test_args_for_nano_banana_empty_refs_unchanged() -> None:
+    # No refs → byte-identical to today's text-only args (back-compat).
+    assert image._args_for("fal-ai/nano-banana", "p", "1:1", []) == {
+        "prompt": "p",
+        "aspect_ratio": "1:1",
+    }
+
+
+async def test_generate_image_uploads_and_passes_reference_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAL_KEY", "fk")
+    captured: dict = {}
+
+    async def fake_to_fal(data_url: str) -> str:
+        return f"fal://{data_url[-1]}"
+
+    async def fake_sub(model: str, args: dict) -> dict:
+        captured["args"] = args
+        return {"images": [{"url": "http://x"}], "requestId": "r1"}
+
+    async def fake_fetch(info: dict) -> tuple[bytes, str]:
+        return b"jpeg", "image/jpeg"
+
+    monkeypatch.setattr("providers._common.to_fal_url", fake_to_fal)
+    monkeypatch.setattr(image, "_fal_subscribe", fake_sub)
+    monkeypatch.setattr(image, "_fetch_image_bytes", fake_fetch)
+
+    out = await image.generate_image(
+        "a cat", "16:9", reference_urls=["data:a", "data:b"]
+    )
+    assert out.jpeg_bytes == b"jpeg"
+    # Data URLs uploaded to fal storage, the resulting URLs passed as image_urls.
+    assert captured["args"]["image_urls"] == ["fal://a", "fal://b"]
+
+
+def test_conditioning_preamble_orders_signals_for_tap() -> None:
+    out = image.conditioning_preamble(["region", "parent", "anchor"], "tap")
+    assert "Image 1" in out and "Image 2" in out and "Image 3" in out
+    assert "inside" in out.lower()  # tap reveals what's inside the region
+    assert "palette" in out.lower() or "world" in out.lower()  # parent anchors look
+
+
+def test_conditioning_preamble_expand_continues_outward() -> None:
+    out = image.conditioning_preamble(["region", "parent", "anchor"], "expand")
+    assert "outward" in out.lower()
+
+
+def test_conditioning_preamble_empty_is_blank() -> None:
+    assert image.conditioning_preamble([], "tap") == ""
+
+
 def test_first_image_extracts_first_dict() -> None:
     assert image._first_image({"images": [{"url": "x"}, {"url": "y"}]}) == {"url": "x"}
 

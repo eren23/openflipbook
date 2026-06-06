@@ -92,6 +92,11 @@ class GenerateBody(BaseModel):
     world_context: list[WorldContextEntity] = Field(
         default_factory=list, max_length=16
     )
+    # Image conditioning — ordered reference data URLs (region crop → parent →
+    # anchor) the generator blends so the page stays in the same world.
+    # `condition_roles` labels each url in order. Built client-side. Capped.
+    condition_image_urls: list[str] | None = Field(default=None, max_length=4)
+    condition_roles: list[str] | None = None
     trace_id: str | None = None
 
 
@@ -241,6 +246,21 @@ async def _event_stream(
                 yield _sse({"type": "expand_done", "count": 0}, trace_id)
                 return
 
+            # Image conditioning: every neighbour shares the parent's world + the
+            # session anchor so the whole bloom reads as one continuous place
+            # (same refs for all; directional edge-crops deferred). Flag-gated.
+            expand_cond_refs: list[str] | None = None
+            expand_cond_preamble = ""
+            if (
+                os.environ.get("IMAGE_CONDITIONING", "true").lower()
+                in ("1", "true", "yes")
+                and body.condition_image_urls
+            ):
+                expand_cond_refs = body.condition_image_urls
+                expand_cond_preamble = image_provider.conditioning_preamble(
+                    body.condition_roles or [], "expand"
+                )
+
             async def _bloom_one(idx, neighbor):
                 plan = await llm.plan_page(
                     query=neighbor.subject,
@@ -256,11 +276,14 @@ async def _event_stream(
                     prompt = f"Style: {expand_style_lock}\n\n{prompt}"
                 if plan.facts:
                     prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+                if expand_cond_preamble:
+                    prompt = expand_cond_preamble + prompt
                 img = await image_provider.generate_image(
                     prompt=prompt,
                     aspect_ratio=body.aspect_ratio,
                     tier=body.image_tier,
                     model_override=body.image_model,
+                    reference_urls=expand_cond_refs,
                 )
                 return idx, neighbor, plan, img
 
@@ -498,12 +521,30 @@ async def _event_stream(
                     tier="fast",
                 )
             )
+        # Image conditioning (final image only; the fast draft stays a quick
+        # text-only preview). Blend the reference stack — region crop → parent →
+        # anchor — so the page belongs to the same world. Flag-gated; no refs →
+        # text-only exactly as before.
+        main_prompt = composed_prompt
+        cond_refs: list[str] | None = None
+        if (
+            os.environ.get("IMAGE_CONDITIONING", "true").lower() in ("1", "true", "yes")
+            and body.condition_image_urls
+        ):
+            cond_refs = body.condition_image_urls
+            main_prompt = (
+                image_provider.conditioning_preamble(
+                    body.condition_roles or [], body.mode
+                )
+                + composed_prompt
+            )
         main_task = _asyncio.create_task(
             image_provider.generate_image(
-                prompt=composed_prompt,
+                prompt=main_prompt,
                 aspect_ratio=body.aspect_ratio,
                 tier=body.image_tier,
                 model_override=body.image_model,
+                reference_urls=cond_refs,
             )
         )
         # Drive both tasks to completion. If the draft finishes first, emit
