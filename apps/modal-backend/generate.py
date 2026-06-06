@@ -97,7 +97,30 @@ class GenerateBody(BaseModel):
     # `condition_roles` labels each url in order. Built client-side. Capped.
     condition_image_urls: list[str] | None = Field(default=None, max_length=4)
     condition_roles: list[str] | None = None
+    # World Mode (gated server-side by the WORLD_MODE env). When on, a tap
+    # ENTERS the tapped place (scene / closer sub-map) instead of explaining a
+    # topic. `render_mode` is an explicit framing override; otherwise the click
+    # classifier's `enter_as` decides. `autonomy` is carried for symmetry.
+    world_mode: bool = False
+    autonomy: str = "auto"
+    render_mode: str | None = None
     trace_id: str | None = None
+
+
+# World Mode is gated behind an env flag (default off) so it's a no-op in prod
+# until a deployer turns it on — like EXPAND_MAP_PAN / IMAGE_CONDITIONING.
+def _world_mode_on(requested: bool) -> bool:
+    return bool(requested) and os.environ.get("WORLD_MODE", "false").lower() in (
+        "1", "true", "yes",
+    )
+
+
+# The click classifier's `enter_as` → the planner's render mode.
+_ENTER_AS_TO_RENDER: dict[str, str] = {
+    "scene": "place_scene",
+    "submap": "place_submap",
+    "explainer": "explainer",
+}
 
 
 def _sse(data: dict, trace_id: str | None = None) -> bytes:
@@ -353,6 +376,13 @@ async def _event_stream(
         # the click subject IS in the parent's domain — fed to the planner
         # to prevent semantic drift on ambiguous phrases like "Memory Bank".
         subject_context: str | None = None
+        # World Mode render framing: an explicit request override wins; else the
+        # click classifier's `enter_as` (set below) decides; else today's
+        # explainer. Empty string = "not yet decided / fall back to explainer".
+        effective_world_mode = _world_mode_on(body.world_mode)
+        render_mode = (body.render_mode or "").strip().lower()
+        if render_mode not in ("place_scene", "place_submap", "explainer"):
+            render_mode = ""
         if body.mode == "tap" and body.click and body.image:
             # Trust-but-verify on client-supplied prefetch hints. The web
             # client computes these via the same VLM the backend would call,
@@ -398,7 +428,17 @@ async def _event_stream(
                     output_locale=body.output_locale,
                     user_hint=cleaned_user_hint or None,
                     prior_rejected_subject=body.prior_rejected_subject,
+                    world_mode=effective_world_mode,
+                    # Clarifiers are surfaced client-side before this generate
+                    # call, so the in-band resolve only needs the classification.
+                    autonomy="auto",
                 )
+                # In world mode, let the classifier's read pick the framing
+                # unless the request already pinned one.
+                if effective_world_mode and not render_mode:
+                    render_mode = _ENTER_AS_TO_RENDER.get(
+                        resolution.enter_as, "explainer"
+                    )
                 if resolution.subject:
                     effective_query = resolution.subject
                     yield _sse(
@@ -468,6 +508,7 @@ async def _event_stream(
             parent_query=body.parent_query,
             subject_context=subject_context,
             world_context=world_context_payload,
+            render_mode=render_mode or "explainer",
         )
 
         composed_prompt = plan.prompt
@@ -532,9 +573,12 @@ async def _event_stream(
             and body.condition_image_urls
         ):
             cond_refs = body.condition_image_urls
+            # Entering a place reframes the region ref ("reveal the fuller place
+            # within") vs. an explainer tap ("reveal what is inside").
+            cond_mode = "place_scene" if render_mode == "place_scene" else body.mode
             main_prompt = (
                 image_provider.conditioning_preamble(
-                    body.condition_roles or [], body.mode
+                    body.condition_roles or [], cond_mode
                 )
                 + composed_prompt
             )
@@ -746,6 +790,10 @@ class ResolveClickBody(BaseModel):
     parent_query: str | None = None
     output_locale: str | None = None
     prior_rejected_subject: str | None = None
+    # World Mode: ask the resolver to also classify what was tapped and (in
+    # "semi") propose clarifying questions to surface before entering.
+    world_mode: bool = False
+    autonomy: str = "auto"
     trace_id: str | None = None
 
 
@@ -771,6 +819,8 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             parent_query=body.parent_query or "",
             output_locale=body.output_locale,
             prior_rejected_subject=body.prior_rejected_subject,
+            world_mode=_world_mode_on(body.world_mode),
+            autonomy=(body.autonomy or "auto"),
         )
     except Exception as exc:
         record_error("resolve_click", exc)
@@ -801,6 +851,8 @@ async def resolve_click(req: Request, body: ResolveClickBody):
                 if resolution.bbox is not None
                 else None
             ),
+            "enter_as": resolution.enter_as,
+            "clarifiers": resolution.clarifiers,
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

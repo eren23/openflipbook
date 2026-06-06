@@ -44,6 +44,8 @@ _SCRUB = (
     "IMAGE_API_KEY",
     "IMAGE_MODEL",
     "IMAGE_SIZE",
+    # World Mode (tap enters a place; gated off by default).
+    "WORLD_MODE",
     "SENTRY_DSN",
 )
 

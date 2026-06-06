@@ -14,6 +14,28 @@ import pytest
 
 from providers import llm
 
+# ---------- World Mode: render-mode base instruction ----------------------
+
+
+def test_render_base_explainer_is_default() -> None:
+    assert "visual-explainer page" in llm._render_base_instruction(None)
+    assert "visual-explainer page" in llm._render_base_instruction("explainer")
+    assert "visual-explainer page" in llm._render_base_instruction("bogus")
+
+
+def test_render_base_place_scene_is_immersive_without_labels() -> None:
+    text = llm._render_base_instruction("place_scene")
+    assert "stepped into" in text
+    assert "NO callout labels" in text
+    assert "visual-explainer page" not in text
+
+
+def test_render_base_place_submap_is_cartographic() -> None:
+    text = llm._render_base_instruction("place_submap")
+    assert "closer MAP" in text
+    assert "visual-explainer page" not in text
+
+
 # ---------- _system_message + caching ------------------------------------
 
 

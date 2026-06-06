@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from openai import AsyncOpenAI, BadRequestError
@@ -82,6 +82,14 @@ class ClickResolution:
     # (it is part of this / bigger). Powers the scale-space map + zoom
     # level-of-detail. Default "peer" keeps older payloads valid.
     scale: str = "peer"
+    # World Mode: the VLM's read of what the tapped thing is — "scene" (a place
+    # to step INTO), "submap" (a sub-area to map closer), or "explainer" (an
+    # object/concept to diagram). Drives the planner's render framing. Default
+    # "explainer" keeps classic tap=learn behaviour for non-world callers.
+    enter_as: str = "explainer"
+    # Semi-autonomy: up to two short clarifying questions to ask before entering
+    # (e.g. "Day or night?"). Empty in auto mode and in classic (non-world) mode.
+    clarifiers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -435,6 +443,8 @@ CLICK_SCHEMA: dict[str, Any] = {
             },
         },
         "scale": {"type": "string", "enum": ["component", "peer", "container"]},
+        "enter_as": {"type": "string", "enum": ["scene", "submap", "explainer"]},
+        "clarifiers": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["subject"],
 }
@@ -705,6 +715,8 @@ async def click_to_subject(
     output_locale: str | None = None,
     user_hint: str | None = None,
     prior_rejected_subject: str | None = None,
+    world_mode: bool = False,
+    autonomy: str = "auto",
 ) -> ClickResolution:
     """Resolve the click region to a subject phrase AND a style descriptor.
 
@@ -731,6 +743,27 @@ async def click_to_subject(
         if output_locale and output_locale.lower() not in ("en", "auto", "")
         else ""
     )
+    # World Mode adds a classification field so the caller can decide whether a
+    # tap ENTERS a place (scene / closer sub-map) or explains a concept, and —
+    # in semi autonomy — proposes a couple of short questions to ask first.
+    world_clause = ""
+    if world_mode:
+        world_clause = (
+            " (9) `enter_as` — one of \"scene\", \"submap\", or \"explainer\": "
+            "\"scene\" when the crosshair is on a PLACE the user would step INTO "
+            "(a building, street, district, room, landscape, ship/vehicle "
+            "interior); \"submap\" when it is a sub-region of a map or area best "
+            "shown as a CLOSER MAP; \"explainer\" when it is an object, "
+            "mechanism, or concept best shown as a labelled diagram."
+        )
+        if autonomy == "semi":
+            world_clause += (
+                " (10) `clarifiers` — an array of AT MOST 2 very short questions "
+                "(<=8 words each) whose answers would change how this place is "
+                "drawn (e.g. \"Day or night?\", \"Bustling or abandoned?\"). "
+                "Return an empty array when you are confident or when `enter_as` "
+                "is \"explainer\"."
+            )
     system = (
         "You examine a generated illustration of the page titled "
         f"'{parent_title}' (user query: '{parent_query}'). A red crosshair with "
@@ -768,6 +801,7 @@ async def click_to_subject(
         "subject: \"component\" (a part of it / smaller), \"peer\" (a separate "
         "thing of similar size), or \"container\" (a larger thing the focal "
         "subject is part of). Default to \"peer\" when unsure."
+        + world_clause
         + locale_clause
     )
     hint_clause = ""
@@ -918,6 +952,18 @@ def _build_click_resolution(
     bbox = _parse_bbox(parsed.get("bbox"))
     scale = _coerce_scale(parsed.get("scale"))
 
+    # World Mode fields — absent on classic payloads, so default to the
+    # explainer framing with no questions (keeps tap=learn behaviour intact).
+    enter_as = str(parsed.get("enter_as", "")).strip().lower()
+    if enter_as not in ("scene", "submap", "explainer"):
+        enter_as = "explainer"
+    clarifiers_raw = parsed.get("clarifiers")
+    clarifiers = (
+        [c.strip() for c in clarifiers_raw if isinstance(c, str) and c.strip()][:2]
+        if isinstance(clarifiers_raw, list)
+        else []
+    )
+
     return ClickResolution(
         subject=subject or fallback_subject,
         style=style,
@@ -927,6 +973,50 @@ def _build_click_resolution(
         point=point,
         bbox=bbox,
         scale=scale,
+        enter_as=enter_as,
+        clarifiers=clarifiers,
+    )
+
+
+def _render_base_instruction(render_mode: str | None) -> str:
+    """The opening planner instruction, keyed by World Mode render mode.
+
+    `place_scene` → an immersive scene the reader steps into (no diagram
+    labels); `place_submap` → a closer cartographic map of a sub-area;
+    `explainer` (default, and every classic non-world call) → today's
+    labelled visual-explainer page, verbatim.
+    """
+    rmode = (render_mode or "explainer").lower()
+    if rmode == "place_scene":
+        return (
+            "You design an illustrated SCENE the reader has just stepped into — "
+            "a place to BE, not a diagram. Return JSON with keys: page_title "
+            "(<=8 words, the place's name), prompt (<=120 words describing the "
+            "view as if you just walked in — architecture, materials, light, "
+            "weather, depth, and the people/creatures and goings-on, as one "
+            "coherent illustrated scene with NO callout labels, annotation "
+            "lines, or diagram arrows), facts (3-6 short sensory or landmark "
+            "details a visitor would notice). Do not include any text outside "
+            "the JSON."
+        )
+    if rmode == "place_submap":
+        return (
+            "You design a closer MAP of just this district/area — a zoom of the "
+            "parent map into this region, in the same cartographic style. Return "
+            "JSON with keys: page_title (<=8 words, the area's name), prompt "
+            "(<=120 words describing an illustrated map of this sub-area — its "
+            "streets, sub-districts and landmarks laid out and named, drawn as a "
+            "map and not a scene), facts (3-6 named sub-areas or landmarks shown "
+            "on the map). Do not include any text outside the JSON."
+        )
+    return (
+        "You design a visual-explainer page for a given user query. Return "
+        "JSON with keys: page_title (<=8 words, title case), prompt (<=120 "
+        "words, a rich description of a single illustrated diagram suitable "
+        "for a text-capable image model — include labels, annotations, "
+        "callouts, and layout hints), facts (list of 3-6 short factual "
+        "bullets that should be visible as labels in the illustration). Do "
+        "not include any text outside the JSON."
     )
 
 
@@ -939,6 +1029,7 @@ async def plan_page(
     parent_query: str | None = None,
     subject_context: str | None = None,
     world_context: list[dict[str, Any]] | None = None,
+    render_mode: str | None = None,
 ) -> PagePlan:
     """Produce a page title, image-gen prompt, and factual snippets for the query.
 
@@ -955,15 +1046,11 @@ async def plan_page(
     per-object tracker memory). `subject_context` comes from the click VLM
     and is treated as authoritative — the planner must not contradict it.
     """
-    system_parts = [
-        "You design a visual-explainer page for a given user query. Return JSON "
-        "with keys: page_title (<=8 words, title case), prompt (<=120 words, a "
-        "rich description of a single illustrated diagram suitable for a "
-        "text-capable image model — include labels, annotations, callouts, and "
-        "layout hints), facts (list of 3-6 short factual bullets that should be "
-        "visible as labels in the illustration). Do not include any text "
-        "outside the JSON."
-    ]
+    # World Mode reframes the page from a labelled explainer into a PLACE: a
+    # scene the reader has stepped into, or a closer cartographic sub-map.
+    # `explainer` (the default) is today's behaviour, untouched.
+    rmode = (render_mode or "explainer").lower()
+    system_parts = [_render_base_instruction(rmode)]
     has_parent_frame = bool(
         (parent_title and parent_title.strip())
         or (parent_query and parent_query.strip())
@@ -1037,9 +1124,19 @@ async def plan_page(
                 f"PERTAINS TO \"{parent_label}\" — not the popular meaning "
                 "of the phrase in unrelated fields."
             )
-    user_parts.append(
-        "Design the illustrated page. Keep the layout readable at 1280x720."
-    )
+    if rmode == "place_scene":
+        user_parts.append(
+            "Paint the scene as if the reader just stepped into it. Keep it "
+            "readable at 1280x720."
+        )
+    elif rmode == "place_submap":
+        user_parts.append(
+            "Draw the district map. Keep the labels readable at 1280x720."
+        )
+    else:
+        user_parts.append(
+            "Design the illustrated page. Keep the layout readable at 1280x720."
+        )
     user = "\n\n".join(user_parts)
     if style_anchor:
         user += f"\n\nVisual style to preserve verbatim: {style_anchor}"
