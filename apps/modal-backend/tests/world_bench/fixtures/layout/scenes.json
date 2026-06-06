@@ -1,0 +1,24 @@
+{
+  "_comment": "Small P3 layout-fidelity eval set. Each scene = a base prompt + an expected layout (the geometry engine's bins). layout_runner generates each WITH and WITHOUT the layout clause and VLM-judges both; the lift is whether geometry steering helps.",
+  "aspect_ratio": "16:9",
+  "scenes": [
+    {
+      "name": "lighthouse-coast",
+      "prompt": "A storybook illustration of a rocky coastline at golden hour, soft watercolour.",
+      "expected": [
+        { "label": "lighthouse", "size": "large", "h_pos": "center", "v_pos": "top" },
+        { "label": "fishing boat", "size": "small", "h_pos": "far-left", "v_pos": "bottom" },
+        { "label": "seagull", "size": "tiny", "h_pos": "far-right", "v_pos": "top" }
+      ]
+    },
+    {
+      "name": "market-square",
+      "prompt": "A hand-drawn medieval market square at midday, bustling with people.",
+      "expected": [
+        { "label": "stone fountain", "size": "large", "h_pos": "center", "v_pos": "mid" },
+        { "label": "merchant stall", "size": "medium", "h_pos": "left", "v_pos": "bottom" },
+        { "label": "clock tower", "size": "medium", "h_pos": "far-right", "v_pos": "top" }
+      ]
+    }
+  ]
+}

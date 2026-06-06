@@ -45,8 +45,11 @@ eval-geometry:
 	cd apps/modal-backend && .venv/bin/python -m pytest -m geometry -q
 	cd apps/web && pnpm exec vitest run lib/world-geometry.test.ts lib/world-geometry.fuzz.test.ts
 
+# P3 layout-fidelity A/B: generate each scene with vs without the geometry layout
+# clause + VLM-judge both → the lift. PAID (~4 fal gens + judge calls). Needs
+# FAL_KEY + OPENROUTER_API_KEY (auto-loaded from apps/modal-backend/.env).
 eval-layout:
-	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 .venv/bin/python -m pytest -m layout -q
+	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.layout_runner
 eval-grounding:
 	cd apps/modal-backend && GROUNDING_BENCH_RUN=1 .venv/bin/python -m pytest -m grounding -q
 eval-repair:
