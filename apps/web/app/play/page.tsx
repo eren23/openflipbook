@@ -2201,6 +2201,7 @@ export default function PlayPage() {
         onToggleChips={() => setEntityChipsEnabled((v) => !v)}
         overrideEnabled={worldState.overrideEnabled}
         onMutate={mutateWorldEntity}
+        geoEditSessionId={sessionId}
       />
 
       {/* Hide the coach while the Around tray is open — both are pinned to
