@@ -19,10 +19,10 @@ import type {
  * up/down). LIMITS: still a flat-ground pinhole — no terrain mesh, no camera
  * roll, no interiors/occlusion-by-walls.
  *
- * Kept line-for-line identical to the Python port
- * apps/modal-backend/providers/geometry.py; the P1 parity gate (a shared golden
- * fixture both must reproduce) guards drift. World coords: origin top-left, +x
- * east, +y south. `gaze` is a heading in radians (0 = +x); `fov` is horizontal.
+ * Must stay line-for-line identical to the Python port
+ * apps/modal-backend/providers/geometry.py: a shared golden fixture both must
+ * reproduce guards against drift. World coords: origin top-left, +x east, +y
+ * south. `gaze` is a heading in radians (0 = +x); `fov` is horizontal.
  */
 
 // Minimal shape the projector needs (WorldEntityGeo satisfies it).
@@ -94,7 +94,8 @@ export function project(
   const yBase = 0.5 - Math.tan(thBase) / (2.0 * tv);
   const yTop = 0.5 - Math.tan(thTop) / (2.0 * tv);
   // Vertical-FOV cull: an entity entirely above/below the frame isn't visible.
-  // (Was unbounded → off-image boxes leaked into the golden + grounding — codex #4.)
+  // Without it, an unbounded y_pct lets off-image boxes leak into the
+  // projection golden and the grounding diff.
   if (Math.max(yTop, yBase) < 0 || Math.min(yTop, yBase) > 1) return null;
   const yPct = (yTop + yBase) / 2.0;
   const hPct = Math.abs(yBase - yTop);
@@ -167,7 +168,7 @@ export function estimateGeoFromBBox(
   _aspect: number,
   projection: ViewProjection = "top_down",
   // Camera tilt from horizontal, degrees: 0 = horizon, -90 = straight down.
-  // Default -60° = the classic bird's-eye, where cos = 0.5 (the old fudge).
+  // Default -60° = the classic bird's-eye, where cos = 0.5.
   pitchDeg = -60,
 ): GeoEstimate {
   const cx = bbox.x_pct + bbox.w_pct / 2;
@@ -176,15 +177,15 @@ export function estimateGeoFromBBox(
     const crop: MapCrop = view.map_crop;
     const pos = { x: crop.x + cx * crop.w, y: crop.y + cy * crop.h };
     if (projection !== "top_down") {
-      // 2.5D / oblique map (FIX 1c): the box's vertical extent reads as apparent
-      // HEIGHT, not footprint depth — so derive a rough, varied height instead of
-      // a flat default. Approximate: a detection box wraps a cluster, not one wall,
-      // so this is relative, not metric. Footprint falls back to a default.
-      // Foreshortening (codex #5): a box's vertical extent reads as TRUE height
-      // only when the camera looks near-horizontal. Tilted toward nadir, the
-      // extent is mostly roof footprint, so damp it by cos(pitch): 1 at the
-      // horizon, 0.5 at the classic -60deg oblique, ~0 looking straight down
-      // (where height-from-extent is meaningless → the default floor kicks in).
+      // On a 2.5D / oblique map the box's vertical extent reads as apparent
+      // HEIGHT, not footprint depth — so derive a rough, varied height instead
+      // of a flat default. Relative, not metric: a detection box wraps a
+      // cluster, not one wall. Footprint falls back to a default.
+      // The extent reads as TRUE height only when the camera looks
+      // near-horizontal. Tilted toward nadir, the extent is mostly roof
+      // footprint, so damp it by cos(pitch): 1 at the horizon, 0.5 at the
+      // -60deg oblique, ~0 looking straight down (where height-from-extent is
+      // meaningless → the default floor kicks in).
       const foreshorten = Math.abs(Math.cos((pitchDeg * Math.PI) / 180));
       return {
         pos,

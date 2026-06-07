@@ -23,7 +23,7 @@ from typing import TypedDict
 # field names + value types of the TS witness (WorldVec2, ProjectInput,
 # ObserverPose, MapCrop, ProjectedEntity, Neighbor). The data is still plain
 # JSON-decoded dicts at runtime — TypedDict is a type-checker-only annotation, so
-# the golden-vector parity gate is unaffected. `total=False` marks the optional
+# the golden-vector parity check is unaffected. `total=False` marks the optional
 # fields the TS reads with `?? 0` (elevation, pitch).
 
 
@@ -161,8 +161,8 @@ def project(
     y_base = 0.5 - math.tan(th_base) / (2.0 * tv)
     y_top = 0.5 - math.tan(th_top) / (2.0 * tv)
     # Vertical-FOV cull: an entity entirely above or below the frame isn't visible.
-    # (The old code let y_pct/h_pct run unbounded, so off-image boxes leaked into
-    # the golden + the grounding diff — codex-audit #4.)
+    # Without it, an unbounded y_pct/h_pct lets off-image boxes leak into the
+    # projection golden and the grounding diff.
     if max(y_top, y_base) < 0.0 or min(y_top, y_base) > 1.0:
         return None
     y_pct = (y_top + y_base) / 2.0

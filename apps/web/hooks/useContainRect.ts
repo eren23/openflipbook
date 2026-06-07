@@ -7,8 +7,8 @@ import { objectContainRect, type ContainRect } from "@/lib/image-click";
 /**
  * Track the on-screen rectangle an `object-fit: contain` <img> content occupies
  * inside its element. Overlays use this to place image-space (0..1) boxes onto
- * the *letterboxed content*, not the wrapper — so a non-16:9 upload (which
- * pillar/letterboxes inside the 16:9 figure) no longer drifts (codex #8).
+ * the *letterboxed content*, not the wrapper, so a non-16:9 upload (which
+ * pillar/letterboxes inside the 16:9 figure) stays aligned.
  *
  * Re-measures on element resize and on image load. Returns null until the image
  * has natural dimensions (callers fall back to wrapper-relative %).

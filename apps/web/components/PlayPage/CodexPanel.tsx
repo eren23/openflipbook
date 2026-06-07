@@ -19,10 +19,9 @@ interface Props {
   // remains usable in isolation (tests pass when omitted).
   chipsEnabled?: boolean;
   onToggleChips?: () => void;
-  // Phase 5 — user-override CRUD. When true, each card exposes pin /
-  // rename / delete affordances; when false (the default), the codex
-  // stays read-only. Driven by the WORLD_OVERRIDE_ENABLED env flag the
-  // server surfaces on the snapshot.
+  // User-override CRUD. When true, each card exposes pin / rename / delete
+  // affordances; when false (the default), the codex stays read-only. Driven
+  // by the WORLD_OVERRIDE_ENABLED env flag the server surfaces on the snapshot.
   overrideEnabled?: boolean;
   onMutate?: (
     mutation: WorldEntityMutation
@@ -66,10 +65,9 @@ const KIND_TINT: Record<EntityKind, string> = {
 type TabKind = EntityKind | "all";
 
 /**
- * Read-only codex sidebar. Renders the current world-state registry
- * grouped by kind. Phase 5 will add user-override controls (rename,
- * merge, pin, delete) and a per-entity editor; this view is intentionally
- * inert until extraction quality is verified on real sessions.
+ * Codex sidebar. Renders the current world-state registry grouped by kind.
+ * User-override controls (rename, pin, delete) appear per card only when
+ * `overrideEnabled`; otherwise the view is read-only.
  */
 export function CodexPanel({
   open,
@@ -86,8 +84,8 @@ export function CodexPanel({
   const [tab, setTab] = useState<TabKind>("all");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const openerRef = useRef<Element | null>(null);
-  // Phase 7b — Undo toast surfaces for ~5s after a delete. The hook keeps
-  // the entity reachable via undo_delete during that window.
+  // Undo toast surfaces for ~5s after a delete; the entity stays reachable via
+  // undo_delete during that window.
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   // Tick the toast at 1Hz so the countdown stays visible.
   const [, setUndoTick] = useState(0);
@@ -104,9 +102,9 @@ export function CodexPanel({
     };
   }, [undoToast]);
 
-  // Move focus into the panel on open + return it to the previously-focused
-  // element on close. Skip the full focus trap for Phase 2 — keyboard users
-  // can still Tab back out and `K` / Escape both close cleanly.
+  // Move focus into the panel on open + return it to the prior focus on close.
+  // No full focus trap — keyboard users can still Tab back out and `K` / Escape
+  // both close cleanly.
   useEffect(() => {
     if (typeof document === "undefined") return;
     if (open) {

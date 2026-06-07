@@ -1,7 +1,6 @@
 // Where-am-I trail for the play page. Walk a node's parent chain up to the root
 // so the user always sees "City › Unseen University › Tower of Art" and can jump
-// straight back to any ancestor (the reliable "out to the map" the old back /
-// map / atlas controls made hard to find).
+// straight back to any ancestor.
 
 export interface Crumb {
   nodeId: string;

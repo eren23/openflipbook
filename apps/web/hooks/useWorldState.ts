@@ -18,10 +18,10 @@ export interface WorldStateView {
   // deployment. The codex hides edit affordances when false so the user
   // never sees a button they aren't allowed to press.
   overrideEnabled: boolean;
-  // Phase 7b — ids of recently-deleted entities. An optimistic
-  // extraction_event arriving milliseconds after a delete would
-  // otherwise re-add the entity as a stub; we suppress for a short
-  // TTL until the canonical refetch settles. We track id → name so
+  // Ids of recently-deleted entities. An optimistic extraction_event arriving
+  // milliseconds after a delete would otherwise re-add the entity as a stub;
+  // we suppress for a short TTL until the canonical refetch settles. We track
+  // id → name so
   // `clear_recently_deleted` can evict the name when the id is cleared
   // — otherwise a long session accumulates names indefinitely and a
   // legitimate later "Torch" gets suppressed because some earlier
@@ -74,12 +74,11 @@ function reducer(state: WorldStateView, action: WorldStateAction): WorldStateVie
       }
       for (const a of action.added) {
         if (existing.has(a.id)) continue;
-        // Phase 7b — drop optimistic stubs for entities the user just
-        // tombstoned. Without this, a stale extraction event arriving
-        // 100ms after a delete would zombie the entity back into the
-        // codex until the canonical refetch lands. We match by id AND
-        // by name (the extractor allocates a new id on re-add, but the
-        // name is stable).
+        // Drop optimistic stubs for entities the user just tombstoned. Without
+        // this, a stale extraction event arriving 100ms after a delete would
+        // zombie the entity back into the codex until the canonical refetch
+        // lands. Match by id AND by name (the extractor allocates a new id on
+        // re-add, but the name is stable).
         if (state.recentlyDeleted.has(a.id)) continue;
         if (deletedNames.has(a.name.toLowerCase())) continue;
         existing.set(a.id, makeStubEntity(a));
@@ -166,7 +165,7 @@ const initialState: WorldStateView = {
  * full appearance / facts / state from Mongo.
  *
  * Returns `{ state, refresh }`. `refresh` is a manual refetch trigger for
- * after user-override CRUD calls (Phase 5).
+ * after user-override CRUD calls.
  */
 export function useWorldState(sessionId: string | null) {
   const [state, dispatch] = useReducer(reducer, initialState);

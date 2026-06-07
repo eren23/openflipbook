@@ -27,7 +27,7 @@ interface ExtractRequestBody {
   scene_description?: string | null;
   // The view this node renders (the geo-tap intent). When it carries a focus_id
   // (an entered place), this scene's sub-entities seed into that place's CHILD
-  // frame instead of the top-level city map (P7b).
+  // frame instead of the top-level city map.
   scene_view?: SceneView | null;
 }
 
@@ -149,16 +149,15 @@ export async function POST(req: Request, { params }: Params) {
     // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
     // entities localized on this node — the world map populates for free. Default
     // scene_view = a top-down map so each bbox maps straight into a normalized
-    // world crop; P6 refines per-scene observer poses. Best-effort, off the
-    // response path.
+    // world crop. Best-effort, off the response path.
     const geoNodeId = body.node_id;
     const sceneView = body.scene_view ?? null;
     const viewLevel = upstreamView?.level ?? "map";
     // An ENTERED place (the geo-tap carried a focus): seed this scene's
     // sub-entities into that place's CHILD frame, so the interior layout
-    // persists + stays consistent across re-entries (P7b). Otherwise we only
-    // seed a top-down MAP into the city frame — a scene's boxes don't belong in
-    // a fake top-down crop (codex-audit #1).
+    // persists + stays consistent across re-entries. Otherwise we only seed a
+    // top-down MAP into the city frame — a scene's boxes don't belong in a fake
+    // top-down crop.
     const parentFrameId =
       sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
     const geoOn = envFlag("GEOMETRIC_WORLD");

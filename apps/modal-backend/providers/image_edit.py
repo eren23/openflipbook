@@ -5,9 +5,9 @@ Mirrors the tier shape in `image.py`. Edit models on fal expect an
 data URL to fal storage first — fal's queue endpoints get unhappy with
 multi-MB inline data URLs.
 
-Standalone fal-ai/qwen-image-edit inference is no longer published (only the
-LoRA trainer remains as of 2026-04), so the balanced slot reuses
-nano-banana-pro which handles both gen and edit on the same endpoint.
+fal-ai doesn't publish standalone qwen-image-edit inference (only the LoRA
+trainer, as of 2026-04), so the balanced slot reuses nano-banana-pro, which
+handles both gen and edit on the same endpoint.
 """
 
 from __future__ import annotations

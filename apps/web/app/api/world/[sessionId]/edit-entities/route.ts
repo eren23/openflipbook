@@ -27,7 +27,7 @@ interface EditRequestBody {
   dry_run?: boolean;
 }
 
-// NL edit of the geometric world map (Phase 5). Resolves the instruction →
+// NL edit of the geometric world map. Resolves the instruction →
 // structured geo edits via the Modal backend's /edit-entities, applies them to
 // the world_map, and returns the plan (incl. blast-radius) + the new snapshot.
 // Gated by WORLD_OVERRIDE_ENABLED (these edits mutate persisted geo state),
@@ -125,7 +125,7 @@ export async function POST(req: Request, { params }: Params) {
     }
     const payload = (await upstream.json()) as { plan: EntityEditPlan };
     plan = payload.plan;
-    // Nested propagation (P7d): ripple the blast-radius to the edited entities'
+    // Nested propagation: ripple the blast-radius to the edited entities'
     // frame-siblings — moving one repositions the things around it, so their
     // saved scenes are stale too. Union with whatever the backend attributed.
     const rippled = blastRadius(

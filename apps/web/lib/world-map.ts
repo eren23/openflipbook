@@ -118,7 +118,7 @@ export function recomputeBounds(entities: WorldEntityGeo[]): MapCrop {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-// ── Structured geo edits (Phase 5: NL-editable map) ──────────────────────────
+// ── Structured geo edits (natural-language-editable map) ─────────────────────
 
 const DEFAULT_GEO_HEIGHT = 4;
 const DEFAULT_GEO_FOOTPRINT = 6;
@@ -177,7 +177,7 @@ export function applyEntityEdit(
  *  candidates. Pure union of `references[target]` over edits that carry a target
  *  (an `add` introduces a new entity, so it stales nothing).
  *
- *  Nested propagation (P7d): when `geos` is supplied, moving an entity also
+ *  Nested propagation: when `geos` is supplied, moving an entity also
  *  stales the scenes that show its FRAME-SIBLINGS — the "things around it" — since
  *  their relative layout just changed. So editing the Tower of Art re-stages
  *  every Unseen University interior, not just the ones with the tower in frame. */
@@ -335,7 +335,7 @@ export async function deriveGeoFromExtraction(
   pitchDeg = -60,
   // When set, the seeded geometry hangs off this place's child frame (its geo
   // id) — i.e. these are sub-entities INSIDE a place, positioned in its local
-  // frame, not top-level city entities (P7b).
+  // frame, not top-level city entities.
   parentId: string | null = null,
 ): Promise<WorldMapSnapshot> {
   const nowIso = new Date().toISOString();

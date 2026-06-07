@@ -13,8 +13,8 @@ interface Props {
 
 type Phase = "idle" | "busy" | "confirm";
 
-// The living, NL-editable entity list (Phase 5). Shows each map entity's geometry
-// as a chip, takes a natural-language edit, previews the structured plan + its
+// The living, NL-editable entity list. Shows each map entity's geometry as a
+// chip, takes a natural-language edit, previews the structured plan + its
 // blast-radius ("restages N scenes"), then applies on confirm. Presentational —
 // the network lives in onSubmit. Rendered only behind the world-override flag.
 export default function GeoEditPanel({ entities, onSubmit }: Props) {

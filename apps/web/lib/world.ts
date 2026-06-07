@@ -18,17 +18,16 @@ const SCHEMA_VERSION = 1;
 const MIN_ADDED_CONFIDENCE = 0.3;
 const MAX_FACTS_PER_ENTITY = 12;
 const MAX_PRIOR_ENTITIES_FOR_EXTRACTION = 30;
-// Continuity injection (Phase 3) — how many entities to ship into the
-// planner's context. Smaller than the extraction prior slice because
-// every entity inflates the image-gen prompt with an appearance sentence
-// the renderer has to honour; too many and the prompt drifts.
+// Continuity injection — how many entities to ship into the planner's context.
+// Smaller than the extraction prior slice because every entity inflates the
+// image-gen prompt with an appearance sentence the renderer has to honour; too
+// many and the prompt drifts.
 const MAX_CONTINUITY_ENTITIES = 8;
 
-// Phase 7a — causality state-write gate. Raw VLM-emitted state used to
-// land directly in the registry, which the Phase 6 planner clause then
-// promoted to a sticky cross-page constraint. We now drop low-confidence
-// state diffs entirely and restrict keys to a canonical allow-list. The
-// load-bearing guard is here; the extractor prompt has a companion nudge.
+// Causality state-write gate. Entity state promotes to a sticky cross-page
+// constraint in the planner, so low-confidence state diffs are dropped and
+// keys restricted to a canonical allow-list before reaching the registry.
+// This guard is the enforcement point; the extractor prompt has a companion nudge.
 const MIN_STATE_WRITE_CONFIDENCE = 0.6;
 
 // Canonical state keys the planner is willing to honour. Anything else
@@ -84,12 +83,11 @@ interface EntityDoc {
   pinned_by_user: boolean;
   confidence: number;
   updated_at: Date;
-  // Phase 7b — soft-delete tombstone. When non-null, the entity is
-  // hidden from snapshot reads and excluded from the continuity slice,
-  // but its name + aliases STILL participate in the in-payload index
-  // so the extractor can't silently re-add the same character. The
-  // codex panel offers a brief Undo window; otherwise tombstones
-  // accumulate (a future purge sweep collapses them ~30 days out).
+  // Soft-delete tombstone. When non-null, the entity is hidden from snapshot
+  // reads and excluded from the continuity slice, but its name + aliases STILL
+  // participate in the in-payload index so the extractor can't silently re-add
+  // the same character. The codex panel offers a brief Undo window; otherwise
+  // tombstones accumulate (a future purge sweep collapses them ~30 days out).
   deleted_at?: Date | null;
 }
 
@@ -177,9 +175,9 @@ export async function listPriorEntitiesForExtraction(
     { projection: { entities: 1 } }
   );
   if (!doc || !doc.entities || doc.entities.length === 0) return [];
-  // Phase 7b — tombstoned entities are not eligible for the prior slice.
-  // The extractor would otherwise see them, match them to a depicted
-  // character, and emit a presence-ping that revives the registry entry.
+  // Tombstoned entities are not eligible for the prior slice. The extractor
+  // would otherwise see them, match them to a depicted character, and emit a
+  // presence-ping that revives the registry entry.
   const liveEntities = doc.entities.filter((e) => !e.deleted_at);
   if (liveEntities.length === 0) return [];
 
@@ -339,20 +337,18 @@ function applyExtractionToEntities(
     byNameLower.set(e.name.toLowerCase(), e);
     for (const a of e.aliases) byNameLower.set(a.toLowerCase(), e);
   };
-  // Drop stale keys that previously pointed to `entity` but are no longer
-  // among its name/aliases. Necessary after a mid-payload rename so a
-  // later entry mentioning the OLD name doesn't collapse into the
-  // renamed record by accident.
+  // Drop stale keys pointing at `entity` that are not among its current
+  // name/aliases. Necessary after a mid-payload rename so a later entry
+  // mentioning the OLD name doesn't collapse into the renamed record.
   const reindexEntity = (entity: EntityDoc, oldKeys: string[]) => {
     for (const k of oldKeys) {
       if (byNameLower.get(k) === entity) byNameLower.delete(k);
     }
     indexEntity(entity);
   };
-  // Phase 7b — tombstoned entries DO go into the index so the extractor's
-  // re-add path can be silently suppressed (see `added` loop below). But
-  // they do NOT get presence pings or facts merges; the user explicitly
-  // deleted them.
+  // Tombstoned entries DO go into the index so the extractor's re-add path can
+  // be silently suppressed (see `added` loop below). But they do NOT get
+  // presence pings or facts merges; the user explicitly deleted them.
   for (const e of entities) indexEntity(e);
 
   const added_ids: string[] = [];
@@ -362,9 +358,8 @@ function applyExtractionToEntities(
     const target = byNameLower.get(u.match_name.toLowerCase());
     if (u.confidence < MIN_ADDED_CONFIDENCE && !target?.pinned_by_user) continue;
     if (!target) continue;
-    // Phase 7b — tombstoned matches are silently suppressed. The user
-    // deleted them; presence pings would defeat the whole point of
-    // soft-delete.
+    // Tombstoned matches are silently suppressed: the user deleted them, and a
+    // presence ping would defeat the whole point of soft-delete.
     if (target.deleted_at) continue;
     const prevName = target.name;
     const prevAliases = target.aliases;
@@ -466,7 +461,7 @@ function applyUpdate(
   if (c.state && typeof c.state === "object" && !Array.isArray(c.state)) {
     // Incoming-wins on extractor diffs; user-CRUD merges use target-wins.
     // Documented in mergeEntities so the two policies don't drift again.
-    // Phase 7a: gate state writes on confidence + canonical key allow-list.
+    // Gate state writes on confidence + canonical key allow-list.
     target.state = mergeEntityState(
       target.state,
       c.state as EntityState,
@@ -477,9 +472,9 @@ function applyUpdate(
   if (!target.appears_on_node_ids.includes(nodeId)) {
     target.appears_on_node_ids.push(nodeId);
   }
-  // Re-localized box for THIS node (codex #3): a recurring entity is detected
-  // again on re-appearance, so it keeps a per-node bbox. Without this the
-  // entity drops out of the world map + overlay every time it's re-seen.
+  // Re-localized box for THIS node: a recurring entity is detected again on
+  // re-appearance, so it keeps a per-node bbox. Without this the entity drops
+  // out of the world map + overlay every time it's re-seen.
   if (update.bbox) {
     target.appearance_bboxes = {
       ...target.appearance_bboxes,
@@ -497,13 +492,12 @@ function applyUpdate(
   );
 }
 
-// Phase 7a — gated state merge. The previous behaviour was a raw spread:
-// any key/value the VLM emitted landed in Mongo and got promoted to a
-// sticky cross-page constraint by the planner's CAUSALITY clause. We now
-// require enough confidence for a write AND restrict keys to a small
-// canonical allow-list. Pinned entities bypass the confidence floor (the
-// user explicitly trusts that record), but the key filter still applies
-// because the planner only knows how to render canonical keys.
+// Gated state merge. Any key/value the VLM emits would otherwise land in Mongo
+// and get promoted to a sticky cross-page constraint by the planner's CAUSALITY
+// clause, so a write requires enough confidence AND a key in a small canonical
+// allow-list. Pinned entities bypass the confidence floor (the user explicitly
+// trusts that record), but the key filter still applies because the planner
+// only knows how to render canonical keys.
 export function mergeEntityState(
   target: EntityState,
   incoming: EntityState,
@@ -613,7 +607,7 @@ function dedupeStrings(values: string[]): string[] {
   return out;
 }
 
-// Continuity injection (Phase 3) ----------------------------------------
+// Continuity injection ----------------------------------------
 // Pure scoring exposed so the test suite can exercise it without a
 // MongoDB. Higher score = more relevant to the upcoming generation.
 // Inputs are all the lowercase tokens from the query / click subject /
@@ -734,8 +728,7 @@ function entityDocToWire(doc: EntityDoc): Entity {
 }
 
 // User-override helpers --------------------------------------------------
-// Land the shapes now so Phase 5 wire-up is purely a route addition; merge
-// logic lives in one place.
+// Merge logic lives in one place.
 
 export async function pinEntity(
   sessionId: string,
@@ -778,11 +771,10 @@ export async function deleteEntity(
   sessionId: string,
   entityId: string
 ): Promise<WorldStateSnapshot> {
-  // Phase 7b — soft-delete. The previous hard-splice triggered a whack-
-  // a-mole loop: extractor re-discovered the entity on the next page,
-  // user deleted again, repeat. Tombstoning keeps the name + aliases in
-  // the in-payload index so the extractor's re-add gets silently
-  // suppressed.
+  // Soft-delete rather than splice: a hard delete causes a whack-a-mole loop
+  // (extractor re-discovers the entity next page, user deletes again, repeat).
+  // Tombstoning keeps the name + aliases in the in-payload index so the
+  // extractor's re-add gets silently suppressed.
   return mutate(sessionId, (entities) => {
     const target = entities.find((e) => e.id === entityId);
     if (target) {

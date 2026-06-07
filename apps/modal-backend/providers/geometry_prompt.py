@@ -3,8 +3,8 @@
 fal-only geometry steering: instead of a structure-control model, we hand the
 image model precise placement language derived from the projection bins
 (h_pos/v_pos/size, nearest-first). Deterministic — the same layout always yields
-the same clause — so it's exactly unit-testable, and the P4 grounding loop has a
-matching target to verify the render against.
+the same clause — so it's unit-testable, and the grounding loop has a matching
+target to verify the render against.
 """
 from __future__ import annotations
 

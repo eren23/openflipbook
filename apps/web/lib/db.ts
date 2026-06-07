@@ -70,9 +70,9 @@ async function ensureIndexes(db: Db): Promise<void> {
       { name: "parent_created_idx" }
     ),
     errors.createIndex({ ts: -1 }, { name: "errors_ts_idx" }),
-    // World-memory layer. `_id` is the session id (auto-indexed). The
-    // secondary index supports atlas-overlay queries that will land in
-    // Phase 4 — added now so we don't migrate a populated collection later.
+    // World-memory layer. `_id` is the session id (auto-indexed). The secondary
+    // index supports atlas-overlay queries; created eagerly to avoid migrating a
+    // populated collection later.
     world.createIndex(
       { "entities.appears_on_node_ids": 1 },
       { name: "world_entity_appears_idx", sparse: true }

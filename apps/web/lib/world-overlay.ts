@@ -1,8 +1,8 @@
 import type { MapCrop, ObserverPose, WorldVec2 } from "@openflipbook/config";
 
 /**
- * Pure top-down overlay projection (Phase 6) for the atlas + observer/gaze
- * editor. Maps world coords ⇆ a letterboxed viewport that frames a MapCrop, at
+ * Pure top-down overlay projection for the atlas + observer/gaze editor. Maps
+ * world coords ⇆ a letterboxed viewport that frames a MapCrop, at
  * a uniform scale. Orientation matches the world: +x east → screen right, +y
  * south → screen down — so a world bearing is the same angle on screen, which is
  * what makes the gaze cone trivial. No engine state; just arithmetic, fully

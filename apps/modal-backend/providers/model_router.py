@@ -1,12 +1,10 @@
 """Per-operation image-model router.
 
-Generalises the scattered hardcoded model choices into one place: every image
-operation has a default model (today's working slug) and an env override, and a
-pure `select_operation` decides which op a tap generation uses. The decision is
-behaviour-identical to the pre-router code (a sub-map entry with a region crop
-zoom-continues; everything else is a fresh generation), so it's a safe refactor.
+Every image operation has a default model and an env override, and a pure
+`select_operation` decides which op a tap generation uses: a sub-map entry with a
+region crop zoom-continues; everything else is a fresh generation.
 
-`outpaint`/`inpaint`/`upscale` slots are declared for the P4 verify→repair loop
+`outpaint`/`inpaint`/`upscale` slots are declared for the verify→repair loop
 (and map-pan reuse) but only activate once their FAL_*_MODEL is set AND a
 provider function is wired — `scripts/verify-fal-models.py` confirms the slug
 before that. fal-only by design (no ControlNet): geometry steers via the

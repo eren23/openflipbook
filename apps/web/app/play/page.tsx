@@ -296,10 +296,9 @@ export default function PlayPage() {
     yPx: number;
     key: number;
   } | null>(null);
-  // ⌘/Ctrl-click hint capture. Replaces the old `window.prompt` with an
-  // inline floating input anchored at the click point. The promise resolves
-  // to the typed hint (or null on cancel/Esc) so the click handler can stay
-  // a single async function.
+  // ⌘/Ctrl-click hint capture via an inline floating input anchored at the
+  // click point. The promise resolves to the typed hint (or null on
+  // cancel/Esc) so the click handler can stay a single async function.
   const [hintPrompt, setHintPrompt] = useState<{
     xPx: number;
     yPx: number;
@@ -336,8 +335,7 @@ export default function PlayPage() {
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
   // would conflict with keyboard tab-order; we expose a small toggle
-  // inside the codex header instead). Persisted only in component state
-  // for now — Phase 5's user preferences will move this to localStorage.
+  // inside the codex header instead). Persisted only in component state.
   const [entityChipsEnabled, setEntityChipsEnabled] = useState(false);
   const [scrubberOpen, setScrubberOpen] = useState(false);
   // True between an SSE `progress` (fast-tier draft) and the matching
@@ -1408,12 +1406,12 @@ export default function PlayPage() {
       } catch {
         // leave condition empty → text-only generation
       }
-      // Close the geometric loop (plan): a tap on the seeded world map → an
-      // observer pose + the projected layout, so the entered scene is steered (P3)
-      // and grounded (P4) by where the entities actually are. Only when World Mode
-      // is on AND the geo world is seeded (⇒ GEOMETRIC_WORLD); null falls back to
-      // the existing World Mode path. generate.py acts on these only under
-      // WORLD_GEOMETRY_GEN / VLM_GROUNDING, so sending them is otherwise inert.
+      // Close the geometric loop: a tap on the seeded world map → an observer
+      // pose + the projected layout, so the entered scene is steered and
+      // grounded by where the entities actually are. Only when World Mode is on
+      // AND the geo world is seeded; null falls back to the existing World Mode
+      // path. generate.py acts on these only under WORLD_GEOMETRY_GEN /
+      // VLM_GROUNDING, so sending them is otherwise inert.
       const geoTap =
         worldEnabled && geoMap.entities.length > 0
           ? geoTapRequest(
