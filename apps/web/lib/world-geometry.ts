@@ -166,6 +166,9 @@ export function estimateGeoFromBBox(
   view: SceneView,
   _aspect: number,
   projection: ViewProjection = "top_down",
+  // Camera tilt from horizontal, degrees: 0 = horizon, -90 = straight down.
+  // Default -60° = the classic bird's-eye, where cos = 0.5 (the old fudge).
+  pitchDeg = -60,
 ): GeoEstimate {
   const cx = bbox.x_pct + bbox.w_pct / 2;
   const cy = bbox.y_pct + bbox.h_pct / 2;
@@ -177,10 +180,16 @@ export function estimateGeoFromBBox(
       // HEIGHT, not footprint depth — so derive a rough, varied height instead of
       // a flat default. Approximate: a detection box wraps a cluster, not one wall,
       // so this is relative, not metric. Footprint falls back to a default.
+      // Foreshortening (codex #5): a box's vertical extent reads as TRUE height
+      // only when the camera looks near-horizontal. Tilted toward nadir, the
+      // extent is mostly roof footprint, so damp it by cos(pitch): 1 at the
+      // horizon, 0.5 at the classic -60deg oblique, ~0 looking straight down
+      // (where height-from-extent is meaningless → the default floor kicks in).
+      const foreshorten = Math.abs(Math.cos((pitchDeg * Math.PI) / 180));
       return {
         pos,
         footprint: { w: DEFAULT_FOOTPRINT, d: DEFAULT_FOOTPRINT },
-        height: Math.max(bbox.h_pct * crop.h * 0.5, DEFAULT_HEIGHT),
+        height: Math.max(bbox.h_pct * crop.h * foreshorten, DEFAULT_HEIGHT),
       };
     }
     return {

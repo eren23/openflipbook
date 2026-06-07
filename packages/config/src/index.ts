@@ -525,6 +525,10 @@ export interface EntityUpdate {
   match_name: string;
   changes: Partial<Pick<Entity, "name" | "appearance" | "facts" | "state" | "aliases">>;
   confidence: number;
+  // Re-localized box on THIS node (codex #3): a recurring entity is detected
+  // again so it keeps an appearance_bbox per node — without it, geometry/overlay
+  // drop the entity on every re-appearance. Omitted when localization fails.
+  bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
 }
 
 export interface EntityExtractionResult {

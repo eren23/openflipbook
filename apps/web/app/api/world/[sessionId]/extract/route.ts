@@ -188,6 +188,7 @@ export async function POST(req: Request, { params }: Params) {
             16 / 9,
             items,
             upstreamView?.projection ?? "top_down",
+            upstreamView?.pitch_deg ?? -60,
           );
         }
       } catch {

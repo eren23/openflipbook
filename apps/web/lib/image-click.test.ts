@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeClickOnImage, summarizeStroke } from "./image-click";
+import {
+  normalizeClickOnImage,
+  objectContainRect,
+  summarizeStroke,
+} from "./image-click";
 
 interface FakeImg {
   naturalWidth: number;
@@ -21,6 +25,35 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
     toJSON: () => ({}),
   } as DOMRect;
 }
+
+describe("objectContainRect (letterbox math, codex #8)", () => {
+  it("image fills an equal-aspect box exactly — no letterbox", () => {
+    const r = objectContainRect(1600, 900, 1600, 900);
+    expect(r).toEqual({ offsetX: 0, offsetY: 0, width: 1600, height: 900 });
+  });
+
+  it("a 4:3 image in a 16:9 box pillarboxes left/right", () => {
+    // natural 4:3 (1.333) < box 16:9 (1.778) → fills height, bars on the sides.
+    const r = objectContainRect(1600, 900, 800, 600)!;
+    expect(r.height).toBeCloseTo(900);
+    expect(r.width).toBeCloseTo(1200); // 900 * 4/3
+    expect(r.offsetX).toBeCloseTo(200); // (1600 - 1200) / 2
+    expect(r.offsetY).toBeCloseTo(0);
+  });
+
+  it("a 21:9 image in a 16:9 box letterboxes top/bottom", () => {
+    const r = objectContainRect(1600, 900, 2100, 900)!;
+    expect(r.width).toBeCloseTo(1600);
+    expect(r.height).toBeCloseTo(1600 * (900 / 2100)); // ~685.7
+    expect(r.offsetY).toBeCloseTo((900 - 1600 * (900 / 2100)) / 2);
+    expect(r.offsetX).toBeCloseTo(0);
+  });
+
+  it("returns null when any dimension is unknown", () => {
+    expect(objectContainRect(0, 900, 800, 600)).toBeNull();
+    expect(objectContainRect(1600, 900, 0, 600)).toBeNull();
+  });
+});
 
 function fakeImg(opts: {
   natW: number;

@@ -47,6 +47,30 @@ describe("estimateGeoFromBBox (seeding bridge)", () => {
     expect(oblique.footprint.w).toBe(6); // footprint falls back to default
   });
 
+  it("codex #5 — camera pitch foreshortens height-from-extent", () => {
+    const view: SceneView = {
+      node_id: "n",
+      level: "map",
+      observer: null,
+      map_crop: { x: 0, y: 0, w: 100, h: 60 },
+    };
+    const bbox: EntityBBox = { x_pct: 0.4, y_pct: 0.2, w_pct: 0.1, h_pct: 0.4 };
+    // Near the horizon (pitch 0) the whole box extent reads as true height.
+    const horizon = estimateGeoFromBBox(bbox, view, ASPECT, "oblique", 0);
+    expect(horizon.height).toBeCloseTo(0.4 * 60); // cos(0) = 1 → 24
+    // The classic -60° bird's-eye halves it — i.e. the old hand-tuned 0.5,
+    // now derived from the estimated camera rather than hard-coded.
+    const oblique60 = estimateGeoFromBBox(bbox, view, ASPECT, "oblique", -60);
+    expect(oblique60.height).toBeCloseTo(12); // cos(60°) = 0.5
+    // Looking straight down, the extent is roof footprint, not height → the
+    // height-from-extent signal vanishes and we fall back to the default.
+    const nadir = estimateGeoFromBBox(bbox, view, ASPECT, "oblique", -89);
+    expect(nadir.height).toBe(4);
+    // Omitting pitch keeps the legacy -60° default (back-compat).
+    const legacy = estimateGeoFromBBox(bbox, view, ASPECT, "oblique");
+    expect(legacy.height).toBeCloseTo(12);
+  });
+
   it("map level: an offset crop shifts the recovered position", () => {
     const view: SceneView = {
       node_id: "n",

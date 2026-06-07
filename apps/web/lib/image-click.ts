@@ -3,6 +3,48 @@ export interface NormalizedClick {
   y_pct: number;
 }
 
+/** The on-screen rectangle the image content actually occupies inside its box
+ *  under `object-fit: contain` — i.e. the letterboxed content area, offset from
+ *  the element's top-left. Returns null if any dimension is unknown/zero. */
+export interface ContainRect {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
+export function objectContainRect(
+  boxWidth: number,
+  boxHeight: number,
+  naturalWidth: number,
+  naturalHeight: number
+): ContainRect | null {
+  if (
+    boxWidth <= 0 ||
+    boxHeight <= 0 ||
+    naturalWidth <= 0 ||
+    naturalHeight <= 0
+  ) {
+    return null;
+  }
+  const naturalAspect = naturalWidth / naturalHeight;
+  const boxAspect = boxWidth / boxHeight;
+  let width = boxWidth;
+  let height = boxHeight;
+  let offsetX = 0;
+  let offsetY = 0;
+  if (naturalAspect > boxAspect) {
+    // Wider than the box → fills width, letterboxes top/bottom.
+    height = boxWidth / naturalAspect;
+    offsetY = (boxHeight - height) / 2;
+  } else {
+    // Taller than the box → fills height, pillarboxes left/right.
+    width = boxHeight * naturalAspect;
+    offsetX = (boxWidth - width) / 2;
+  }
+  return { offsetX, offsetY, width, height };
+}
+
 export interface NormalizedStroke {
   points: NormalizedClick[];
   bbox: { x: number; y: number; w: number; h: number };
@@ -17,44 +59,30 @@ export function normalizeClickOnImage(
   event: MouseEvent,
   img: HTMLImageElement
 ): NormalizedClick | null {
-  if (!img.naturalWidth || !img.naturalHeight) return null;
-
   const rect = img.getBoundingClientRect();
-  const boxWidth = rect.width;
-  const boxHeight = rect.height;
-  if (boxWidth <= 0 || boxHeight <= 0) return null;
+  const content = objectContainRect(
+    rect.width,
+    rect.height,
+    img.naturalWidth,
+    img.naturalHeight
+  );
+  if (!content) return null;
 
-  const naturalAspect = img.naturalWidth / img.naturalHeight;
-  const boxAspect = boxWidth / boxHeight;
-
-  let renderedWidth = boxWidth;
-  let renderedHeight = boxHeight;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  if (naturalAspect > boxAspect) {
-    renderedHeight = boxWidth / naturalAspect;
-    offsetY = (boxHeight - renderedHeight) / 2;
-  } else {
-    renderedWidth = boxHeight * naturalAspect;
-    offsetX = (boxWidth - renderedWidth) / 2;
-  }
-
-  const localX = event.clientX - rect.left - offsetX;
-  const localY = event.clientY - rect.top - offsetY;
+  const localX = event.clientX - rect.left - content.offsetX;
+  const localY = event.clientY - rect.top - content.offsetY;
 
   if (
     localX < 0 ||
     localY < 0 ||
-    localX > renderedWidth ||
-    localY > renderedHeight
+    localX > content.width ||
+    localY > content.height
   ) {
     return null;
   }
 
   return {
-    x_pct: clamp01(localX / renderedWidth),
-    y_pct: clamp01(localY / renderedHeight),
+    x_pct: clamp01(localX / content.width),
+    y_pct: clamp01(localY / content.height),
   };
 }
 
