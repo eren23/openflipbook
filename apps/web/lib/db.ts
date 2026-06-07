@@ -156,11 +156,16 @@ export interface NodeRow {
   sources: NodeSource[];
   relation: "descend" | "expand";
   scale: "component" | "peer" | "container";
+  // The observer pose + view level this node was rendered from. Null on
+  // pre-geometry / classic nodes. Read back on revisit so the minimap scopes to
+  // the right frame and the entered angle is reproducible.
+  scene_view: SceneView | null;
   created_at: string;
 }
 
-function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, click_in_parent, sources, relation, scale, ...rest } = doc;
+export function toRow(doc: NodeDoc): NodeRow {
+  const { _id, created_at, click_in_parent, sources, relation, scale, scene_view, ...rest } =
+    doc;
   return {
     id: _id,
     ...rest,
@@ -168,6 +173,7 @@ function toRow(doc: NodeDoc): NodeRow {
     sources: Array.isArray(sources) ? sources : [],
     relation: relation ?? "descend",
     scale: scale ?? "peer",
+    scene_view: scene_view ?? null,
     created_at: created_at.toISOString(),
   };
 }
@@ -189,6 +195,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     sources: n.sources ?? null,
     relation: n.relation ?? "descend",
     scale: n.scale ?? "peer",
+    scene_view: n.scene_view ?? null,
     created_at: new Date(),
   };
   await collection.insertOne(doc);

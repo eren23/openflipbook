@@ -130,6 +130,7 @@ interface PersistBody {
   sources?: { url: string; title: string | null }[] | null;
   relation?: "descend" | "expand";
   scale?: "component" | "peer" | "container";
+  scene_view?: SceneView | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -595,6 +596,7 @@ export default function PlayPage() {
                     url: s.url,
                     title: s.title ?? null,
                   })),
+                  scene_view: body.scene_view ?? null,
                 },
                 traceId
               ).then((saved) => {
@@ -1030,6 +1032,7 @@ export default function PlayPage() {
             image_url: string;
             click_in_parent: { x_pct: number; y_pct: number } | null;
             sources?: { url: string; title: string | null }[] | null;
+            scene_view?: SceneView | null;
           }>;
         };
         if (cancelled) return;
@@ -1042,6 +1045,7 @@ export default function PlayPage() {
           imageDataUrl: n.image_url,
           parentId: n.parent_id,
           sources: Array.isArray(n.sources) ? n.sources : [],
+          sceneView: n.scene_view ?? null,
           ...(n.click_in_parent
             ? {
                 clickInParent: {
