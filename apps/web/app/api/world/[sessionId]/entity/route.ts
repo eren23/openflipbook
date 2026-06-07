@@ -8,6 +8,7 @@ import {
   undoDeleteEntity,
 } from "@/lib/world";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
 import type { WorldEntityMutation } from "@openflipbook/config";
 
 export const runtime = "nodejs";
@@ -29,8 +30,7 @@ interface Params {
 // want them callable on a production deploy by accident. Local dev sets
 // the flag in `.env.local` to iterate on the UI.
 function overridesEnabled(): boolean {
-  const flag = (process.env.WORLD_OVERRIDE_ENABLED ?? "").toLowerCase();
-  return flag === "1" || flag === "true" || flag === "yes";
+  return envFlag("WORLD_OVERRIDE_ENABLED");
 }
 
 export async function POST(req: Request, { params }: Params) {

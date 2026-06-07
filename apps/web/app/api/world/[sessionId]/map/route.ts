@@ -6,6 +6,7 @@ import {
   upsertEntityGeos,
 } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,8 +16,7 @@ interface Params {
 }
 
 function geometricWorldEnabled(): boolean {
-  const f = (process.env.GEOMETRIC_WORLD ?? "").toLowerCase();
-  return f === "1" || f === "true" || f === "yes";
+  return envFlag("GEOMETRIC_WORLD");
 }
 
 function emptyMap(sessionId: string) {
