@@ -7,6 +7,7 @@ import type {
   Entity,
   EntityExtractionResult,
   EntityKind,
+  ViewEstimate,
 } from "@openflipbook/config";
 
 export const runtime = "nodejs";
@@ -84,6 +85,7 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   let upstreamResult: EntityExtractionResult;
+  let upstreamView: ViewEstimate | null = null;
   try {
     const upstream = await fetch(
       `${env.MODAL_API_URL.replace(/\/$/, "")}/extract-entities`,
@@ -117,8 +119,10 @@ export async function POST(req: Request, { params }: Params) {
     }
     const payload = (await upstream.json()) as {
       result: EntityExtractionResult;
+      view?: ViewEstimate | null;
     };
     upstreamResult = payload.result;
+    upstreamView = payload.view ?? null;
   } catch (err) {
     return NextResponse.json(
       {
@@ -173,6 +177,7 @@ export async function POST(req: Request, { params }: Params) {
             },
             16 / 9,
             items,
+            upstreamView?.projection ?? "top_down",
           );
         }
       } catch {

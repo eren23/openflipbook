@@ -7,6 +7,7 @@ import type {
   EntityState,
   MapCrop,
   SceneView,
+  ViewProjection,
   WorldEntityGeo,
   WorldMapSnapshot,
 } from "@openflipbook/config";
@@ -345,10 +346,11 @@ export async function deriveGeoFromExtraction(
   view: SceneView,
   aspect: number,
   items: ExtractedGeoItem[],
+  projection: ViewProjection = "top_down",
 ): Promise<WorldMapSnapshot> {
   const nowIso = new Date().toISOString();
   const geos: WorldEntityGeo[] = items.map((item) => {
-    const est = estimateGeoFromBBox(item.bbox, view, aspect);
+    const est = estimateGeoFromBBox(item.bbox, view, aspect, projection);
     return {
       id: `geo_${item.entity_id}`,
       entity_id: item.entity_id,

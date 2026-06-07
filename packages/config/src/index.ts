@@ -482,6 +482,17 @@ export interface ProjectedEntity {
   size: string;
 }
 
+// What the camera estimator (FIX 1b) reads out of a generated image, so the
+// geometry layer stops assuming top-down. `projection` decides how a detection
+// box back-projects: top_down → the box is a footprint; oblique/perspective →
+// its vertical extent reads as apparent height.
+export type ViewProjection = "top_down" | "oblique" | "perspective";
+export interface ViewEstimate {
+  level: ViewLevel;
+  projection: ViewProjection;
+  pitch_deg: number;
+}
+
 // A per-session snapshot of the geometric world (the `world_map` collection).
 export interface WorldMapSnapshot {
   session_id: string;
