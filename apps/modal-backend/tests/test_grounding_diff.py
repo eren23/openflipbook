@@ -64,6 +64,18 @@ def test_truly_absent_label_is_missing() -> None:
     assert r.matched == [] and r.missing == ["tower"] and r.extra == ["boat"]
 
 
+def test_extra_detection_penalizes_score() -> None:
+    # A perfect match + one unexpected (hallucinated) detection must not score 1.0.
+    r = diff(
+        [_box("tower", 0.5, 0.5)],
+        [_box("tower", 0.5, 0.5), _box("dragon", 0.1, 0.1)],
+    )
+    assert [m.label for m in r.matched] == ["tower"]
+    assert r.extra == ["dragon"]
+    # base 1.0 * (1 - 0.5 * (1 extra / 2)) = 0.75
+    assert r.score == pytest.approx(0.75)
+
+
 def test_duplicate_label_one_detected_one_missing() -> None:
     # Two same-label expected entities, only one detected. The OTHER must still
     # report missing — an old label-set diff masked it ("tower" ∈ matched labels

@@ -113,8 +113,14 @@ def test_pitch_and_elevation_default_is_byte_identical() -> None:
 
 def test_vertical_frustum_cull() -> None:
     # Looking down hard (pitch<0) at a tall, very close entity pushes its top
-    # past the vertical image plane → culled (the new Z guard).
+    # past the vertical image plane → culled (the ±pi/2 guard).
     assert geometry.project(_ent("a", 3, 0, height=30), {**_OBS, "pitch": -0.6}, _ASPECT) is None
+
+
+def test_vertical_fov_cull_below_frame() -> None:
+    # Looking UP (pitch>0) at a close ground entity → it sits entirely below the
+    # frame → culled by the vertical-FOV cull (codex-audit #4).
+    assert geometry.project(_ent("a", 5, 0, height=2), {**_OBS, "pitch": 0.6}, _ASPECT) is None
 
 
 def test_crop_entities_window() -> None:
