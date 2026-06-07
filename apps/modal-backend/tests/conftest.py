@@ -47,6 +47,9 @@ _SCRUB = (
     # World Mode (tap enters a place; gated off by default).
     "WORLD_MODE",
     "FAL_CONTINUE_MODEL",
+    # Map-pan expand (outpaint the world outward).
+    "EXPAND_MAP_PAN",
+    "FAL_EXPAND_MODEL",
     "SENTRY_DSN",
 )
 
