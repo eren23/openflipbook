@@ -507,10 +507,14 @@ export default function AtlasView({
                     <path
                       d={arcPath(c.from, c.to)}
                       fill="none"
-                      stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
+                      stroke={isExpand ? "rgba(13,148,136,0.65)" : "rgba(15,15,15,0.7)"}
                       strokeWidth={8}
                       strokeLinecap="round"
-                      strokeDasharray="2 22"
+                      // A "descend" edge is the zoom path you want to FOLLOW
+                      // (City -> place -> sub-part) — draw it as a clear dashed
+                      // line, not the near-invisible 2/24 dotting that made the
+                      // nested maps read as detached. "expand" stays subtle.
+                      strokeDasharray={isExpand ? "3 16" : "16 9"}
                       markerEnd={
                         isExpand
                           ? "url(#ofb-atlas-arrow-expand)"
