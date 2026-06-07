@@ -1475,7 +1475,17 @@ export default function PlayPage() {
             }
           : {}),
         ...(geoTap
-          ? { scene_view: geoTap.scene_view, expected_layout: geoTap.expected_layout }
+          ? {
+              scene_view: geoTap.scene_view,
+              expected_layout: geoTap.expected_layout,
+              // The geometric tap KNOWS which entity you hit (by coordinates) —
+              // make it the subject so tapping the Tower of Art enters the Tower,
+              // overriding the looser VLM read that picked its container. Spread
+              // last so it wins over the cached / world-resolved subjects above.
+              ...(geoTap.focus_label
+                ? { prefetched_subject: geoTap.focus_label }
+                : {}),
+            }
           : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });

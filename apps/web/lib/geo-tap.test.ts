@@ -42,6 +42,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
     expect(t).not.toBeNull();
     expect(t!.focus_id).toBe("clock");
+    expect(t!.focus_label).toBe("clock tower"); // drives the entered subject
     expect(t!.scene_view.level).toBe("building"); // tall → building
     expect(t!.scene_view.observer).not.toBeNull();
     // First enter — no saved interior → steer by NOTHING, so the OTHER city

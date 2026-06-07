@@ -16,6 +16,10 @@ export interface GeoTap {
   scene_view: SceneView;
   expected_layout: ProjectedEntity[];
   focus_id: string | null;
+  // Label of the entity you geometrically tapped. Drives the entered scene's
+  // subject so a tap on the Tower of Art ENTERS the Tower — not "Unseen
+  // University" (its container) that a looser VLM read would pick.
+  focus_label: string | null;
 }
 
 /**
@@ -72,5 +76,6 @@ export function geoTapRequest(
     },
     expected_layout: projectScene(layoutEntities, route.observer, aspect),
     focus_id: route.focus_id,
+    focus_label: byId.get(route.focus_id)?.label ?? null,
   };
 }
