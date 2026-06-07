@@ -8,10 +8,10 @@ matching target to verify the render against.
 """
 from __future__ import annotations
 
-from typing import Any
+from providers.geometry import ProjectedEntity
 
 
-def layout_constraints(expected: list[dict[str, Any]]) -> str:
+def layout_constraints(expected: list[ProjectedEntity]) -> str:
     """A placement clause from a projected layout (ProjectedEntity dicts, already
     depth-sorted nearest-first). Empty string when there's nothing to place."""
     if not expected:
@@ -28,12 +28,12 @@ def layout_constraints(expected: list[dict[str, Any]]) -> str:
     )
 
 
-def _place_phrase(e: dict[str, Any]) -> str:
+def _place_phrase(e: ProjectedEntity) -> str:
     return f"{e['h_pos']} {e['v_pos']}"
 
 
 def repair_instruction(
-    expected: list[dict[str, Any]],
+    expected: list[ProjectedEntity],
     missing: list[str],
     misplaced: list[str],
 ) -> str:
@@ -45,7 +45,7 @@ def repair_instruction(
     The edit model is in-context (it keeps unmentioned content), and the loop
     only runs this below the accept threshold — so the instruction stays a
     minimal "fix just these" rather than a re-describe of the whole scene."""
-    by_label: dict[str, dict[str, Any]] = {}
+    by_label: dict[str, ProjectedEntity] = {}
     for e in expected:
         by_label.setdefault(str(e.get("label") or e.get("id") or ""), e)
     parts: list[str] = []

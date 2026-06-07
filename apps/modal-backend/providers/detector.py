@@ -11,7 +11,18 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any
+from typing import Any, TypedDict
+
+
+# A centre-based detection box, normalised 0..1 — the shape `parse_detections`
+# emits and `grounding.diff` consumes (matches ProjectedEntity's box fields).
+class Detection(TypedDict):
+    label: str
+    x_pct: float
+    y_pct: float
+    w_pct: float
+    h_pct: float
+    score: float
 
 
 def _detector_model() -> str:
@@ -29,14 +40,17 @@ def _clamp01(v: Any) -> float:
     return max(0.0, min(1.0, f))
 
 
-def parse_detections(payload: Any) -> list[dict[str, Any]]:
+def parse_detections(payload: Any) -> list[Detection]:
     """Coerce a VLM detection reply into centre-based boxes. Tolerant: a box
-    missing a coordinate or with a blank label is dropped (never raises)."""
+    missing a coordinate or with a blank label is dropped (never raises).
+
+    `payload` stays `Any` — it's a raw JSON reply of unknown shape, validated
+    field-by-field below."""
     if isinstance(payload, dict):
         payload = payload.get("detections") or payload.get("entities") or []
     if not isinstance(payload, list):
         return []
-    out: list[dict[str, Any]] = []
+    out: list[Detection] = []
     for d in payload:
         if not isinstance(d, dict):
             continue
@@ -56,7 +70,7 @@ def parse_detections(payload: Any) -> list[dict[str, Any]]:
     return out
 
 
-async def detect(image_bytes: bytes, labels: list[str]) -> list[dict[str, Any]]:
+async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
     """Detect the given labels in the image; returns centre-based boxes for the
     ones actually present (the VLM is told NOT to invent absent labels)."""
     from providers import llm

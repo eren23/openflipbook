@@ -16,7 +16,71 @@ radians (0 = +x / east); fov is the horizontal field of view in radians.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TypedDict
+
+# --- Wire shapes (mirror apps/web/lib/world-geometry.ts ↔ packages/config) -----
+# These TypedDicts pin the dict shapes the projector reads/returns to the exact
+# field names + value types of the TS witness (WorldVec2, ProjectInput,
+# ObserverPose, MapCrop, ProjectedEntity, Neighbor). The data is still plain
+# JSON-decoded dicts at runtime — TypedDict is a type-checker-only annotation, so
+# the golden-vector parity gate is unaffected. `total=False` marks the optional
+# fields the TS reads with `?? 0` (elevation, pitch).
+
+
+class WorldVec2(TypedDict):
+    x: float
+    y: float
+
+
+class _Footprint(TypedDict):
+    w: float
+    d: float
+
+
+class ProjectInput(TypedDict, total=False):
+    # Required at runtime; `total=False` lets callers also omit the optional
+    # `label`/`elevation` (read via `.get(...)`), mirroring TS `?? ` reads.
+    id: str
+    pos: WorldVec2
+    height: float
+    footprint: _Footprint
+    label: str
+    elevation: float
+
+
+class ObserverPose(TypedDict, total=False):
+    pos: WorldVec2
+    eye_height: float
+    gaze: float
+    fov: float
+    pitch: float  # optional, read via `.get("pitch", 0.0)`
+
+
+class ProjectedEntity(TypedDict):
+    id: str
+    label: str
+    x_pct: float
+    y_pct: float
+    w_pct: float
+    h_pct: float
+    depth: float
+    h_pos: str
+    v_pos: str
+    size: str
+
+
+class MapCrop(TypedDict):
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class Neighbor(TypedDict):
+    id: str
+    bearing: float
+    dist: float
+
 
 _TWO_PI = 2.0 * math.pi
 _HALF_PI = math.pi / 2.0
@@ -63,8 +127,8 @@ def _size_bin(s: float) -> str:
 
 
 def project(
-    entity: dict[str, Any], observer: dict[str, Any], aspect: float
-) -> dict[str, Any] | None:
+    entity: ProjectInput, observer: ObserverPose, aspect: float
+) -> ProjectedEntity | None:
     """Project one entity into the observer's frame, or None if not visible."""
     if aspect <= 0:
         return None  # degenerate frame — no vertical frustum
@@ -119,8 +183,8 @@ def project(
 
 
 def project_scene(
-    entities: list[dict[str, Any]], observer: dict[str, Any], aspect: float
-) -> list[dict[str, Any]]:
+    entities: list[ProjectInput], observer: ObserverPose, aspect: float
+) -> list[ProjectedEntity]:
     """Project all in-frame entities, nearest first (reverse for painter's draw)."""
     out = [p for e in entities if (p := project(e, observer, aspect)) is not None]
     out.sort(key=lambda p: (p["depth"], p["id"]))
@@ -128,8 +192,8 @@ def project_scene(
 
 
 def crop_entities(
-    entities: list[dict[str, Any]], crop: dict[str, float]
-) -> list[dict[str, Any]]:
+    entities: list[ProjectInput], crop: MapCrop
+) -> list[ProjectInput]:
     """Entities whose map position falls inside a world-coord window (sub-map)."""
     x0, y0 = crop["x"], crop["y"]
     x1, y1 = x0 + crop["w"], y0 + crop["h"]
@@ -141,14 +205,14 @@ def crop_entities(
 
 
 def neighbors_of(
-    entities: list[dict[str, Any]], entity_id: str, k: int
-) -> list[dict[str, Any]]:
+    entities: list[ProjectInput], entity_id: str, k: int
+) -> list[Neighbor]:
     """The k nearest entities to `entity_id`, with bearing + distance (anchors)."""
     src = next((e for e in entities if e["id"] == entity_id), None)
     if src is None:
         return []
     sx, sy = src["pos"]["x"], src["pos"]["y"]
-    others = []
+    others: list[Neighbor] = []
     for e in entities:
         if e["id"] == entity_id:
             continue

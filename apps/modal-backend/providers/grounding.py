@@ -11,7 +11,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+
+from providers.detector import Detection
+from providers.geometry import ProjectedEntity
+
+# The image flowing through the loop is opaque to it: production passes a
+# GeneratedImage, the unit tests pass a sentinel str. The loop only ever hands it
+# back to the injected verify/repair callbacks, so it's generic (ImageT type
+# parameter, below), not `Any`.
 
 # A matched observed box within this centre distance (normalised) of its expected
 # centre counts as correctly positioned.
@@ -54,8 +61,8 @@ class GroundingReport:
 
 
 def diff(
-    expected: list[dict[str, Any]],
-    observed: list[dict[str, Any]],
+    expected: list[ProjectedEntity],
+    observed: list[Detection],
     *,
     iou_thresh: float = 0.2,
 ) -> GroundingReport:
@@ -66,7 +73,7 @@ def diff(
     matched_exp: set[int] = set()  # expected INDICES matched (not labels — dupes)
     for ei, e in enumerate(expected):
         e_box = _to_corners(e["x_pct"], e["y_pct"], e["w_pct"], e["h_pct"])
-        best: tuple[int, float, dict[str, Any]] | None = None
+        best: tuple[int, float, Detection] | None = None
         for j, o in enumerate(observed):
             if j in used or not _label_match(str(e["label"]), str(o.get("label", ""))):
                 continue
@@ -113,8 +120,8 @@ class Budget:
 
 
 @dataclass
-class LoopResult:
-    image: Any
+class LoopResult[ImageT]:
+    image: ImageT
     report: GroundingReport
     iterations: int = 0
     repairs: int = 0
@@ -126,14 +133,14 @@ def _actionable(report: GroundingReport) -> bool:
     return bool(report.missing) or any(not m.pos_ok for m in report.matched)
 
 
-async def run_grounding_loop(
-    initial_image: Any,
+async def run_grounding_loop[ImageT](
+    initial_image: ImageT,
     *,
-    verify: Callable[[Any], Awaitable[GroundingReport]],
-    repair: Callable[[Any, GroundingReport], Awaitable[Any | None]],
+    verify: Callable[[ImageT], Awaitable[GroundingReport]],
+    repair: Callable[[ImageT, GroundingReport], Awaitable[ImageT | None]],
     accept_threshold: float = 0.7,
     budget: Budget = Budget(),
-) -> LoopResult:
+) -> LoopResult[ImageT]:
     """Bounded verify→repair. Stops at the accept threshold, the iter/inpaint
     budget, when nothing is actionable, or when a repair fails to improve — and
     always returns the BEST-scoring image seen, never merely the last."""
