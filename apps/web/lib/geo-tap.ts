@@ -1,7 +1,9 @@
 import type {
   MapCrop,
+  ObserverPose,
   ProjectedEntity,
   SceneView,
+  ViewLevel,
   WorldEntityGeo,
 } from "@openflipbook/config";
 
@@ -15,6 +17,9 @@ import {
 export interface GeoTap {
   scene_view: SceneView;
   expected_layout: ProjectedEntity[];
+  // The scene's contents (the focus's children, resolved to absolute world
+  // coords) — what the detail popover's live preview projects from.
+  layout_entities: WorldEntityGeo[];
   focus_id: string | null;
   // Label of the entity you geometrically tapped. Drives the entered scene's
   // subject so a tap on the Tower of Art ENTERS the Tower — not "Unseen
@@ -37,11 +42,19 @@ export interface GeoTap {
  * or a submap/explainer tap) — the caller then falls back to the existing World
  * Mode path. Pure: a thin compose over the tested routeClick + projectScene.
  */
+// A user-set view (from the click-detail popover) that overrides the pose +
+// level the click router would synthesize, before we enter.
+export interface GeoTapOverride {
+  observer?: ObserverPose;
+  level?: ViewLevel;
+}
+
 export function geoTapRequest(
   map: { entities: WorldEntityGeo[]; bounds: MapCrop },
   nodeId: string,
   click: ClickPoint,
   aspect: number,
+  override?: GeoTapOverride,
 ): GeoTap | null {
   if (map.entities.length === 0) return null;
   // The current view is the top-down world map (the world's coordinate frame).
@@ -53,6 +66,9 @@ export function geoTapRequest(
   };
   const route = routeClick(map, mapView, click, aspect);
   if (route.kind !== "scene") return null;
+  // The popover's adjusted pose/level (if any) win over the synthesized ones.
+  const observer = override?.observer ?? route.observer;
+  const level = override?.level ?? route.level;
 
   // An entered scene shows the place's INTERIOR, never the city around it.
   //   - Re-enter: we have the saved interior — its sub-entities seeded into the
@@ -72,14 +88,15 @@ export function geoTapRequest(
   return {
     scene_view: {
       node_id: nodeId,
-      level: route.level,
-      observer: route.observer,
+      level,
+      observer,
       map_crop: null,
       // The place you entered: its geo id anchors the child frame the entered
       // scene's sub-entities seed into.
       focus_id: route.focus_id,
     },
-    expected_layout: projectScene(layoutEntities, route.observer, aspect),
+    expected_layout: projectScene(layoutEntities, observer, aspect),
+    layout_entities: layoutEntities,
     focus_id: route.focus_id,
     focus_label: byId.get(route.focus_id)?.label ?? null,
     focus_visual: byId.get(route.focus_id)?.visual ?? null,

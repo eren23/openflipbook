@@ -6,7 +6,11 @@ import type {
   Citation,
   GenerateRequestBody,
   GenerateEvent,
+  MapCrop,
+  ObserverPose,
   SceneView,
+  ViewLevel,
+  WorldEntityGeo,
 } from "@openflipbook/config";
 import {
   annotateClickPoint,
@@ -59,6 +63,9 @@ import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { CodexPanel } from "@/components/PlayPage/CodexPanel";
 import GeometryOverlay from "@/components/PlayPage/GeometryOverlay";
 import WorldMiniMap from "@/components/PlayPage/WorldMiniMap";
+import ClickDetailPopover, {
+  type ClickDetailResult,
+} from "@/components/PlayPage/ClickDetailPopover";
 import Breadcrumb from "@/components/PlayPage/Breadcrumb";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
@@ -71,7 +78,7 @@ import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { geoTapRequest } from "@/lib/geo-tap";
+import { geoTapRequest, type GeoTapOverride } from "@/lib/geo-tap";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -318,6 +325,32 @@ export default function PlayPage() {
       });
     },
     []
+  );
+  // ⌘/Ctrl-click on a geo-enterable place → the structured "set your view"
+  // popover (mounts the observer/gaze editor). Mirrors promptForHint: the
+  // promise resolves to the chosen view (or null on cancel) so the click
+  // handler stays one async function.
+  type ClickDetailRequest = {
+    xPx: number;
+    yPx: number;
+    entities: WorldEntityGeo[];
+    crop: MapCrop;
+    initial: {
+      observer: ObserverPose;
+      level: ViewLevel;
+      focusLabel: string;
+      canSubmap: boolean;
+      mode: "scene" | "submap";
+    };
+    resolve: (r: ClickDetailResult | null) => void;
+  };
+  const [clickDetail, setClickDetail] = useState<ClickDetailRequest | null>(null);
+  const promptForClickDetail = useCallback(
+    (
+      args: Omit<ClickDetailRequest, "resolve">,
+    ): Promise<ClickDetailResult | null> =>
+      new Promise((resolve) => setClickDetail({ ...args, resolve })),
+    [],
   );
   // Morph state. The new page is rendered as a second <img> above the old
   // one, scaling from the click origin while the old layer fades. See
@@ -1326,6 +1359,8 @@ export default function PlayPage() {
       // ripple/morph state so the bubble is the first thing they see; on
       // cancel we release the in-flight slot so the next click is honored.
       let hint = "";
+      // The user's set-your-view override from the click-detail popover (if any).
+      let geoOverride: GeoTapOverride | undefined;
       // World Mode "semi": resolve the tap up front and, when the model has
       // clarifying questions, ask them in the hint bubble before entering.
       let worldResolved:
@@ -1361,15 +1396,65 @@ export default function PlayPage() {
         }
       } else if (evt.metaKey || evt.ctrlKey) {
         const rect = img.getBoundingClientRect();
-        const raw = await promptForHint(
-          evt.clientX - rect.left,
-          evt.clientY - rect.top
-        );
-        if (raw === null) {
-          clickInFlightRef.current = false;
-          return;
+        const px2 = evt.clientX - rect.left;
+        const py2 = evt.clientY - rect.top;
+        // On a geo-enterable place, open the structured "set your view" popover
+        // (mounts the observer/gaze editor); otherwise keep the plain hint bubble.
+        const previewTap =
+          worldEnabled && geoMap.entities.length > 0
+            ? geoTapRequest(
+                { entities: geoMap.entities, bounds: geoMap.bounds },
+                page.nodeId ?? "",
+                click,
+                16 / 9,
+              )
+            : null;
+        const previewObserver = previewTap?.scene_view.observer ?? null;
+        if (previewTap && previewObserver) {
+          // Frame the editor on the camera↔place axis (not the whole city).
+          const focusEnt = geoMap.entities.find((e) => e.id === previewTap.focus_id);
+          const fx = focusEnt?.pos.x ?? previewObserver.pos.x;
+          const fy = focusEnt?.pos.y ?? previewObserver.pos.y;
+          const cx = (previewObserver.pos.x + fx) / 2;
+          const cy = (previewObserver.pos.y + fy) / 2;
+          const span = Math.max(
+            Math.abs(previewObserver.pos.x - fx),
+            Math.abs(previewObserver.pos.y - fy),
+            focusEnt?.footprint.w ?? 10,
+          ) * 2.5;
+          const editorCrop: MapCrop = {
+            x: cx - span / 2,
+            y: cy - span / 2,
+            w: span,
+            h: span,
+          };
+          const detail = await promptForClickDetail({
+            xPx: px2,
+            yPx: py2,
+            entities: previewTap.layout_entities,
+            crop: editorCrop,
+            initial: {
+              observer: previewObserver,
+              level: previewTap.scene_view.level,
+              focusLabel: previewTap.focus_label ?? "here",
+              canSubmap: false,
+              mode: "scene",
+            },
+          });
+          if (detail === null) {
+            clickInFlightRef.current = false;
+            return;
+          }
+          hint = detail.note;
+          geoOverride = { observer: detail.observer, level: detail.level };
+        } else {
+          const raw = await promptForHint(px2, py2);
+          if (raw === null) {
+            clickInFlightRef.current = false;
+            return;
+          }
+          hint = raw;
         }
-        hint = raw;
       }
       const rect = img.getBoundingClientRect();
       const px = evt.clientX - rect.left;
@@ -1438,6 +1523,7 @@ export default function PlayPage() {
               page.nodeId ?? "",
               { x_pct: click.x_pct, y_pct: click.y_pct },
               16 / 9,
+              geoOverride,
             )
           : null;
       void generate({
@@ -2048,6 +2134,23 @@ export default function PlayPage() {
                   onCancel={() => {
                     hintPrompt.resolve(null);
                     setHintPrompt(null);
+                  }}
+                />
+              )}
+              {clickDetail && (
+                <ClickDetailPopover
+                  xPx={clickDetail.xPx}
+                  yPx={clickDetail.yPx}
+                  entities={clickDetail.entities}
+                  crop={clickDetail.crop}
+                  initial={clickDetail.initial}
+                  onConfirm={(r) => {
+                    clickDetail.resolve(r);
+                    setClickDetail(null);
+                  }}
+                  onCancel={() => {
+                    clickDetail.resolve(null);
+                    setClickDetail(null);
                   }}
                 />
               )}
