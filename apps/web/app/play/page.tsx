@@ -67,6 +67,7 @@ import ClickDetailPopover, {
   type ClickDetailResult,
 } from "@/components/PlayPage/ClickDetailPopover";
 import Breadcrumb from "@/components/PlayPage/Breadcrumb";
+import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
@@ -1931,6 +1932,9 @@ export default function PlayPage() {
       {page?.imageDataUrl && history.items.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Breadcrumb crumbs={breadcrumb} onJump={selectFromMap} />
+          {worldEnabled && (
+            <SpatialPath crumbs={breadcrumb} onNavigate={selectFromMap} />
+          )}
           <div className="flex items-center justify-between gap-3 text-xs opacity-80">
           <div className="flex items-center gap-2">
             <button
