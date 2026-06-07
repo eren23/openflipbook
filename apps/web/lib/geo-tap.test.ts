@@ -115,6 +115,31 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t.expected_layout).not.toEqual(def.expected_layout);
   });
 
+  it("tap on an empty cluster → submap (stay in map, crop the region)", () => {
+    const map = {
+      entities: [geo("a", "market", 45, 40), geo("b", "well", 58, 45)],
+      bounds: { x: 0, y: 0, w: 100, h: 80 },
+    };
+    // (51,42) is empty (between the two) but the 40% window holds both → submap
+    const t = geoTapRequest(map, "n1", { x_pct: 51 / 100, y_pct: 42 / 80 }, 16 / 9);
+    expect(t).not.toBeNull();
+    expect(t!.kind).toBe("submap");
+    expect(t!.scene_view.level).toBe("map");
+    expect(t!.scene_view.observer).toBeNull();
+    expect(t!.scene_view.map_crop).not.toBeNull();
+    // the cropped region carries its in-frame entities (for the minimap + steer)
+    expect(t!.layout_entities.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("tapping a place still routes to a scene (not a submap)", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
+    expect(t!.kind).toBe("scene");
+  });
+
   it("empty world → null (caller keeps the existing World Mode path)", () => {
     expect(
       geoTapRequest({ entities: [], bounds: CROP }, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9),

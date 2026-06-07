@@ -10,11 +10,15 @@ import type {
 import { routeClick, type ClickPoint } from "./click-route";
 import {
   childrenOf,
+  cropEntities,
   projectScene,
   resolveAbsolutePos,
 } from "./world-geometry";
 
 export interface GeoTap {
+  // "scene" = enter a place (perspective, has an observer). "submap" = stay in
+  // map mode + crop a region (top-down, no observer).
+  kind: "scene" | "submap";
   scene_view: SceneView;
   expected_layout: ProjectedEntity[];
   // The scene's contents (the focus's children, resolved to absolute world
@@ -65,7 +69,30 @@ export function geoTapRequest(
     map_crop: map.bounds,
   };
   const route = routeClick(map, mapView, click, aspect);
-  if (route.kind !== "scene") return null;
+  if (route.kind === "explainer") return null;
+  const byId = new Map(map.entities.map((e) => [e.id, e]));
+
+  // Tap on empty map area that still holds a cluster → stay in MAP mode + crop
+  // the region (a sub-map), instead of entering a single place.
+  if (route.kind === "submap") {
+    return {
+      kind: "submap",
+      scene_view: {
+        node_id: nodeId,
+        level: "map",
+        observer: null,
+        map_crop: route.crop,
+        focus_id: route.focus_id,
+      },
+      expected_layout: [],
+      layout_entities: cropEntities(map.entities, route.crop),
+      focus_id: route.focus_id,
+      focus_label: route.focus_id ? byId.get(route.focus_id)?.label ?? null : null,
+      focus_visual: route.focus_id ? byId.get(route.focus_id)?.visual ?? null : null,
+    };
+  }
+
+  // route.kind === "scene": enter the place.
   // The popover's adjusted pose/level (if any) win over the synthesized ones.
   const observer = override?.observer ?? route.observer;
   const level = override?.level ?? route.level;
@@ -80,12 +107,12 @@ export function geoTapRequest(
   //     ("parts outside my image shown in my image"). The child frame still
   //     seeds from this scene's extraction (keyed on focus_id below).
   const kids = childrenOf(map.entities, route.focus_id);
-  const byId = new Map(map.entities.map((e) => [e.id, e]));
   const layoutEntities =
     kids.length > 0
       ? kids.map((k) => ({ ...k, pos: resolveAbsolutePos(k.id, byId) ?? k.pos }))
       : [];
   return {
+    kind: "scene",
     scene_view: {
       node_id: nodeId,
       level,

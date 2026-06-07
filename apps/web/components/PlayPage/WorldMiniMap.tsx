@@ -3,7 +3,12 @@
 import type { MapCrop, WorldEntityGeo } from "@openflipbook/config";
 
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { childrenOf, resolveAbsolutePos, type FrameNode } from "@/lib/world-geometry";
+import {
+  childrenOf,
+  cropEntities,
+  resolveAbsolutePos,
+  type FrameNode,
+} from "@/lib/world-geometry";
 import { worldToView, type ViewBox } from "@/lib/world-overlay";
 
 interface Props {
@@ -12,6 +17,9 @@ interface Props {
   // entities in their LOCAL coordinates, not the whole session's world frame.
   focusId?: string | null;
   focusLabel?: string | null;
+  // A submap crop (tap-empty → cropped region): scope the inset to it, in world
+  // coords. Mutually exclusive with focusId in practice (scene vs submap).
+  crop?: MapCrop | null;
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -45,7 +53,12 @@ function localBounds(es: WorldEntityGeo[]): MapCrop {
 // from the (possibly oblique) generated image, which is image-space.
 // When `focusId` is set, it scopes to that place's interior in LOCAL coords
 // rather than the whole world — otherwise a sub-part shows the city's frame.
-export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) {
+export default function WorldMiniMap({
+  sessionId,
+  focusId,
+  focusLabel,
+  crop,
+}: Props) {
   const { entities: worldEntities, bounds: worldBounds } = useWorldMap(sessionId);
 
   // The place's name: caller override, else the focus entity's own label.
@@ -67,9 +80,14 @@ export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) 
   }
 
   const local = !!(kids && kids.length > 0);
-  const entities = local ? kids! : worldEntities;
+  const submap = !local && !!crop;
+  const entities = local
+    ? kids!
+    : submap
+      ? cropEntities(worldEntities, crop!)
+      : worldEntities;
   if (entities.length === 0) return null;
-  const bounds = local ? localBounds(kids!) : worldBounds;
+  const bounds = local ? localBounds(kids!) : submap ? crop! : worldBounds;
   const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
 
   const W = 208;
@@ -82,21 +100,21 @@ export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) 
   const maxY = Math.max(bounds.y + bounds.h, 0);
   const wSpan = Math.max(maxX - minX, 1);
   const hSpan = Math.max(maxY - minY, 1);
-  const crop: MapCrop = {
+  const viewWindow: MapCrop = {
     x: minX - wSpan * 0.1,
     y: minY - hSpan * 0.1,
     w: wSpan * 1.2,
     h: hSpan * 1.2,
   };
 
-  const origin = worldToView({ x: 0, y: 0 }, crop, view);
+  const origin = worldToView({ x: 0, y: 0 }, viewWindow, view);
   const centre = worldToView(
     { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 },
-    crop,
+    viewWindow,
     view,
   );
-  const bTL = worldToView({ x: bounds.x, y: bounds.y }, crop, view);
-  const bBR = worldToView({ x: bounds.x + bounds.w, y: bounds.y + bounds.h }, crop, view);
+  const bTL = worldToView({ x: bounds.x, y: bounds.y }, viewWindow, view);
+  const bBR = worldToView({ x: bounds.x + bounds.w, y: bounds.y + bounds.h }, viewWindow, view);
 
   return (
     <div
@@ -130,10 +148,10 @@ export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) 
             the children's local pos directly. */}
         {entities.map((e) => {
           const abs = local ? e.pos : (resolveAbsolutePos(e.id, byId) ?? e.pos);
-          const p = worldToView(abs, crop, view);
+          const p = worldToView(abs, viewWindow, view);
           const nested = !local && !!(e.parent_id && byId.has(e.parent_id));
           const parentPos = nested
-            ? worldToView(resolveAbsolutePos(e.parent_id!, byId) ?? abs, crop, view)
+            ? worldToView(resolveAbsolutePos(e.parent_id!, byId) ?? abs, viewWindow, view)
             : null;
           return (
             <g key={e.id} data-testid="minimap-dot">
@@ -165,7 +183,9 @@ export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) 
       <div className="px-1 text-[9px] text-stone-500">
         {local
           ? `inside ${resolvedLabel} · ${entities.length} parts · local coords`
-          : `world coords · ${entities.length} entities · bounds ${Math.round(bounds.w)}×${Math.round(bounds.h)}`}
+          : submap
+            ? `submap · ${entities.length} here · ${Math.round(crop!.w)}×${Math.round(crop!.h)}`
+            : `world coords · ${entities.length} entities · bounds ${Math.round(bounds.w)}×${Math.round(bounds.h)}`}
       </div>
     </div>
   );

@@ -98,6 +98,26 @@ describe("WorldMiniMap", () => {
     expect(screen.queryByText(/100×60/)).toBeNull();
   });
 
+  it("scopes to a submap crop when given one (cropped region, stay in map)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok(
+          mapPayload([
+            ent("a", "Market", 50, 40),
+            ent("b", "Well", 55, 45),
+            ent("c", "FarTower", 95, 75), // outside the crop
+          ]),
+        ),
+      ) as unknown as typeof fetch,
+    );
+    render(<WorldMiniMap sessionId="s1" crop={{ x: 40, y: 30, w: 30, h: 30 }} />);
+    await waitFor(() => expect(screen.getByTestId("world-minimap")).toBeTruthy());
+    expect(screen.getAllByTestId("minimap-dot")).toHaveLength(2); // a,b in; c out
+    expect(screen.getByText(/submap/i)).toBeTruthy();
+    expect(screen.queryByText(/world coords/i)).toBeNull();
+  });
+
   it("shows an explicit empty-state (not the city) for a place with no interior yet", async () => {
     vi.stubGlobal(
       "fetch",

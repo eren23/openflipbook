@@ -128,10 +128,10 @@ export function projectScene(
   return out;
 }
 
-export function cropEntities(
-  entities: ProjectInput[],
+export function cropEntities<T extends ProjectInput>(
+  entities: T[],
   crop: MapCrop,
-): ProjectInput[] {
+): T[] {
   const x1 = crop.x + crop.w;
   const y1 = crop.y + crop.h;
   return entities.filter(
