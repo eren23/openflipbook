@@ -410,10 +410,21 @@ export interface WorldVec2 {
 }
 
 // An entity placed on the map: where it is, how tall, how much ground it covers.
+//
+// Nested frames (the sub-entity consistency model): a place you can ENTER (the
+// Unseen University) is its own little world. Its sub-entities (Tower of Art,
+// Library, Great Hall) carry `parent_id` = that place's geo id, and their `pos`
+// is LOCAL to the parent's frame — so the University's internal layout is fixed
+// ONCE and stays consistent across every view of it, and editing one ripples to
+// its siblings. Top-level city entities have `parent_id: null` (pos == world).
 export interface WorldEntityGeo {
   id: string;
   // The Codex Entity.id this geometry belongs to, or null for a map-only prop.
   entity_id: string | null;
+  // The geo id of the place this entity lives INSIDE (its sub-world), or null
+  // for a top-level city-frame entity. `pos` is interpreted in the parent's
+  // local frame; resolve up the chain for an absolute world position.
+  parent_id?: string | null;
   kind: EntityKind;
   label: string;
   pos: WorldVec2;
