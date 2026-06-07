@@ -38,7 +38,7 @@ PY := apps/modal-backend/.venv/bin/python
 eval:
 	cd apps/modal-backend && .venv/bin/python -m pytest -m "not paid" -q
 	cd apps/modal-backend && .venv/bin/ruff check . && .venv/bin/mypy providers/geometry.py providers/geometry_prompt.py providers/model_router.py providers/grounding.py providers/detector.py generate.py
-	cd apps/web && pnpm exec vitest run && pnpm exec tsc --noEmit
+	cd apps/web && pnpm exec vitest run && pnpm exec tsc --noEmit && pnpm run check:circular
 
 # P1 — pure 2.5D projection parity (TS golden + Py golden + cross-lang fuzz).
 eval-geometry:
