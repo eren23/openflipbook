@@ -728,6 +728,7 @@ async def _event_stream(
         layout_clause = _layout_clause_for(body)
         if layout_clause:
             composed_prompt += "\n\n" + layout_clause
+            log("info", "geo.layout_steered", entities=len(body.expected_layout))
         # Top-down map lever (WORLD_TOPDOWN_MAPS) — a flat overhead map makes the
         # seeded geometry exact. Flag-gated, map renders only → "" otherwise.
         topdown_clause = _topdown_clause_for(body)
