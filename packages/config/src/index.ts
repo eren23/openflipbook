@@ -474,6 +474,10 @@ export interface SceneView {
   level: ViewLevel;
   observer: ObserverPose | null;
   map_crop: MapCrop | null;
+  // The entity you ENTERED to get here (the tapped place). Its sub-entities seed
+  // into this place's child frame (parent_id = its geo) so the interior layout
+  // stays consistent across re-entries. Null for a top-level map view.
+  focus_id?: string | null;
 }
 
 // One entity's projected place in a rendered frame (geometry-engine output),

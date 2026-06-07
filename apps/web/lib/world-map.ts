@@ -13,7 +13,12 @@ import type {
 } from "@openflipbook/config";
 
 import { getDb } from "./db";
-import { estimateGeoFromBBox } from "./world-geometry";
+import {
+  estimateGeoFromBBox,
+  resolveAbsolutePos,
+  siblingsOf,
+  type FrameNode,
+} from "./world-geometry";
 
 // Per-session geometric world map (entity coordinates). Mirrors the world_state
 // machinery in world.ts — same optimistic read-modify-write loop — but kept in
@@ -92,17 +97,22 @@ export function applyGeoUpsert(
 /** The world bounds = the axis-aligned box covering every entity's footprint. */
 export function recomputeBounds(entities: WorldEntityGeo[]): MapCrop {
   if (entities.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+  // Sub-entities carry a pos LOCAL to their place's frame — resolve up the
+  // parent chain so a child's small/negative local coords don't skew the world
+  // bounds (a top-level entity resolves to itself).
+  const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const e of entities) {
+    const p = resolveAbsolutePos(e.id, byId) ?? e.pos;
     const hw = e.footprint.w / 2;
     const hd = e.footprint.d / 2;
-    minX = Math.min(minX, e.pos.x - hw);
-    maxX = Math.max(maxX, e.pos.x + hw);
-    minY = Math.min(minY, e.pos.y - hd);
-    maxY = Math.max(maxY, e.pos.y + hd);
+    minX = Math.min(minX, p.x - hw);
+    maxX = Math.max(maxX, p.x + hw);
+    minY = Math.min(minY, p.y - hd);
+    maxY = Math.max(maxY, p.y + hd);
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
@@ -164,15 +174,27 @@ export function applyEntityEdit(
 
 /** Node ids whose saved render references any edited entity → the re-stage
  *  candidates. Pure union of `references[target]` over edits that carry a target
- *  (an `add` introduces a new entity, so it stales nothing). */
+ *  (an `add` introduces a new entity, so it stales nothing).
+ *
+ *  Nested propagation (P7d): when `geos` is supplied, moving an entity also
+ *  stales the scenes that show its FRAME-SIBLINGS — the "things around it" — since
+ *  their relative layout just changed. So editing the Tower of Art re-stages
+ *  every Unseen University interior, not just the ones with the tower in frame. */
 export function blastRadius(
   edits: EntityGeoEdit[],
   references: Record<string, string[]>,
+  geos?: Pick<WorldEntityGeo, "id" | "parent_id">[],
 ): string[] {
   const nodes = new Set<string>();
+  const stale = (geoId: string) => {
+    for (const n of references[geoId] ?? []) nodes.add(n);
+  };
   for (const e of edits) {
     if ("target" in e) {
-      for (const n of references[e.target] ?? []) nodes.add(n);
+      stale(e.target);
+      if (geos) {
+        for (const sib of siblingsOf(geos, e.target)) stale(sib.id);
+      }
     }
   }
   return [...nodes].sort();
@@ -348,6 +370,10 @@ export async function deriveGeoFromExtraction(
   items: ExtractedGeoItem[],
   projection: ViewProjection = "top_down",
   pitchDeg = -60,
+  // When set, the seeded geometry hangs off this place's child frame (its geo
+  // id) — i.e. these are sub-entities INSIDE a place, positioned in its local
+  // frame, not top-level city entities (P7b).
+  parentId: string | null = null,
 ): Promise<WorldMapSnapshot> {
   const nowIso = new Date().toISOString();
   const geos: WorldEntityGeo[] = items.map((item) => {
@@ -355,6 +381,7 @@ export async function deriveGeoFromExtraction(
     return {
       id: `geo_${item.entity_id}`,
       entity_id: item.entity_id,
+      parent_id: parentId,
       kind: item.kind,
       label: item.label,
       pos: est.pos,

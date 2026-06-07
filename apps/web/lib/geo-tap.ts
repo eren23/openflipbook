@@ -6,7 +6,11 @@ import type {
 } from "@openflipbook/config";
 
 import { routeClick, type ClickPoint } from "./click-route";
-import { projectScene } from "./world-geometry";
+import {
+  childrenOf,
+  projectScene,
+  resolveAbsolutePos,
+} from "./world-geometry";
 
 export interface GeoTap {
   scene_view: SceneView;
@@ -40,14 +44,31 @@ export function geoTapRequest(
   };
   const route = routeClick(map, mapView, click, aspect);
   if (route.kind !== "scene") return null;
+
+  // Nested consistency (P7c): if this place already has a saved interior — its
+  // sub-entities were seeded into its child frame on a prior enter — steer by
+  // THAT sub-layout (resolved local → absolute) so the interior stays put across
+  // re-entries. First enter (no children yet) falls back to the city entities.
+  const kids = childrenOf(map.entities, route.focus_id);
+  let layoutEntities: typeof map.entities = map.entities;
+  if (kids.length > 0) {
+    const byId = new Map(map.entities.map((e) => [e.id, e]));
+    layoutEntities = kids.map((k) => ({
+      ...k,
+      pos: resolveAbsolutePos(k.id, byId) ?? k.pos,
+    }));
+  }
   return {
     scene_view: {
       node_id: nodeId,
       level: route.level,
       observer: route.observer,
       map_crop: null,
+      // The place you entered: its geo id anchors the child frame the entered
+      // scene's sub-entities seed into (P7b).
+      focus_id: route.focus_id,
     },
-    expected_layout: projectScene(map.entities, route.observer, aspect),
+    expected_layout: projectScene(layoutEntities, route.observer, aspect),
     focus_id: route.focus_id,
   };
 }

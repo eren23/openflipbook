@@ -6,6 +6,7 @@ import type {
   Citation,
   GenerateRequestBody,
   GenerateEvent,
+  SceneView,
 } from "@openflipbook/config";
 import {
   annotateClickPoint,
@@ -177,6 +178,9 @@ function triggerExtraction(args: {
   imageDataUrl: string;
   caption: string;
   sceneDescription?: string | null;
+  // The view this node renders (geo-tap intent). When it carries a focus_id, the
+  // extract route seeds this scene's sub-entities into that place's child frame.
+  sceneView?: SceneView | null;
   traceId: string | null;
 }): void {
   const t0 = nowMs();
@@ -194,6 +198,7 @@ function triggerExtraction(args: {
         image_data_url: args.imageDataUrl,
         caption: args.caption,
         scene_description: args.sceneDescription ?? null,
+        scene_view: args.sceneView ?? null,
       }),
     }
   )
@@ -635,6 +640,9 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     caption: evt.page_title,
                     sceneDescription: evt.final_prompt ?? null,
+                    sceneView: body.scene_view
+                      ? { ...body.scene_view, node_id: saved.id }
+                      : null,
                     traceId,
                   });
                 }

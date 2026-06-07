@@ -7,6 +7,7 @@ import type {
   Entity,
   EntityExtractionResult,
   EntityKind,
+  SceneView,
   ViewEstimate,
 } from "@openflipbook/config";
 
@@ -22,6 +23,10 @@ interface ExtractRequestBody {
   image_data_url?: string;
   caption?: string;
   scene_description?: string | null;
+  // The view this node renders (the geo-tap intent). When it carries a focus_id
+  // (an entered place), this scene's sub-entities seed into that place's CHILD
+  // frame instead of the top-level city map (P7b).
+  scene_view?: SceneView | null;
 }
 
 // Post-final extraction trigger. The web client calls this once a generated
@@ -145,51 +150,87 @@ export async function POST(req: Request, { params }: Params) {
     // world crop; P6 refines per-scene observer poses. Best-effort, off the
     // response path.
     const geoNodeId = body.node_id;
-    // Only seed world coordinates from a MAP. A street/eye/building capture is a
-    // scene, not a map — back-projecting its boxes into a fake top-down crop gives
-    // wrong positions (codex-audit #1). No estimate → assume map (back-compat).
+    const sceneView = body.scene_view ?? null;
     const viewLevel = upstreamView?.level ?? "map";
-    if (
-      geoNodeId &&
-      viewLevel === "map" &&
-      ["1", "true", "yes"].includes((process.env.GEOMETRIC_WORLD ?? "").toLowerCase())
-    ) {
+    // An ENTERED place (the geo-tap carried a focus): seed this scene's
+    // sub-entities into that place's CHILD frame, so the interior layout
+    // persists + stays consistent across re-entries (P7b). Otherwise we only
+    // seed a top-down MAP into the city frame — a scene's boxes don't belong in
+    // a fake top-down crop (codex-audit #1).
+    const parentFrameId =
+      sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
+    const geoOn = ["1", "true", "yes"].includes(
+      (process.env.GEOMETRIC_WORLD ?? "").toLowerCase(),
+    );
+    if (geoNodeId && geoOn && (parentFrameId || viewLevel === "map")) {
       try {
-        const items = merged.snapshot.entities
-          .map((e) => {
-            const bbox = e.appearance_bboxes?.[geoNodeId];
-            // Seed only enterable PLACES with a box that's an actual point
-            // location. A non-place (a compass turtle, a coat of arms) or a box
-            // that's huge (a river spanning the whole map → area ~0.7) or a
-            // speck isn't a world coordinate — it just pollutes the map.
-            if (!bbox || e.kind !== "place") return null;
-            const area = bbox.w_pct * bbox.h_pct;
-            if (area > 0.5 || area < 0.0005) return null;
-            return {
-              entity_id: e.id,
-              kind: e.kind,
-              label: e.name,
-              bbox,
-              visual: e.appearance,
-              state: e.state,
-              confidence: e.confidence,
+        // Map an on-node entity → a seedable geo item (or null to skip). Drops
+        // boxes that are huge (a backdrop river → area ~0.7) or specks, and — in
+        // a child frame — the focus place itself (it lives one frame up).
+        const toItem = (e: Entity, childFrame: boolean) => {
+          const bbox = e.appearance_bboxes?.[geoNodeId];
+          if (!bbox) return null;
+          if (childFrame) {
+            if (`geo_${e.id}` === parentFrameId) return null; // skip the parent
+          } else if (e.kind !== "place") {
+            return null; // top-level map: enterable PLACES only
+          }
+          const area = bbox.w_pct * bbox.h_pct;
+          if (area > 0.5 || area < 0.0005) return null;
+          return {
+            entity_id: e.id,
+            kind: e.kind,
+            label: e.name,
+            bbox,
+            visual: e.appearance,
+            state: e.state,
+            confidence: e.confidence,
+          };
+        };
+        if (parentFrameId && sceneView) {
+          // Child frame: position sub-entities in the place's LOCAL frame
+          // (observer at the local origin) so they're relative to the place, not
+          // the city. Reuses the entered scene's observer pose + angle.
+          const items = merged.snapshot.entities
+            .map((e) => toItem(e, true))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          if (items.length > 0) {
+            const localView: SceneView = {
+              ...sceneView,
+              observer: sceneView.observer
+                ? { ...sceneView.observer, pos: { x: 0, y: 0 } }
+                : null,
             };
-          })
-          .filter((x): x is NonNullable<typeof x> => x !== null);
-        if (items.length > 0) {
-          await deriveGeoFromExtraction(
-            sessionId,
-            {
-              node_id: geoNodeId,
-              level: "map",
-              observer: null,
-              map_crop: { x: 0, y: 0, w: 100, h: 60 },
-            },
-            16 / 9,
-            items,
-            upstreamView?.projection ?? "top_down",
-            upstreamView?.pitch_deg ?? -60,
-          );
+            await deriveGeoFromExtraction(
+              sessionId,
+              localView,
+              16 / 9,
+              items,
+              upstreamView?.projection ?? "perspective",
+              upstreamView?.pitch_deg ?? 0,
+              parentFrameId,
+            );
+          }
+        } else {
+          // Top-level city map (parent_id = null) — the original seeding.
+          const items = merged.snapshot.entities
+            .map((e) => toItem(e, false))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          if (items.length > 0) {
+            await deriveGeoFromExtraction(
+              sessionId,
+              {
+                node_id: geoNodeId,
+                level: "map",
+                observer: null,
+                map_crop: { x: 0, y: 0, w: 100, h: 60 },
+              },
+              16 / 9,
+              items,
+              upstreamView?.projection ?? "top_down",
+              upstreamView?.pitch_deg ?? -60,
+            );
+          }
         }
       } catch {
         /* seeding is best-effort — never block the extraction response */

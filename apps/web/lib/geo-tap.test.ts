@@ -47,6 +47,38 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t!.expected_layout.some((p) => p.id === "clock")).toBe(true);
   });
 
+  it("P7b — scene_view carries the focus geo id (anchors the child frame)", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
+    expect(t!.scene_view.focus_id).toBe("clock");
+  });
+
+  it("P7c — a place with a saved interior steers by its sub-entities, not the city", () => {
+    const map = {
+      entities: [
+        geo("uu", "Unseen University", 30, 18, { height: 15 }),
+        // children carry parent_id + a LOCAL pos; (0,0) sits at the parent.
+        geo("tower", "Tower of Art", 0, 0, { parent_id: "uu", height: 14 }),
+        geo("lib", "Library", 4, 2, { parent_id: "uu", height: 7 }),
+        geo("palace", "Palace", 80, 70), // unrelated city entity
+      ],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(map, "n1", { x_pct: 30 / 100, y_pct: 18 / 80 }, 16 / 9);
+    expect(t).not.toBeNull();
+    expect(t!.scene_view.focus_id).toBe("uu");
+    const ids = t!.expected_layout.map((p) => p.id);
+    // The interior (children) drives the layout…
+    expect(ids).toContain("tower");
+    // …the parent isn't part of its own interior, and unrelated city entities
+    // (the Palace) don't leak in.
+    expect(ids).not.toContain("uu");
+    expect(ids).not.toContain("palace");
+  });
+
   it("empty world → null (caller keeps the existing World Mode path)", () => {
     expect(
       geoTapRequest({ entities: [], bounds: CROP }, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9),

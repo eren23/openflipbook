@@ -28,6 +28,15 @@ describe("GeoEditPanel", () => {
     expect(screen.getByTestId("geo-chips").textContent).toContain("lighthouse");
   });
 
+  it("P7e — nests a sub-entity under its place (shows 'in <place>')", () => {
+    const uu = geo("uu", "Unseen University", 30, 18);
+    const tower: WorldEntityGeo = { ...geo("tower", "Tower of Art", -8, -1), parent_id: "uu" };
+    render(<GeoEditPanel entities={[tower, uu]} onSubmit={vi.fn()} />);
+    const text = screen.getByTestId("geo-chips").textContent ?? "";
+    expect(text).toContain("Tower of Art");
+    expect(text).toContain("in Unseen University");
+  });
+
   it("previews → shows the blast-radius confirm → applies", async () => {
     const plan: EntityEditPlan = {
       edits: [{ op: "move", target: "g1", dx: 0, dy: -5 }],

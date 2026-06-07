@@ -62,24 +62,52 @@ export default function GeoEditPanel({ entities, onSubmit }: Props) {
     setPhase("idle");
   };
 
+  // Order each place immediately before its sub-entities so the nesting reads
+  // top-down; a child's (x,y) is LOCAL to its place (that's the whole point).
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const ordered = [...entities].sort((a, b) => {
+    const ka = a.parent_id ?? a.id;
+    const kb = b.parent_id ?? b.id;
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    // within a group: the parent first, then children by id
+    if (a.id === ka) return -1;
+    if (b.id === kb) return 1;
+    return a.id < b.id ? -1 : 1;
+  });
+
   return (
     <div className="flex flex-col gap-2" data-testid="geo-edit">
       <ul className="space-y-0.5 text-xs text-stone-600" data-testid="geo-chips">
         {entities.length === 0 ? (
           <li className="italic text-stone-400">no map entities yet</li>
         ) : (
-          entities.map((e) => (
-            <li key={e.id} className="flex items-center gap-1.5">
-              <span className="font-medium">{e.label || e.id}</span>
-              <span className="text-stone-400">
-                ({Math.round(e.pos.x)},{Math.round(e.pos.y)}) · h{Math.round(e.height)}
-                {e.elevation ? ` ↑${Math.round(e.elevation)}` : ""}
-              </span>
-              <span className="rounded bg-stone-200 px-1 text-[10px] text-stone-500">
-                {e.source}
-              </span>
-            </li>
-          ))
+          ordered.map((e) => {
+            const parent = e.parent_id ? byId.get(e.parent_id) : null;
+            return (
+              <li
+                key={e.id}
+                className={
+                  "flex items-center gap-1.5" + (parent ? " pl-3" : "")
+                }
+              >
+                {parent && <span className="text-stone-300">↳</span>}
+                <span className="font-medium">{e.label || e.id}</span>
+                <span className="text-stone-400">
+                  ({Math.round(e.pos.x)},{Math.round(e.pos.y)}) · h
+                  {Math.round(e.height)}
+                  {e.elevation ? ` ↑${Math.round(e.elevation)}` : ""}
+                </span>
+                {parent && (
+                  <span className="text-[10px] text-stone-400">
+                    in {parent.label}
+                  </span>
+                )}
+                <span className="rounded bg-stone-200 px-1 text-[10px] text-stone-500">
+                  {e.source}
+                </span>
+              </li>
+            );
+          })
         )}
       </ul>
 
