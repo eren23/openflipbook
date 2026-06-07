@@ -190,6 +190,25 @@ def _layout_clause_for(body: GenerateBody) -> str:
     )
 
 
+def _topdown_clause_for(body: GenerateBody) -> str:
+    """Force a flat top-down map render (WORLD_TOPDOWN_MAPS). A genuine overhead
+    map makes bbox→world geometry EXACT (the box IS the footprint) instead of
+    guessing an oblique camera — the metric path. Only applies to MAP renders (a
+    fresh world or an explicit map_crop view); a scene/observer render is left
+    alone. Off (default) keeps the model's usual, often-2.5D, map aesthetic."""
+    if os.environ.get("WORLD_TOPDOWN_MAPS", "false").lower() not in ("1", "true", "yes"):
+        return ""
+    sv = body.scene_view
+    is_map = sv is None or (sv.observer is None and sv.level == "map")
+    if not is_map:
+        return ""
+    return (
+        "Render this as a FLAT TOP-DOWN overhead map — orthographic, looking "
+        "straight down, NO perspective or isometric tilt — so every place sits "
+        "at an unambiguous map position."
+    )
+
+
 def _vlm_grounding_on() -> bool:
     """Verify the rendered frame against the expected layout (VLM_GROUNDING).
     Off → no detector call, `final` carries no grounding summary."""
@@ -709,6 +728,11 @@ async def _event_stream(
         layout_clause = _layout_clause_for(body)
         if layout_clause:
             composed_prompt += "\n\n" + layout_clause
+        # Top-down map lever (WORLD_TOPDOWN_MAPS) — a flat overhead map makes the
+        # seeded geometry exact. Flag-gated, map renders only → "" otherwise.
+        topdown_clause = _topdown_clause_for(body)
+        if topdown_clause:
+            composed_prompt += "\n\n" + topdown_clause
 
         await _abort_if_disconnected("pre-image-gen")
         yield _sse(

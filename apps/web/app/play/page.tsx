@@ -67,6 +67,8 @@ import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
+import { useWorldMap } from "@/hooks/useWorldMap";
+import { geoTapRequest } from "@/lib/geo-tap";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -342,6 +344,9 @@ export default function PlayPage() {
   const { bindTrace } = useTraceEmitter();
   const { state: worldState, mutate: mutateWorldEntity } =
     useWorldState(sessionId);
+  // Geometric world map (entity coordinates). Empty unless GEOMETRIC_WORLD seeded
+  // it; drives the geometry overlay/minimap + the geometric tap (close the loop).
+  const geoMap = useWorldMap(sessionId);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -1378,6 +1383,21 @@ export default function PlayPage() {
       } catch {
         // leave condition empty → text-only generation
       }
+      // Close the geometric loop (plan): a tap on the seeded world map → an
+      // observer pose + the projected layout, so the entered scene is steered (P3)
+      // and grounded (P4) by where the entities actually are. Only when World Mode
+      // is on AND the geo world is seeded (⇒ GEOMETRIC_WORLD); null falls back to
+      // the existing World Mode path. generate.py acts on these only under
+      // WORLD_GEOMETRY_GEN / VLM_GROUNDING, so sending them is otherwise inert.
+      const geoTap =
+        worldEnabled && geoMap.entities.length > 0
+          ? geoTapRequest(
+              { entities: geoMap.entities, bounds: geoMap.bounds },
+              page.nodeId ?? "",
+              { x_pct: click.x_pct, y_pct: click.y_pct },
+              16 / 9,
+            )
+          : null;
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -1429,6 +1449,9 @@ export default function PlayPage() {
                 ? { render_mode: enterAsToRenderMode(worldResolved?.enter_as) }
                 : {}),
             }
+          : {}),
+        ...(geoTap
+          ? { scene_view: geoTap.scene_view, expected_layout: geoTap.expected_layout }
           : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });

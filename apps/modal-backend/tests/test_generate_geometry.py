@@ -54,6 +54,30 @@ def test_layout_clause_empty_without_expected(
     assert generate._layout_clause_for(_body([])) == ""
 
 
+def test_topdown_clause_only_for_maps_when_flag_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("WORLD_TOPDOWN_MAPS", raising=False)
+    assert generate._topdown_clause_for(_body([])) == ""  # flag off → nothing
+    monkeypatch.setenv("WORLD_TOPDOWN_MAPS", "true")
+    # no scene_view ⇒ a fresh map render → forced top-down
+    assert "FLAT TOP-DOWN" in generate._topdown_clause_for(_body([]))
+    # a scene/observer render is left alone (it's not a map)
+    scene = generate.GenerateBody(
+        query="q",
+        session_id="s",
+        scene_view=generate.SceneView(
+            node_id="n",
+            level="street",
+            observer=generate.ObserverPose(
+                pos=generate.WorldVec2(x=0, y=0), eye_height=1.7, gaze=0, fov=1.5
+            ),
+            map_crop=None,
+        ),
+    )
+    assert generate._topdown_clause_for(scene) == ""
+
+
 # --- P4(c): grounding wiring -------------------------------------------------
 
 from types import SimpleNamespace  # noqa: E402
