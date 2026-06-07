@@ -491,6 +491,15 @@ function applyUpdate(
   if (!target.appears_on_node_ids.includes(nodeId)) {
     target.appears_on_node_ids.push(nodeId);
   }
+  // Re-localized box for THIS node (codex #3): a recurring entity is detected
+  // again on re-appearance, so it keeps a per-node bbox. Without this the
+  // entity drops out of the world map + overlay every time it's re-seen.
+  if (update.bbox) {
+    target.appearance_bboxes = {
+      ...target.appearance_bboxes,
+      [nodeId]: update.bbox,
+    };
+  }
   target.last_seen_node_id = nodeId;
   target.updated_at = now;
   // Confidence drifts upward as the entity is seen again — a strong signal

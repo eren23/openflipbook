@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type RefObject } from "react";
 import type { Entity, EntityBBox } from "@openflipbook/config";
+
+import { useContainRect } from "@/hooks/useContainRect";
+import type { ContainRect } from "@/lib/image-click";
 
 interface Props {
   /** Stable id of the page the chips are layered on. */
@@ -12,6 +15,9 @@ interface Props {
   enabled: boolean;
   /** Fired when the user clicks a chip — focus codex entry / open panel. */
   onSelect?: (entityId: string) => void;
+  /** The rendered <img>; lets the chips track the object-contain content rect
+   *  so dots land on the image, not the letterboxed wrapper (codex #8). */
+  imgRef?: RefObject<HTMLImageElement | null>;
 }
 
 interface VisibleChip {
@@ -37,7 +43,9 @@ export function EntityHoverOverlay({
   entities,
   enabled,
   onSelect,
+  imgRef,
 }: Props) {
+  const content = useContainRect(imgRef);
   // Resolve once per (nodeId, entities) change. The expensive bit is the
   // bbox lookup; everything else is cheap object pruning.
   const visible = useMemo<VisibleChip[]>(() => {
@@ -68,6 +76,7 @@ export function EntityHoverOverlay({
           key={entity.id}
           entity={entity}
           bbox={bbox}
+          content={content}
           onSelect={onSelect}
         />
       ))}
@@ -78,26 +87,35 @@ export function EntityHoverOverlay({
 function ChipMarker({
   entity,
   bbox,
+  content,
   onSelect,
 }: {
   entity: Entity;
   bbox: EntityBBox;
+  content: ContainRect | null;
   onSelect?: ((entityId: string) => void) | undefined;
 }) {
   const [hover, setHover] = useState(false);
-  // Centre the marker on the bbox; the peek card is anchored just below.
-  const cx = (bbox.x_pct + bbox.w_pct / 2) * 100;
-  const cy = (bbox.y_pct + bbox.h_pct / 2) * 100;
-  // When the marker is in the lower half of the image, flip the peek
-  // card above so it doesn't extend past the bottom edge.
-  const placeAbove = cy > 65;
+  // Centre the marker on the bbox. With a measured content rect, place it in px
+  // on the letterboxed image; otherwise fall back to wrapper-relative %.
+  const fx = bbox.x_pct + bbox.w_pct / 2;
+  const fy = bbox.y_pct + bbox.h_pct / 2;
+  const left = content
+    ? `${content.offsetX + fx * content.width}px`
+    : `${fx * 100}%`;
+  const top = content
+    ? `${content.offsetY + fy * content.height}px`
+    : `${fy * 100}%`;
+  // When the marker is in the lower part of the image, flip the peek card above
+  // so it doesn't extend past the bottom edge.
+  const placeAbove = fy > 0.65;
   const stateEntries = Object.entries(entity.state).slice(0, 3);
   return (
     <div
       className="pointer-events-auto absolute"
       style={{
-        left: `${cx}%`,
-        top: `${cy}%`,
+        left,
+        top,
         transform: "translate(-50%, -50%)",
       }}
     >

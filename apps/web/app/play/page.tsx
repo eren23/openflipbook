@@ -2002,9 +2002,14 @@ export default function PlayPage() {
                   streamStatus === "off"
                 }
                 onSelect={() => setCodexOpen(true)}
+                imgRef={imgRef}
               />
               {geoOverlayOn && page?.nodeId && (
-                <GeometryOverlay nodeId={page.nodeId} entities={worldState.entities} />
+                <GeometryOverlay
+                  nodeId={page.nodeId}
+                  entities={worldState.entities}
+                  imgRef={imgRef}
+                />
               )}
               {geoOverlayOn && <WorldMiniMap sessionId={sessionId} />}
             </div>

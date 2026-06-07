@@ -1296,42 +1296,59 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         except Exception:
             geo_img_bytes = b""
 
-    if geo_img_bytes and result.added:
+    if geo_img_bytes and (result.added or result.updated):
         try:
             from providers import detector as _detector
 
-            need = [e.name for e in result.added if not e.bbox]
-            if need:
-                dets = await _detector.detect(geo_img_bytes, need)
+            def _box_from_det(d: dict[str, Any]) -> dict[str, float]:
+                # Centre-based → top-left, CLIPPED to the frame on all four edges
+                # (a naive `max(0, c - s/2)` leaves w/h unclipped, so an edge box
+                # overflows past 1.0 or shifts its recomputed centre). codex #2.
+                cx, cy = float(d["x_pct"]), float(d["y_pct"])
+                bw, bh = float(d["w_pct"]), float(d["h_pct"])
+                x1, y1 = max(0.0, cx - bw / 2.0), max(0.0, cy - bh / 2.0)
+                x2, y2 = min(1.0, cx + bw / 2.0), min(1.0, cy + bh / 2.0)
+                return {
+                    "x_pct": x1,
+                    "y_pct": y1,
+                    "w_pct": max(0.0, x2 - x1),
+                    "h_pct": max(0.0, y2 - y1),
+                }
+
+            # Localize NEW *and* recurring entities (codex #3): a re-appearance
+            # must keep a per-node box or it drops out of geometry + the overlay
+            # every time it's seen again. One detector call covers both lists.
+            need_added = [e for e in result.added if not e.bbox]
+            need_updated = [u for u in result.updated if not u.bbox]
+            labels = [e.name for e in need_added] + [
+                u.match_name for u in need_updated
+            ]
+            if labels:
+                dets = await _detector.detect(geo_img_bytes, labels)
                 by_label = {str(d.get("label", "")).lower().strip(): d for d in dets}
-                for e in result.added:
-                    if e.bbox:
-                        continue
-                    key = e.name.lower().strip()
+
+                def _match(name: str) -> dict[str, float] | None:
+                    key = name.lower().strip()
                     d = by_label.get(key) or next(
                         (v for k, v in by_label.items() if k and (k in key or key in k)),
                         None,
                     )
-                    if d:
-                        # Centre-based → top-left, CLIPPED to the frame on all four
-                        # edges (a naive `max(0, c - s/2)` leaves w/h unclipped, so
-                        # an edge box overflows past 1.0 or shifts its recomputed
-                        # centre). codex-audit #2.
-                        cx, cy = float(d["x_pct"]), float(d["y_pct"])
-                        bw, bh = float(d["w_pct"]), float(d["h_pct"])
-                        x1, y1 = max(0.0, cx - bw / 2.0), max(0.0, cy - bh / 2.0)
-                        x2, y2 = min(1.0, cx + bw / 2.0), min(1.0, cy + bh / 2.0)
-                        e.bbox = {
-                            "x_pct": x1,
-                            "y_pct": y1,
-                            "w_pct": max(0.0, x2 - x1),
-                            "h_pct": max(0.0, y2 - y1),
-                        }
+                    return _box_from_det(d) if d else None
+
+                for e in need_added:
+                    box = _match(e.name)
+                    if box:
+                        e.bbox = box
+                for u in need_updated:
+                    box = _match(u.match_name)
+                    if box:
+                        u.bbox = box
             log(
                 "info",
                 "extract.localized",
-                located=sum(1 for e in result.added if e.bbox),
-                total=len(result.added),
+                located=sum(1 for e in result.added if e.bbox)
+                + sum(1 for u in result.updated if u.bbox),
+                total=len(result.added) + len(result.updated),
             )
         except Exception as exc:  # best-effort — geometry localization is optional
             log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
@@ -1376,6 +1393,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                         "match_name": u.match_name,
                         "changes": u.changes,
                         "confidence": u.confidence,
+                        "bbox": u.bbox,
                     }
                     for u in result.updated
                 ],

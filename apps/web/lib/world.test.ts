@@ -280,6 +280,39 @@ describe("mergeIntoEntities", () => {
     ]);
   });
 
+  it("codex #3 — a recurring (updated) entity keeps a re-localized per-node bbox", () => {
+    const seed = __test.makeEntity({
+      id: "e1",
+      name: "Mira",
+      appearance_bboxes: {
+        "node-1": { x_pct: 0.1, y_pct: 0.1, w_pct: 0.2, h_pct: 0.2 },
+      },
+    });
+    const out = __test.mergeIntoEntities([seed], "node-2", {
+      ...emptyResult(),
+      updated: [
+        {
+          match_name: "Mira",
+          changes: {},
+          confidence: 0.8,
+          bbox: { x_pct: 0.6, y_pct: 0.6, w_pct: 0.1, h_pct: 0.1 },
+        },
+      ],
+    });
+    const e = out.entities[0]!;
+    // The re-appearance adds node-2's box without dropping node-1's.
+    expect(Object.keys(e.appearance_bboxes).sort()).toEqual([
+      "node-1",
+      "node-2",
+    ]);
+    expect(e.appearance_bboxes["node-2"]).toEqual({
+      x_pct: 0.6,
+      y_pct: 0.6,
+      w_pct: 0.1,
+      h_pct: 0.1,
+    });
+  });
+
   it("ratchets confidence upward, never down", () => {
     const seed = __test.makeEntity({ id: "e1", name: "Mira", confidence: 0.9 });
     const out = __test.mergeIntoEntities([seed], "node-2", {

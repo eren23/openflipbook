@@ -160,6 +160,10 @@ class EntityUpdate:
     match_name: str
     changes: dict[str, Any]
     confidence: float
+    # Re-localized box on the current node (codex #3). The VLM doesn't emit this;
+    # the extract endpoint's detector fills it so recurring entities keep a
+    # per-node bbox for geometry + the overlay.
+    bbox: dict[str, float] | None = None
 
 
 @dataclass
