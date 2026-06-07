@@ -72,6 +72,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import { geoTapRequest } from "@/lib/geo-tap";
+import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -1484,6 +1485,17 @@ export default function PlayPage() {
               // last so it wins over the cached / world-resolved subjects above.
               ...(geoTap.focus_label
                 ? { prefetched_subject: geoTap.focus_label }
+                : {}),
+              // Anchor the entity's IDENTITY across zoom levels: feed its
+              // appearance as the authoritative subject context, view-neutral so
+              // it carries the materials/architecture (ancient stone, concentric
+              // rings) without forcing the angle it was captured at.
+              ...(viewNeutralAppearance(geoTap.focus_visual)
+                ? {
+                    prefetched_subject_context: viewNeutralAppearance(
+                      geoTap.focus_visual,
+                    ),
+                  }
                 : {}),
             }
           : {}),

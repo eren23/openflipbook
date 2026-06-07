@@ -34,7 +34,10 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
   it("tapping a place → scene_view (observer); a FIRST enter steers by nothing", () => {
     const map = {
       entities: [
-        geo("clock", "clock tower", 60, 30, { height: 18 }),
+        geo("clock", "clock tower", 60, 30, {
+          height: 18,
+          visual: "an ancient brass clock tower",
+        }),
         geo("lh", "lighthouse", 45, 15, { height: 25 }),
       ],
       bounds: CROP,
@@ -43,6 +46,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t).not.toBeNull();
     expect(t!.focus_id).toBe("clock");
     expect(t!.focus_label).toBe("clock tower"); // drives the entered subject
+    expect(t!.focus_visual).toBe("an ancient brass clock tower"); // identity anchor
     expect(t!.scene_view.level).toBe("building"); // tall → building
     expect(t!.scene_view.observer).not.toBeNull();
     // First enter — no saved interior → steer by NOTHING, so the OTHER city

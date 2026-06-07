@@ -20,6 +20,11 @@ export interface GeoTap {
   // subject so a tap on the Tower of Art ENTERS the Tower — not "Unseen
   // University" (its container) that a looser VLM read would pick.
   focus_label: string | null;
+  // The focus entity's persistent appearance descriptor — fed (view-neutral) as
+  // the authoritative subject context so the entity keeps its IDENTITY (ancient
+  // stone, concentric rings, moss-covered) across zoom levels, even as the angle
+  // changes between map and scene.
+  focus_visual: string | null;
 }
 
 /**
@@ -77,5 +82,6 @@ export function geoTapRequest(
     expected_layout: projectScene(layoutEntities, route.observer, aspect),
     focus_id: route.focus_id,
     focus_label: byId.get(route.focus_id)?.label ?? null,
+    focus_visual: byId.get(route.focus_id)?.visual ?? null,
   };
 }
