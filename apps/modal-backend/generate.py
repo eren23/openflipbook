@@ -1288,11 +1288,19 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                         None,
                     )
                     if d:
+                        # Centre-based → top-left, CLIPPED to the frame on all four
+                        # edges (a naive `max(0, c - s/2)` leaves w/h unclipped, so
+                        # an edge box overflows past 1.0 or shifts its recomputed
+                        # centre). codex-audit #2.
+                        cx, cy = float(d["x_pct"]), float(d["y_pct"])
+                        bw, bh = float(d["w_pct"]), float(d["h_pct"])
+                        x1, y1 = max(0.0, cx - bw / 2.0), max(0.0, cy - bh / 2.0)
+                        x2, y2 = min(1.0, cx + bw / 2.0), min(1.0, cy + bh / 2.0)
                         e.bbox = {
-                            "x_pct": max(0.0, float(d["x_pct"]) - float(d["w_pct"]) / 2.0),
-                            "y_pct": max(0.0, float(d["y_pct"]) - float(d["h_pct"]) / 2.0),
-                            "w_pct": float(d["w_pct"]),
-                            "h_pct": float(d["h_pct"]),
+                            "x_pct": x1,
+                            "y_pct": y1,
+                            "w_pct": max(0.0, x2 - x1),
+                            "h_pct": max(0.0, y2 - y1),
                         }
             log(
                 "info",

@@ -93,6 +93,9 @@ export function project(
   if (thTop >= HALF_PI || thBase <= -HALF_PI) return null;
   const yBase = 0.5 - Math.tan(thBase) / (2.0 * tv);
   const yTop = 0.5 - Math.tan(thTop) / (2.0 * tv);
+  // Vertical-FOV cull: an entity entirely above/below the frame isn't visible.
+  // (Was unbounded → off-image boxes leaked into the golden + grounding — codex #4.)
+  if (Math.max(yTop, yBase) < 0 || Math.min(yTop, yBase) > 1) return null;
   const yPct = (yTop + yBase) / 2.0;
   const hPct = Math.abs(yBase - yTop);
   const wPct = entity.footprint.w / dist / (2.0 * tHalf);

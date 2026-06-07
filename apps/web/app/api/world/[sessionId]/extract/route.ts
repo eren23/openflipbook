@@ -145,8 +145,13 @@ export async function POST(req: Request, { params }: Params) {
     // world crop; P6 refines per-scene observer poses. Best-effort, off the
     // response path.
     const geoNodeId = body.node_id;
+    // Only seed world coordinates from a MAP. A street/eye/building capture is a
+    // scene, not a map — back-projecting its boxes into a fake top-down crop gives
+    // wrong positions (codex-audit #1). No estimate → assume map (back-compat).
+    const viewLevel = upstreamView?.level ?? "map";
     if (
       geoNodeId &&
+      viewLevel === "map" &&
       ["1", "true", "yes"].includes((process.env.GEOMETRIC_WORLD ?? "").toLowerCase())
     ) {
       try {

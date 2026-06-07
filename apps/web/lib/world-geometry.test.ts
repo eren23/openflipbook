@@ -105,6 +105,8 @@ describe("world-geometry properties", () => {
   });
   it("vertical frustum cull (look down at a tall close entity)", () =>
     expect(project(ent("a", 3, 0, 30), { ...OBS, pitch: -0.6 }, ASPECT)).toBeNull());
+  it("vertical-FOV cull: look up at a close ground entity → below frame → culled", () =>
+    expect(project(ent("a", 5, 0, 2), { ...OBS, pitch: 0.6 }, ASPECT)).toBeNull());
   it("crop window", () =>
     expect(
       cropEntities([ent("a", 5, 5), ent("b", 50, 50), ent("c", 9, 1)], {

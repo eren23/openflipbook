@@ -96,6 +96,11 @@ def project(
         return None
     y_base = 0.5 - math.tan(th_base) / (2.0 * tv)
     y_top = 0.5 - math.tan(th_top) / (2.0 * tv)
+    # Vertical-FOV cull: an entity entirely above or below the frame isn't visible.
+    # (The old code let y_pct/h_pct run unbounded, so off-image boxes leaked into
+    # the golden + the grounding diff — codex-audit #4.)
+    if max(y_top, y_base) < 0.0 or min(y_top, y_base) > 1.0:
+        return None
     y_pct = (y_top + y_base) / 2.0
     h_pct = abs(y_base - y_top)
     w_pct = (entity["footprint"]["w"] / dist) / (2.0 * t_half)

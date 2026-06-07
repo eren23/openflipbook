@@ -44,7 +44,7 @@ describe("world-geometry cross-language parity fuzz", () => {
     }
     // Exact: corpus is seed-pinned + deterministic, so a silently-trimmed regen
     // (fewer projections) trips the gate, not just an all-culled corpus.
-    expect(total).toBe(274);
+    expect(total).toBe(259);
   });
 
   it("left/right mirror symmetry (structural truth)", () => {
