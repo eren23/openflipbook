@@ -2175,7 +2175,16 @@ export default function PlayPage() {
               {geoOverlayOn && (
                 <WorldMiniMap
                   sessionId={sessionId}
-                  focusId={page?.sceneView?.focus_id ?? null}
+                  focusId={
+                    page?.sceneView && page.sceneView.level !== "map"
+                      ? page.sceneView.focus_id ?? null
+                      : null
+                  }
+                  crop={
+                    page?.sceneView?.level === "map"
+                      ? page.sceneView.map_crop ?? null
+                      : null
+                  }
                 />
               )}
             </div>
