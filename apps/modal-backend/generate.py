@@ -1344,7 +1344,13 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             from providers import view_estimator as _view
 
             view = await _view.estimate_view(geo_img_bytes, body.caption)
-            log("info", "extract.view", **view)
+            log(
+                "info",
+                "extract.view",
+                view_level=view["level"],
+                projection=view["projection"],
+                pitch_deg=view["pitch_deg"],
+            )
         except Exception as exc:
             log("info", "extract.view_failed", error=f"{type(exc).__name__}: {exc}")
 
