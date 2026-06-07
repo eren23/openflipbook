@@ -83,12 +83,13 @@ There are **two directions**, and we built only one:
 
 **Perception half (image → world) is DONE: localize + classify camera + back-project.**
 Remaining = the **consume/integrate** half (FIX 2 + 3) — make *generation* geometry-aware.
-- [ ] **FIX 2 — Thread geometry through generation + store it.** When a `world_map` exists:
-  compute `scene_view` + `expected_layout` (project the in-frame entities from the observer),
-  send them in the generate request (`WORLD_GEOMETRY_GEN` on), store them on the node, turn
-  grounding on. → steering + grounding go live; the overlay (Fix 0) gets data. _Closes ROOT 2._
-- [ ] **FIX 3 — Wire click-route into the tap handler.** Tap → `click-route` → observer pose
-  → Fix 2's steered+grounded generate. → going-in becomes geometry-driven. _Closes ROOT 3._
+- [x] **FIX 2 + 3 — Geometric tap (loop closed).** ✅ `lib/geo-tap.ts`: a World-Mode tap on
+  the seeded map routes through click-route → an observer pose → `projectScene` →
+  `expected_layout`, sent in the generate request. `generate.py` steers on it (P3) + grounds
+  against it (P4). Going-in is geometry-driven; the entered scene is laid out by where the
+  entities are. Gated (inert unless seeded + WORLD_GEOMETRY_GEN/VLM_GROUNDING). _Closes ROOT 2+3._
+- [x] **Metric lever — `WORLD_TOPDOWN_MAPS`.** ✅ forces flat top-down map renders → the seed
+  is EXACT (box = footprint), sidestepping the monocular-pose ceiling Codex named. Opt-in.
 - [ ] **FIX 4 (later) — Atlas geo overlay** once the geo↔node-layout coord relationship is decided.
 
 ## 4b. Codex second-opinion audit (875ab50)
