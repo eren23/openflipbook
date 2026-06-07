@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type {
   Entity,
@@ -93,7 +95,7 @@ export async function POST(req: Request, { params }: Params) {
   let upstreamView: ViewEstimate | null = null;
   try {
     const upstream = await fetch(
-      `${env.MODAL_API_URL.replace(/\/$/, "")}/extract-entities`,
+      joinModalUrl(env.MODAL_API_URL, "/extract-entities"),
       {
         method: "POST",
         headers: {
@@ -159,9 +161,7 @@ export async function POST(req: Request, { params }: Params) {
     // a fake top-down crop (codex-audit #1).
     const parentFrameId =
       sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
-    const geoOn = ["1", "true", "yes"].includes(
-      (process.env.GEOMETRIC_WORLD ?? "").toLowerCase(),
-    );
+    const geoOn = envFlag("GEOMETRIC_WORLD");
     if (geoNodeId && geoOn && (parentFrameId || viewLevel === "map")) {
       try {
         // Map an on-node entity → a seedable geo item (or null to skip). Drops

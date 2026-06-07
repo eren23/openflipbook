@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GenerateRequestBody } from "@openflipbook/config";
 import { resolveEntitiesForPrompt } from "@/lib/world";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
     upstreamBody = rawText;
   }
 
-  const upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/sse/generate`, {
+  const upstream = await fetch(joinModalUrl(modalUrl, "/sse/generate"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

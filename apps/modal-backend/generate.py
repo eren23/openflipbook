@@ -17,7 +17,6 @@ import asyncio as _asyncio
 import base64
 import contextlib
 import json
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -26,6 +25,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from _env import env_flag
+
 APP_NAME = "openflipbook-generate"
 
 image = (
@@ -33,6 +34,7 @@ image = (
     .pip_install_from_requirements("requirements.txt")
     .add_local_python_source("providers")
     .add_local_python_source("obs")
+    .add_local_python_source("_env")
 )
 
 secrets = [
@@ -167,22 +169,18 @@ class GenerateBody(BaseModel):
 # World Mode is gated behind an env flag (default off) so it's a no-op in prod
 # until a deployer turns it on — like EXPAND_MAP_PAN / IMAGE_CONDITIONING.
 def _world_mode_on(requested: bool) -> bool:
-    return bool(requested) and os.environ.get("WORLD_MODE", "false").lower() in (
-        "1", "true", "yes",
-    )
+    return bool(requested) and env_flag("WORLD_MODE")
 
 
 def _geometric_world_on() -> bool:
     """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
     endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
-    return os.environ.get("GEOMETRIC_WORLD", "false").lower() in ("1", "true", "yes")
+    return env_flag("GEOMETRIC_WORLD")
 
 
 def _world_geometry_gen_on() -> bool:
     """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
-    return os.environ.get("WORLD_GEOMETRY_GEN", "false").lower() in (
-        "1", "true", "yes",
-    )
+    return env_flag("WORLD_GEOMETRY_GEN")
 
 
 def _layout_clause_for(body: GenerateBody) -> str:
@@ -203,7 +201,7 @@ def _topdown_clause_for(body: GenerateBody) -> str:
     guessing an oblique camera — the metric path. Only applies to MAP renders (a
     fresh world or an explicit map_crop view); a scene/observer render is left
     alone. Off (default) keeps the model's usual, often-2.5D, map aesthetic."""
-    if os.environ.get("WORLD_TOPDOWN_MAPS", "false").lower() not in ("1", "true", "yes"):
+    if not env_flag("WORLD_TOPDOWN_MAPS"):
         return ""
     sv = body.scene_view
     is_map = sv is None or (sv.observer is None and sv.level == "map")
@@ -219,15 +217,13 @@ def _topdown_clause_for(body: GenerateBody) -> str:
 def _vlm_grounding_on() -> bool:
     """Verify the rendered frame against the expected layout (VLM_GROUNDING).
     Off → no detector call, `final` carries no grounding summary."""
-    return os.environ.get("VLM_GROUNDING", "false").lower() in ("1", "true", "yes")
+    return env_flag("VLM_GROUNDING")
 
 
 def _vlm_grounding_repair_on() -> bool:
     """Let the grounding loop attempt a corrective edit (VLM_GROUNDING_REPAIR).
     Off → verify-only: report the diff, never mutate the image."""
-    return os.environ.get("VLM_GROUNDING_REPAIR", "false").lower() in (
-        "1", "true", "yes",
-    )
+    return env_flag("VLM_GROUNDING_REPAIR")
 
 
 def _grounding_summary(
@@ -391,9 +387,7 @@ async def _event_stream(
     # so an online lookup adds 500-2000ms of variance for marginal value and
     # tends to drift the page out of the parent domain. Override with
     # WEB_SEARCH_ON_TAP=true if you want the legacy behaviour back.
-    web_search_on_tap = os.environ.get("WEB_SEARCH_ON_TAP", "false").lower() in (
-        "1", "true", "yes",
-    )
+    web_search_on_tap = env_flag("WEB_SEARCH_ON_TAP")
     effective_web_search = body.web_search and (body.mode != "tap" or web_search_on_tap)
     try:
         # Edit mode short-circuits the planner: we already have an image, the
@@ -475,11 +469,7 @@ async def _event_stream(
             # (same refs for all; directional edge-crops deferred). Flag-gated.
             expand_cond_refs: list[str] | None = None
             expand_cond_preamble = ""
-            if (
-                os.environ.get("IMAGE_CONDITIONING", "true").lower()
-                in ("1", "true", "yes")
-                and body.condition_image_urls
-            ):
+            if env_flag("IMAGE_CONDITIONING", "true") and body.condition_image_urls:
                 expand_cond_refs = body.condition_image_urls
                 expand_cond_preamble = image_provider.conditioning_preamble(
                     body.condition_roles or [], "expand"
@@ -785,9 +775,7 @@ async def _event_stream(
         # parallel and emitting it via the existing `progress` event lets
         # the frontend paint a usable page seconds before the final lands.
         # Disabled by env if a deployer wants to save the extra fal call.
-        progressive_enabled = os.environ.get(
-            "PROGRESSIVE_DRAFT", "true"
-        ).lower() in ("1", "true", "yes")
+        progressive_enabled = env_flag("PROGRESSIVE_DRAFT", "true")
         target_tier = (body.image_tier or "balanced").lower()
         wants_draft = (
             progressive_enabled
@@ -817,10 +805,7 @@ async def _event_stream(
         # text-only exactly as before.
         main_prompt = composed_prompt
         cond_refs: list[str] | None = None
-        if (
-            os.environ.get("IMAGE_CONDITIONING", "true").lower() in ("1", "true", "yes")
-            and body.condition_image_urls
-        ):
+        if env_flag("IMAGE_CONDITIONING", "true") and body.condition_image_urls:
             cond_refs = body.condition_image_urls
             # Entering a place reframes the region ref ("reveal the fuller place
             # within") vs. an explainer tap ("reveal what is inside").

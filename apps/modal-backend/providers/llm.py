@@ -20,6 +20,8 @@ from typing import Any, TypeGuard, cast
 
 from openai import AsyncOpenAI, BadRequestError
 
+from _env import env_flag
+
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
 DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
@@ -274,7 +276,7 @@ def _client() -> AsyncOpenAI:
 
 
 def _cache_enabled() -> bool:
-    return os.environ.get("OPENROUTER_CACHE", "true").lower() in ("1", "true", "yes")
+    return env_flag("OPENROUTER_CACHE", "true")
 
 
 def _system_message(text: str) -> Any:
@@ -336,11 +338,7 @@ def _web_search_enabled(online: bool) -> bool:
     # just without OpenRouter-brokered grounding).
     if _llm_provider() != "openrouter":
         return False
-    return os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    return env_flag("OPENROUTER_ENABLE_WEB_SEARCH", "true")
 
 
 def _supports_online_suffix(model: str) -> bool:

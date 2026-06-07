@@ -7,6 +7,8 @@ import {
   getWorldMap,
 } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { EntityEditPlan, EntityGeoEdit } from "@openflipbook/config";
 
@@ -31,8 +33,7 @@ interface EditRequestBody {
 // Gated by WORLD_OVERRIDE_ENABLED (these edits mutate persisted geo state),
 // mirroring the codex-override route next door.
 function overridesEnabled(): boolean {
-  const flag = (process.env.WORLD_OVERRIDE_ENABLED ?? "").toLowerCase();
-  return flag === "1" || flag === "true" || flag === "yes";
+  return envFlag("WORLD_OVERRIDE_ENABLED");
 }
 
 export async function POST(req: Request, { params }: Params) {
@@ -97,7 +98,7 @@ export async function POST(req: Request, { params }: Params) {
   let plan: EntityEditPlan;
   try {
     const upstream = await fetch(
-      `${env.MODAL_API_URL.replace(/\/$/, "")}/edit-entities`,
+      joinModalUrl(env.MODAL_API_URL, "/edit-entities"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },

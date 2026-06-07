@@ -11,6 +11,7 @@ import type {
   WorldStateSnapshot,
 } from "@openflipbook/config";
 import { getDb } from "./db";
+import { optimisticReplace } from "./optimistic-update";
 
 const COLLECTION = "world_state";
 const SCHEMA_VERSION = 1;
@@ -261,56 +262,41 @@ export async function mergeExtraction(
   input: MergeExtractionInput
 ): Promise<MergeExtractionOutput> {
   const col = await collection();
-  let attempt = 0;
-  while (true) {
-    const existing = await col.findOne({ _id: input.session_id });
-    const entities: EntityDoc[] = existing ? existing.entities.map(cloneEntity) : [];
-    const now = new Date();
-    const result = applyExtractionToEntities(entities, input.node_id, input.result, now);
-
-    const next: WorldStateDoc = {
-      _id: input.session_id,
-      entities,
-      updated_at: now,
-      schema_version: SCHEMA_VERSION,
-    };
-
-    let ok = false;
-    if (existing) {
-      const write = await col.replaceOne(
-        { _id: input.session_id, updated_at: existing.updated_at },
-        next
+  // The merge result (added/updated ids) is produced as a side effect of
+  // building the replacement doc; capture it from the winning build.
+  let result: ApplyResult = { added_ids: [], updated_ids: [] };
+  const next = await optimisticReplace<WorldStateDoc>(
+    col,
+    input.session_id,
+    (existing) => {
+      const entities: EntityDoc[] = existing
+        ? existing.entities.map(cloneEntity)
+        : [];
+      const now = new Date();
+      result = applyExtractionToEntities(
+        entities,
+        input.node_id,
+        input.result,
+        now
       );
-      ok = write.matchedCount === 1;
-    } else {
-      // First-write path: insertOne. If another writer beat us, the
-      // duplicate-key error sends us around the loop, which now sees
-      // the row and uses the optimistic-replace path. Without this,
-      // two parallel "create" calls would both upsert and the second
-      // would silently overwrite the first.
-      try {
-        await col.insertOne(next);
-        ok = true;
-      } catch (err) {
-        if (!isDuplicateKeyError(err)) throw err;
-        ok = false;
-      }
-    }
-
-    if (ok) {
       return {
-        snapshot: snapshotFromDoc(next),
-        added_ids: result.added_ids,
-        updated_ids: result.updated_ids,
+        _id: input.session_id,
+        entities,
+        updated_at: now,
+        schema_version: SCHEMA_VERSION,
       };
+    },
+    {
+      retryLimit: OPTIMISTIC_RETRY_LIMIT,
+      isDuplicateKeyError,
+      label: "mergeExtraction",
     }
-    attempt += 1;
-    if (attempt >= OPTIMISTIC_RETRY_LIMIT) {
-      throw new Error(
-        `mergeExtraction: optimistic concurrency retry exhausted for session ${input.session_id}`
-      );
-    }
-  }
+  );
+  return {
+    snapshot: snapshotFromDoc(next),
+    added_ids: result.added_ids,
+    updated_ids: result.updated_ids,
+  };
 }
 
 function isDuplicateKeyError(err: unknown): boolean {
@@ -892,44 +878,26 @@ async function mutate(
   fn: (entities: EntityDoc[]) => void
 ): Promise<WorldStateSnapshot> {
   const col = await collection();
-  let attempt = 0;
-  while (true) {
-    const existing = await col.findOne({ _id: sessionId });
-    const entities = existing ? existing.entities.map(cloneEntity) : [];
-    fn(entities);
-    const now = new Date();
-    const next: WorldStateDoc = {
-      _id: sessionId,
-      entities,
-      updated_at: now,
-      schema_version: SCHEMA_VERSION,
-    };
-
-    let ok = false;
-    if (existing) {
-      const write = await col.replaceOne(
-        { _id: sessionId, updated_at: existing.updated_at },
-        next
-      );
-      ok = write.matchedCount === 1;
-    } else {
-      try {
-        await col.insertOne(next);
-        ok = true;
-      } catch (err) {
-        if (!isDuplicateKeyError(err)) throw err;
-        ok = false;
-      }
+  const next = await optimisticReplace<WorldStateDoc>(
+    col,
+    sessionId,
+    (existing) => {
+      const entities = existing ? existing.entities.map(cloneEntity) : [];
+      fn(entities);
+      return {
+        _id: sessionId,
+        entities,
+        updated_at: new Date(),
+        schema_version: SCHEMA_VERSION,
+      };
+    },
+    {
+      retryLimit: OPTIMISTIC_RETRY_LIMIT,
+      isDuplicateKeyError,
+      label: "world.mutate",
     }
-
-    if (ok) return snapshotFromDoc(next);
-    attempt += 1;
-    if (attempt >= OPTIMISTIC_RETRY_LIMIT) {
-      throw new Error(
-        `world.mutate: optimistic concurrency retry exhausted for session ${sessionId}`
-      );
-    }
-  }
+  );
+  return snapshotFromDoc(next);
 }
 
 // Test surface — small wrappers used by unit tests so we don't have to spin

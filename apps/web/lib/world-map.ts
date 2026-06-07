@@ -13,6 +13,7 @@ import type {
 } from "@openflipbook/config";
 
 import { getDb } from "./db";
+import { optimisticReplace } from "./optimistic-update";
 import {
   estimateGeoFromBBox,
   resolveAbsolutePos,
@@ -258,46 +259,27 @@ export async function upsertEntityGeos(
   geos: WorldEntityGeo[],
 ): Promise<WorldMapSnapshot> {
   const col = await collection();
-  let attempt = 0;
-  while (true) {
-    const existing = await col.findOne({ _id: sessionId });
-    const now = new Date();
-    const entities = applyGeoUpsert(
-      existing ? existing.entities : [],
-      geos,
-      now.toISOString(),
-    );
-    const next: WorldMapDoc = {
-      _id: sessionId,
-      entities,
-      bounds: recomputeBounds(entities),
-      schema_version: SCHEMA_VERSION,
-      updated_at: now,
-    };
-    let ok = false;
-    if (existing) {
-      const write = await col.replaceOne(
-        { _id: sessionId, updated_at: existing.updated_at },
-        next,
+  const next = await optimisticReplace<WorldMapDoc>(
+    col,
+    sessionId,
+    (existing) => {
+      const now = new Date();
+      const entities = applyGeoUpsert(
+        existing ? existing.entities : [],
+        geos,
+        now.toISOString(),
       );
-      ok = write.matchedCount === 1;
-    } else {
-      try {
-        await col.insertOne(next);
-        ok = true;
-      } catch (err) {
-        if (!isDuplicateKeyError(err)) throw err;
-        ok = false;
-      }
-    }
-    if (ok) return snapshotFromDoc(next);
-    attempt += 1;
-    if (attempt >= OPTIMISTIC_RETRY_LIMIT) {
-      throw new Error(
-        `upsertEntityGeos: optimistic concurrency retry exhausted for ${sessionId}`,
-      );
-    }
-  }
+      return {
+        _id: sessionId,
+        entities,
+        bounds: recomputeBounds(entities),
+        schema_version: SCHEMA_VERSION,
+        updated_at: now,
+      };
+    },
+    { retryLimit: OPTIMISTIC_RETRY_LIMIT, isDuplicateKeyError, label: "upsertEntityGeos" },
+  );
+  return snapshotFromDoc(next);
 }
 
 /** Apply a sequence of structured geo edits to the session map under optimistic
@@ -309,44 +291,25 @@ export async function applyEntityEdits(
 ): Promise<WorldMapSnapshot> {
   if (edits.length === 0) return getWorldMap(sessionId);
   const col = await collection();
-  let attempt = 0;
-  while (true) {
-    const existing = await col.findOne({ _id: sessionId });
-    const now = new Date();
-    const nowIso = now.toISOString();
-    let entities = existing ? existing.entities : [];
-    for (const edit of edits) entities = applyEntityEdit(entities, edit, nowIso);
-    const next: WorldMapDoc = {
-      _id: sessionId,
-      entities,
-      bounds: recomputeBounds(entities),
-      schema_version: SCHEMA_VERSION,
-      updated_at: now,
-    };
-    let ok = false;
-    if (existing) {
-      const write = await col.replaceOne(
-        { _id: sessionId, updated_at: existing.updated_at },
-        next,
-      );
-      ok = write.matchedCount === 1;
-    } else {
-      try {
-        await col.insertOne(next);
-        ok = true;
-      } catch (err) {
-        if (!isDuplicateKeyError(err)) throw err;
-        ok = false;
-      }
-    }
-    if (ok) return snapshotFromDoc(next);
-    attempt += 1;
-    if (attempt >= OPTIMISTIC_RETRY_LIMIT) {
-      throw new Error(
-        `applyEntityEdits: optimistic concurrency retry exhausted for ${sessionId}`,
-      );
-    }
-  }
+  const next = await optimisticReplace<WorldMapDoc>(
+    col,
+    sessionId,
+    (existing) => {
+      const now = new Date();
+      const nowIso = now.toISOString();
+      let entities = existing ? existing.entities : [];
+      for (const edit of edits) entities = applyEntityEdit(entities, edit, nowIso);
+      return {
+        _id: sessionId,
+        entities,
+        bounds: recomputeBounds(entities),
+        schema_version: SCHEMA_VERSION,
+        updated_at: now,
+      };
+    },
+    { retryLimit: OPTIMISTIC_RETRY_LIMIT, isDuplicateKeyError, label: "applyEntityEdits" },
+  );
+  return snapshotFromDoc(next);
 }
 
 // ── Seeding bridge: extraction → derived map geometry ────────────────────────
