@@ -10,7 +10,7 @@ import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
-import type { EntityEditPlan, EntityGeoEdit } from "@openflipbook/config";
+import type { EntityEditPlan, EntityGeoEdit, SceneView } from "@openflipbook/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ interface Params {
 
 interface EditRequestBody {
   instruction?: string;
-  scene_view?: unknown;
+  scene_view?: SceneView | null;
   // Preview only: resolve + return the plan (edits + blast-radius) WITHOUT
   // mutating the map, so the UI can confirm before applying. Default false.
   dry_run?: boolean;

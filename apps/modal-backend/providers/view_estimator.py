@@ -8,13 +8,25 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any
+from typing import Any, Literal, TypedDict, cast
 
-LEVELS = ("map", "building", "street", "eye")
-PROJECTIONS = ("top_down", "oblique", "perspective")
+# Mirrors the TS `ViewLevel` / `ViewProjection` unions + `ViewEstimate` shape in
+# packages/config/src/index.ts — the camera read-out the geometry layer consumes.
+ViewLevel = Literal["map", "building", "street", "eye"]
+ViewProjection = Literal["top_down", "oblique", "perspective"]
+
+
+class ViewEstimate(TypedDict):
+    level: ViewLevel
+    projection: ViewProjection
+    pitch_deg: float
+
+
+LEVELS: tuple[ViewLevel, ...] = ("map", "building", "street", "eye")
+PROJECTIONS: tuple[ViewProjection, ...] = ("top_down", "oblique", "perspective")
 
 # Safe default: a flat top-down map (what the old code blindly assumed).
-DEFAULT_VIEW: dict[str, Any] = {"level": "map", "projection": "top_down", "pitch_deg": -90.0}
+DEFAULT_VIEW: ViewEstimate = {"level": "map", "projection": "top_down", "pitch_deg": -90.0}
 
 
 def _model() -> str:
@@ -24,11 +36,15 @@ def _model() -> str:
     )
 
 
-def parse_view(payload: Any) -> dict[str, Any]:
+def parse_view(payload: Any) -> ViewEstimate:
     """Coerce a view-estimate reply into a validated dict. Tolerant: an unknown
-    level/projection or a non-numeric pitch falls back to the top-down default."""
+    level/projection or a non-numeric pitch falls back to the top-down default.
+
+    `payload` is a raw JSON reply of unknown shape, so it stays `Any`; the
+    `in LEVELS` / `in PROJECTIONS` membership checks narrow the validated string
+    back to its Literal type (LEVELS/PROJECTIONS are typed tuples)."""
     if not isinstance(payload, dict):
-        return dict(DEFAULT_VIEW)
+        return cast(ViewEstimate, dict(DEFAULT_VIEW))
     level = str(payload.get("level", "")).strip().lower()
     proj = str(payload.get("projection", "")).strip().lower()
     try:
@@ -42,7 +58,7 @@ def parse_view(payload: Any) -> dict[str, Any]:
     }
 
 
-async def estimate_view(image_bytes: bytes, caption: str = "") -> dict[str, Any]:
+async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
     """Classify the image's camera. One VLM call; degrades to the top-down default
     on any failure (so callers can always seed *something*)."""
     from providers import llm
@@ -89,5 +105,5 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> dict[str, Any]
         raw = resp.choices[0].message.content or "{}"
         payload = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
     except Exception:
-        return dict(DEFAULT_VIEW)
+        return cast(ViewEstimate, dict(DEFAULT_VIEW))
     return parse_view(payload)

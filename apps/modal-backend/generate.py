@@ -18,9 +18,18 @@ import base64
 import contextlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import modal
+
+if TYPE_CHECKING:
+    # Type-only — the providers are imported lazily at the call sites (Modal cold
+    # start cost), but mypy needs the shapes to check the geometry boundary. The
+    # geometry TypedDict is aliased to avoid clashing with this module's Pydantic
+    # `ProjectedEntity` wire model (same shape; model_dump() yields the TypedDict).
+    from providers.detector import Detection
+    from providers.geometry import ProjectedEntity as ProjectedEntityDict
+    from providers.view_estimator import ViewEstimate
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -190,8 +199,10 @@ def _layout_clause_for(body: GenerateBody) -> str:
         return ""
     from providers import geometry_prompt
 
+    # model_dump() erases the static type, but a ProjectedEntity Pydantic model
+    # dumps to exactly the ProjectedEntity TypedDict shape the prompt consumes.
     return geometry_prompt.layout_constraints(
-        [e.model_dump() for e in body.expected_layout]
+        cast("list[ProjectedEntityDict]", [e.model_dump() for e in body.expected_layout])
     )
 
 
@@ -245,7 +256,7 @@ def _grounding_summary(
 
 async def _run_grounding(
     result: Any,
-    expected: list[dict[str, Any]],
+    expected: list[ProjectedEntityDict],
     *,
     repair_on: bool,
     abort: Callable[[str], Awaitable[None]],
@@ -893,7 +904,10 @@ async def _event_stream(
             )
             result, grounding_summary = await _run_grounding(
                 result,
-                [e.model_dump() for e in body.expected_layout],
+                cast(
+                    "list[ProjectedEntityDict]",
+                    [e.model_dump() for e in body.expected_layout],
+                ),
                 repair_on=_vlm_grounding_repair_on(),
                 abort=_abort_if_disconnected,
             )
@@ -1292,7 +1306,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         try:
             from providers import detector as _detector
 
-            def _box_from_det(d: dict[str, Any]) -> dict[str, float]:
+            def _box_from_det(d: Detection) -> dict[str, float]:
                 # Centre-based → top-left, CLIPPED to the frame on all four edges
                 # (a naive `max(0, c - s/2)` leaves w/h unclipped, so an edge box
                 # overflows past 1.0 or shifts its recomputed centre). codex #2.
@@ -1348,7 +1362,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # FIX 1b — estimate the camera so we stop assuming top-down (the live Ankh map
     # is 2.5D). Returned on the response so the web side can store it on the node
     # and back-project the FIX 1a boxes at the right angle. Best-effort.
-    view: dict[str, Any] | None = None
+    view: ViewEstimate | None = None
     if geo_img_bytes:
         try:
             from providers import view_estimator as _view
