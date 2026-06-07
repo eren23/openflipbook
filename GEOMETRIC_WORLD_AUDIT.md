@@ -91,6 +91,21 @@ Remaining = the **consume/integrate** half (FIX 2 + 3) — make *generation* geo
   → Fix 2's steered+grounded generate. → going-in becomes geometry-driven. _Closes ROOT 3._
 - [ ] **FIX 4 (later) — Atlas geo overlay** once the geo↔node-layout coord relationship is decided.
 
+## 4b. Codex second-opinion audit (875ab50)
+
+Codex ran `make eval` (green) and found 8 issues. Triage + outcome:
+
+- [x] **#2** FIX 1a centre→top-left clipped only one corner → edge boxes overflow/shift. **Fixed** (clip all 4 edges).
+- [x] **#1** extract bridge hard-coded `level:"map"`, only threaded `projection` → scene captures seeded as fake top-down. **Fixed** (only MAP images seed).
+- [x] **#6** grounding reported `extra` but never penalized → hallucination scores 1.0. **Fixed** (extras drag the score).
+- [x] **#4** no vertical-FOV cull → unbounded `y_pct` (oracle held −1.7) leaks into golden + grounding. **Fixed** (cull both engines; 274→259, parity holds).
+- [ ] **#3** recurring `updated` entities never get a bbox (schema/parser/applyUpdate) → drop from geometry on re-appearance. _Deferred — needs the update path to carry + persist bboxes._
+- [ ] **#5** oblique height = `h_pct·crop.h·0.5` ignores `pitch_deg`/pose. _Known fudge (already flagged honest)._
+- [ ] **#8** overlay maps to the 16:9 wrapper, not the `object-contain` image rect → non-16:9 uploads letterbox + drift. _Deferred._
+- #7 "parity gate blesses shared math, not correctness" → true; the fix is fixing the math (#4), which we did.
+
+**Codex's single biggest risk (matches §1):** the system *classifies* the camera but never *recovers or persists a metric observer pose*, so geometry from a generated image is **relative, not metric**. The cleanest path to metric is the top-down-map lever (prompt a flat overhead map → exact bbox→world), not better monocular estimation.
+
 ## 5. The honest bottom line
 
 The **authored-first** pipeline (engine → steer → ground → NL-edit) is real, tested, and
