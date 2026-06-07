@@ -50,6 +50,7 @@ _SCRUB = (
     # Geometric world model (numeric map, observer poses, grounded gen).
     "GEOMETRIC_WORLD",
     "WORLD_GEOMETRY_GEN",
+    "WORLD_TOPDOWN_MAPS",
     "VLM_GROUNDING",
     "VLM_GROUNDING_REPAIR",
     "FAL_OUTPAINT_MODEL",
