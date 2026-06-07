@@ -56,6 +56,7 @@ import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
 import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { CodexPanel } from "@/components/PlayPage/CodexPanel";
+import GeometryOverlay from "@/components/PlayPage/GeometryOverlay";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
@@ -320,6 +321,7 @@ export default function PlayPage() {
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
+  const [geoOverlayOn, setGeoOverlayOn] = useState(false);
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
   // would conflict with keyboard tab-order; we expose a small toggle
@@ -1969,6 +1971,9 @@ export default function PlayPage() {
                 }
                 onSelect={() => setCodexOpen(true)}
               />
+              {geoOverlayOn && page?.nodeId && (
+                <GeometryOverlay nodeId={page.nodeId} entities={worldState.entities} />
+              )}
             </div>
 
             {page?.nodeId &&
@@ -2024,6 +2029,19 @@ export default function PlayPage() {
               >
                 <BloomGlyph className="h-3.5 w-3.5" />
                 Around
+              </button>
+              <button
+                type="button"
+                onClick={() => setGeoOverlayOn((v) => !v)}
+                aria-pressed={geoOverlayOn}
+                disabled={!page?.nodeId}
+                className={
+                  "rounded-full px-3 py-1 text-xs text-white disabled:opacity-50 " +
+                  (geoOverlayOn ? "bg-emerald-600" : "bg-slate-600/85 hover:bg-slate-600")
+                }
+                title="Geometry layer — draw each entity's detected coordinate box on the image"
+              >
+                ⊞ geo
               </button>
               <button
                 type="button"
