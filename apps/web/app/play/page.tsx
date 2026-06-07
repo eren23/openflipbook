@@ -347,6 +347,14 @@ export default function PlayPage() {
   // Geometric world map (entity coordinates). Empty unless GEOMETRIC_WORLD seeded
   // it; drives the geometry overlay/minimap + the geometric tap (close the loop).
   const geoMap = useWorldMap(sessionId);
+  // Extraction seeds the geo map AFTER the node loads, so reload it whenever the
+  // codex grows (same trigger) — otherwise a tap right after a render routes
+  // against a stale/empty world and the geometric path never fires.
+  const geoRefetch = geoMap.refetch;
+  const codexCount = worldState.entities.length;
+  useEffect(() => {
+    void geoRefetch();
+  }, [codexCount, geoRefetch]);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
