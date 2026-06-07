@@ -133,11 +133,14 @@ def conditioning_preamble(roles: list[str], mode: str) -> str:
     anchor. Empty roles → no preamble (plain text-to-image)."""
     if not roles:
         return ""
-    enter = (
-        "Continue the scene outward from"
-        if mode == "expand"
-        else "Reveal what is inside"
-    )
+    if mode == "expand":
+        enter = "Continue the scene outward from"
+    elif mode == "place_scene":
+        # World Mode: the user is stepping INTO the tapped spot — reveal the
+        # fuller place that lies within it (a scene to stand in, not a diagram).
+        enter = "Reveal the fuller place within"
+    else:
+        enter = "Reveal what is inside"
     lines: list[str] = []
     for i, role in enumerate(roles, start=1):
         if role == "region":

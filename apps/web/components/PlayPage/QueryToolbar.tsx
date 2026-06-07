@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent, FormEvent, RefObject } from "react";
-import type { ImageTier } from "@openflipbook/config";
+import type { Autonomy, ImageTier } from "@openflipbook/config";
 
 import { SUPPORTED_LOCALES, type SupportedLocale, type LocaleStrings } from "@/lib/i18n";
 import { THEMES, type Theme } from "@/hooks/usePersistedTheme";
@@ -22,6 +22,10 @@ interface Props {
   setTheme: (t: Theme) => void;
   imageTier: ImageTier;
   setImageTier: (t: ImageTier) => void;
+  worldMode: boolean;
+  setWorldMode: (on: boolean) => void;
+  autonomy: Autonomy;
+  setAutonomy: (a: Autonomy) => void;
 }
 
 export function QueryToolbar({
@@ -38,6 +42,10 @@ export function QueryToolbar({
   setTheme,
   imageTier,
   setImageTier,
+  worldMode,
+  setWorldMode,
+  autonomy,
+  setAutonomy,
 }: Props) {
   return (
     <>
@@ -126,6 +134,48 @@ export function QueryToolbar({
               {tier}
             </button>
           ))}
+        </div>
+        <div
+          role="group"
+          aria-label="World Mode"
+          className="flex items-center overflow-hidden rounded-full border border-[var(--color-edge)] text-xs"
+          title="World Mode — tap to ENTER places (immersive scenes / closer sub-maps) instead of explaining a topic; entered places persist and reopen."
+        >
+          <button
+            type="button"
+            onClick={() => setWorldMode(!worldMode)}
+            aria-pressed={worldMode}
+            className={
+              "px-2.5 py-1 transition-colors " +
+              (worldMode
+                ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
+                : "hover:bg-[var(--color-ink)]/5")
+            }
+          >
+            world
+          </button>
+          {worldMode &&
+            (["auto", "semi"] as const).map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setAutonomy(a)}
+                aria-pressed={autonomy === a}
+                title={
+                  a === "auto"
+                    ? "Auto — enter straight away"
+                    : "Semi — ask a quick question first"
+                }
+                className={
+                  "px-2.5 py-1 transition-colors " +
+                  (autonomy === a
+                    ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
+                    : "hover:bg-[var(--color-ink)]/5")
+                }
+              >
+                {a}
+              </button>
+            ))}
         </div>
         <button
           type="submit"

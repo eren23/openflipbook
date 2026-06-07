@@ -15,6 +15,15 @@ export type ImageTier = "fast" | "balanced" | "pro";
 
 export type VideoTier = "fast" | "balanced" | "pro";
 
+// World Mode (opt-in). `autonomy` "auto" generates straight away; "semi" first
+// surfaces the resolver's clarifying questions. `RenderMode` is how a tapped
+// subject is drawn — an immersive place you've stepped into, a closer
+// cartographic map of a sub-area, or today's labelled explainer diagram.
+export type Autonomy = "auto" | "semi";
+export type RenderMode = "place_scene" | "place_submap" | "explainer";
+// The click-resolver's read of what was tapped (drives RenderMode in world mode).
+export type EnterAs = "scene" | "submap" | "explainer";
+
 export interface GenerateRequestBody {
   query: string;
   aspect_ratio: AspectRatio;
@@ -67,6 +76,14 @@ export interface GenerateRequestBody {
   // Built client-side (lib/image-condition.ts). Omit → today's text-only gen.
   condition_image_urls?: string[];
   condition_roles?: string[];
+  // World Mode (opt-in; the backend also gates it behind the WORLD_MODE env so
+  // it's a no-op in prod until enabled). When on, a tap ENTERS the tapped place
+  // — a scene you stand in or a closer sub-map — instead of explaining a topic,
+  // and the place persists + reopens. `render_mode` explicitly overrides the
+  // per-place framing the resolver would otherwise pick from `enter_as`.
+  world_mode?: boolean;
+  autonomy?: Autonomy;
+  render_mode?: RenderMode;
   trace_id?: string;
 }
 
@@ -93,6 +110,10 @@ export interface ResolveClickRequestBody {
   parent_query?: string;
   output_locale?: string;
   prior_rejected_subject?: string;
+  // World Mode: ask the resolver to also classify what was tapped (`enter_as`)
+  // and, in "semi" autonomy, propose short clarifying questions before entering.
+  world_mode?: boolean;
+  autonomy?: Autonomy;
   trace_id?: string;
 }
 
@@ -126,6 +147,15 @@ export interface ResolveClickResponse {
   confidence?: number;
   point?: ResolveClickPoint | null;
   bbox?: ResolveClickBBox | null;
+  // World Mode: the resolver's read of what was tapped (a place to step into, a
+  // sub-area to map closer, or a concept to explain) + up to two short
+  // clarifying questions (semi autonomy only). Absent in classic mode.
+  enter_as?: EnterAs;
+  clarifiers?: string[];
+  // World Mode spatial anchor: what sits AROUND the tapped spot and in which
+  // direction ("river to the south, timbered houses west, market square NE"),
+  // so the entered place keeps its neighbours where the parent map had them.
+  surroundings?: string;
 }
 
 export interface GenerateProgressEvent {
