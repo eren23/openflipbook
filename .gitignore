@@ -36,8 +36,9 @@ flipbook-steam.jpg
 ec-*.jpg
 ec-*.png
 
-# Demo recorder intermediates
+# Demo recorder intermediates (raw webm captures)
 scripts/record-demo/artifacts/
+scripts/record-demo/artifacts-geo*/
 scripts/record-demo/node_modules/
 
 # Playwright artifacts (committing reports = noisy + binary churn).
