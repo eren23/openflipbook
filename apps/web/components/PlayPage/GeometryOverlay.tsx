@@ -29,7 +29,16 @@ export default function GeometryOverlay({ entities, nodeId, imgRef }: Props) {
   const content = useContainRect(imgRef);
   const boxes = entities.flatMap((e) => {
     const bb = e.appearance_bboxes?.[nodeId];
-    return bb ? [{ e, bb }] : [];
+    if (!bb) return [];
+    // Only draw boxes that actually sit in THIS frame. A centre outside [0,1] is
+    // off-screen; a box covering most of the image is a mislocalized backdrop,
+    // not a thing you can point at. Keeps the layer honest — otherwise stray
+    // boxes read as "parts outside my image shown in my image".
+    const cx = bb.x_pct + bb.w_pct / 2;
+    const cy = bb.y_pct + bb.h_pct / 2;
+    if (cx < 0 || cx > 1 || cy < 0 || cy > 1) return [];
+    if (bb.w_pct * bb.h_pct > 0.6) return [];
+    return [{ e, bb }];
   });
   // Map an image-space (0..1) bbox onto the element. With a measured content
   // rect we land on the letterboxed image (px); otherwise fall back to

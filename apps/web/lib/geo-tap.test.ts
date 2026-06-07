@@ -31,7 +31,7 @@ function geo(
 const CROP: MapCrop = { x: 0, y: 0, w: 100, h: 80 };
 
 describe("geoTapRequest (close the geometric tap loop)", () => {
-  it("tapping a place → scene_view (observer) + an expected_layout with the focus", () => {
+  it("tapping a place → scene_view (observer); a FIRST enter steers by nothing", () => {
     const map = {
       entities: [
         geo("clock", "clock tower", 60, 30, { height: 18 }),
@@ -44,7 +44,10 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t!.focus_id).toBe("clock");
     expect(t!.scene_view.level).toBe("building"); // tall → building
     expect(t!.scene_view.observer).not.toBeNull();
-    expect(t!.expected_layout.some((p) => p.id === "clock")).toBe(true);
+    // First enter — no saved interior → steer by NOTHING, so the OTHER city
+    // landmark (the lighthouse) is NOT dragged into the clock-tower scene. The
+    // child frame seeds from this scene's own extraction instead.
+    expect(t!.expected_layout).toEqual([]);
   });
 
   it("P7b — scene_view carries the focus geo id (anchors the child frame)", () => {

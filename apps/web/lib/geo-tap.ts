@@ -45,19 +45,21 @@ export function geoTapRequest(
   const route = routeClick(map, mapView, click, aspect);
   if (route.kind !== "scene") return null;
 
-  // Nested consistency (P7c): if this place already has a saved interior — its
-  // sub-entities were seeded into its child frame on a prior enter — steer by
-  // THAT sub-layout (resolved local → absolute) so the interior stays put across
-  // re-entries. First enter (no children yet) falls back to the city entities.
+  // An entered scene shows the place's INTERIOR, never the city around it.
+  //   - Re-enter (P7c): we have the saved interior — its sub-entities seeded into
+  //     the child frame on a prior visit — so steer by THOSE (resolved local →
+  //     absolute) and the inside stays consistent across visits.
+  //   - First enter: we know nothing inside yet, so steer by NOTHING and let the
+  //     model render the place freely. Projecting the city's *other* landmarks
+  //     here is exactly what wrongly drew the Brass Bridge inside the University
+  //     (user-reported "parts outside my image shown in my image"). The child
+  //     frame still seeds from this scene's extraction (keyed on focus_id below).
   const kids = childrenOf(map.entities, route.focus_id);
-  let layoutEntities: typeof map.entities = map.entities;
-  if (kids.length > 0) {
-    const byId = new Map(map.entities.map((e) => [e.id, e]));
-    layoutEntities = kids.map((k) => ({
-      ...k,
-      pos: resolveAbsolutePos(k.id, byId) ?? k.pos,
-    }));
-  }
+  const byId = new Map(map.entities.map((e) => [e.id, e]));
+  const layoutEntities =
+    kids.length > 0
+      ? kids.map((k) => ({ ...k, pos: resolveAbsolutePos(k.id, byId) ?? k.pos }))
+      : [];
   return {
     scene_view: {
       node_id: nodeId,

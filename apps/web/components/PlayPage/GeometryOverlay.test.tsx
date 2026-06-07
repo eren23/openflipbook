@@ -33,6 +33,24 @@ describe("GeometryOverlay", () => {
     expect(boxes[0]!.style.width).toBe("20%");
   });
 
+  it("culls boxes that aren't really in this frame (off-centre / backdrop)", () => {
+    render(
+      <GeometryOverlay
+        nodeId="n1"
+        entities={[
+          ent("in", "In frame", { n1: { x_pct: 0.4, y_pct: 0.4, w_pct: 0.2, h_pct: 0.2 } }),
+          // centre at (1.1, 0.5) — off the right edge → dropped.
+          ent("off", "Off frame", { n1: { x_pct: 1.05, y_pct: 0.45, w_pct: 0.1, h_pct: 0.1 } }),
+          // covers ~72% of the image → a mislocalized backdrop → dropped.
+          ent("backdrop", "Whole map", { n1: { x_pct: 0.1, y_pct: 0.1, w_pct: 0.9, h_pct: 0.8 } }),
+        ]}
+      />,
+    );
+    const boxes = screen.getAllByTestId("geo-box");
+    expect(boxes).toHaveLength(1);
+    expect(screen.getByText("In frame")).toBeTruthy();
+  });
+
   it("shows the empty note when nothing is localized on this node", () => {
     render(<GeometryOverlay nodeId="n1" entities={[ent("c", "River Ankh", {})]} />);
     expect(screen.queryAllByTestId("geo-box")).toHaveLength(0);
