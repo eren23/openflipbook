@@ -22,7 +22,13 @@ import {
   type LayoutInput,
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
-import type { NodeRelation, ScaleKind } from "@openflipbook/config";
+import { anchorForTile } from "@/lib/atlas-anchors";
+import type {
+  NodeRelation,
+  ScaleKind,
+  SceneView,
+  WorldEntityGeo,
+} from "@openflipbook/config";
 
 export interface AtlasNode {
   id: string;
@@ -50,6 +56,11 @@ interface AtlasViewProps {
   // appear on it. Server-component hydrates these from Mongo (`getWorldState`);
   // the prop is optional so sessions without entity data render unchanged.
   entities?: AtlasEntity[];
+  // Geometric-world anchors: the per-node saved view + the world geo map → each
+  // tile shows the entered place's coords, the camera's gaze, and its neighbours.
+  // Optional; tiles render unchanged without geometry.
+  sceneViews?: Record<string, SceneView | null>;
+  geoMap?: { entities: WorldEntityGeo[] };
 }
 
 export interface AtlasEntity {
@@ -101,6 +112,8 @@ export default function AtlasView({
   latestNodeId,
   rootTitle,
   entities,
+  sceneViews,
+  geoMap,
 }: AtlasViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ w: 1280, h: 720 });
@@ -121,6 +134,11 @@ export default function AtlasView({
   // (so the cursor flips back to grab), so the click handler can't read the
   // moved-flag off the live ref. Stash it here for the trailing click.
   const recentDragMovedRef = useRef(false);
+  // Geo-entity id → label, for the per-tile neighbour list.
+  const geoById = useMemo(
+    () => new Map((geoMap?.entities ?? []).map((e) => [e.id, e.label])),
+    [geoMap],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -558,6 +576,9 @@ export default function AtlasView({
             const lodFactor = lodOn
               ? lodOpacity(scaleLevel, camera.zoom, fitZoom)
               : 1;
+            const anchor = geoMap
+              ? anchorForTile(sceneViews?.[p.nodeId], geoMap)
+              : null;
             return (
               <div
                 key={p.nodeId}
@@ -649,6 +670,35 @@ export default function AtlasView({
                     ))}
                   </div>
                 ) : null}
+
+                {anchor && (
+                  <div
+                    className="pointer-events-none absolute left-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
+                    title={
+                      anchor.neighbors.length
+                        ? `near: ${anchor.neighbors
+                            .map((n) => geoById.get(n.id) ?? n.id)
+                            .join(", ")}`
+                        : undefined
+                    }
+                  >
+                    {anchor.gazeAngle !== null && (
+                      <svg width={10} height={10} viewBox="-5 -5 10 10" aria-hidden="true">
+                        <line
+                          x1={0}
+                          y1={0}
+                          x2={Math.cos(anchor.gazeAngle) * 4}
+                          y2={Math.sin(anchor.gazeAngle) * 4}
+                          stroke="#7dd3fc"
+                          strokeWidth={1.5}
+                        />
+                        <circle cx={0} cy={0} r={1} fill="#fff" />
+                      </svg>
+                    )}
+                    {Math.round(anchor.focusWorldPos.x)},
+                    {Math.round(anchor.focusWorldPos.y)}
+                  </div>
+                )}
 
                 {showHeatmap && <HeatmapOverlay parentId={p.nodeId} />}
 

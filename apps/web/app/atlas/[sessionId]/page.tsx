@@ -4,6 +4,8 @@ import Link from "next/link";
 import { listNodesBySession, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import { getWorldState } from "@/lib/world";
+import { getWorldMap } from "@/lib/world-map";
+import type { SceneView, WorldEntityGeo } from "@openflipbook/config";
 import AtlasView, {
   type AtlasEntity,
   type AtlasNode,
@@ -173,6 +175,21 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
     atlasEntities = [];
   }
 
+  // Per-node saved view (the observer pose + focus) for the tile anchors.
+  const sceneViews: Record<string, SceneView | null> = {};
+  for (const row of rows) sceneViews[row.id] = row.scene_view;
+
+  // The world geo map → each tile's coords + gaze + neighbours. Best-effort:
+  // an unseeded session (or a Mongo hiccup) just renders the atlas without
+  // anchors, exactly as before.
+  let geoMap: { entities: WorldEntityGeo[] } = { entities: [] };
+  try {
+    const map = await getWorldMap(sessionId);
+    geoMap = { entities: map.entities };
+  } catch {
+    geoMap = { entities: [] };
+  }
+
   const latest = nodes[nodes.length - 1];
   const root = nodes.find((n) => n.parentId == null) ?? nodes[0];
 
@@ -183,6 +200,8 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
       latestNodeId={latest?.id ?? null}
       rootTitle={root?.title ?? "session"}
       entities={atlasEntities}
+      sceneViews={sceneViews}
+      geoMap={geoMap}
     />
   );
 }
