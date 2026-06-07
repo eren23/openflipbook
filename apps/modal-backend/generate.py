@@ -1262,15 +1262,22 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # detector reliably returns one box per label. Detector boxes are centre-based
     # → store top-left for the EntityBBox shape. Gated + best-effort: a failure
     # here never blocks the extract response.
-    if _geometric_world_on() and result.added:
+    # Decode the image once for both geometry passes below (FIX 1a + 1b).
+    geo_img_bytes = b""
+    if _geometric_world_on():
+        try:
+            _, _, _gb64 = body.image_data_url.partition(",")
+            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
+        except Exception:
+            geo_img_bytes = b""
+
+    if geo_img_bytes and result.added:
         try:
             from providers import detector as _detector
 
-            _, _, _b64 = body.image_data_url.partition(",")
-            img_bytes = base64.b64decode(_b64) if _b64 else b""
             need = [e.name for e in result.added if not e.bbox]
-            if img_bytes and need:
-                dets = await _detector.detect(img_bytes, need)
+            if need:
+                dets = await _detector.detect(geo_img_bytes, need)
                 by_label = {str(d.get("label", "")).lower().strip(): d for d in dets}
                 for e in result.added:
                     if e.bbox:
@@ -1295,6 +1302,19 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             )
         except Exception as exc:  # best-effort — geometry localization is optional
             log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
+
+    # FIX 1b — estimate the camera so we stop assuming top-down (the live Ankh map
+    # is 2.5D). Returned on the response so the web side can store it on the node
+    # and back-project the FIX 1a boxes at the right angle. Best-effort.
+    view: dict[str, Any] | None = None
+    if geo_img_bytes:
+        try:
+            from providers import view_estimator as _view
+
+            view = await _view.estimate_view(geo_img_bytes, body.caption)
+            log("info", "extract.view", **view)
+        except Exception as exc:
+            log("info", "extract.view_failed", error=f"{type(exc).__name__}: {exc}")
 
     def _entity_payload(e: llm_provider.ExtractedEntity) -> dict:
         return {
@@ -1321,6 +1341,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     for u in result.updated
                 ],
             },
+            "view": view,
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

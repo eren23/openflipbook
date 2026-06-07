@@ -201,6 +201,12 @@ async def test_extract_localizes_missing_bboxes(
     # localized by the detector; the centre-based detection is stored top-left.
     monkeypatch.setenv("GEOMETRIC_WORLD", "true")
     from providers import detector as _det
+    from providers import view_estimator as _ve
+
+    async def fake_view(_bytes, _caption=""):
+        return {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
+
+    monkeypatch.setattr(_ve, "estimate_view", fake_view)
 
     async def fake_extract(**_kwargs):
         return _llm.EntityExtractionResult(
@@ -223,10 +229,13 @@ async def test_extract_localizes_missing_bboxes(
         session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
     )
     resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
-    bb = _json.loads(resp.body)["result"]["added"][0]["bbox"]
+    payload = _json.loads(resp.body)
+    bb = payload["result"]["added"][0]["bbox"]
     assert bb["x_pct"] == pytest.approx(0.4)  # centre 0.5 minus w/2 0.1
     assert bb["y_pct"] == pytest.approx(0.25)  # centre 0.4 minus h/2 0.15
     assert bb["w_pct"] == pytest.approx(0.2)
+    # FIX 1b: the estimated camera rides on the response (no more top-down assumption)
+    assert payload["view"] == {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
 
 
 async def test_edit_entities_endpoint_returns_plan(
