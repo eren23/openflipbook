@@ -67,15 +67,17 @@ There are **two directions**, and we built only one:
 
 ## 4. Fix plan (root-cause, ordered so each unblocks the next)
 
-- [ ] **FIX 0 — Coordinate overlay layer.** Toggle on every generated image that draws the
-  `ProjectedEntity` rects (label · box · depth · bins) over it. Consumes the node's
-  `expected_layout`. Build now; it lights up as 1–2 feed it geometry. _Closes ROOT 4._
-- [ ] **FIX 1 — Perception pass (`image → world`).** After a render: a VLM/detector pass →
-  `{ view_level, observer estimate (pitch/eye/fov), entities:[{label,bbox}] }`.
-  (a) Force bboxes (make extraction bbox **required**, or run `detect()` on the labels).
-  (b) Classify view-level + rough camera. (c) Back-project with the **right** projection for
-  that camera. → the world finally seeds from real generations, at the correct angle.
-  _Closes ROOT 1._
+- [x] **FIX 0 — Coordinate overlay layer.** ✅ `GeometryOverlay` draws each entity's
+  localized box over the image; `⊞ geo` toggle in the node action row. Live on the
+  Ankh map. _Closes ROOT 4._
+- **FIX 1 — Perception pass (`image → world`).**
+  - [x] **1a — Localize (force bboxes).** ✅ run the detector after extraction → every
+    entity gets a box (Ankh: 0 → **7/7**); the world map seeds (0 → 7 entities). _The
+    keystone — ROOT 1's data gap is closed._
+  - [ ] **1b — Estimate view-level + camera.** A VLM pass → `{ view_level, observer
+    (pitch/eye/fov) }` so we know the render is 2.5D, not top-down.
+  - [ ] **1c — Correct back-projection.** Use 1b's camera to back-project the 1a boxes into
+    world coords at the **right** angle (today they're top-down-assumed, height defaulted).
 - [ ] **FIX 2 — Thread geometry through generation + store it.** When a `world_map` exists:
   compute `scene_view` + `expected_layout` (project the in-frame entities from the observer),
   send them in the generate request (`WORLD_GEOMETRY_GEN` on), store them on the node, turn
