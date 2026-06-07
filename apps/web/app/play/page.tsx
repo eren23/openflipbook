@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import type {
   Citation,
@@ -59,6 +59,8 @@ import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { CodexPanel } from "@/components/PlayPage/CodexPanel";
 import GeometryOverlay from "@/components/PlayPage/GeometryOverlay";
 import WorldMiniMap from "@/components/PlayPage/WorldMiniMap";
+import Breadcrumb from "@/components/PlayPage/Breadcrumb";
+import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
@@ -894,6 +896,12 @@ export default function PlayPage() {
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
+  // Where-am-I trail (root … current) — clicking an ancestor jumps straight
+  // back to it (the leftmost crumb is the map you started from).
+  const breadcrumb = useMemo(
+    () => buildBreadcrumb(page?.nodeId ?? null, history.items),
+    [page?.nodeId, history.items],
+  );
 
   const navigateToTrailIdx = (
     prev: typeof history,
@@ -1796,7 +1804,9 @@ export default function PlayPage() {
       )}
 
       {page?.imageDataUrl && history.items.length > 0 && (
-        <div className="flex items-center justify-between gap-3 text-xs opacity-80">
+        <div className="flex flex-col gap-1.5">
+          <Breadcrumb crumbs={breadcrumb} onJump={selectFromMap} />
+          <div className="flex items-center justify-between gap-3 text-xs opacity-80">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1840,6 +1850,7 @@ export default function PlayPage() {
               ? ` · ${history.items.length} pages explored`
               : ""}
           </span>
+          </div>
         </div>
       )}
 
