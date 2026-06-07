@@ -1,13 +1,17 @@
 "use client";
 
-import type { MapCrop } from "@openflipbook/config";
+import type { MapCrop, WorldEntityGeo } from "@openflipbook/config";
 
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { resolveAbsolutePos, type FrameNode } from "@/lib/world-geometry";
+import { childrenOf, resolveAbsolutePos, type FrameNode } from "@/lib/world-geometry";
 import { worldToView, type ViewBox } from "@/lib/world-overlay";
 
 interface Props {
   sessionId: string;
+  // When set, the inset scopes to the place you're INSIDE: its child-frame
+  // entities in their LOCAL coordinates, not the whole session's world frame.
+  focusId?: string | null;
+  focusLabel?: string | null;
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -17,14 +21,55 @@ const KIND_COLOR: Record<string, string> = {
   creature: "#a855f7",
 };
 
+// Bounds over the entities' OWN pos (no parent-chain resolve) — the local frame
+// of a place's interior, where each child carries a pos local to that place.
+function localBounds(es: WorldEntityGeo[]): MapCrop {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const e of es) {
+    const hw = e.footprint.w / 2;
+    const hd = e.footprint.d / 2;
+    minX = Math.min(minX, e.pos.x - hw);
+    maxX = Math.max(maxX, e.pos.x + hw);
+    minY = Math.min(minY, e.pos.y - hd);
+    maxY = Math.max(maxY, e.pos.y + hd);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
 // The coordinate-frame inset (answers "where is the coordinate system / the
-// middle / how far does it reach"). A top-down view of the WORLD coords — origin
-// (0,0), +x east / +y south axes, each entity as a dot at its (x,y), the bounds
-// (the current extent → expand past them), and the centre. Separate from the
-// (possibly oblique) generated image, which is image-space. Self-contained.
-export default function WorldMiniMap({ sessionId }: Props) {
-  const { entities, bounds } = useWorldMap(sessionId);
+// middle / how far does it reach"). A top-down view: origin (0,0), +x east /
+// +y south, each entity a dot at its (x,y), the bounds, the centre. Separate
+// from the (possibly oblique) generated image, which is image-space.
+// When `focusId` is set, it scopes to that place's interior in LOCAL coords
+// rather than the whole world — otherwise a sub-part shows the city's frame.
+export default function WorldMiniMap({ sessionId, focusId, focusLabel }: Props) {
+  const { entities: worldEntities, bounds: worldBounds } = useWorldMap(sessionId);
+
+  // The place's name: caller override, else the focus entity's own label.
+  const resolvedLabel =
+    focusLabel ?? worldEntities.find((e) => e.id === focusId)?.label ?? "here";
+  const kids = focusId ? childrenOf(worldEntities, focusId) : null;
+
+  // Inside a place whose interior isn't mapped yet → say so, rather than
+  // silently showing the whole city (the bug: the map's coords on a sub-part).
+  if (focusId && worldEntities.length > 0 && (!kids || kids.length === 0)) {
+    return (
+      <div
+        className="pointer-events-none absolute right-2 top-12 rounded-lg border border-black/20 bg-stone-50/95 px-2 py-1.5 text-[10px] text-stone-500 shadow-lg"
+        data-testid="minimap-empty"
+      >
+        inside {resolvedLabel} · no interior mapped yet
+      </div>
+    );
+  }
+
+  const local = !!(kids && kids.length > 0);
+  const entities = local ? kids! : worldEntities;
   if (entities.length === 0) return null;
+  const bounds = local ? localBounds(kids!) : worldBounds;
   const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
 
   const W = 208;
@@ -76,17 +121,17 @@ export default function WorldMiniMap({ sessionId }: Props) {
         <text x={origin.x + 2} y={origin.y + 30} fontSize={8} fill="#2563eb">+y S</text>
         <circle cx={origin.x} cy={origin.y} r={2.5} fill="#111827" />
         <text x={origin.x + 3} y={origin.y - 3} fontSize={8} fill="#111827">0,0</text>
-        {/* centre of the world */}
+        {/* centre of the frame */}
         <line x1={centre.x - 5} y1={centre.y} x2={centre.x + 5} y2={centre.y} stroke="#0f766e" strokeWidth={1} />
         <line x1={centre.x} y1={centre.y - 5} x2={centre.x} y2={centre.y + 5} stroke="#0f766e" strokeWidth={1} />
-        {/* entities at their ABSOLUTE world (x,y) — sub-entities carry a pos
-            local to their place's frame, so resolve up the parent chain. A
-            child gets a smaller dot + a faint tether to its parent so the
-            nesting is visible. */}
+        {/* entities at their (x,y). In the world view, sub-entities carry a pos
+            local to their place's frame → resolve up the parent chain + tether to
+            the parent. In a focused (local) view we ARE the place's frame, so plot
+            the children's local pos directly. */}
         {entities.map((e) => {
-          const abs = resolveAbsolutePos(e.id, byId) ?? e.pos;
+          const abs = local ? e.pos : (resolveAbsolutePos(e.id, byId) ?? e.pos);
           const p = worldToView(abs, crop, view);
-          const nested = !!(e.parent_id && byId.has(e.parent_id));
+          const nested = !local && !!(e.parent_id && byId.has(e.parent_id));
           const parentPos = nested
             ? worldToView(resolveAbsolutePos(e.parent_id!, byId) ?? abs, crop, view)
             : null;
@@ -118,8 +163,9 @@ export default function WorldMiniMap({ sessionId }: Props) {
         })}
       </svg>
       <div className="px-1 text-[9px] text-stone-500">
-        world coords · {entities.length} entities · bounds {Math.round(bounds.w)}×
-        {Math.round(bounds.h)}
+        {local
+          ? `inside ${resolvedLabel} · ${entities.length} parts · local coords`
+          : `world coords · ${entities.length} entities · bounds ${Math.round(bounds.w)}×${Math.round(bounds.h)}`}
       </div>
     </div>
   );

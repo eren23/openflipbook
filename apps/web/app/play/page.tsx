@@ -97,6 +97,10 @@ interface Page {
   // event and from /api/nodes/[id] on permalink replay. Empty when web
   // search returned nothing or is disabled.
   sources?: Citation[];
+  // The view this page was entered from (geo tap). Its focus_id scopes the
+  // minimap to the place you're inside; null/absent on the world map + classic
+  // pages → the minimap shows the whole world frame.
+  sceneView?: SceneView | null;
 }
 
 function newSessionId(): string {
@@ -603,6 +607,9 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     parentId: body.current_node_id || null,
                     sources: evtSources,
+                    sceneView: body.scene_view
+                      ? { ...body.scene_view, node_id: saved.id }
+                      : null,
                     ...(body.mode === "tap" && body.click
                       ? {
                           clickInParent: {
@@ -613,7 +620,15 @@ export default function PlayPage() {
                       : {}),
                   };
                   setPage((prev) =>
-                    prev ? { ...prev, nodeId: saved.id } : prev
+                    prev
+                      ? {
+                          ...prev,
+                          nodeId: saved.id,
+                          sceneView: body.scene_view
+                            ? { ...body.scene_view, node_id: saved.id }
+                            : null,
+                        }
+                      : prev
                   );
                   const newId = saved.id;
                   setHistory((prev) => {
@@ -2050,7 +2065,12 @@ export default function PlayPage() {
                   imgRef={imgRef}
                 />
               )}
-              {geoOverlayOn && <WorldMiniMap sessionId={sessionId} />}
+              {geoOverlayOn && (
+                <WorldMiniMap
+                  sessionId={sessionId}
+                  focusId={page?.sceneView?.focus_id ?? null}
+                />
+              )}
             </div>
 
             {page?.nodeId &&
