@@ -87,6 +87,34 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(ids).not.toContain("palace");
   });
 
+  it("an observer/level override (from the detail popover) wins + re-projects", () => {
+    const map = {
+      entities: [
+        geo("uu", "Unseen University", 30, 18, { height: 15 }),
+        geo("tower", "Tower of Art", 0, 0, { parent_id: "uu", height: 14 }),
+        geo("lib", "Library", 4, 2, { parent_id: "uu", height: 7 }),
+      ],
+      bounds: CROP,
+    };
+    const click = { x_pct: 30 / 100, y_pct: 18 / 80 };
+    const def = geoTapRequest(map, "n1", click, 16 / 9)!;
+    const custom = {
+      ...def.scene_view.observer!,
+      pos: { x: 31, y: 25 },
+      gaze: -Math.PI / 2,
+      pitch: 0.3,
+    };
+    const t = geoTapRequest(map, "n1", click, 16 / 9, {
+      observer: custom,
+      level: "eye",
+    })!;
+    // the popover's adjusted pose + level win over the synthesized ones
+    expect(t.scene_view.observer).toEqual(custom);
+    expect(t.scene_view.level).toBe("eye");
+    // and the layout is re-projected from the overridden pose
+    expect(t.expected_layout).not.toEqual(def.expected_layout);
+  });
+
   it("empty world → null (caller keeps the existing World Mode path)", () => {
     expect(
       geoTapRequest({ entities: [], bounds: CROP }, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9),
