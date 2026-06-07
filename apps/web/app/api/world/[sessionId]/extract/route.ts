@@ -153,17 +153,22 @@ export async function POST(req: Request, { params }: Params) {
         const items = merged.snapshot.entities
           .map((e) => {
             const bbox = e.appearance_bboxes?.[geoNodeId];
-            return bbox
-              ? {
-                  entity_id: e.id,
-                  kind: e.kind,
-                  label: e.name,
-                  bbox,
-                  visual: e.appearance,
-                  state: e.state,
-                  confidence: e.confidence,
-                }
-              : null;
+            // Seed only enterable PLACES with a box that's an actual point
+            // location. A non-place (a compass turtle, a coat of arms) or a box
+            // that's huge (a river spanning the whole map → area ~0.7) or a
+            // speck isn't a world coordinate — it just pollutes the map.
+            if (!bbox || e.kind !== "place") return null;
+            const area = bbox.w_pct * bbox.h_pct;
+            if (area > 0.5 || area < 0.0005) return null;
+            return {
+              entity_id: e.id,
+              kind: e.kind,
+              label: e.name,
+              bbox,
+              visual: e.appearance,
+              state: e.state,
+              confidence: e.confidence,
+            };
           })
           .filter((x): x is NonNullable<typeof x> => x !== null);
         if (items.length > 0) {
