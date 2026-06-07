@@ -45,6 +45,7 @@ export async function GET(req: Request, { params }: Params) {
       aspect_ratio: row.aspect_ratio,
       click_in_parent: row.click_in_parent,
       sources: row.sources,
+      scene_view: row.scene_view,
       created_at: row.created_at,
     })),
   });

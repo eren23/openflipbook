@@ -96,6 +96,20 @@ def test_scene_view_mirror_carries_focus_id() -> None:
     assert sv.focus_id == "g1"
 
 
+def test_scene_view_observer_pose_round_trips() -> None:
+    """The observer pose is persisted on the node + restored on revisit, so the
+    entered angle stays stable. Lock that it survives validation by VALUE, not
+    just by field name (the mirror test checks keys only)."""
+    sv = generate.SceneView.model_validate(_FIXTURE["samples"]["SceneView"])
+    assert sv.observer is not None
+    op = _FIXTURE["samples"]["SceneView"]["observer"]
+    assert sv.observer.pos.x == op["pos"]["x"]
+    assert sv.observer.eye_height == op["eye_height"]
+    assert sv.observer.gaze == op["gaze"]
+    assert sv.observer.pitch == op["pitch"]
+    assert sv.observer.fov == op["fov"]
+
+
 def test_generate_body_carries_geo_round_trip_fields() -> None:
     """GenerateBody must accept + preserve the geo-tap request fields end to end
     (scene_view incl. focus_id, expected_layout) — the path the web proxy
