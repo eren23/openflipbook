@@ -58,7 +58,10 @@ class WorldContextEntity(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     appearance: str
     reference_image_url: str | None = None
-    state: dict[str, Any] = Field(default_factory=dict)
+    # Mirrors EntityState in packages/config: a key/value bag whose values are
+    # primitives only (door=open, lantern=lit, mira_present=true). Kept in this
+    # tightened union — not dict[str, Any] — so the TS↔Py parity gate guards it.
+    state: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
 
 # Geometric world model — Pydantic mirrors of the packages/config TS shapes.
@@ -88,6 +91,10 @@ class SceneView(BaseModel):
     level: str
     observer: ObserverPose | None = None
     map_crop: MapCrop | None = None
+    # The entity you ENTERED to get here (the tapped place's geo id). geo-tap.ts
+    # sets it and the extract route reads it to anchor the child frame; without
+    # it the field was silently dropped on validation, breaking the round-trip.
+    focus_id: str | None = None
 
 
 class ProjectedEntity(BaseModel):
