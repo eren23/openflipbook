@@ -74,10 +74,15 @@ There are **two directions**, and we built only one:
   - [x] **1a — Localize (force bboxes).** ✅ run the detector after extraction → every
     entity gets a box (Ankh: 0 → **7/7**); the world map seeds (0 → 7 entities). _The
     keystone — ROOT 1's data gap is closed._
-  - [ ] **1b — Estimate view-level + camera.** A VLM pass → `{ view_level, observer
-    (pitch/eye/fov) }` so we know the render is 2.5D, not top-down.
-  - [ ] **1c — Correct back-projection.** Use 1b's camera to back-project the 1a boxes into
-    world coords at the **right** angle (today they're top-down-assumed, height defaulted).
+  - [x] **1b — Estimate view-level + camera.** ✅ `view_estimator.estimate_view` →
+    `{ level, projection, pitch_deg }`, rides on the extract response. We now *know*
+    the Ankh map is oblique, not top-down.
+  - [x] **1c — Back-project with the camera.** ✅ oblique/perspective → height from the
+    box's vertical extent (varied, not flat h4); top_down → box-as-footprint. _Honest:
+    relative, not metric (a box wraps a cluster)._
+
+**Perception half (image → world) is DONE: localize + classify camera + back-project.**
+Remaining = the **consume/integrate** half (FIX 2 + 3) — make *generation* geometry-aware.
 - [ ] **FIX 2 — Thread geometry through generation + store it.** When a `world_map` exists:
   compute `scene_view` + `expected_layout` (project the in-frame entities from the observer),
   send them in the generate request (`WORLD_GEOMETRY_GEN` on), store them on the node, turn
