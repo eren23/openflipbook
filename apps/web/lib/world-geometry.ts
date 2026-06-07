@@ -254,14 +254,18 @@ export function neighborsOf(
 // fixed once and stays consistent across views, and an edit ripples to the
 // siblings that share its frame. These pure helpers resolve the hierarchy.
 
-export interface FrameNode {
+// The frame link is just id + parent (childrenOf/siblingsOf need no geometry);
+// resolveAbsolutePos additionally needs the local pos.
+export interface FrameLink {
   id: string;
   parent_id?: string | null;
+}
+export interface FrameNode extends FrameLink {
   pos: WorldVec2;
 }
 
 /** Direct children of a place (its sub-entities), stable-sorted by id. */
-export function childrenOf<T extends FrameNode>(geos: T[], parentId: string): T[] {
+export function childrenOf<T extends FrameLink>(geos: T[], parentId: string): T[] {
   return geos
     .filter((g) => (g.parent_id ?? null) === parentId)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -269,7 +273,7 @@ export function childrenOf<T extends FrameNode>(geos: T[], parentId: string): T[
 
 /** Entities sharing a frame with `id` (same parent), excluding itself — the
  *  "relevant neighbours" an edit ripples to (move one, the others are stale). */
-export function siblingsOf<T extends FrameNode>(geos: T[], id: string): T[] {
+export function siblingsOf<T extends FrameLink>(geos: T[], id: string): T[] {
   const self = geos.find((g) => g.id === id);
   if (!self) return [];
   const parent = self.parent_id ?? null;

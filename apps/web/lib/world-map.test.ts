@@ -141,6 +141,27 @@ describe("blastRadius (which saved scenes go stale)", () => {
     expect(blastRadius([{ op: "add", label: "x", pos: { x: 0, y: 0 } }], {})).toEqual([]);
     expect(blastRadius([{ op: "remove", target: "ghost" }], { geo_a: ["n1"] })).toEqual([]);
   });
+
+  it("P7d — with geos, an edit ripples to the target's frame-siblings", () => {
+    // Tower + Library + Hall all live inside Unseen University; Palace is city-level.
+    const geos = [
+      { id: "geo_uu", parent_id: null },
+      { id: "geo_tower", parent_id: "geo_uu" },
+      { id: "geo_lib", parent_id: "geo_uu" },
+      { id: "geo_palace", parent_id: null },
+    ];
+    const refs = {
+      geo_tower: ["n_tower"],
+      geo_lib: ["n_lib"],
+      geo_palace: ["n_palace"],
+    };
+    const edits: EntityGeoEdit[] = [{ op: "move", target: "geo_tower", dx: 1, dy: 0 }];
+    // Without geos: only the tower's own scenes.
+    expect(blastRadius(edits, refs)).toEqual(["n_tower"]);
+    // With geos: the Library (its University frame-mate) is stale too — but the
+    // unrelated Palace stays untouched.
+    expect(blastRadius(edits, refs, geos)).toEqual(["n_lib", "n_tower"]);
+  });
 });
 
 describe("buildGeoReferences (geo id → node refs)", () => {

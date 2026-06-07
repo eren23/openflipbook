@@ -3,6 +3,7 @@
 import type { MapCrop } from "@openflipbook/config";
 
 import { useWorldMap } from "@/hooks/useWorldMap";
+import { resolveAbsolutePos, type FrameNode } from "@/lib/world-geometry";
 import { worldToView, type ViewBox } from "@/lib/world-overlay";
 
 interface Props {
@@ -24,6 +25,7 @@ const KIND_COLOR: Record<string, string> = {
 export default function WorldMiniMap({ sessionId }: Props) {
   const { entities, bounds } = useWorldMap(sessionId);
   if (entities.length === 0) return null;
+  const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
 
   const W = 208;
   const H = 148;
@@ -77,15 +79,40 @@ export default function WorldMiniMap({ sessionId }: Props) {
         {/* centre of the world */}
         <line x1={centre.x - 5} y1={centre.y} x2={centre.x + 5} y2={centre.y} stroke="#0f766e" strokeWidth={1} />
         <line x1={centre.x} y1={centre.y - 5} x2={centre.x} y2={centre.y + 5} stroke="#0f766e" strokeWidth={1} />
-        {/* entities at their world (x,y) */}
+        {/* entities at their ABSOLUTE world (x,y) — sub-entities carry a pos
+            local to their place's frame, so resolve up the parent chain. A
+            child gets a smaller dot + a faint tether to its parent so the
+            nesting is visible. */}
         {entities.map((e) => {
-          const p = worldToView(e.pos, crop, view);
+          const abs = resolveAbsolutePos(e.id, byId) ?? e.pos;
+          const p = worldToView(abs, crop, view);
+          const nested = !!(e.parent_id && byId.has(e.parent_id));
+          const parentPos = nested
+            ? worldToView(resolveAbsolutePos(e.parent_id!, byId) ?? abs, crop, view)
+            : null;
           return (
             <g key={e.id} data-testid="minimap-dot">
-              <circle cx={p.x} cy={p.y} r={3} fill={KIND_COLOR[e.kind] ?? "#64748b"} />
-              <text x={p.x + 4} y={p.y + 3} fontSize={7} fill="#334155">
-                {e.label.length > 14 ? e.label.slice(0, 13) + "…" : e.label}
-              </text>
+              {parentPos && (
+                <line
+                  x1={parentPos.x}
+                  y1={parentPos.y}
+                  x2={p.x}
+                  y2={p.y}
+                  stroke="#cbd5e1"
+                  strokeWidth={0.5}
+                />
+              )}
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={nested ? 2 : 3}
+                fill={KIND_COLOR[e.kind] ?? "#64748b"}
+              />
+              {!nested && (
+                <text x={p.x + 4} y={p.y + 3} fontSize={7} fill="#334155">
+                  {e.label.length > 14 ? e.label.slice(0, 13) + "…" : e.label}
+                </text>
+              )}
             </g>
           );
         })}

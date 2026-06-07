@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorldState } from "@/lib/world";
 import {
   applyEntityEdits,
+  blastRadius,
   buildGeoReferences,
   getWorldMap,
 } from "@/lib/world-map";
@@ -123,6 +124,18 @@ export async function POST(req: Request, { params }: Params) {
     }
     const payload = (await upstream.json()) as { plan: EntityEditPlan };
     plan = payload.plan;
+    // Nested propagation (P7d): ripple the blast-radius to the edited entities'
+    // frame-siblings — moving one repositions the things around it, so their
+    // saved scenes are stale too. Union with whatever the backend attributed.
+    const rippled = blastRadius(
+      plan.edits as EntityGeoEdit[],
+      references,
+      map.entities,
+    );
+    plan = {
+      ...plan,
+      blast_radius: [...new Set([...plan.blast_radius, ...rippled])].sort(),
+    };
   } catch (err) {
     return NextResponse.json(
       { error: `edit upstream failed: ${(err as Error).message}`, trace_id: traceId },
