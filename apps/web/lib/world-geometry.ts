@@ -4,6 +4,7 @@ import type {
   ObserverPose,
   ProjectedEntity,
   SceneView,
+  ViewProjection,
   WorldEntityGeo,
   WorldVec2,
 } from "@openflipbook/config";
@@ -161,13 +162,26 @@ export function estimateGeoFromBBox(
   bbox: EntityBBox,
   view: SceneView,
   _aspect: number,
+  projection: ViewProjection = "top_down",
 ): GeoEstimate {
   const cx = bbox.x_pct + bbox.w_pct / 2;
   const cy = bbox.y_pct + bbox.h_pct / 2;
   if (view.level === "map" && view.map_crop) {
     const crop: MapCrop = view.map_crop;
+    const pos = { x: crop.x + cx * crop.w, y: crop.y + cy * crop.h };
+    if (projection !== "top_down") {
+      // 2.5D / oblique map (FIX 1c): the box's vertical extent reads as apparent
+      // HEIGHT, not footprint depth — so derive a rough, varied height instead of
+      // a flat default. Approximate: a detection box wraps a cluster, not one wall,
+      // so this is relative, not metric. Footprint falls back to a default.
+      return {
+        pos,
+        footprint: { w: DEFAULT_FOOTPRINT, d: DEFAULT_FOOTPRINT },
+        height: Math.max(bbox.h_pct * crop.h * 0.5, DEFAULT_HEIGHT),
+      };
+    }
     return {
-      pos: { x: crop.x + cx * crop.w, y: crop.y + cy * crop.h },
+      pos,
       footprint: {
         w: Math.max(bbox.w_pct * crop.w, 0.5),
         d: Math.max(bbox.h_pct * crop.h, 0.5),

@@ -28,6 +28,25 @@ describe("estimateGeoFromBBox (seeding bridge)", () => {
     expect(g.footprint.d).toBeCloseTo(12);
   });
 
+  it("FIX 1c — oblique map: the box's height drives entity height, not footprint", () => {
+    const view: SceneView = {
+      node_id: "n",
+      level: "map",
+      observer: null,
+      map_crop: { x: 0, y: 0, w: 100, h: 60 },
+    };
+    const bbox: EntityBBox = { x_pct: 0.4, y_pct: 0.2, w_pct: 0.1, h_pct: 0.4 };
+    const flat = estimateGeoFromBBox(bbox, view, ASPECT, "top_down");
+    const oblique = estimateGeoFromBBox(bbox, view, ASPECT, "oblique");
+    // same ground position…
+    expect(oblique.pos.x).toBeCloseTo(flat.pos.x);
+    expect(oblique.pos.y).toBeCloseTo(flat.pos.y);
+    // …but a tall box → a tall entity (0.4 * 60 * 0.5 = 12), vs the flat default (4)
+    expect(flat.height).toBe(4);
+    expect(oblique.height).toBeCloseTo(12);
+    expect(oblique.footprint.w).toBe(6); // footprint falls back to default
+  });
+
   it("map level: an offset crop shifts the recovered position", () => {
     const view: SceneView = {
       node_id: "n",
