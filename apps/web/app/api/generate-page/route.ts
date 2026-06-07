@@ -10,11 +10,10 @@ export const dynamic = "force-dynamic";
 /**
  * Proxies to the user's Modal-hosted generate endpoint as SSE.
  *
- * Phase 3 — before forwarding, we resolve the session's world-memory
- * registry and attach a slim continuity slice (`world_context`) to the
- * outgoing body so the planner can preserve recurring characters /
- * places without the user having to re-describe them. Mongo lives on
- * this side; the backend stays stateless.
+ * Before forwarding, we resolve the session's world-memory registry and attach
+ * a slim continuity slice (`world_context`) to the outgoing body so the planner
+ * can preserve recurring characters / places without the user having to
+ * re-describe them. Mongo lives on this side; the backend stays stateless.
  */
 export async function POST(req: Request) {
   const modalUrl = process.env.MODAL_API_URL;

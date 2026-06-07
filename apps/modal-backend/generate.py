@@ -70,13 +70,13 @@ class WorldContextEntity(BaseModel):
     appearance: str
     reference_image_url: str | None = None
     # Mirrors EntityState in packages/config: a key/value bag whose values are
-    # primitives only (door=open, lantern=lit, mira_present=true). Kept in this
-    # tightened union — not dict[str, Any] — so the TS↔Py parity gate guards it.
+    # primitives only (door=open, lantern=lit, mira_present=true). The tightened
+    # union (not dict[str, Any]) keeps the TS<->Py schema-parity check meaningful.
     state: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
 
 # Geometric world model — Pydantic mirrors of the packages/config TS shapes.
-# Kept in field-parity with index.ts (the P0 schema-parity gate guards drift).
+# Must stay in field-parity with index.ts; the schema-parity check guards drift.
 class WorldVec2(BaseModel):
     x: float
     y: float
@@ -149,10 +149,10 @@ class GenerateBody(BaseModel):
     # rejected phrase so the VLM picks something different.
     prior_rejected_subject: str | None = None
     session_style_anchor: str | None = None
-    # Phase 3 — world-memory continuity. Web proxy resolves a slim slice
-    # of the session's registry before forwarding; planner injects each
-    # entity's `appearance` into the image prompt so recurring characters
-    # / places stay visually consistent across pages. Capped server-side.
+    # World-memory continuity. Web proxy resolves a slim slice of the session's
+    # registry before forwarding; planner injects each entity's `appearance`
+    # into the image prompt so recurring characters / places stay visually
+    # consistent across pages. Capped server-side.
     world_context: list[WorldContextEntity] = Field(
         default_factory=list, max_length=16
     )
@@ -696,8 +696,8 @@ async def _event_stream(
         #    parent + subject_context for semantic continuity — keeps an
         #    ambiguous click subject in the parent page's domain instead of
         #    drifting to whatever interpretation web search likes most).
-        #    Phase 3: `world_context` carries recurring-entity appearance
-        #    descriptors that the planner injects into the image prompt.
+        #    `world_context` carries recurring-entity appearance descriptors
+        #    that the planner injects into the image prompt.
         await _abort_if_disconnected("pre-plan")
         yield _sse({"type": "status", "stage": "planning"}, trace_id)
         world_context_payload = [e.model_dump() for e in body.world_context]
@@ -1287,13 +1287,12 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             headers={"X-Trace-Id": trace_id},
         )
 
-    # FIX 1a (geometric world): localize the catalogued entities so the world map
-    # can seed and the overlay can draw. The extractor's bbox is best-effort and
-    # often empty on dense images (the live Ankh run got 0); the purpose-built
-    # detector reliably returns one box per label. Detector boxes are centre-based
-    # → store top-left for the EntityBBox shape. Gated + best-effort: a failure
-    # here never blocks the extract response.
-    # Decode the image once for both geometry passes below (FIX 1a + 1b).
+    # Localize the catalogued entities so the world map can seed and the overlay
+    # can draw. The extractor's bbox is best-effort and often empty on dense
+    # images; the purpose-built detector reliably returns one box per label.
+    # Detector boxes are centre-based → store top-left for the EntityBBox shape.
+    # Gated + best-effort: a failure here never blocks the extract response.
+    # Decode the image once for both geometry passes (localize + view-estimate).
     geo_img_bytes = b""
     if _geometric_world_on():
         try:
@@ -1307,9 +1306,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             from providers import detector as _detector
 
             def _box_from_det(d: Detection) -> dict[str, float]:
-                # Centre-based → top-left, CLIPPED to the frame on all four edges
-                # (a naive `max(0, c - s/2)` leaves w/h unclipped, so an edge box
-                # overflows past 1.0 or shifts its recomputed centre). codex #2.
+                # Centre-based → top-left, clipped to the frame on all four edges.
+                # A naive `max(0, c - s/2)` leaves w/h unclipped, so an edge box
+                # overflows past 1.0 or shifts its recomputed centre.
                 cx, cy = float(d["x_pct"]), float(d["y_pct"])
                 bw, bh = float(d["w_pct"]), float(d["h_pct"])
                 x1, y1 = max(0.0, cx - bw / 2.0), max(0.0, cy - bh / 2.0)
@@ -1321,9 +1320,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     "h_pct": max(0.0, y2 - y1),
                 }
 
-            # Localize NEW *and* recurring entities (codex #3): a re-appearance
-            # must keep a per-node box or it drops out of geometry + the overlay
-            # every time it's seen again. One detector call covers both lists.
+            # Localize NEW *and* recurring entities: a re-appearance must keep a
+            # per-node box or it drops out of geometry + the overlay every time
+            # it's seen again. One detector call covers both lists.
             need_added = [e for e in result.added if not e.bbox]
             need_updated = [u for u in result.updated if not u.bbox]
             labels = [e.name for e in need_added] + [
@@ -1359,9 +1358,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         except Exception as exc:  # best-effort — geometry localization is optional
             log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
 
-    # FIX 1b — estimate the camera so we stop assuming top-down (the live Ankh map
-    # is 2.5D). Returned on the response so the web side can store it on the node
-    # and back-project the FIX 1a boxes at the right angle. Best-effort.
+    # Estimate the camera instead of assuming top-down (maps are often 2.5D).
+    # Returned on the response so the web side can store it on the node and
+    # back-project the localized boxes at the right angle. Best-effort.
     view: ViewEstimate | None = None
     if geo_img_bytes:
         try:

@@ -16,9 +16,9 @@ interface Props {
 const MAX_LEN = 240;
 
 /**
- * Inline replacement for the old `window.prompt` on ⌘/Ctrl-click. Floats
- * a small text bubble anchored above the click point inside the image
- * figure. Enter submits, Esc cancels, click-outside cancels.
+ * Inline hint input for ⌘/Ctrl-click. Floats a small text bubble anchored
+ * above the click point inside the image figure. Enter submits, Esc cancels,
+ * click-outside cancels.
  */
 export function HintPrompt({
   xPx,

@@ -131,7 +131,7 @@ class Neighbor:
 # wire format is JSON. Any other kind emitted by the VLM is dropped on parse.
 ENTITY_KINDS = ("person", "place", "item", "creature")
 
-# Relative scale buckets for the scale-space map (M3). Composed into an integer
+# Relative scale buckets for the scale-space map. Composed into an integer
 # scale-level (component=-1, peer=0, container=+1) for zoom level-of-detail.
 SCALE_KINDS = ("component", "peer", "container")
 
@@ -164,8 +164,8 @@ class EntityUpdate:
     match_name: str
     changes: dict[str, Any]
     confidence: float
-    # Re-localized box on the current node (codex #3). The VLM doesn't emit this;
-    # the extract endpoint's detector fills it so recurring entities keep a
+    # Re-localized box on the current node. The VLM doesn't emit this; the
+    # extract endpoint's detector fills it so recurring entities keep a
     # per-node bbox for geometry + the overlay.
     bbox: dict[str, float] | None = None
 
@@ -347,13 +347,12 @@ def _supports_online_suffix(model: str) -> bool:
     return "gemini" not in model.lower()
 
 
-# Phase 7d — model-swap robustness. `response_format={"type": "json_object"}`
-# isn't universally supported on OpenRouter: most Mistral / Grok / older
-# Llama slugs silently strip it and return freeform text. The downstream
-# `_safe_json` then collapses the response to `{}` — a silent regression of
-# the entire world-memory pipeline + planner JSON contract. Branch by model
-# family so a deployer can swap to any of the known-good families without
-# losing structured output.
+# `response_format={"type": "json_object"}` isn't universally supported on
+# OpenRouter: most Mistral / Grok / older Llama slugs silently strip it and
+# return freeform text, which `_safe_json` then collapses to `{}` — silently
+# breaking the world-memory pipeline + planner JSON contract. Branch by model
+# family so a deployer can swap to any known-good family without losing
+# structured output.
 _STRUCTURED_OUTPUT_FAMILIES = ("gemini", "gpt", "claude", "qwen")
 
 # Instruct tunes that follow forced tool-calls more reliably than JSON mode.
@@ -374,12 +373,9 @@ def _resolve_structured_tier(provider: str, model: str) -> str:
     fidelity). `LLM_STRUCTURED_OUTPUT` (default ``auto``) lets an operator pin
     a tier explicitly. This is a pure substring ladder — data, not a registry.
 
-    Back-compat is load-bearing: on the **openrouter** provider a known-good
-    family resolves to ``json_object`` exactly as today, and everything else
-    falls to ``prompt`` (which today already happens via the empty
-    response_format, just without the repair pass). The ``tool`` rung is
-    reserved for direct/custom providers so the default deployment is byte
-    unchanged.
+    On the **openrouter** provider a known-good family resolves to
+    ``json_object`` and everything else falls to ``prompt``. The ``tool`` rung
+    is reserved for direct/custom providers.
     """
     override = os.environ.get("LLM_STRUCTURED_OUTPUT", "auto").strip().lower()
     if override and override != "auto":
@@ -1889,10 +1885,9 @@ def _coerce_extracted_entity(entry: Any) -> ExtractedEntity | None:
         return None
     kind = str(entry.get("kind", "")).strip().lower()
     name = str(entry.get("name", "")).strip()[:120]
-    # `appearance` is the descriptor Phase 3 will inject into image-gen
-    # prompts. Cap it so a runaway VLM doesn't blow up the planner's
-    # ~120-word prompt budget when multiple entities are stacked into
-    # the same composed_prompt.
+    # `appearance` is the descriptor injected into image-gen prompts. Cap it
+    # so a runaway VLM doesn't blow up the planner's ~120-word prompt budget
+    # when multiple entities are stacked into the same composed_prompt.
     appearance = str(entry.get("appearance", "")).strip()[:280]
     if kind not in ENTITY_KINDS or not name or not appearance:
         return None
@@ -1942,9 +1937,8 @@ def _coerce_entity_update(entry: Any) -> EntityUpdate | None:
     record, the VLM is still asked to emit an `updated` entry so the
     merge layer can bump `last_seen_node_id`, append to `appears_on_node_ids`,
     and keep the entity inside the recency-based prior slice on the next
-    extraction. Dropping these empty pings was the original Phase 1 bug —
-    recurring entities silently fell off the slice and got re-added as
-    duplicates.
+    extraction. Dropping these empty pings makes recurring entities fall off
+    the slice and get re-added as duplicates.
     """
     if not isinstance(entry, dict):
         return None
@@ -2023,7 +2017,7 @@ def _safe_json(raw: str) -> dict[str, Any]:
     return {}
 
 
-# ── P5: natural-language editing of the geometric world map ───────────────────
+# ── Natural-language editing of the geometric world map ───────────────────────
 # Turn an instruction ("move the lighthouse north", "make the tower taller") into
 # validated structured edits to WorldEntityGeo entities, plus the blast-radius
 # (which saved scenes now reference an edited entity → re-stage candidates). The

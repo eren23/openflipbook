@@ -16,7 +16,7 @@ interface Props {
   /** Fired when the user clicks a chip — focus codex entry / open panel. */
   onSelect?: (entityId: string) => void;
   /** The rendered <img>; lets the chips track the object-contain content rect
-   *  so dots land on the image, not the letterboxed wrapper (codex #8). */
+   *  so dots land on the image, not the letterboxed wrapper. */
   imgRef?: RefObject<HTMLImageElement | null>;
 }
 

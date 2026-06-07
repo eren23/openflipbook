@@ -31,7 +31,7 @@ export interface GeoTap {
  * Close the loop (the plan's "tap a building → enter it geometrically"): given
  * the top-down world map + a normalized tap, route the click → an observer pose,
  * then project the in-frame entities into an `expected_layout` the generator
- * steers by (P3) and the grounding loop audits against (P4).
+ * steers by and the grounding loop audits against.
  *
  * Returns null when the tap doesn't resolve to an enterable scene (empty world,
  * or a submap/explainer tap) — the caller then falls back to the existing World
@@ -55,14 +55,14 @@ export function geoTapRequest(
   if (route.kind !== "scene") return null;
 
   // An entered scene shows the place's INTERIOR, never the city around it.
-  //   - Re-enter (P7c): we have the saved interior — its sub-entities seeded into
-  //     the child frame on a prior visit — so steer by THOSE (resolved local →
+  //   - Re-enter: we have the saved interior — its sub-entities seeded into the
+  //     child frame on a prior visit — so steer by THOSE (resolved local →
   //     absolute) and the inside stays consistent across visits.
   //   - First enter: we know nothing inside yet, so steer by NOTHING and let the
   //     model render the place freely. Projecting the city's *other* landmarks
-  //     here is exactly what wrongly drew the Brass Bridge inside the University
-  //     (user-reported "parts outside my image shown in my image"). The child
-  //     frame still seeds from this scene's extraction (keyed on focus_id below).
+  //     here is what wrongly draws e.g. the Brass Bridge inside the University
+  //     ("parts outside my image shown in my image"). The child frame still
+  //     seeds from this scene's extraction (keyed on focus_id below).
   const kids = childrenOf(map.entities, route.focus_id);
   const byId = new Map(map.entities.map((e) => [e.id, e]));
   const layoutEntities =
@@ -76,7 +76,7 @@ export function geoTapRequest(
       observer: route.observer,
       map_crop: null,
       // The place you entered: its geo id anchors the child frame the entered
-      // scene's sub-entities seed into (P7b).
+      // scene's sub-entities seed into.
       focus_id: route.focus_id,
     },
     expected_layout: projectScene(layoutEntities, route.observer, aspect),

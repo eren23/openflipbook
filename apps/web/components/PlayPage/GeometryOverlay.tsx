@@ -10,7 +10,7 @@ interface Props {
   entities: Pick<Entity, "id" | "name" | "kind" | "appearance_bboxes">[];
   nodeId: string;
   /** The rendered <img>; lets the overlay track the object-contain content rect
-   *  so boxes land on the image, not the letterboxed wrapper (codex #8). */
+   *  so boxes land on the image, not the letterboxed wrapper. */
   imgRef?: RefObject<HTMLImageElement | null>;
 }
 
@@ -21,7 +21,7 @@ const KIND_COLOR: Record<string, string> = {
   creature: "#a855f7",
 };
 
-// Debug/inspection layer (FIX 0): draws the localized coordinate box for each
+// Debug/inspection layer: draws the localized coordinate box for each
 // entity on this node, straight over the image. Boxes are 0..1 normalized
 // (top-left) in image space, so positioning by % overlays the image exactly.
 // Toggled by the caller; purely presentational + pointer-transparent.

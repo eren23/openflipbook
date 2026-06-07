@@ -11,8 +11,8 @@ import type {
 import { cropEntities, projectScene } from "./world-geometry";
 
 /**
- * Pure, coordinate-driven click routing (Phase 6). Given the world map, the
- * current scene view and a normalized click, decide what entering means:
+ * Pure, coordinate-driven click routing. Given the world map, the current scene
+ * view and a normalized click, decide what entering means:
  *   - "scene": the tap landed on an enterable PLACE → stand in front of it and
  *     look at it (the level + observer pose are synthesized from its geometry).
  *   - "submap": the tap landed on empty map area that still holds a cluster →

@@ -46,10 +46,9 @@ interface AtlasViewProps {
   nodes: AtlasNode[];
   latestNodeId: string | null;
   rootTitle: string;
-  // Phase 4 — world-memory pins overlay. Each tile gets dots for the
-  // entities that appear on it. Server-component hydrates these from
-  // Mongo (`getWorldState`); the prop is optional so the existing tests
-  // and pre-Phase-4 sessions render unchanged.
+  // World-memory pins overlay. Each tile gets dots for the entities that
+  // appear on it. Server-component hydrates these from Mongo (`getWorldState`);
+  // the prop is optional so sessions without entity data render unchanged.
   entities?: AtlasEntity[];
 }
 

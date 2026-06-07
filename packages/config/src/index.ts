@@ -3,7 +3,7 @@ export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 export type GenerateMode = "query" | "tap" | "edit" | "expand";
 
 // Scale of a node's subject relative to its parent's focal subject, for the
-// scale-space world map + zoom level-of-detail (M3). Composes into an integer
+// scale-space world map + zoom level-of-detail. Composes into an integer
 // scale-level: component = -1, peer = 0, container = +1.
 export type ScaleKind = "component" | "peer" | "container";
 
@@ -63,11 +63,11 @@ export interface GenerateRequestBody {
   // visual style for ALL pages in the session, overriding the per-hop
   // style derived from the parent. Pin a page in the UI to populate.
   session_style_anchor?: string;
-  // Phase 3 — world-memory continuity injection. The web proxy at
-  // /api/generate-page resolves a slim slice of the session's world_state
-  // before forwarding upstream. Each entry's `appearance` gets injected
-  // into the planner's prompt so recurring characters / places preserve
-  // their look across pages without the user having to re-describe them.
+  // World-memory continuity injection. The web proxy at /api/generate-page
+  // resolves a slim slice of the session's world_state before forwarding
+  // upstream. Each entry's `appearance` gets injected into the planner's prompt
+  // so recurring characters / places preserve their look across pages without
+  // the user having to re-describe them.
   world_context?: WorldContextEntity[];
   // Image conditioning — an ordered stack of reference images (data URLs) the
   // generator blends so the page belongs to the same world: region crop (the
@@ -349,9 +349,9 @@ export type EntityKind = "person" | "place" | "item" | "creature";
 export type EntityState = Record<string, string | number | boolean>;
 
 // 0..1 normalized bounding box of an entity inside a page image. Top-left
-// origin. Used by the in-image hover-chip overlay (Phase 4) to position
-// the tooltip; an entity's appearance count is independent of how many
-// of its appearances have a bbox.
+// origin. Used by the in-image hover-chip overlay to position the tooltip; an
+// entity's appearance count is independent of how many of its appearances have
+// a bbox.
 export interface EntityBBox {
   x_pct: number;
   y_pct: number;
@@ -497,8 +497,8 @@ export interface ProjectedEntity {
   size: string;
 }
 
-// What the camera estimator (FIX 1b) reads out of a generated image, so the
-// geometry layer stops assuming top-down. `projection` decides how a detection
+// What the camera estimator reads out of a generated image, so the geometry
+// layer doesn't assume top-down. `projection` decides how a detection
 // box back-projects: top_down → the box is a footprint; oblique/perspective →
 // its vertical extent reads as apparent height.
 export type ViewProjection = "top_down" | "oblique" | "perspective";
@@ -540,9 +540,9 @@ export interface EntityUpdate {
   match_name: string;
   changes: Partial<Pick<Entity, "name" | "appearance" | "facts" | "state" | "aliases">>;
   confidence: number;
-  // Re-localized box on THIS node (codex #3): a recurring entity is detected
-  // again so it keeps an appearance_bbox per node — without it, geometry/overlay
-  // drop the entity on every re-appearance. Omitted when localization fails.
+  // Re-localized box on THIS node: a recurring entity is detected again so it
+  // keeps an appearance_bbox per node — without it, geometry/overlay drop the
+  // entity on every re-appearance. Omitted when localization fails.
   bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
 }
 
@@ -576,10 +576,8 @@ export interface WorldStateSnapshot {
   updated_at: string;
 }
 
-// User-override CRUD on the codex. Ships in Phase 5 of the plan; types
-// land now so the read surface (Phase 2) is wire-compatible from day one.
-// `undo_delete` (Phase 7b) restores a soft-deleted entity within the
-// undo window the codex panel exposes.
+// User-override CRUD on the codex. `undo_delete` restores a soft-deleted entity
+// within the undo window the codex panel exposes.
 export type WorldEntityMutation =
   | { op: "create"; entity: Omit<Entity, "id" | "updated_at"> }
   | { op: "rename"; id: string; name: string; aliases?: string[] }
@@ -589,7 +587,7 @@ export type WorldEntityMutation =
   | { op: "pin"; id: string; pinned: boolean }
   | { op: "set_appearance"; id: string; appearance: string; reference_image_url?: string | null };
 
-// ── Geometry edits (Phase 5): NL-editable map ────────────────────────────────
+// ── Geometry edits: NL-editable map ──────────────────────────────────────────
 // A structured edit to the geometric world map (WorldEntityGeo by id). These are
 // what `edit_entities_nl` turns a natural-language instruction into ("move the
 // lighthouse north" → {op:"move", target, dx, dy}). `target` is a WorldEntityGeo

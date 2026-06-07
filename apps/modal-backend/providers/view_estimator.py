@@ -1,5 +1,5 @@
-"""Estimate a generated image's CAMERA so the geometry layer stops assuming
-top-down (the live Ankh map is 2.5D, not flat). One VLM call →
+"""Estimate a generated image's CAMERA so the geometry layer doesn't assume
+top-down (many maps are 2.5D, not flat). One VLM call →
 {level, projection, pitch_deg}. Mirrors detector.detect: Gemini-default model,
 tolerant parse that falls back to a top-down map and never raises.
 """
@@ -25,7 +25,7 @@ class ViewEstimate(TypedDict):
 LEVELS: tuple[ViewLevel, ...] = ("map", "building", "street", "eye")
 PROJECTIONS: tuple[ViewProjection, ...] = ("top_down", "oblique", "perspective")
 
-# Safe default: a flat top-down map (what the old code blindly assumed).
+# Safe default when estimation fails: a flat top-down map.
 DEFAULT_VIEW: ViewEstimate = {"level": "map", "projection": "top_down", "pitch_deg": -90.0}
 
 

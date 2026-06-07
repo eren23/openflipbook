@@ -105,7 +105,7 @@ def diff(
     pos_agree = sum(1 for m in matched if m.pos_ok) / len(matched) if matched else 0.0
     score = 0.5 * presence + 0.3 * mean_iou + 0.2 * pos_agree
     # Penalize unexpected detections — the layout is the spec, so a clean match plus
-    # a hallucinated extra object must not score a perfect 1.0 (codex-audit #6).
+    # a hallucinated extra object must not score a perfect 1.0.
     if matched or extra:
         score *= 1.0 - 0.5 * (len(extra) / (len(matched) + len(extra)))
     return GroundingReport(
