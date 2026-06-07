@@ -57,6 +57,7 @@ import { Quickbar } from "@/components/PlayPage/Quickbar";
 import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { CodexPanel } from "@/components/PlayPage/CodexPanel";
 import GeometryOverlay from "@/components/PlayPage/GeometryOverlay";
+import WorldMiniMap from "@/components/PlayPage/WorldMiniMap";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
@@ -1974,6 +1975,7 @@ export default function PlayPage() {
               {geoOverlayOn && page?.nodeId && (
                 <GeometryOverlay nodeId={page.nodeId} entities={worldState.entities} />
               )}
+              {geoOverlayOn && <WorldMiniMap sessionId={sessionId} />}
             </div>
 
             {page?.nodeId &&
