@@ -5,7 +5,7 @@
     "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "heading", "visual", "state", "confidence", "source", "updated_at"],
     "ObserverPose": ["pos", "eye_height", "gaze", "pitch", "fov"],
     "MapCrop": ["x", "y", "w", "h"],
-    "SceneView": ["node_id", "level", "observer", "map_crop"],
+    "SceneView": ["node_id", "level", "observer", "map_crop", "focus_id"],
     "ProjectedEntity": ["id", "label", "x_pct", "y_pct", "w_pct", "h_pct", "depth", "h_pos", "v_pos", "size"],
     "WorldMapSnapshot": ["session_id", "entities", "bounds", "schema_version", "updated_at"]
   },
@@ -34,7 +34,8 @@
       "node_id": "n1",
       "level": "eye",
       "observer": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
-      "map_crop": null
+      "map_crop": null,
+      "focus_id": "g1"
     },
     "ProjectedEntity": {
       "id": "g1",

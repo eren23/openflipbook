@@ -41,6 +41,7 @@ const sceneView: SceneView = {
   level: "eye",
   observer: observerPose,
   map_crop: null,
+  focus_id: "g1",
 };
 const projectedEntity: ProjectedEntity = {
   id: "g1",

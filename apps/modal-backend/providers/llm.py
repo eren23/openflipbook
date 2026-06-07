@@ -150,7 +150,9 @@ class ExtractedEntity:
     appearance: str
     aliases: list[str]
     facts: list[str]
-    state: dict[str, Any]
+    # Mirrors EntityState in packages/config: primitive-only key/value bag
+    # (the builder below already drops non-primitives), not freeform JSON.
+    state: dict[str, str | int | float | bool]
     confidence: float
     bbox: dict[str, float] | None = None
 
@@ -1909,7 +1911,7 @@ def _coerce_extracted_entity(entry: Any) -> ExtractedEntity | None:
         else []
     )
     state_raw = entry.get("state", {}) or {}
-    state: dict[str, Any] = {}
+    state: dict[str, str | int | float | bool] = {}
     if isinstance(state_raw, dict):
         for k, v in state_raw.items():
             if not isinstance(k, str):
@@ -1974,7 +1976,8 @@ def _coerce_entity_update(entry: Any) -> EntityUpdate | None:
                 str(a).strip() for a in v if isinstance(a, str) and a.strip()
             ]
         elif k == "state" and isinstance(v, dict):
-            state: dict[str, Any] = {}
+            # EntityState sub-bag (primitive-only), mirroring packages/config.
+            state: dict[str, str | int | float | bool] = {}
             for sk, sv in v.items():
                 if isinstance(sk, str) and isinstance(sv, (str, int, float, bool)):
                     state[sk] = sv
