@@ -80,6 +80,10 @@ class GenerateBody(BaseModel):
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
+    # World Mode semi-autonomy already resolved the tap client-side; this carries
+    # the resolver's spatial-anchor note back so the planner can keep the
+    # entered place's neighbours where the parent map had them.
+    prefetched_surroundings: str | None = None
     # Multi-turn refer (SAMA / MM-Conv pattern): when the user rejects a
     # resolved subject and taps again nearby, the client forwards the
     # rejected phrase so the VLM picks something different.
@@ -97,7 +101,30 @@ class GenerateBody(BaseModel):
     # `condition_roles` labels each url in order. Built client-side. Capped.
     condition_image_urls: list[str] | None = Field(default=None, max_length=4)
     condition_roles: list[str] | None = None
+    # World Mode (gated server-side by the WORLD_MODE env). When on, a tap
+    # ENTERS the tapped place (scene / closer sub-map) instead of explaining a
+    # topic. `render_mode` is an explicit framing override; otherwise the click
+    # classifier's `enter_as` decides. `autonomy` is carried for symmetry.
+    world_mode: bool = False
+    autonomy: str = "auto"
+    render_mode: str | None = None
     trace_id: str | None = None
+
+
+# World Mode is gated behind an env flag (default off) so it's a no-op in prod
+# until a deployer turns it on — like EXPAND_MAP_PAN / IMAGE_CONDITIONING.
+def _world_mode_on(requested: bool) -> bool:
+    return bool(requested) and os.environ.get("WORLD_MODE", "false").lower() in (
+        "1", "true", "yes",
+    )
+
+
+# The click classifier's `enter_as` → the planner's render mode.
+_ENTER_AS_TO_RENDER: dict[str, str] = {
+    "scene": "place_scene",
+    "submap": "place_submap",
+    "explainer": "explainer",
+}
 
 
 def _sse(data: dict, trace_id: str | None = None) -> bytes:
@@ -431,6 +458,16 @@ async def _event_stream(
         # the click subject IS in the parent's domain — fed to the planner
         # to prevent semantic drift on ambiguous phrases like "Memory Bank".
         subject_context: str | None = None
+        # World Mode render framing: an explicit request override wins; else the
+        # click classifier's `enter_as` (set below) decides; else today's
+        # explainer. Empty string = "not yet decided / fall back to explainer".
+        effective_world_mode = _world_mode_on(body.world_mode)
+        render_mode = (body.render_mode or "").strip().lower()
+        if render_mode not in ("place_scene", "place_submap", "explainer"):
+            render_mode = ""
+        # World Mode spatial anchor — what's around the tapped spot + directions,
+        # threaded into the planner so the entered place keeps its neighbours.
+        surroundings_for_plan: str | None = None
         if body.mode == "tap" and body.click and body.image:
             # Trust-but-verify on client-supplied prefetch hints. The web
             # client computes these via the same VLM the backend would call,
@@ -452,11 +489,13 @@ async def _event_stream(
                 body.prefetched_subject_context, 400
             )
             cleaned_user_hint = _sanitize_hint(body.click_hint, 240)
+            cleaned_surroundings = _sanitize_hint(body.prefetched_surroundings, 240)
             prefetched_ok = bool(cleaned_subject)
             if prefetched_ok:
                 effective_query = cleaned_subject
                 style_anchor = cleaned_style or None
                 subject_context = cleaned_subject_context or None
+                surroundings_for_plan = cleaned_surroundings or None
                 yield _sse(
                     {
                         "type": "status",
@@ -476,7 +515,17 @@ async def _event_stream(
                     output_locale=body.output_locale,
                     user_hint=cleaned_user_hint or None,
                     prior_rejected_subject=body.prior_rejected_subject,
+                    world_mode=effective_world_mode,
+                    # Clarifiers are surfaced client-side before this generate
+                    # call, so the in-band resolve only needs the classification.
+                    autonomy="auto",
                 )
+                # In world mode, let the classifier's read pick the framing
+                # unless the request already pinned one.
+                if effective_world_mode and not render_mode:
+                    render_mode = _ENTER_AS_TO_RENDER.get(
+                        resolution.enter_as, "explainer"
+                    )
                 if resolution.subject:
                     effective_query = resolution.subject
                     yield _sse(
@@ -508,6 +557,8 @@ async def _event_stream(
                     style_anchor = resolution.style
                 if resolution.subject_context:
                     subject_context = resolution.subject_context
+                if resolution.surroundings:
+                    surroundings_for_plan = resolution.surroundings
 
             # Fold the user's free-form note into the planner query so the next
             # page reflects their angle even when the prefetched-subject path
@@ -546,6 +597,8 @@ async def _event_stream(
             parent_query=body.parent_query,
             subject_context=subject_context,
             world_context=world_context_payload,
+            render_mode=render_mode or "explainer",
+            surroundings=surroundings_for_plan,
         )
 
         composed_prompt = plan.prompt
@@ -569,6 +622,27 @@ async def _event_stream(
             trace_id,
         )
 
+        # World Mode sub-map: pixel-continue the click region with a continuation
+        # model (Kontext) so the closer map keeps the parent's streets/buildings
+        # in place instead of re-planning a fresh image. Needs the region crop.
+        region_ref: str | None = None
+        if body.condition_image_urls:
+            roles = body.condition_roles or []
+            for i, url in enumerate(body.condition_image_urls):
+                if i < len(roles) and roles[i] == "region":
+                    region_ref = url
+                    break
+            if region_ref is None:
+                region_ref = body.condition_image_urls[0]
+        use_continuation = render_mode == "place_submap" and region_ref is not None
+        zoom_instruction = (
+            f"Zoom in and draw a closer map of {plan.page_title} — the area at the "
+            "centre of this image. Keep the same hand-drawn cartographic style, "
+            "palette and line work; keep the existing streets, buildings and "
+            "landmarks where they are and continue them outward; label its "
+            "sub-areas. A closer continuation of this map, not a new scene."
+        )
+
         # 3. Image gen — with progressive fast-tier draft.
         #
         # When the user picked balanced/pro the cheap nano-banana model is
@@ -589,6 +663,9 @@ async def _event_stream(
             # tiers to one model, so a draft would just regenerate the same
             # image — skip it.
             and image_provider.active_provider() == "fal"
+            # Sub-map continuation is a single Kontext call on the region crop;
+            # a nano-banana text draft would just be an unrelated preview.
+            and not use_continuation
         )
         draft_task: _asyncio.Task | None = None
         if wants_draft:
@@ -610,21 +687,31 @@ async def _event_stream(
             and body.condition_image_urls
         ):
             cond_refs = body.condition_image_urls
+            # Entering a place reframes the region ref ("reveal the fuller place
+            # within") vs. an explainer tap ("reveal what is inside").
+            cond_mode = "place_scene" if render_mode == "place_scene" else body.mode
             main_prompt = (
                 image_provider.conditioning_preamble(
-                    body.condition_roles or [], body.mode
+                    body.condition_roles or [], cond_mode
                 )
                 + composed_prompt
             )
-        main_task = _asyncio.create_task(
-            image_provider.generate_image(
-                prompt=main_prompt,
-                aspect_ratio=body.aspect_ratio,
-                tier=body.image_tier,
-                model_override=body.image_model,
-                reference_urls=cond_refs,
+        if use_continuation and region_ref is not None:
+            main_task = _asyncio.create_task(
+                image_edit_provider.continue_image(
+                    region_ref, zoom_instruction, model_override=body.image_model
+                )
             )
-        )
+        else:
+            main_task = _asyncio.create_task(
+                image_provider.generate_image(
+                    prompt=main_prompt,
+                    aspect_ratio=body.aspect_ratio,
+                    tier=body.image_tier,
+                    model_override=body.image_model,
+                    reference_urls=cond_refs,
+                )
+            )
         # Drive both tasks to completion. If the draft finishes first, emit
         # `progress`; if the main finishes first, drop the draft.
         if draft_task is not None:
@@ -689,7 +776,7 @@ async def _event_stream(
                 "image_model": result.model,
                 "prompt_author_model": text_model,
                 "session_id": body.session_id,
-                "final_prompt": composed_prompt,
+                "final_prompt": zoom_instruction if use_continuation else composed_prompt,
                 "sources": sources_payload,
             },
             trace_id,
@@ -824,6 +911,10 @@ class ResolveClickBody(BaseModel):
     parent_query: str | None = None
     output_locale: str | None = None
     prior_rejected_subject: str | None = None
+    # World Mode: ask the resolver to also classify what was tapped and (in
+    # "semi") propose clarifying questions to surface before entering.
+    world_mode: bool = False
+    autonomy: str = "auto"
     trace_id: str | None = None
 
 
@@ -849,6 +940,8 @@ async def resolve_click(req: Request, body: ResolveClickBody):
             parent_query=body.parent_query or "",
             output_locale=body.output_locale,
             prior_rejected_subject=body.prior_rejected_subject,
+            world_mode=_world_mode_on(body.world_mode),
+            autonomy=(body.autonomy or "auto"),
         )
     except Exception as exc:
         record_error("resolve_click", exc)
@@ -879,6 +972,9 @@ async def resolve_click(req: Request, body: ResolveClickBody):
                 if resolution.bbox is not None
                 else None
             ),
+            "enter_as": resolution.enter_as,
+            "clarifiers": resolution.clarifiers,
+            "surroundings": resolution.surroundings,
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},
