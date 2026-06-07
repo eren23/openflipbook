@@ -247,3 +247,54 @@ export function neighborsOf(
   );
   return others.slice(0, k);
 }
+
+// ── Nested frames ────────────────────────────────────────────────────────────
+// A place you ENTER (the Unseen University) is a sub-world: its children carry
+// `parent_id` and a pos LOCAL to that frame, so the place's internal layout is
+// fixed once and stays consistent across views, and an edit ripples to the
+// siblings that share its frame. These pure helpers resolve the hierarchy.
+
+export interface FrameNode {
+  id: string;
+  parent_id?: string | null;
+  pos: WorldVec2;
+}
+
+/** Direct children of a place (its sub-entities), stable-sorted by id. */
+export function childrenOf<T extends FrameNode>(geos: T[], parentId: string): T[] {
+  return geos
+    .filter((g) => (g.parent_id ?? null) === parentId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Entities sharing a frame with `id` (same parent), excluding itself — the
+ *  "relevant neighbours" an edit ripples to (move one, the others are stale). */
+export function siblingsOf<T extends FrameNode>(geos: T[], id: string): T[] {
+  const self = geos.find((g) => g.id === id);
+  if (!self) return [];
+  const parent = self.parent_id ?? null;
+  return geos.filter((g) => g.id !== id && (g.parent_id ?? null) === parent);
+}
+
+/** Walk the parent chain, summing local positions, to get an absolute world
+ *  position. Cycle-guarded. Translation-only nesting (no per-frame scale yet) —
+ *  honest, and enough for the minimap/atlas to show where a sub-entity sits
+ *  inside its place. */
+export function resolveAbsolutePos(
+  id: string,
+  byId: Map<string, FrameNode>,
+): WorldVec2 | null {
+  let node: FrameNode | undefined = byId.get(id);
+  if (!node) return null;
+  let x = 0;
+  let y = 0;
+  const seen = new Set<string>();
+  while (node && !seen.has(node.id)) {
+    seen.add(node.id);
+    x += node.pos.x;
+    y += node.pos.y;
+    const pid: string | null = node.parent_id ?? null;
+    node = pid ? byId.get(pid) : undefined;
+  }
+  return { x, y };
+}
