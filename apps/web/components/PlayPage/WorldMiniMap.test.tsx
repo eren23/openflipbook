@@ -24,6 +24,16 @@ function ent(id: string, label: string, x: number, y: number): WorldEntityGeo {
   };
 }
 
+function childEnt(
+  id: string,
+  label: string,
+  x: number,
+  y: number,
+  parentId: string,
+): WorldEntityGeo {
+  return { ...ent(id, label, x, y), parent_id: parentId };
+}
+
 function mapPayload(entities: WorldEntityGeo[]) {
   return {
     session_id: "s1",
@@ -59,5 +69,50 @@ describe("WorldMiniMap", () => {
     render(<WorldMiniMap sessionId="s1" />);
     await waitFor(() => undefined);
     expect(screen.queryByTestId("world-minimap")).toBeNull();
+  });
+
+  it("scopes to the entered place's LOCAL frame when focusId is set", async () => {
+    // University at city coords (50,30); its interior parts carry pos LOCAL to
+    // its frame (small, near the local origin). The inset must show the parts,
+    // in local coords — not the whole city.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok(
+          mapPayload([
+            ent("u", "University", 50, 30),
+            childEnt("t", "Tower of Art", 2, 1, "u"),
+            childEnt("l", "Library", -3, 0, "u"),
+          ]),
+        ),
+      ) as unknown as typeof fetch,
+    );
+    render(<WorldMiniMap sessionId="s1" focusId="u" focusLabel="University" />);
+    await waitFor(() => expect(screen.getByTestId("world-minimap")).toBeTruthy());
+    // the 2 interior parts, not the city's 3 entities
+    expect(screen.getAllByTestId("minimap-dot")).toHaveLength(2);
+    expect(screen.getByText(/inside University/i)).toBeTruthy();
+    expect(screen.getByText(/local coords/i)).toBeTruthy();
+    // the lie we're killing: it must NOT claim the city's frame
+    expect(screen.queryByText(/world coords/i)).toBeNull();
+    expect(screen.queryByText(/100×60/)).toBeNull();
+  });
+
+  it("shows an explicit empty-state (not the city) for a place with no interior yet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok(
+          mapPayload([
+            ent("u", "University", 50, 30),
+            ent("b", "Bridge", 80, 40),
+          ]),
+        ),
+      ) as unknown as typeof fetch,
+    );
+    render(<WorldMiniMap sessionId="s1" focusId="u" focusLabel="University" />);
+    await waitFor(() => expect(screen.getByTestId("minimap-empty")).toBeTruthy());
+    expect(screen.queryAllByTestId("minimap-dot")).toHaveLength(0);
+    expect(screen.queryByText(/world coords/i)).toBeNull();
   });
 });
