@@ -194,6 +194,41 @@ async def test_edit_entities_endpoint_403_when_flag_off(
     assert resp.status_code == 403
 
 
+async def test_extract_localizes_missing_bboxes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # FIX 1a: with GEOMETRIC_WORLD on, an entity the extractor left bbox-less gets
+    # localized by the detector; the centre-based detection is stored top-left.
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+    from providers import detector as _det
+
+    async def fake_extract(**_kwargs):
+        return _llm.EntityExtractionResult(
+            added=[
+                _llm.ExtractedEntity(
+                    kind="place", name="Unseen University", appearance="tower",
+                    aliases=[], facts=[], state={}, confidence=0.9, bbox=None,
+                )
+            ],
+            updated=[],
+        )
+
+    async def fake_detect(_bytes, _labels):
+        return [{"label": "Unseen University", "x_pct": 0.5, "y_pct": 0.4,
+                 "w_pct": 0.2, "h_pct": 0.3, "score": 0.9}]
+
+    monkeypatch.setattr(_llm, "extract_entities", fake_extract)
+    monkeypatch.setattr(_det, "detect", fake_detect)
+    body = generate.ExtractEntitiesBody(
+        session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
+    )
+    resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
+    bb = _json.loads(resp.body)["result"]["added"][0]["bbox"]
+    assert bb["x_pct"] == pytest.approx(0.4)  # centre 0.5 minus w/2 0.1
+    assert bb["y_pct"] == pytest.approx(0.25)  # centre 0.4 minus h/2 0.15
+    assert bb["w_pct"] == pytest.approx(0.2)
+
+
 async def test_edit_entities_endpoint_returns_plan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

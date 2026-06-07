@@ -1256,6 +1256,46 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             headers={"X-Trace-Id": trace_id},
         )
 
+    # FIX 1a (geometric world): localize the catalogued entities so the world map
+    # can seed and the overlay can draw. The extractor's bbox is best-effort and
+    # often empty on dense images (the live Ankh run got 0); the purpose-built
+    # detector reliably returns one box per label. Detector boxes are centre-based
+    # → store top-left for the EntityBBox shape. Gated + best-effort: a failure
+    # here never blocks the extract response.
+    if _geometric_world_on() and result.added:
+        try:
+            from providers import detector as _detector
+
+            _, _, _b64 = body.image_data_url.partition(",")
+            img_bytes = base64.b64decode(_b64) if _b64 else b""
+            need = [e.name for e in result.added if not e.bbox]
+            if img_bytes and need:
+                dets = await _detector.detect(img_bytes, need)
+                by_label = {str(d.get("label", "")).lower().strip(): d for d in dets}
+                for e in result.added:
+                    if e.bbox:
+                        continue
+                    key = e.name.lower().strip()
+                    d = by_label.get(key) or next(
+                        (v for k, v in by_label.items() if k and (k in key or key in k)),
+                        None,
+                    )
+                    if d:
+                        e.bbox = {
+                            "x_pct": max(0.0, float(d["x_pct"]) - float(d["w_pct"]) / 2.0),
+                            "y_pct": max(0.0, float(d["y_pct"]) - float(d["h_pct"]) / 2.0),
+                            "w_pct": float(d["w_pct"]),
+                            "h_pct": float(d["h_pct"]),
+                        }
+            log(
+                "info",
+                "extract.localized",
+                located=sum(1 for e in result.added if e.bbox),
+                total=len(result.added),
+            )
+        except Exception as exc:  # best-effort — geometry localization is optional
+            log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
+
     def _entity_payload(e: llm_provider.ExtractedEntity) -> dict:
         return {
             "kind": e.kind,
