@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   MapCrop,
@@ -60,6 +60,31 @@ export default function ClickDetailPopover({
   const [level, setLevel] = useState<ViewLevel>(initial.level);
   const [mode, setMode] = useState<"scene" | "submap">(initial.mode);
   const [note, setNote] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss on Escape or a click outside. onCancel resolves the pending
+  // promptForClickDetail promise with null, which is the ONLY thing that frees
+  // the click handler's in-flight lock — without this, dismissing the popover
+  // any other way leaves the lock stuck and the next tap is silently dead.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        onCancel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [onCancel]);
 
   // Move along the gaze axis (closer to / further from what you're looking at).
   const step = Math.max(crop.w, crop.h, 10) * 0.05;
@@ -78,6 +103,7 @@ export default function ClickDetailPopover({
 
   return (
     <div
+      ref={rootRef}
       className="absolute z-30 w-72 -translate-x-1/2 rounded-xl border border-black/15 bg-stone-50/95 p-2 shadow-xl backdrop-blur"
       style={{ left: xPx, top: yPx }}
       data-testid="click-detail-popover"
