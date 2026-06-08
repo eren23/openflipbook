@@ -1426,6 +1426,11 @@ export default function PlayPage() {
                 page.nodeId ?? "",
                 click,
                 16 / 9,
+                undefined,
+                // Preview in the CURRENT frame too (children of the place you're
+                // inside), so the ⌘-popover nests deeper rather than re-routing
+                // to a city landmark.
+                page.sceneView,
               )
             : null;
         const previewObserver = previewTap?.scene_view.observer ?? null;
@@ -1535,14 +1540,37 @@ export default function PlayPage() {
       // AND the geo world is seeded; null falls back to the existing World Mode
       // path. generate.py acts on these only under WORLD_GEOMETRY_GEN /
       // VLM_GROUNDING, so sending them is otherwise inert.
+      // The world_map seeds a beat after a generation and this handler's geoMap
+      // closure can lag it — so a tap right after a gen would see no entities,
+      // produce a null geoTap, and persist the entered node with scene_view:null
+      // (which breaks all downstream nesting). Fetch fresh when empty.
+      let geoEntities = geoMap.entities;
+      let geoBounds = geoMap.bounds;
+      if (worldEnabled && geoEntities.length === 0) {
+        const fresh = (await fetch(
+          `/api/world/${encodeURIComponent(sessionId)}/map`,
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)) as
+          | { entities: WorldEntityGeo[]; bounds: MapCrop }
+          | null;
+        if (fresh?.entities?.length) {
+          geoEntities = fresh.entities;
+          geoBounds = fresh.bounds;
+        }
+      }
       const geoTap =
-        worldEnabled && geoMap.entities.length > 0
+        worldEnabled && geoEntities.length > 0
           ? geoTapRequest(
-              { entities: geoMap.entities, bounds: geoMap.bounds },
+              { entities: geoEntities, bounds: geoBounds },
               page.nodeId ?? "",
               { x_pct: click.x_pct, y_pct: click.y_pct },
               16 / 9,
               geoOverride,
+              // Route in the CURRENT frame: on the city map this is the whole
+              // map; INSIDE a place it's that place's children, so the tap nests
+              // one level deeper instead of resolving to a city landmark.
+              page.sceneView,
             )
           : null;
       void generate({
