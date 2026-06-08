@@ -90,6 +90,10 @@ services:
       # Default off — turn on per-session from the UI once enabled here:
       #   WORLD_MODE=true docker compose up -d backend
       WORLD_MODE: ${WORLD_MODE:-false}
+      # Map-pan: "expand" (Around) outpaints the world outward in 4 directions
+      # instead of blooming neighbour subjects. Default off:
+      #   EXPAND_MAP_PAN=true docker compose up -d backend
+      EXPAND_MAP_PAN: ${EXPAND_MAP_PAN:-false}
     # Force public resolvers — Docker's default 127.0.0.11 link-local resolver
     # has been flaking on the fal.ai / r2.cloudflarestorage.com hosts during
     # E2E runs (sporadic ESERVFAIL / EAI_AGAIN), which manifests as
