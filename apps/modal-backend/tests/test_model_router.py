@@ -7,16 +7,21 @@ import pytest
 from providers import model_router
 
 
-def test_select_operation_submap_with_region_continues() -> None:
-    assert model_router.select_operation("place_submap", True) == "zoom_continue"
+@pytest.mark.parametrize("rm", ["place_submap", "place_scene"])
+def test_entering_a_place_or_submap_with_region_zoom_continues(rm) -> None:
+    # Both ENTERING a place and cropping a sub-map are a faithful Kontext zoom of
+    # the map crop (same walls/buildings/style), not a fresh reinvention.
+    assert model_router.select_operation(rm, True) == "zoom_continue"
 
 
-def test_select_operation_submap_without_region_is_fresh() -> None:
-    assert model_router.select_operation("place_submap", False) == "fresh"
+@pytest.mark.parametrize("rm", ["place_submap", "place_scene"])
+def test_no_region_falls_back_to_fresh(rm) -> None:
+    # No region crop to continue from → a fresh generation.
+    assert model_router.select_operation(rm, False) == "fresh"
 
 
-@pytest.mark.parametrize("rm", ["place_scene", "explainer", None])
-def test_select_operation_non_submap_is_fresh(rm) -> None:
+@pytest.mark.parametrize("rm", ["explainer", None])
+def test_select_operation_non_enter_is_fresh(rm) -> None:
     assert model_router.select_operation(rm, True) == "fresh"
 
 
