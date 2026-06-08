@@ -7,6 +7,7 @@ describe("nodeKind", () => {
     const k = nodeKind({ level: "map", relation: null, isRoot: true });
     expect(k.levelGlyph).toBe("🗺");
     expect(k.levelLabel).toBe("map");
+    expect(k.levelColor).toBe("#d97706"); // amber frame
     expect(k.relLabel).toBe("root");
   });
 
@@ -27,5 +28,6 @@ describe("nodeKind", () => {
     const k = nodeKind({ level: null, relation: "descend", isRoot: false });
     expect(k.levelGlyph).toBe("📄");
     expect(k.levelLabel).toBe("page");
+    expect(k.levelColor).toBe("#9ca3af"); // neutral frame for pre-geo nodes
   });
 });

@@ -23,7 +23,7 @@ import {
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
 import { anchorForTile } from "@/lib/atlas-anchors";
-import { nodeKind } from "@/lib/node-kind";
+import { nodeKind, NODE_KIND_LEGEND } from "@/lib/node-kind";
 import type {
   NodeRelation,
   ScaleKind,
@@ -433,6 +433,21 @@ export default function AtlasView({
           >
             continue session
           </Link>
+          <div
+            className="flex items-center gap-2 pl-1 opacity-60"
+            data-testid="atlas-legend"
+            title="Tile frame colour = view level · ↓ inside (tap-in) · ⤢ expanded (neighbour)"
+          >
+            {NODE_KIND_LEGEND.map((lv) => (
+              <span key={lv.label} className="flex items-center gap-0.5">
+                <span
+                  className="inline-block h-2 w-2 rounded-sm"
+                  style={{ backgroundColor: lv.color }}
+                />
+                {lv.glyph}&nbsp;{lv.label}
+              </span>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -632,12 +647,12 @@ export default function AtlasView({
                     (isFocused && !reduced ? " ofb-tile-glow" : "")
                   }
                   style={{
+                    // Frame colour = the view LEVEL (map/building/scene) so type
+                    // is readable at any zoom; red overrides for the focused tile.
                     borderColor: isFocused
                       ? "rgba(239, 68, 68, 0.95)"
-                      : isExpand
-                        ? "rgba(13,148,136,0.45)"
-                        : "rgba(0,0,0,0.2)",
-                    borderWidth: isFocused ? 6 : 2,
+                      : kind.levelColor,
+                    borderWidth: isFocused ? 6 : 3,
                     filter: `saturate(${tint.saturation})`,
                     opacity: isFocused ? 1 : tint.opacity * lodFactor,
                   }}
@@ -710,6 +725,12 @@ export default function AtlasView({
                   className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
                   data-testid="tile-kind"
                   title={`${kind.levelLabel} · ${kind.relLabel}${depth > 0 ? ` · depth ${depth}` : ""}`}
+                  style={{
+                    // Counter the camera zoom so the badge stays legible at the
+                    // fit-all overview (otherwise it's a sub-pixel smudge there).
+                    transform: `scale(${counterScale(camera.zoom)})`,
+                    transformOrigin: "top right",
+                  }}
                 >
                   <span>{kind.levelGlyph}</span>
                   <span className="opacity-80">

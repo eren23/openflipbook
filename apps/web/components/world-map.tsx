@@ -298,11 +298,12 @@ export default function WorldMap({
               top: p.rect.y,
               width: p.rect.w,
               height: p.rect.h,
+              // Frame colour = the view LEVEL; red overrides the active tile.
               borderColor:
                 p.nodeId === activeNodeId
                   ? "rgba(239, 68, 68, 0.95)"
-                  : "rgba(0,0,0,0.2)",
-              borderWidth: p.nodeId === activeNodeId ? 6 : 2,
+                  : kind.levelColor,
+              borderWidth: p.nodeId === activeNodeId ? 6 : 3,
             }}
             title={p.title}
           >
@@ -323,6 +324,11 @@ export default function WorldMap({
               className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
               data-testid="map-tile-kind"
               title={`${kind.levelLabel} · ${kind.relLabel}`}
+              style={{
+                // Counter the camera zoom so the badge stays legible when zoomed out.
+                transform: `scale(${Math.min(1 / Math.max(camera.zoom, 0.0001), 8)})`,
+                transformOrigin: "top right",
+              }}
             >
               <span>{kind.levelGlyph}</span>
               <span className="opacity-80">
