@@ -99,6 +99,45 @@ async def edit_image(
 CONTINUE_MODEL_DEFAULT = "fal-ai/flux-pro/kontext"
 
 
+def build_zoom_instruction(
+    page_title: str,
+    facts: list[str],
+    layout_clause: str = "",
+) -> str:
+    """Compose the Kontext zoom instruction from what the system already knows.
+
+    The reference crop carries the *look* (walls, palette, layout); this text
+    carries the *content* the crop can't — the named sub-areas the planner found
+    inside (`facts`) and the geometry engine's placement clause — so the zoom
+    ELABORATES the place in finer detail instead of dumb-zooming the pixels.
+    Faithful-but-enhanced: keep the existing structures and style, reveal more
+    within them. Empty facts/clause (first enter, nothing seeded) degrade to a
+    plain faithful zoom — no dangling enumeration.
+    """
+    title = page_title.strip() or "this place"
+    text = (
+        f'Zoom into "{title}" — the area at the centre of this image — and draw a '
+        "closer, richer map of it. Keep the exact walls, buildings, towers and "
+        "landmarks the reference already shows, in the same hand-drawn engraving "
+        "style, palette and line work, from the SAME overhead map viewpoint; do "
+        "not reinvent them, restyle them, or switch to an eye-level or interior "
+        "view. As you move closer, elaborate them with finer architectural detail"
+    )
+    named = [f.strip() for f in facts if f and f.strip()]
+    if named:
+        # Worked in as features the map should SHOW, not text to write — Kontext
+        # renders label text as garble, and "label these" drags it into an
+        # interior scene. Atmospheric prose stays mood/detail, not a caption.
+        text += ", working in the features that belong here: " + "; ".join(named[:8])
+    text += (
+        ". A closer, faithful continuation of this exact map, not a new scene. "
+        "Keep any lettering sparse and legible — no garbled text."
+    )
+    if layout_clause.strip():
+        text += "\n\n" + layout_clause.strip()
+    return text.strip()
+
+
 async def continue_image(
     image_data_url: str,
     instruction: str,

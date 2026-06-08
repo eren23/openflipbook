@@ -771,12 +771,13 @@ async def _event_stream(
             model_router.select_operation(render_mode, region_ref is not None)
             == "zoom_continue"
         )
-        zoom_instruction = (
-            f"Zoom in and draw a closer map of {plan.page_title} — the area at the "
-            "centre of this image. Keep the same hand-drawn cartographic style, "
-            "palette and line work; keep the existing streets, buildings and "
-            "landmarks where they are and continue them outward; label its "
-            "sub-areas. A closer continuation of this map, not a new scene."
+        # The Kontext zoom keeps the crop's LOOK faithful; feed it the system's
+        # KNOWLEDGE too — the planner's named sub-areas (plan.facts) + the
+        # geometry placement clause — so it ELABORATES the place in finer detail
+        # instead of a dumb pixel-zoom. The crop is the reference; this enhances
+        # it through the world model and geometry.
+        zoom_instruction = image_edit_provider.build_zoom_instruction(
+            plan.page_title, plan.facts, layout_clause
         )
 
         # 3. Image gen — with progressive fast-tier draft.
