@@ -58,6 +58,12 @@ eval-repair:
 	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
 eval-edit:
 	cd apps/modal-backend && EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m edit -q
+# B3 sub-part coherence A/B: ENTER each place WITH vs WITHOUT region-conditioning
+# (+ the B2 faithful preamble) → judge faithfulness vs the parent map crop → the
+# lift. PAID (fal gens + judge). Needs a live session + the web app running:
+#   COHERENCE_BENCH_SESSION=session_xxx make eval-coherence
+eval-coherence:
+	cd apps/modal-backend && COHERENCE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.coherence_runner
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
