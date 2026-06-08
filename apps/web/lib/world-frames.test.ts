@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   childrenOf,
+  localExtent,
   resolveAbsolutePos,
   siblingsOf,
   type FrameNode,
@@ -70,6 +71,17 @@ describe("nested frames", () => {
     const byId = new Map(CITY.map((g) => [g.id, g]));
     expect(resolveAbsolutePos("tower", byId)).toEqual({ x: 22, y: 17 });
     expect(resolveAbsolutePos("library", byId)).toEqual({ x: 36, y: 34 });
+  });
+
+  it("localExtent is the larger dimension of an interior's local bounds", () => {
+    // Used to learn a place's scale (footprint ÷ extent). x spans -42..42 = 84;
+    // y spans -2..12 = 14 → extent 84.
+    const kids = [
+      { pos: { x: -40, y: 0 }, footprint: { w: 4, d: 4 } },
+      { pos: { x: 40, y: 10 }, footprint: { w: 4, d: 4 } },
+    ];
+    expect(localExtent(kids)).toBe(84);
+    expect(localExtent([])).toBe(1);
   });
 
   it("resolveAbsolutePos is cycle-guarded and null-safe", () => {

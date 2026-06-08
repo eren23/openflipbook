@@ -318,3 +318,33 @@ export function resolveAbsolutePos(
   }
   return { x, y };
 }
+
+/** Axis-aligned bounds over entities' OWN pos+footprint (no parent resolve) —
+ *  the LOCAL frame of a place's interior, where each child's pos is local. */
+export function localBounds<
+  T extends { pos: WorldVec2; footprint: { w: number; d: number } },
+>(es: T[]): MapCrop {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const e of es) {
+    const hw = e.footprint.w / 2;
+    const hd = e.footprint.d / 2;
+    minX = Math.min(minX, e.pos.x - hw);
+    maxX = Math.max(maxX, e.pos.x + hw);
+    minY = Math.min(minY, e.pos.y - hd);
+    maxY = Math.max(maxY, e.pos.y + hd);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** The larger dimension of a frame's local bounds — "how big is this interior",
+ *  used to learn a place's `scale` on first enter (footprint ÷ extent). */
+export function localExtent<
+  T extends { pos: WorldVec2; footprint: { w: number; d: number } },
+>(es: T[]): number {
+  if (es.length === 0) return 1;
+  const b = localBounds(es);
+  return Math.max(b.w, b.h, 1e-6);
+}

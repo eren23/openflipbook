@@ -1,11 +1,12 @@
 "use client";
 
-import type { MapCrop, WorldEntityGeo } from "@openflipbook/config";
+import type { MapCrop } from "@openflipbook/config";
 
 import { useWorldMap } from "@/hooks/useWorldMap";
 import {
   childrenOf,
   cropEntities,
+  localBounds,
   resolveAbsolutePos,
   type FrameNode,
 } from "@/lib/world-geometry";
@@ -28,24 +29,6 @@ const KIND_COLOR: Record<string, string> = {
   item: "#f59e0b",
   creature: "#a855f7",
 };
-
-// Bounds over the entities' OWN pos (no parent-chain resolve) — the local frame
-// of a place's interior, where each child carries a pos local to that place.
-function localBounds(es: WorldEntityGeo[]): MapCrop {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const e of es) {
-    const hw = e.footprint.w / 2;
-    const hd = e.footprint.d / 2;
-    minX = Math.min(minX, e.pos.x - hw);
-    maxX = Math.max(maxX, e.pos.x + hw);
-    minY = Math.min(minY, e.pos.y - hd);
-    maxY = Math.max(maxY, e.pos.y + hd);
-  }
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-}
 
 // The coordinate-frame inset (answers "where is the coordinate system / the
 // middle / how far does it reach"). A top-down view: origin (0,0), +x east /

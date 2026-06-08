@@ -86,6 +86,26 @@ describe("world-map merge core", () => {
 
   it("empty map → zero bounds", () =>
     expect(recomputeBounds([])).toEqual({ x: 0, y: 0, w: 0, h: 0 }));
+
+  it("a scaled child resolves INSIDE its parent footprint (not flung flat)", () => {
+    // Unseen University at (30,18), footprint 10×10, interior scale 0.1. A child
+    // at LOCAL (50,50) resolves to absolute (35,23) — inside UU's box — NOT the
+    // (80,68) a scaleless translation would give. So world bounds stay tight.
+    const uu: WorldEntityGeo = {
+      ...geo("geo_uu", "derived", 30, 18),
+      footprint: { w: 10, d: 10 },
+      scale: 0.1,
+    };
+    const child: WorldEntityGeo = {
+      ...geo("geo_tower", "derived", 50, 50),
+      parent_id: "geo_uu",
+      footprint: { w: 2, d: 2 },
+    };
+    const b = recomputeBounds([uu, child]);
+    // child reached (36,24) at most — far from a scaleless (81,69).
+    expect(b.x + b.w).toBeLessThanOrEqual(37);
+    expect(b.y + b.h).toBeLessThanOrEqual(25);
+  });
 });
 
 describe("applyEntityEdit (P5 structured geo edits)", () => {
