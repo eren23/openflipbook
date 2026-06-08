@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import { deriveGeoFromExtraction } from "@/lib/world-map";
+import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
@@ -222,7 +223,7 @@ export async function POST(req: Request, { params }: Params) {
                 node_id: geoNodeId,
                 level: "map",
                 observer: null,
-                map_crop: { x: 0, y: 0, w: 100, h: 60 },
+                map_crop: MAP_IMAGE_FRAME,
               },
               16 / 9,
               items,

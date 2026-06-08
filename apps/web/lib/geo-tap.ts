@@ -15,6 +15,14 @@ import {
   resolveAbsolutePos,
 } from "./world-geometry";
 
+// The image-world frame a top-down map is seeded in: estimateGeoFromBBox maps
+// each detection bbox (0..1 of the image) into THIS frame. Tap-routing must use
+// the SAME frame so a click on a visible place maps back to that place's coords.
+// Routing through the entities' tight bounding box instead lands the click off
+// the footprint (the two frames disagree). Kept in lockstep with the extract
+// seed (apps/web/app/api/world/[sessionId]/extract/route.ts).
+export const MAP_IMAGE_FRAME: MapCrop = { x: 0, y: 0, w: 100, h: 60 };
+
 export interface GeoTap {
   // "scene" = enter a place (perspective, has an observer). "submap" = stay in
   // map mode + crop a region (top-down, no observer).
@@ -61,12 +69,14 @@ export function geoTapRequest(
   override?: GeoTapOverride,
 ): GeoTap | null {
   if (map.entities.length === 0) return null;
-  // The current view is the top-down world map (the world's coordinate frame).
+  // The current view is the top-down world map. Route the click through the
+  // image-world frame the entities were SEEDED in — not their tight bounding box
+  // (map.bounds), which is a different frame and lands taps off the footprint.
   const mapView: SceneView = {
     node_id: nodeId,
     level: "map",
     observer: null,
-    map_crop: map.bounds,
+    map_crop: MAP_IMAGE_FRAME,
   };
   const route = routeClick(map, mapView, click, aspect);
   if (route.kind === "explainer") return null;

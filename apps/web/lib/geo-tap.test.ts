@@ -42,7 +42,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
     expect(t).not.toBeNull();
     expect(t!.focus_id).toBe("clock");
     expect(t!.focus_label).toBe("clock tower"); // drives the entered subject
@@ -60,7 +60,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
     expect(t!.scene_view.focus_id).toBe("clock");
   });
 
@@ -75,7 +75,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 30 / 100, y_pct: 18 / 80 }, 16 / 9);
+    const t = geoTapRequest(map, "n1", { x_pct: 30 / 100, y_pct: 18 / 60 }, 16 / 9);
     expect(t).not.toBeNull();
     expect(t!.scene_view.focus_id).toBe("uu");
     const ids = t!.expected_layout.map((p) => p.id);
@@ -96,7 +96,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const click = { x_pct: 30 / 100, y_pct: 18 / 80 };
+    const click = { x_pct: 30 / 100, y_pct: 18 / 60 };
     const def = geoTapRequest(map, "n1", click, 16 / 9)!;
     const custom = {
       ...def.scene_view.observer!,
@@ -121,7 +121,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       bounds: { x: 0, y: 0, w: 100, h: 80 },
     };
     // (51,42) is empty (between the two) but the 40% window holds both → submap
-    const t = geoTapRequest(map, "n1", { x_pct: 51 / 100, y_pct: 42 / 80 }, 16 / 9);
+    const t = geoTapRequest(map, "n1", { x_pct: 51 / 100, y_pct: 42 / 60 }, 16 / 9);
     expect(t).not.toBeNull();
     expect(t!.kind).toBe("submap");
     expect(t!.scene_view.level).toBe("map");
@@ -136,8 +136,28 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 80 }, 16 / 9);
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
     expect(t!.kind).toBe("scene");
+  });
+
+  it("routes a tap through the image frame, not the entities' tight bounds (live-bug regression)", () => {
+    // Entities cluster in a sub-range of the 100×60 image frame, so their tight
+    // bounding box differs from the frame the tap maps through. Tapping a place's
+    // image position must still land on it — using the tight bounds shifts the
+    // click off the footprint (the live "tap misses the place" bug).
+    const map = {
+      entities: [
+        geo("uni", "University", 54.5, 21.5, { height: 25 }),
+        geo("spire", "Spire", 64, 14, { height: 16 }),
+        geo("market", "Market", 75, 44, { height: 14 }),
+      ],
+      bounds: { x: 54, y: 14, w: 21, h: 30 }, // the TIGHT bbox, deliberately != frame
+    };
+    // tap the University's image position: 54.5% across, 21.5/60 down
+    const t = geoTapRequest(map, "n1", { x_pct: 0.545, y_pct: 21.5 / 60 }, 16 / 9);
+    expect(t).not.toBeNull();
+    expect(t!.kind).toBe("scene");
+    expect(t!.focus_id).toBe("uni"); // would miss if routed via bounds
   });
 
   it("empty world → null (caller keeps the existing World Mode path)", () => {
