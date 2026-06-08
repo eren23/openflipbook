@@ -148,24 +148,18 @@ def test_conditioning_preamble_empty_is_blank() -> None:
     assert image.conditioning_preamble([], "tap") == ""
 
 
-def test_conditioning_preamble_place_scene_reprojects() -> None:
-    # Entering a place RE-VIEWS a top-down map crop from the ground — the prompt
-    # must say so (re-view, not from overhead) instead of "keep the composition",
-    # which leaked overhead artefacts into the oblique scene (the B3 failure).
-    out = image.conditioning_preamble(["region", "parent"], "place_scene", level="street")
+def test_conditioning_preamble_place_scene_reveals_within() -> None:
+    # World Mode entering a place: the region ref should say to reveal the
+    # fuller place within (a scene), distinct from the explainer "inside".
+    out = image.conditioning_preamble(["region", "parent"], "place_scene")
     low = out.lower()
-    assert "top-down map" in low
-    assert "not from overhead" in low
-    assert "street level" in low  # the level-grounded reprojection angle
-    # still anchored to THAT exact place, not a re-invention
-    assert "faithfully" in low and "exact place" in low
+    assert "reveal the fuller place within" in low
     assert "outward" not in low
-    # the entered level picks the angle
-    building = image.conditioning_preamble(["region"], "place_scene", level="building").lower()
-    assert "three-quarter oblique" in building
-    # a plain explainer tap is NOT a reprojection
-    tap = image.conditioning_preamble(["region"], "tap").lower()
-    assert "overhead" not in tap and "faithfully" not in tap
+    # …and FAITHFULLY: a closer view of THAT exact place, not a re-invention
+    # (the fix for sub-parts drifting into unrelated renders).
+    assert "faithfully" in low and "exact place" in low
+    # the faithful-continuation clause is place_scene-only, not a plain tap
+    assert "faithfully" not in image.conditioning_preamble(["region"], "tap").lower()
 
 
 def test_first_image_extracts_first_dict() -> None:

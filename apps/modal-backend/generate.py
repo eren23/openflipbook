@@ -823,9 +823,7 @@ async def _event_stream(
             cond_mode = "place_scene" if render_mode == "place_scene" else body.mode
             main_prompt = (
                 image_provider.conditioning_preamble(
-                    body.condition_roles or [],
-                    cond_mode,
-                    level=body.scene_view.level if body.scene_view else None,
+                    body.condition_roles or [], cond_mode
                 )
                 + composed_prompt
             )
