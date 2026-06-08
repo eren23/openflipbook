@@ -1,8 +1,9 @@
 """Per-operation image-model router.
 
 Every image operation has a default model and an env override, and a pure
-`select_operation` decides which op a tap generation uses: a sub-map entry with a
-region crop zoom-continues; everything else is a fresh generation.
+`select_operation` decides which op a tap generation uses: entering a place or a
+sub-map with a region crop zoom-continues (a faithful Kontext zoom of the map);
+everything else is a fresh generation.
 
 `outpaint`/`inpaint`/`upscale` slots are declared for the verify→repair loop
 (and map-pan reuse) but only activate once their FAL_*_MODEL is set AND a
@@ -34,10 +35,12 @@ def resolve_model(op: str) -> str | None:
 
 
 def select_operation(render_mode: str | None, has_region: bool) -> str:
-    """Which image operation a tap generation uses. Matches today's behaviour
-    exactly: a `place_submap` entry with a region crop zoom-continues; everything
-    else is a fresh generation. (outpaint/inpaint/upscale are invoked explicitly
-    by callers — the repair loop — not chosen here.)"""
-    if render_mode == "place_submap" and has_region:
+    """Which image operation a tap generation uses. ENTERING a place
+    (`place_scene`) OR cropping a sub-map (`place_submap`) with a region crop
+    ZOOM-CONTINUES the map (Kontext) — a faithful, style-preserving closer view of
+    the SAME walls/buildings the map shows, not a fresh reinvention in a new style.
+    Everything else is a fresh generation. (outpaint/inpaint/upscale are invoked
+    explicitly by callers — the repair loop — not chosen here.)"""
+    if render_mode in ("place_submap", "place_scene") and has_region:
         return "zoom_continue"
     return "fresh"
