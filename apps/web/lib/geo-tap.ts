@@ -67,18 +67,33 @@ export function geoTapRequest(
   click: ClickPoint,
   aspect: number,
   override?: GeoTapOverride,
+  // The view the tap happened in. At the top-level city map this is absent/map →
+  // route over the whole map. INSIDE an entered place, route over THAT place's
+  // children so the tap nests one level deeper instead of resolving to a city
+  // landmark. Every frame — city or interior — is a top-down map in the SAME
+  // MAP_IMAGE_FRAME; the per-frame `scale` composes them to absolute coords.
+  currentView?: SceneView | null,
 ): GeoTap | null {
   if (map.entities.length === 0) return null;
-  // The current view is the top-down world map. Route the click through the
-  // image-world frame the entities were SEEDED in — not their tight bounding box
-  // (map.bounds), which is a different frame and lands taps off the footprint.
+  const insideId =
+    currentView && currentView.level !== "map"
+      ? currentView.focus_id ?? null
+      : null;
+  // The entities the tap can land on: the whole map at top level, else the
+  // current place's children (in their local frame).
+  const candidates = insideId
+    ? { entities: childrenOf(map.entities, insideId), bounds: map.bounds }
+    : map;
+  if (candidates.entities.length === 0) return null;
+  // Route the click through the image-world frame the entities were SEEDED in —
+  // not their tight bounding box (map.bounds), which lands taps off the footprint.
   const mapView: SceneView = {
     node_id: nodeId,
     level: "map",
     observer: null,
     map_crop: MAP_IMAGE_FRAME,
   };
-  const route = routeClick(map, mapView, click, aspect);
+  const route = routeClick(candidates, mapView, click, aspect);
   if (route.kind === "explainer") return null;
   const byId = new Map(map.entities.map((e) => [e.id, e]));
 
@@ -95,7 +110,7 @@ export function geoTapRequest(
         focus_id: route.focus_id,
       },
       expected_layout: [],
-      layout_entities: cropEntities(map.entities, route.crop),
+      layout_entities: cropEntities(candidates.entities, route.crop),
       focus_id: route.focus_id,
       focus_label: route.focus_id ? byId.get(route.focus_id)?.label ?? null : null,
       focus_visual: route.focus_id ? byId.get(route.focus_id)?.visual ?? null : null,
