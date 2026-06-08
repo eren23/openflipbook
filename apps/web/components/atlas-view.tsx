@@ -23,6 +23,7 @@ import {
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
 import { anchorForTile } from "@/lib/atlas-anchors";
+import { nodeKind } from "@/lib/node-kind";
 import type {
   NodeRelation,
   ScaleKind,
@@ -579,6 +580,11 @@ export default function AtlasView({
             const anchor = geoMap
               ? anchorForTile(sceneViews?.[p.nodeId], geoMap)
               : null;
+            const kind = nodeKind({
+              level: sceneViews?.[p.nodeId]?.level ?? null,
+              relation: p.relation ?? null,
+              isRoot: !p.parentId,
+            });
             return (
               <div
                 key={p.nodeId}
@@ -699,6 +705,18 @@ export default function AtlasView({
                     {Math.round(anchor.focusWorldPos.y)}
                   </div>
                 )}
+
+                <div
+                  className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
+                  data-testid="tile-kind"
+                  title={`${kind.levelLabel} · ${kind.relLabel}${depth > 0 ? ` · depth ${depth}` : ""}`}
+                >
+                  <span>{kind.levelGlyph}</span>
+                  <span className="opacity-80">
+                    {kind.relGlyph} {kind.relLabel}
+                  </span>
+                  {depth > 0 && <span className="opacity-60">d{depth}</span>}
+                </div>
 
                 {showHeatmap && <HeatmapOverlay parentId={p.nodeId} />}
 
