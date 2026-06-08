@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
   let upstream: Response;
   try {
     upstream = await fetch(
-      `${modalUrl.replace(/\/$/, "")}/precompute-candidates`,
+      joinModalUrl(modalUrl, "/precompute-candidates"),
       {
         method: "POST",
         headers: {

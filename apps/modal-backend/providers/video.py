@@ -64,9 +64,6 @@ def _animate_model(tier: str | None = None) -> str:
     override = os.environ.get("FAL_ANIMATE_MODEL", "").strip()
     if override:
         return override
-    # Legacy USE_LTX_PRO toggle still honored when no explicit tier is passed.
-    if tier is None and os.environ.get("USE_LTX_PRO", "").lower() in ("1", "true", "yes"):
-        return PRO_ANIMATE_MODEL
     resolved = _resolve_video_tier(tier)
     env_key = TIER_VIDEO_ENV_KEYS[resolved]
     return os.environ.get(env_key) or TIER_VIDEO_MODELS[resolved]

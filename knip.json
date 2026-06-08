@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/web": {
+      "entry": [
+        "app/**/{page,layout,route,loading,error,not-found,template,default,global-error}.{ts,tsx}",
+        "next.config.{js,mjs,cjs,ts}",
+        "tests/**/*.{ts,tsx}",
+        "e2e/**/*.{ts,tsx}",
+        "**/*.test.{ts,tsx}"
+      ],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/config": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"],
+      "includeEntryExports": false
+    },
+    "scripts/record-demo": {
+      "entry": ["record.ts", "record-geo.ts", "record-geo-nav.ts"],
+      "project": ["*.ts"]
+    },
+    "scripts/perfbudget": {
+      "entry": ["run.ts"],
+      "project": ["*.ts"]
+    }
+  }
+}

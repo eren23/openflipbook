@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const upstream = await fetch(
-      `${modalUrl.replace(/\/$/, "")}/trace/abort-stats?limit=${limit}`,
+      joinModalUrl(modalUrl, `/trace/abort-stats?limit=${limit}`),
       {
         method: "GET",
         cache: "no-store",

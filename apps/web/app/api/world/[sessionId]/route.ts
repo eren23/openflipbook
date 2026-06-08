@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorldState } from "@/lib/world";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +14,7 @@ interface Params {
 // the snapshot so the codex can hide / show edit controls based on the
 // deployment's posture without each consumer re-deriving it.
 function overridesEnabled(): boolean {
-  const flag = (process.env.WORLD_OVERRIDE_ENABLED ?? "").toLowerCase();
-  return flag === "1" || flag === "true" || flag === "yes";
+  return envFlag("WORLD_OVERRIDE_ENABLED");
 }
 
 // Hydrate the world-memory registry for a session. Used by the codex panel

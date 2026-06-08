@@ -148,12 +148,20 @@ def test_conditioning_preamble_empty_is_blank() -> None:
     assert image.conditioning_preamble([], "tap") == ""
 
 
-def test_conditioning_preamble_place_scene_reveals_within() -> None:
-    # World Mode entering a place: the region ref should say to reveal the
-    # fuller place within (a scene), distinct from the explainer "inside".
+def test_conditioning_preamble_place_scene_steps_inside_consistently() -> None:
+    # World Mode CORE mechanic: stepping INSIDE a place. The region ref is the
+    # place's EXTERIOR from the map; the page is its INTERIOR, architecturally
+    # continuous with that exterior — a seamless step within the SAME building,
+    # not a zoom of the outside and not a reinvention.
     out = image.conditioning_preamble(["region", "parent"], "place_scene")
-    assert "reveal the fuller place within" in out.lower()
-    assert "outward" not in out.lower()
+    low = out.lower()
+    assert "exterior" in low and "interior" in low   # exterior crop -> interior
+    assert "architecture" in low                     # keep the place's architecture
+    assert "seamless" in low or "continuous" in low  # the move inward is continuous
+    assert "exact" in low                            # the inside of THAT exact place
+    assert "outward" not in low                      # not expand
+    # the step-inside / exterior framing is place_scene-only, not a plain tap
+    assert "exterior" not in image.conditioning_preamble(["region"], "tap").lower()
 
 
 def test_first_image_extracts_first_dict() -> None:

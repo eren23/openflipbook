@@ -37,6 +37,17 @@ indent-style = "space"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+# Geometric-world eval gates. Free deterministic gates run always; `paid` gates
+# spend fal/openrouter and self-skip unless their *_BENCH_RUN flag is set, so
+# CI selects them out with `-m "not paid"`.
+markers = [
+    "geometry: free deterministic 2.5D projection gate (P1)",
+    "layout: paid VLM layout-fidelity gate (P3)",
+    "grounding: paid open-vocab detector grounding gate (P4)",
+    "repair: verify->repair loop — free control-flow + paid convergence (P4)",
+    "edit: entity NL-edit parse gate (P5)",
+    "paid: spends fal/openrouter; skipped unless its *_BENCH_RUN flag is set",
+]
 
 [tool.mypy]
 python_version = "3.12"

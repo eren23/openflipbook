@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   const body = await req.text();
   let upstream: Response;
   try {
-    upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/resolve-click`, {
+    upstream = await fetch(joinModalUrl(modalUrl, "/resolve-click"), {
       method: "POST",
       headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
       body,

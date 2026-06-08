@@ -116,7 +116,13 @@ export function layoutPages(pages: LayoutInput[]): LayoutResult {
 
     const kids = childrenOf.get(page.nodeId) ?? [];
     for (const kid of kids) {
-      const kidRect = positionChild(rect, kid.clickInParent, placed, kid.scale);
+      const kidRect = positionChild(
+        rect,
+        kid.clickInParent,
+        placed,
+        kid.scale,
+        kid.relation
+      );
       if (kid.clickInParent) {
         const clickWorld = {
           x: rect.x + kid.clickInParent.xPct * rect.w,
@@ -154,7 +160,8 @@ function positionChild(
   parent: WorldRect,
   click: { xPct: number; yPct: number } | undefined,
   placed: WorldRect[],
-  scale?: ScaleKind
+  scale?: ScaleKind,
+  relation?: NodeRelation
 ): WorldRect {
   const cx = parent.x + parent.w / 2;
   const cy = parent.y + parent.h / 2;
@@ -164,30 +171,49 @@ function positionChild(
     const dx = click.xPct - 0.5;
     const dy = click.yPct - 0.5;
     if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-      baseAngle = 0;
+      baseAngle = Math.PI / 2; // dead-centre tap → straight down (chain reads top→down)
     } else {
       baseAngle = Math.atan2(dy, dx);
     }
   } else {
-    // Roots without a click — fan to the right by default.
-    baseAngle = 0;
+    baseAngle = Math.PI / 2;
   }
 
-  // Child size from scale: containers loom larger, components shrink.
-  const childW = PAGE_W * sizeFactor(scale);
-  const childH = PAGE_H * sizeFactor(scale);
-  // Distance from parent center to child center. For a peer/default child this
-  // equals the original radius (back-compat); it grows with child size so a
-  // bigger child still clears, and is biased by scale so bigger things sit
-  // farther out and smaller things nearer — the scale gradient.
-  const radius =
-    (Math.hypot(PAGE_W, PAGE_H) + Math.hypot(childW, childH)) * 0.275 * radiusBias(scale) +
-    GAP;
+  // Child size. A tapped-in ("descend") child is a ZOOM-IN — render it a notch
+  // smaller than its PARENT so the chain reads as nesting (City bigger than the
+  // place bigger than the sub-part), compounding gently down the chain and
+  // floored at 0.4 of the root so deep tiles stay readable. Expand-neighbours
+  // and explicit container/component scales keep the root-relative sizing.
+  // Gate on EXPLICIT "descend" (every real tap-in carries it from the wire) so
+  // scale-less fixtures / pre-relation sessions keep the default size.
+  const isDescend = relation === "descend";
+  const plainScale = scale === undefined || scale === "peer";
+  const childW =
+    isDescend && plainScale
+      ? Math.max(PAGE_W * 0.4, parent.w * 0.8)
+      : PAGE_W * sizeFactor(scale);
+  const childH =
+    isDescend && plainScale
+      ? Math.max(PAGE_H * 0.4, parent.h * 0.8)
+      : PAGE_H * sizeFactor(scale);
 
-  // Try base angle first, then nudge ±15° outward up to ±90° each side.
-  const tries = [0, 15, -15, 30, -30, 45, -45, 60, -60, 90, -90, 135, -135, 180];
+  // Place the child JUST outside the parent ALONG THE TAP DIRECTION, using a
+  // direction-aware clearance (project each rect's half-extents onto the angle)
+  // rather than a fixed radius. So the child hugs the exact spot you tapped and
+  // the City → place → sub-part chain stays traceable, instead of being flung
+  // ~1300u out and rotated to a random slot (which read as "detached maps").
+  // Rotation now only kicks in to dodge an already-placed SIBLING.
+  const tries = [0, 18, -18, 36, -36, 54, -54, 78, -78, 104, -104, 140, -140, 180];
+  const radiusAt = (ang: number): number => {
+    const ux = Math.abs(Math.cos(ang));
+    const uy = Math.abs(Math.sin(ang));
+    const parentClear = ux * (parent.w / 2) + uy * (parent.h / 2);
+    const childClear = ux * (childW / 2) + uy * (childH / 2);
+    return (parentClear + childClear + GAP) * radiusBias(scale);
+  };
   for (const offsetDeg of tries) {
     const ang = baseAngle + (offsetDeg * Math.PI) / 180;
+    const radius = radiusAt(ang);
     const ccx = cx + Math.cos(ang) * radius;
     const ccy = cy + Math.sin(ang) * radius;
     const rect: WorldRect = {
@@ -199,10 +225,10 @@ function positionChild(
     if (!collidesAny(rect, placed)) return rect;
   }
 
-  // Fallback: stack outward at the base angle even if it overlaps.
-  const ang = baseAngle;
-  const ccx = cx + Math.cos(ang) * radius * 1.6;
-  const ccy = cy + Math.sin(ang) * radius * 1.6;
+  // Fallback: push farther out along the base angle even if it overlaps.
+  const radius = radiusAt(baseAngle) * 1.5;
+  const ccx = cx + Math.cos(baseAngle) * radius;
+  const ccy = cy + Math.sin(baseAngle) * radius;
   return {
     x: ccx - childW / 2,
     y: ccy - childH / 2,

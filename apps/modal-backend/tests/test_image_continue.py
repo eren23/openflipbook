@@ -40,6 +40,40 @@ async def test_continue_image_defaults_to_kontext(
     assert captured["args"]["prompt"] == "zoom in"
 
 
+def test_build_zoom_instruction_carries_system_knowledge() -> None:
+    # The zoom must USE what the system already knows — the named sub-areas the
+    # planner found inside + the geometry placement clause — not a dumb pixel
+    # zoom. The crop is the reference; this text is the enhancement.
+    s = image_edit.build_zoom_instruction(
+        page_title="The Unseen University",
+        facts=["The Tower of Art", "The Library", "Great Hall"],
+        layout_clause="Place the Tower of Art toward the upper-left.",
+    )
+    low = s.lower()
+    assert "the unseen university" in low          # anchors on the entered place
+    assert "reinvent" in low and "closer" in low   # faithful to the reference crop
+    assert "detail" in low                         # enhances, doesn't dumb-zoom
+    # The named features the system knows are inside, worked into the map.
+    assert all(f in s for f in ("The Tower of Art", "The Library", "Great Hall"))
+    # Holds the reference's overhead-map viewpoint — no interior/eye-level drift.
+    assert "viewpoint" in low
+    # Don't bait the model into rendering (garbled) label text.
+    assert "garbled" in low
+    # The geometry placement clause reaches Kontext (it never did before).
+    assert "Place the Tower of Art toward the upper-left." in s
+
+
+def test_build_zoom_instruction_degrades_without_knowledge() -> None:
+    # First enter (no interior seeded yet, no facts): still a faithful, enhancing
+    # zoom, but no dangling feature enumeration and no stray separators.
+    s = image_edit.build_zoom_instruction("The Tower", [], "")
+    low = s.lower()
+    assert "the tower" in low
+    assert "belong here" not in low
+    assert "reinvent" in low and "detail" in low
+    assert s == s.strip()
+
+
 async def test_continue_image_respects_env_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

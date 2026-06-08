@@ -70,4 +70,37 @@ describe("world-layout scale gradient (M3 phase 2)", () => {
     expect(rectOf(pages, "plain").w).toBe(PAGE_W);
     expect(rectOf(pages, "plain").h).toBe(PAGE_H);
   });
+
+  it("nests a tapped-in (descend) child SMALLER than its parent, aspect kept", () => {
+    const { pages } = layoutPages([
+      ROOT,
+      {
+        nodeId: "sub",
+        parentId: "root",
+        imageDataUrl: null,
+        title: "sub",
+        clickInParent: { xPct: 0.5, yPct: 0.5 },
+        relation: "descend",
+      },
+    ]);
+    const root = rectOf(pages, "root");
+    const sub = rectOf(pages, "sub");
+    expect(sub.w).toBeLessThan(root.w); // zoom-in reads as nested
+    expect(sub.w / sub.h).toBeCloseTo(PAGE_W / PAGE_H, 5); // aspect preserved
+  });
+
+  it("an expand neighbour keeps the default size (it's not a zoom-in)", () => {
+    const { pages } = layoutPages([
+      ROOT,
+      {
+        nodeId: "nb",
+        parentId: "root",
+        imageDataUrl: null,
+        title: "nb",
+        clickInParent: { xPct: 0.9, yPct: 0.5 },
+        relation: "expand",
+      },
+    ]);
+    expect(rectOf(pages, "nb").w).toBe(PAGE_W);
+  });
 });

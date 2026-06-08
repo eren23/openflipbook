@@ -19,12 +19,23 @@ import contextlib
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import modal
+
+if TYPE_CHECKING:
+    # Type-only — the providers are imported lazily at the call sites (Modal cold
+    # start cost), but mypy needs the shapes to check the geometry boundary. The
+    # geometry TypedDict is aliased to avoid clashing with this module's Pydantic
+    # `ProjectedEntity` wire model (same shape; model_dump() yields the TypedDict).
+    from providers.detector import Detection
+    from providers.geometry import ProjectedEntity as ProjectedEntityDict
+    from providers.view_estimator import ViewEstimate
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+
+from _env import env_flag
 
 APP_NAME = "openflipbook-generate"
 
@@ -33,6 +44,7 @@ image = (
     .pip_install_from_requirements("requirements.txt")
     .add_local_python_source("providers")
     .add_local_python_source("obs")
+    .add_local_python_source("_env")
 )
 
 secrets = [
@@ -58,7 +70,56 @@ class WorldContextEntity(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     appearance: str
     reference_image_url: str | None = None
-    state: dict[str, Any] = Field(default_factory=dict)
+    # Mirrors EntityState in packages/config: a key/value bag whose values are
+    # primitives only (door=open, lantern=lit, mira_present=true). The tightened
+    # union (not dict[str, Any]) keeps the TS<->Py schema-parity check meaningful.
+    state: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+# Geometric world model — Pydantic mirrors of the packages/config TS shapes.
+# Must stay in field-parity with index.ts; the schema-parity check guards drift.
+class WorldVec2(BaseModel):
+    x: float
+    y: float
+
+
+class ObserverPose(BaseModel):
+    pos: WorldVec2
+    eye_height: float
+    gaze: float
+    pitch: float = 0.0
+    fov: float
+
+
+class MapCrop(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class SceneView(BaseModel):
+    node_id: str
+    level: str
+    observer: ObserverPose | None = None
+    map_crop: MapCrop | None = None
+    # The entity you ENTERED to get here (the tapped place's geo id). geo-tap.ts
+    # sets it and the extract route reads it to anchor the child frame; without
+    # it the field was silently dropped on validation, breaking the round-trip.
+    focus_id: str | None = None
+
+
+class ProjectedEntity(BaseModel):
+    id: str
+    label: str
+    x_pct: float
+    y_pct: float
+    w_pct: float
+    h_pct: float
+    depth: float
+    h_pos: str
+    v_pos: str
+    size: str
 
 
 class GenerateBody(BaseModel):
@@ -89,10 +150,10 @@ class GenerateBody(BaseModel):
     # rejected phrase so the VLM picks something different.
     prior_rejected_subject: str | None = None
     session_style_anchor: str | None = None
-    # Phase 3 — world-memory continuity. Web proxy resolves a slim slice
-    # of the session's registry before forwarding; planner injects each
-    # entity's `appearance` into the image prompt so recurring characters
-    # / places stay visually consistent across pages. Capped server-side.
+    # World-memory continuity. Web proxy resolves a slim slice of the session's
+    # registry before forwarding; planner injects each entity's `appearance`
+    # into the image prompt so recurring characters / places stay visually
+    # consistent across pages. Capped server-side.
     world_context: list[WorldContextEntity] = Field(
         default_factory=list, max_length=16
     )
@@ -108,14 +169,158 @@ class GenerateBody(BaseModel):
     world_mode: bool = False
     autonomy: str = "auto"
     render_mode: str | None = None
+    # Geometric world (GEOMETRIC_WORLD): the scene's observer pose/level + the
+    # geometry engine's expected per-entity layout for this frame.
+    scene_view: SceneView | None = None
+    expected_layout: list[ProjectedEntity] = Field(default_factory=list)
     trace_id: str | None = None
 
 
 # World Mode is gated behind an env flag (default off) so it's a no-op in prod
 # until a deployer turns it on — like EXPAND_MAP_PAN / IMAGE_CONDITIONING.
 def _world_mode_on(requested: bool) -> bool:
-    return bool(requested) and os.environ.get("WORLD_MODE", "false").lower() in (
-        "1", "true", "yes",
+    return bool(requested) and env_flag("WORLD_MODE")
+
+
+def _geometric_world_on() -> bool:
+    """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
+    endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
+    return env_flag("GEOMETRIC_WORLD")
+
+
+def _world_geometry_gen_on() -> bool:
+    """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
+    return env_flag("WORLD_GEOMETRY_GEN")
+
+
+def _layout_clause_for(body: GenerateBody) -> str:
+    """The geometry layout-constraint clause for this request, or "" when the
+    geometry-gen flag is off or no expected layout was sent."""
+    if not _world_geometry_gen_on() or not body.expected_layout:
+        return ""
+    from providers import geometry_prompt
+
+    # model_dump() erases the static type, but a ProjectedEntity Pydantic model
+    # dumps to exactly the ProjectedEntity TypedDict shape the prompt consumes.
+    return geometry_prompt.layout_constraints(
+        cast("list[ProjectedEntityDict]", [e.model_dump() for e in body.expected_layout])
+    )
+
+
+def _topdown_clause_for(body: GenerateBody) -> str:
+    """Force a flat top-down map render (WORLD_TOPDOWN_MAPS). A genuine overhead
+    map makes bbox→world geometry EXACT (the box IS the footprint) instead of
+    guessing an oblique camera — the metric path. Only applies to MAP renders (a
+    fresh world or an explicit map_crop view); a scene/observer render is left
+    alone. Off (default) keeps the model's usual, often-2.5D, map aesthetic."""
+    if not env_flag("WORLD_TOPDOWN_MAPS"):
+        return ""
+    sv = body.scene_view
+    is_map = sv is None or (sv.observer is None and sv.level == "map")
+    if not is_map:
+        return ""
+    return (
+        "Render this as a FLAT TOP-DOWN overhead map — orthographic, looking "
+        "straight down, NO perspective or isometric tilt — so every place sits "
+        "at an unambiguous map position."
+    )
+
+
+def _vlm_grounding_on() -> bool:
+    """Verify the rendered frame against the expected layout (VLM_GROUNDING).
+    Off → no detector call, `final` carries no grounding summary."""
+    return env_flag("VLM_GROUNDING")
+
+
+def _vlm_grounding_repair_on() -> bool:
+    """Let the grounding loop attempt a corrective edit (VLM_GROUNDING_REPAIR).
+    Off → verify-only: report the diff, never mutate the image."""
+    return env_flag("VLM_GROUNDING_REPAIR")
+
+
+def _grounding_summary(
+    report: Any, *, repaired: bool, iterations: int
+) -> dict[str, Any]:
+    """The compact grounding payload attached to the `final` event. `repaired`
+    means the returned image IS a kept corrective edit (not merely that one was
+    attempted) — a discarded / no-improvement repair reports False."""
+    return {
+        "score": round(report.score, 3),
+        "mean_iou": round(report.mean_iou, 3),
+        "matched": [m.label for m in report.matched],
+        "missing": list(report.missing),
+        "extra": list(report.extra),
+        "repaired": repaired,
+        "iterations": iterations,
+    }
+
+
+async def _run_grounding(
+    result: Any,
+    expected: list[ProjectedEntityDict],
+    *,
+    repair_on: bool,
+    abort: Callable[[str], Awaitable[None]],
+    accept_threshold: float = 0.7,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Verify the render against the expected layout (and optionally repair it),
+    returning the best image + a summary. Fully best-effort: ANY failure (detector
+    error/429, edit error) degrades to (original image, None) so grounding can
+    never break generation. The bounded loop itself is unit-tested in
+    test_repair_loop.py; this wires the live detector + edit into it."""
+    from providers import detector, geometry_prompt, grounding
+    from providers import image as image_provider
+    from providers import image_edit as image_edit_provider
+
+    labels = [
+        lbl
+        for lbl in dict.fromkeys(
+            str(e.get("label") or e.get("id") or "") for e in expected
+        )
+        if lbl
+    ]
+    if not labels:
+        return result, None
+
+    async def _verify(img: Any) -> Any:
+        observed = await detector.detect(img.jpeg_bytes, labels)
+        return grounding.diff(expected, observed)
+
+    async def _repair(img: Any, report: Any) -> Any | None:
+        misplaced = [m.label for m in report.matched if not m.pos_ok]
+        instruction = geometry_prompt.repair_instruction(
+            expected, list(report.missing), misplaced
+        )
+        if not instruction:
+            return None
+        await abort("grounding-repair")
+        data_url = image_provider.encode_data_url(img.jpeg_bytes, img.mime_type)
+        return await image_edit_provider.edit_image(data_url, instruction)
+
+    # Verify-only ⇒ inpaint_budget=0 so the loop never even calls the edit model
+    # (no fal spend, iterations stays 0). Repair-on uses the default budget.
+    budget = grounding.Budget() if repair_on else grounding.Budget(inpaint_budget=0)
+    try:
+        loop_res = await grounding.run_grounding_loop(
+            result,
+            verify=_verify,
+            repair=_repair,
+            accept_threshold=accept_threshold,
+            budget=budget,
+        )
+    except Exception as exc:
+        # Grounding is strictly best-effort — a detector 429 or edit failure must
+        # never break generation, so any error degrades to (original, no summary).
+        from obs import log
+
+        log("info", "grounding.failed", error=f"{type(exc).__name__}: {exc}")
+        return result, None
+    # `repaired` = the kept image differs from what we rendered (a corrective edit
+    # actually survived), not merely that a repair was attempted.
+    return loop_res.image, _grounding_summary(
+        loop_res.report,
+        repaired=loop_res.image is not result,
+        iterations=loop_res.iterations,
     )
 
 
@@ -145,7 +350,7 @@ async def _event_stream(
     from obs import bind_trace, log, record_error
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
-    from providers import llm
+    from providers import llm, model_router
 
     bind_trace(trace_id)
     started = _time.perf_counter()
@@ -194,9 +399,7 @@ async def _event_stream(
     # so an online lookup adds 500-2000ms of variance for marginal value and
     # tends to drift the page out of the parent domain. Override with
     # WEB_SEARCH_ON_TAP=true if you want the legacy behaviour back.
-    web_search_on_tap = os.environ.get("WEB_SEARCH_ON_TAP", "false").lower() in (
-        "1", "true", "yes",
-    )
+    web_search_on_tap = env_flag("WEB_SEARCH_ON_TAP")
     effective_web_search = body.web_search and (body.mode != "tap" or web_search_on_tap)
     try:
         # Edit mode short-circuits the planner: we already have an image, the
@@ -356,11 +559,7 @@ async def _event_stream(
             # (same refs for all; directional edge-crops deferred). Flag-gated.
             expand_cond_refs: list[str] | None = None
             expand_cond_preamble = ""
-            if (
-                os.environ.get("IMAGE_CONDITIONING", "true").lower()
-                in ("1", "true", "yes")
-                and body.condition_image_urls
-            ):
+            if env_flag("IMAGE_CONDITIONING", "true") and body.condition_image_urls:
                 expand_cond_refs = body.condition_image_urls
                 expand_cond_preamble = image_provider.conditioning_preamble(
                     body.condition_roles or [], "expand"
@@ -576,8 +775,8 @@ async def _event_stream(
         #    parent + subject_context for semantic continuity — keeps an
         #    ambiguous click subject in the parent page's domain instead of
         #    drifting to whatever interpretation web search likes most).
-        #    Phase 3: `world_context` carries recurring-entity appearance
-        #    descriptors that the planner injects into the image prompt.
+        #    `world_context` carries recurring-entity appearance descriptors
+        #    that the planner injects into the image prompt.
         await _abort_if_disconnected("pre-plan")
         yield _sse({"type": "status", "stage": "planning"}, trace_id)
         world_context_payload = [e.model_dump() for e in body.world_context]
@@ -609,8 +808,24 @@ async def _event_stream(
             composed_prompt = (
                 f"Style: {style_anchor}\n\n{composed_prompt}"
             )
-        if plan.facts:
+        # Stepping INSIDE a place is an immersive scene, not a diagram — rendering
+        # the facts as on-image "Labels to include" turns the interior into an
+        # annotated diagram (floating captions), breaking the seamless step-in.
+        # The scene still carries that content via plan.prompt; maps/explainers
+        # keep their labels.
+        if plan.facts and render_mode != "place_scene":
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+        # Geometric world: append the engine's deterministic placement clause so
+        # the model aims entities at their projected positions. Flag-gated → "".
+        layout_clause = _layout_clause_for(body)
+        if layout_clause:
+            composed_prompt += "\n\n" + layout_clause
+            log("info", "geo.layout_steered", entities=len(body.expected_layout))
+        # Top-down map lever (WORLD_TOPDOWN_MAPS) — a flat overhead map makes the
+        # seeded geometry exact. Flag-gated, map renders only → "" otherwise.
+        topdown_clause = _topdown_clause_for(body)
+        if topdown_clause:
+            composed_prompt += "\n\n" + topdown_clause
 
         await _abort_if_disconnected("pre-image-gen")
         yield _sse(
@@ -634,13 +849,19 @@ async def _event_stream(
                     break
             if region_ref is None:
                 region_ref = body.condition_image_urls[0]
-        use_continuation = render_mode == "place_submap" and region_ref is not None
-        zoom_instruction = (
-            f"Zoom in and draw a closer map of {plan.page_title} — the area at the "
-            "centre of this image. Keep the same hand-drawn cartographic style, "
-            "palette and line work; keep the existing streets, buildings and "
-            "landmarks where they are and continue them outward; label its "
-            "sub-areas. A closer continuation of this map, not a new scene."
+        # The model router owns the op decision (same result as before: a
+        # place_submap entry with a region crop zoom-continues, else fresh gen).
+        use_continuation = (
+            model_router.select_operation(render_mode, region_ref is not None)
+            == "zoom_continue"
+        )
+        # The Kontext zoom keeps the crop's LOOK faithful; feed it the system's
+        # KNOWLEDGE too — the planner's named sub-areas (plan.facts) + the
+        # geometry placement clause — so it ELABORATES the place in finer detail
+        # instead of a dumb pixel-zoom. The crop is the reference; this enhances
+        # it through the world model and geometry.
+        zoom_instruction = image_edit_provider.build_zoom_instruction(
+            plan.page_title, plan.facts, layout_clause
         )
 
         # 3. Image gen — with progressive fast-tier draft.
@@ -650,9 +871,7 @@ async def _event_stream(
         # parallel and emitting it via the existing `progress` event lets
         # the frontend paint a usable page seconds before the final lands.
         # Disabled by env if a deployer wants to save the extra fal call.
-        progressive_enabled = os.environ.get(
-            "PROGRESSIVE_DRAFT", "true"
-        ).lower() in ("1", "true", "yes")
+        progressive_enabled = env_flag("PROGRESSIVE_DRAFT", "true")
         target_tier = (body.image_tier or "balanced").lower()
         wants_draft = (
             progressive_enabled
@@ -682,10 +901,7 @@ async def _event_stream(
         # text-only exactly as before.
         main_prompt = composed_prompt
         cond_refs: list[str] | None = None
-        if (
-            os.environ.get("IMAGE_CONDITIONING", "true").lower() in ("1", "true", "yes")
-            and body.condition_image_urls
-        ):
+        if env_flag("IMAGE_CONDITIONING", "true") and body.condition_image_urls:
             cond_refs = body.condition_image_urls
             # Entering a place reframes the region ref ("reveal the fuller place
             # within") vs. an explainer tap ("reveal what is inside").
@@ -755,6 +971,32 @@ async def _event_stream(
                 result = await main_task
         else:
             result = await main_task
+
+        # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the
+        # expected layout and — when VLM_GROUNDING_REPAIR is also on — attempt one
+        # bounded corrective edit, keeping the best-scoring image. Best-effort +
+        # flag-gated, so off (the default) is byte-identical to before.
+        grounding_summary: dict | None = None
+        if _vlm_grounding_on() and body.expected_layout:
+            await _abort_if_disconnected("pre-grounding")
+            yield _sse(
+                {
+                    "type": "status",
+                    "stage": "verifying",
+                    "page_title": plan.page_title,
+                },
+                trace_id,
+            )
+            result, grounding_summary = await _run_grounding(
+                result,
+                cast(
+                    "list[ProjectedEntityDict]",
+                    [e.model_dump() for e in body.expected_layout],
+                ),
+                repair_on=_vlm_grounding_repair_on(),
+                abort=_abort_if_disconnected,
+            )
+
         # Final image is the largest payload (up to 3MB JPEG on the pro
         # tier); offload the b64 encode the same way as the draft so the
         # `final` SSE yield isn't gated on a sync CPU stall.
@@ -768,19 +1010,21 @@ async def _event_stream(
             {"url": c.url, "title": c.title}
             for c in (plan.sources or [])
         ]
-        yield _sse(
-            {
-                "type": "final",
-                "image_data_url": data_url,
-                "page_title": plan.page_title,
-                "image_model": result.model,
-                "prompt_author_model": text_model,
-                "session_id": body.session_id,
-                "final_prompt": zoom_instruction if use_continuation else composed_prompt,
-                "sources": sources_payload,
-            },
-            trace_id,
-        )
+        final_payload: dict[str, Any] = {
+            "type": "final",
+            "image_data_url": data_url,
+            "page_title": plan.page_title,
+            "image_model": result.model,
+            "prompt_author_model": text_model,
+            "session_id": body.session_id,
+            "final_prompt": zoom_instruction if use_continuation else composed_prompt,
+            "sources": sources_payload,
+        }
+        # Geometric grounding summary rides on `final` only when produced (flag
+        # off → key absent → unchanged wire shape).
+        if grounding_summary is not None:
+            final_payload["grounding"] = grounding_summary
+        yield _sse(final_payload, trace_id)
         log(
             "info",
             "sse.generate.end",
@@ -1062,6 +1306,28 @@ class ExtractEntitiesBody(BaseModel):
     trace_id: str | None = None
 
 
+class GeoEntityRef(BaseModel):
+    """The trimmed geo state the NL editor may target (mirrors the web's
+    EditEntitiesRequestBody.entities slice)."""
+    id: str
+    entity_id: str | None = None
+    label: str = ""
+    pos: WorldVec2
+    height: float = 0.0
+    footprint: dict[str, float] = Field(default_factory=dict)
+    visual: str = ""
+
+
+class EditEntitiesBody(BaseModel):
+    session_id: str
+    instruction: str
+    entities: list[GeoEntityRef] = Field(default_factory=list, max_length=120)
+    # geo-id → node ids that show it; lets us compute the blast-radius here.
+    references: dict[str, list[str]] = Field(default_factory=dict)
+    scene_view: SceneView | None = None
+    trace_id: str | None = None
+
+
 @fastapi_app.post("/extract-entities")
 async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     """Run the world-memory extractor on a freshly-rendered page.
@@ -1106,6 +1372,96 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             headers={"X-Trace-Id": trace_id},
         )
 
+    # Localize the catalogued entities so the world map can seed and the overlay
+    # can draw. The extractor's bbox is best-effort and often empty on dense
+    # images; the purpose-built detector reliably returns one box per label.
+    # Detector boxes are centre-based → store top-left for the EntityBBox shape.
+    # Gated + best-effort: a failure here never blocks the extract response.
+    # Decode the image once for both geometry passes (localize + view-estimate).
+    geo_img_bytes = b""
+    if _geometric_world_on():
+        try:
+            _, _, _gb64 = body.image_data_url.partition(",")
+            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
+        except Exception:
+            geo_img_bytes = b""
+
+    if geo_img_bytes and (result.added or result.updated):
+        try:
+            from providers import detector as _detector
+
+            def _box_from_det(d: Detection) -> dict[str, float]:
+                # Centre-based → top-left, clipped to the frame on all four edges.
+                # A naive `max(0, c - s/2)` leaves w/h unclipped, so an edge box
+                # overflows past 1.0 or shifts its recomputed centre.
+                cx, cy = float(d["x_pct"]), float(d["y_pct"])
+                bw, bh = float(d["w_pct"]), float(d["h_pct"])
+                x1, y1 = max(0.0, cx - bw / 2.0), max(0.0, cy - bh / 2.0)
+                x2, y2 = min(1.0, cx + bw / 2.0), min(1.0, cy + bh / 2.0)
+                return {
+                    "x_pct": x1,
+                    "y_pct": y1,
+                    "w_pct": max(0.0, x2 - x1),
+                    "h_pct": max(0.0, y2 - y1),
+                }
+
+            # Localize NEW *and* recurring entities: a re-appearance must keep a
+            # per-node box or it drops out of geometry + the overlay every time
+            # it's seen again. One detector call covers both lists.
+            need_added = [e for e in result.added if not e.bbox]
+            need_updated = [u for u in result.updated if not u.bbox]
+            labels = [e.name for e in need_added] + [
+                u.match_name for u in need_updated
+            ]
+            if labels:
+                dets = await _detector.detect(geo_img_bytes, labels)
+                by_label = {str(d.get("label", "")).lower().strip(): d for d in dets}
+
+                def _match(name: str) -> dict[str, float] | None:
+                    key = name.lower().strip()
+                    d = by_label.get(key) or next(
+                        (v for k, v in by_label.items() if k and (k in key or key in k)),
+                        None,
+                    )
+                    return _box_from_det(d) if d else None
+
+                for e in need_added:
+                    box = _match(e.name)
+                    if box:
+                        e.bbox = box
+                for u in need_updated:
+                    box = _match(u.match_name)
+                    if box:
+                        u.bbox = box
+            log(
+                "info",
+                "extract.localized",
+                located=sum(1 for e in result.added if e.bbox)
+                + sum(1 for u in result.updated if u.bbox),
+                total=len(result.added) + len(result.updated),
+            )
+        except Exception as exc:  # best-effort — geometry localization is optional
+            log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
+
+    # Estimate the camera instead of assuming top-down (maps are often 2.5D).
+    # Returned on the response so the web side can store it on the node and
+    # back-project the localized boxes at the right angle. Best-effort.
+    view: ViewEstimate | None = None
+    if geo_img_bytes:
+        try:
+            from providers import view_estimator as _view
+
+            view = await _view.estimate_view(geo_img_bytes, body.caption)
+            log(
+                "info",
+                "extract.view",
+                view_level=view["level"],
+                projection=view["projection"],
+                pitch_deg=view["pitch_deg"],
+            )
+        except Exception as exc:
+            log("info", "extract.view_failed", error=f"{type(exc).__name__}: {exc}")
+
     def _entity_payload(e: llm_provider.ExtractedEntity) -> dict:
         return {
             "kind": e.kind,
@@ -1127,10 +1483,61 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                         "match_name": u.match_name,
                         "changes": u.changes,
                         "confidence": u.confidence,
+                        "bbox": u.bbox,
                     }
                     for u in result.updated
                 ],
             },
+            "view": view,
+            "trace_id": trace_id,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
+@fastapi_app.post("/edit-entities")
+async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
+    """Turn an NL instruction into structured geo edits + a blast-radius (P5).
+
+    Gated by GEOMETRIC_WORLD (403 when off → behaves as if absent). The web
+    layer applies the returned edits to the world_map and surfaces the
+    blast-radius as a "restage N scenes?" confirm. One text-LLM call; no
+    Mongo/R2 here — the edits are just structured JSON.
+    """
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import llm as llm_provider
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    if not _geometric_world_on():
+        return JSONResponse(
+            {"error": "geometric world disabled (set GEOMETRIC_WORLD=1)", "trace_id": trace_id},
+            status_code=403,
+            headers={"X-Trace-Id": trace_id},
+        )
+    log(
+        "info",
+        "edit_entities.request",
+        session_id=body.session_id,
+        instruction_len=len(body.instruction or ""),
+        entity_count=len(body.entities),
+    )
+    try:
+        plan = await llm_provider.edit_entities_nl(
+            instruction=body.instruction,
+            entities=[e.model_dump() for e in body.entities],
+            references=body.references,
+            scene_view=body.scene_view.model_dump() if body.scene_view else None,
+        )
+    except Exception as exc:
+        record_error("edit_entities", exc, session_id=body.session_id)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
+    return JSONResponse(
+        {
+            "plan": {"edits": plan.edits, "blast_radius": plan.blast_radius},
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},

@@ -1,0 +1,9 @@
+# THROWAWAY demo override (untracked) — turns World Mode on and swaps the
+# planner off the rate-limited qwen VLM onto Gemini for a clean live run.
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+services:
+  backend:
+    environment:
+      WORLD_MODE: "true"
+      OPENROUTER_VLM_MODEL: google/gemini-3-flash-preview
+      OPENROUTER_TEXT_MODEL: google/gemini-3-flash-preview
