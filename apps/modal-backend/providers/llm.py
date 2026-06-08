@@ -1472,6 +1472,11 @@ async def polish_edit_instruction(
     if not instruction:
         return instruction
     if len(instruction.split()) > 20:
+        # Already detailed enough to skip the LLM polish — but still pin the
+        # medium so a long edit (especially on Kontext, which takes no style
+        # ref image) can't drift the art style.
+        if style_anchor:
+            return f"{instruction} Keep the existing art medium: {style_anchor}."
         return instruction
     client = _client()
     system = (

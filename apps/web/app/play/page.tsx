@@ -1826,6 +1826,20 @@ export default function PlayPage() {
       // planner emphasises the stroked area in the next page.
       const strokeHint =
         "User circled / annotated this region with a freehand stroke. Treat the stroked area as the focus.";
+      // Same style lock as a click-tap: carry the medium exemplar so a freehand
+      // "go inside" can't drift the art medium either (the parent grounds the
+      // world; the style ref pins the medium).
+      const strokeStyleRef =
+        (styleAnchor
+          ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)
+              ?.imageDataUrl
+          : null) ??
+        history.items.find((p) => p.parentId == null)?.imageDataUrl ??
+        null;
+      const strokeCondition = orderedRefs({
+        parent: currentImage,
+        style: strokeStyleRef !== currentImage ? strokeStyleRef : null,
+      });
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -1840,6 +1854,12 @@ export default function PlayPage() {
         click_hint: strokeHint,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(strokeCondition.urls.length
+          ? {
+              condition_image_urls: strokeCondition.urls,
+              condition_roles: strokeCondition.roles,
+            }
+          : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     };
