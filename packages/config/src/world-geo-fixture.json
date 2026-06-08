@@ -2,7 +2,7 @@
   "_comment": "Single source of truth for the geometric-world wire shapes. The P0 schema-parity gate (apps/web/lib/world-geo-schema.test.ts + apps/modal-backend/tests/test_geo_schema.py) asserts both the TS interfaces and the Pydantic mirrors match these key sets. Edit here when a shape changes; both gates will fail until both sides follow.",
   "keys": {
     "WorldVec2": ["x", "y"],
-    "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "heading", "visual", "state", "confidence", "source", "updated_at"],
+    "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "scale", "heading", "visual", "state", "confidence", "source", "updated_at"],
     "ObserverPose": ["pos", "eye_height", "gaze", "pitch", "fov"],
     "MapCrop": ["x", "y", "w", "h"],
     "SceneView": ["node_id", "level", "observer", "map_crop", "focus_id"],
@@ -21,6 +21,7 @@
       "height": 12,
       "elevation": 0,
       "footprint": { "w": 4, "d": 4 },
+      "scale": 1,
       "heading": 0,
       "visual": "red-and-white striped tower",
       "state": { "lit": true },

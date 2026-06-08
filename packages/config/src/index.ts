@@ -434,6 +434,12 @@ export interface WorldEntityGeo {
   // a wall-mounted lantern). The projector reads `elevation ?? 0`.
   elevation?: number;
   footprint: { w: number; d: number }; // ground extent: width (x) × depth (y)
+  // Per-frame scale: the size of ONE unit of THIS place's INTERIOR frame, in its
+  // parent's units (default 1). Set when the place is first entered (its
+  // footprint extent ÷ the interior's local extent) so a child's local `pos`
+  // resolves to a true absolute position INSIDE this place. Metric — distinct
+  // from the categorical Entity.scale LOD bucket.
+  scale?: number;
   heading?: number; // facing, radians, 0 = +x; optional
   visual: string; // short appearance descriptor (mirrors Entity.appearance)
   state: EntityState;

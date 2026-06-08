@@ -64,6 +64,7 @@ const worldEntityGeo: WorldEntityGeo = {
   height: 12,
   elevation: 0,
   footprint: { w: 4, d: 4 },
+  scale: 1,
   heading: 0,
   visual: "red-and-white striped tower",
   state: { lit: true },
