@@ -126,25 +126,11 @@ def _args_for(
     return args
 
 
-def _ground_view_phrase(level: str | None) -> str:
-    """The viewpoint to RE-VIEW a top-down map crop from, by the entered level.
-    A place you step INTO is seen from the ground, not from overhead."""
-    return {
-        "building": "a three-quarter oblique angle, looking across its rooftops and facades",
-        "street": "street level, standing among its buildings looking along the street",
-        "eye": "eye level, standing inside it looking around",
-    }.get((level or "").strip().lower(), "ground level, a closer and lower angle")
-
-
-def conditioning_preamble(
-    roles: list[str], mode: str, level: str | None = None
-) -> str:
+def conditioning_preamble(roles: list[str], mode: str) -> str:
     """Prompt prefix telling nano-banana how to read the ordered reference
     images (image 1, 2, …). The order encodes weight: the region you came from
     is strongest, then the immediate parent's world, then the global style
-    anchor. Empty roles → no preamble (plain text-to-image). `level` is the
-    entered view level (street/building/eye) — it picks the reprojection angle
-    for a place_scene enter."""
+    anchor. Empty roles → no preamble (plain text-to-image)."""
     if not roles:
         return ""
     if mode == "expand":
@@ -158,24 +144,20 @@ def conditioning_preamble(
     lines: list[str] = []
     for i, role in enumerate(roles, start=1):
         if role == "region":
-            if mode == "place_scene":
-                # Reprojection (the B3 lesson): the region ref is a TOP-DOWN map
-                # crop, but entering a place means standing IN it. Re-view from
-                # the ground and do NOT keep the overhead composition — copying it
-                # leaks top-down artefacts (e.g. a roof seen from above rendered
-                # as a building). Keep the place's IDENTITY, transform the angle.
-                lines.append(
-                    f"Image {i}: a top-down map view of the spot you are entering. "
-                    f"Re-view that exact place from {_ground_view_phrase(level)} — "
-                    "keep its buildings, materials, colours and spatial layout "
-                    "faithfully, but render them as seen from within the place, "
-                    "NOT from overhead. The same place, re-viewed, not a new invention."
-                )
-            else:
-                lines.append(
-                    f"Image {i}: the spot you are entering — {enter.lower()} it, "
-                    "keeping its composition, depth and framing."
-                )
+            # Entering a place must be a FAITHFUL closer view of that exact spot,
+            # not a fresh invention — otherwise the sub-part drifts into an
+            # unrelated render (the loose-refs failure the user hit).
+            faithful = (
+                " Reproduce ITS structures, colours, landmarks and layout"
+                " faithfully — this page is a closer, continued view of that"
+                " exact place, not a new invention."
+                if mode == "place_scene"
+                else ""
+            )
+            lines.append(
+                f"Image {i}: the spot you are entering — {enter.lower()} it, "
+                "keeping its composition, depth and framing." + faithful
+            )
         elif role == "parent":
             lines.append(
                 f"Image {i}: the surrounding scene — match its world, palette, "
