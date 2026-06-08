@@ -12,6 +12,10 @@ interface Props {
   /** The rendered <img>; lets the overlay track the object-contain content rect
    *  so boxes land on the image, not the letterboxed wrapper. */
   imgRef?: RefObject<HTMLImageElement | null>;
+  /** When set (you're INSIDE a place), draw only this frame's own entities — the
+   *  place's children — not the whole city codex leaking boxes onto the interior.
+   *  Null/absent at the top-level map ⇒ draw all (the original behaviour). */
+  allowedEntityIds?: Set<string> | null;
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -25,9 +29,17 @@ const KIND_COLOR: Record<string, string> = {
 // entity on this node, straight over the image. Boxes are 0..1 normalized
 // (top-left) in image space, so positioning by % overlays the image exactly.
 // Toggled by the caller; purely presentational + pointer-transparent.
-export default function GeometryOverlay({ entities, nodeId, imgRef }: Props) {
+export default function GeometryOverlay({
+  entities,
+  nodeId,
+  imgRef,
+  allowedEntityIds,
+}: Props) {
   const content = useContainRect(imgRef);
   const boxes = entities.flatMap((e) => {
+    // Scope to the current frame: inside a place, skip entities that aren't its
+    // own children (otherwise the city's landmarks draw on the interior).
+    if (allowedEntityIds && !allowedEntityIds.has(e.id)) return [];
     const bb = e.appearance_bboxes?.[nodeId];
     if (!bb) return [];
     // Only draw boxes that actually sit in THIS frame. A centre outside [0,1] is
