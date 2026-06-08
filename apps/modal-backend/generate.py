@@ -17,6 +17,7 @@ import asyncio as _asyncio
 import base64
 import contextlib
 import json
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -460,6 +461,84 @@ async def _event_stream(
                     trace_id,
                 )
                 return
+
+            # Map-pan (flag-gated): instead of blooming neighbour SUBJECTS,
+            # outpaint the parent OUTWARD in four directions so "expand" pans the
+            # same continuous world — like moving across a map (BRIA, bakeoff
+            # winner). Reuses the neighbor/expand_done stream + abort handling;
+            # flag off → the subject bloom below, unchanged.
+            if os.environ.get("EXPAND_MAP_PAN", "false").lower() in (
+                "1", "true", "yes"
+            ):
+                yield _sse({"type": "status", "stage": "planning"}, trace_id)
+                _dirs = [
+                    ("west", "Westward"),
+                    ("east", "Eastward"),
+                    ("north", "Northward"),
+                    ("south", "Southward"),
+                ]
+                _dims = {
+                    "16:9": (1600, 900),
+                    "9:16": (900, 1600),
+                    "1:1": (1024, 1024),
+                    "4:3": (1280, 960),
+                    "3:4": (960, 1280),
+                }
+                pw, ph = _dims.get(body.aspect_ratio, (1600, 900))
+                total = len(_dirs)
+                parent_image = body.image  # non-None (checked above); narrows for the closure
+
+                async def _pan_one(idx: int, direction: str):
+                    img = await image_edit_provider.expand_image(
+                        parent_image, direction, pw, ph
+                    )
+                    return idx, direction, img
+
+                await _abort_if_disconnected("pre-pan")
+                pan_tasks = [
+                    _asyncio.create_task(_pan_one(i, d[0]))
+                    for i, d in enumerate(_dirs)
+                ]
+                emitted = 0
+                try:
+                    for fut in _asyncio.as_completed(pan_tasks):
+                        try:
+                            idx, direction, img = await fut
+                        except Exception as exc:
+                            log(
+                                "warn",
+                                "expand.pan_failed",
+                                error=f"{type(exc).__name__}: {exc}",
+                            )
+                            record_error("expand_pan", exc)
+                            continue
+                        data_url = await _asyncio.to_thread(
+                            image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
+                        )
+                        emitted += 1
+                        yield _sse(
+                            {
+                                "type": "neighbor",
+                                "subject": _dirs[idx][1],
+                                "scale": "peer",
+                                "page_title": _dirs[idx][1],
+                                "image_data_url": data_url,
+                                "image_model": img.model,
+                                "prompt_author_model": "",
+                                "final_prompt": f"map-pan {direction}",
+                                "session_id": body.session_id,
+                                "index": idx,
+                                "total": total,
+                            },
+                            trace_id,
+                        )
+                finally:
+                    for t in pan_tasks:
+                        if not t.done():
+                            t.cancel()
+                yield _sse({"type": "expand_done", "count": emitted}, trace_id)
+                return
+
             expand_style_lock = (body.session_style_anchor or "").strip() or None
             expand_world_context = [e.model_dump() for e in body.world_context]
             yield _sse({"type": "status", "stage": "planning"}, trace_id)
