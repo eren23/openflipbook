@@ -80,6 +80,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import { geoTapRequest, type GeoTapOverride } from "@/lib/geo-tap";
+import { childrenOf } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -2232,6 +2233,19 @@ export default function PlayPage() {
                   nodeId={page.nodeId}
                   entities={worldState.entities}
                   imgRef={imgRef}
+                  allowedEntityIds={
+                    // Inside a place → only its own children's boxes (scoped to
+                    // the current frame). At the top-level map → all (null).
+                    page?.sceneView &&
+                    page.sceneView.level !== "map" &&
+                    page.sceneView.focus_id
+                      ? new Set(
+                          childrenOf(geoMap.entities, page.sceneView.focus_id)
+                            .map((g) => g.entity_id)
+                            .filter((id): id is string => id != null),
+                        )
+                      : null
+                  }
                 />
               )}
               {geoOverlayOn && (

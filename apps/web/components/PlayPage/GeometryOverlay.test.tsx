@@ -51,6 +51,24 @@ describe("GeometryOverlay", () => {
     expect(screen.getByText("In frame")).toBeTruthy();
   });
 
+  it("scopes to the current frame: only the place's own children draw", () => {
+    render(
+      <GeometryOverlay
+        nodeId="n1"
+        entities={[
+          ent("tower", "Tower of Art", { n1: { x_pct: 0.4, y_pct: 0.4, w_pct: 0.2, h_pct: 0.2 } }),
+          // a CITY landmark that leaked a bbox onto this interior node — filtered
+          // out because it isn't a child of the place you're inside.
+          ent("palace", "Patrician's Palace", { n1: { x_pct: 0.6, y_pct: 0.5, w_pct: 0.15, h_pct: 0.15 } }),
+        ]}
+        allowedEntityIds={new Set(["tower"])}
+      />,
+    );
+    expect(screen.getAllByTestId("geo-box")).toHaveLength(1);
+    expect(screen.getByText("Tower of Art")).toBeTruthy();
+    expect(screen.queryByText("Patrician's Palace")).toBeNull();
+  });
+
   it("shows the empty note when nothing is localized on this node", () => {
     render(<GeometryOverlay nodeId="n1" entities={[ent("c", "River Ankh", {})]} />);
     expect(screen.queryAllByTestId("geo-box")).toHaveLength(0);
