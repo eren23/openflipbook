@@ -22,7 +22,14 @@ import {
   type LayoutInput,
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
-import type { NodeRelation, ScaleKind } from "@openflipbook/config";
+import { anchorForTile } from "@/lib/atlas-anchors";
+import { nodeKind, NODE_KIND_LEGEND } from "@/lib/node-kind";
+import type {
+  NodeRelation,
+  ScaleKind,
+  SceneView,
+  WorldEntityGeo,
+} from "@openflipbook/config";
 
 export interface AtlasNode {
   id: string;
@@ -46,11 +53,15 @@ interface AtlasViewProps {
   nodes: AtlasNode[];
   latestNodeId: string | null;
   rootTitle: string;
-  // Phase 4 — world-memory pins overlay. Each tile gets dots for the
-  // entities that appear on it. Server-component hydrates these from
-  // Mongo (`getWorldState`); the prop is optional so the existing tests
-  // and pre-Phase-4 sessions render unchanged.
+  // World-memory pins overlay. Each tile gets dots for the entities that
+  // appear on it. Server-component hydrates these from Mongo (`getWorldState`);
+  // the prop is optional so sessions without entity data render unchanged.
   entities?: AtlasEntity[];
+  // Geometric-world anchors: the per-node saved view + the world geo map → each
+  // tile shows the entered place's coords, the camera's gaze, and its neighbours.
+  // Optional; tiles render unchanged without geometry.
+  sceneViews?: Record<string, SceneView | null>;
+  geoMap?: { entities: WorldEntityGeo[] };
 }
 
 export interface AtlasEntity {
@@ -102,6 +113,8 @@ export default function AtlasView({
   latestNodeId,
   rootTitle,
   entities,
+  sceneViews,
+  geoMap,
 }: AtlasViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ w: 1280, h: 720 });
@@ -122,6 +135,11 @@ export default function AtlasView({
   // (so the cursor flips back to grab), so the click handler can't read the
   // moved-flag off the live ref. Stash it here for the trailing click.
   const recentDragMovedRef = useRef(false);
+  // Geo-entity id → label, for the per-tile neighbour list.
+  const geoById = useMemo(
+    () => new Map((geoMap?.entities ?? []).map((e) => [e.id, e.label])),
+    [geoMap],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -415,6 +433,21 @@ export default function AtlasView({
           >
             continue session
           </Link>
+          <div
+            className="flex items-center gap-2 pl-1 opacity-60"
+            data-testid="atlas-legend"
+            title="Tile frame colour = view level · ↓ inside (tap-in) · ⤢ expanded (neighbour)"
+          >
+            {NODE_KIND_LEGEND.map((lv) => (
+              <span key={lv.label} className="flex items-center gap-0.5">
+                <span
+                  className="inline-block h-2 w-2 rounded-sm"
+                  style={{ backgroundColor: lv.color }}
+                />
+                {lv.glyph}&nbsp;{lv.label}
+              </span>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -507,10 +540,14 @@ export default function AtlasView({
                     <path
                       d={arcPath(c.from, c.to)}
                       fill="none"
-                      stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
+                      stroke={isExpand ? "rgba(13,148,136,0.65)" : "rgba(15,15,15,0.7)"}
                       strokeWidth={8}
                       strokeLinecap="round"
-                      strokeDasharray="2 22"
+                      // A "descend" edge is the zoom path you want to FOLLOW
+                      // (City -> place -> sub-part) — draw it as a clear dashed
+                      // line, not the near-invisible 2/24 dotting that made the
+                      // nested maps read as detached. "expand" stays subtle.
+                      strokeDasharray={isExpand ? "3 16" : "16 9"}
                       markerEnd={
                         isExpand
                           ? "url(#ofb-atlas-arrow-expand)"
@@ -555,6 +592,14 @@ export default function AtlasView({
             const lodFactor = lodOn
               ? lodOpacity(scaleLevel, camera.zoom, fitZoom)
               : 1;
+            const anchor = geoMap
+              ? anchorForTile(sceneViews?.[p.nodeId], geoMap)
+              : null;
+            const kind = nodeKind({
+              level: sceneViews?.[p.nodeId]?.level ?? null,
+              relation: p.relation ?? null,
+              isRoot: !p.parentId,
+            });
             return (
               <div
                 key={p.nodeId}
@@ -602,12 +647,12 @@ export default function AtlasView({
                     (isFocused && !reduced ? " ofb-tile-glow" : "")
                   }
                   style={{
+                    // Frame colour = the view LEVEL (map/building/scene) so type
+                    // is readable at any zoom; red overrides for the focused tile.
                     borderColor: isFocused
                       ? "rgba(239, 68, 68, 0.95)"
-                      : isExpand
-                        ? "rgba(13,148,136,0.45)"
-                        : "rgba(0,0,0,0.2)",
-                    borderWidth: isFocused ? 6 : 2,
+                      : kind.levelColor,
+                    borderWidth: isFocused ? 6 : 3,
                     filter: `saturate(${tint.saturation})`,
                     opacity: isFocused ? 1 : tint.opacity * lodFactor,
                   }}
@@ -646,6 +691,53 @@ export default function AtlasView({
                     ))}
                   </div>
                 ) : null}
+
+                {anchor && (
+                  <div
+                    className="pointer-events-none absolute left-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
+                    title={
+                      anchor.neighbors.length
+                        ? `near: ${anchor.neighbors
+                            .map((n) => geoById.get(n.id) ?? n.id)
+                            .join(", ")}`
+                        : undefined
+                    }
+                  >
+                    {anchor.gazeAngle !== null && (
+                      <svg width={10} height={10} viewBox="-5 -5 10 10" aria-hidden="true">
+                        <line
+                          x1={0}
+                          y1={0}
+                          x2={Math.cos(anchor.gazeAngle) * 4}
+                          y2={Math.sin(anchor.gazeAngle) * 4}
+                          stroke="#7dd3fc"
+                          strokeWidth={1.5}
+                        />
+                        <circle cx={0} cy={0} r={1} fill="#fff" />
+                      </svg>
+                    )}
+                    {Math.round(anchor.focusWorldPos.x)},
+                    {Math.round(anchor.focusWorldPos.y)}
+                  </div>
+                )}
+
+                <div
+                  className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
+                  data-testid="tile-kind"
+                  title={`${kind.levelLabel} · ${kind.relLabel}${depth > 0 ? ` · depth ${depth}` : ""}`}
+                  style={{
+                    // Counter the camera zoom so the badge stays legible at the
+                    // fit-all overview (otherwise it's a sub-pixel smudge there).
+                    transform: `scale(${counterScale(camera.zoom)})`,
+                    transformOrigin: "top right",
+                  }}
+                >
+                  <span>{kind.levelGlyph}</span>
+                  <span className="opacity-80">
+                    {kind.relGlyph} {kind.relLabel}
+                  </span>
+                  {depth > 0 && <span className="opacity-60">d{depth}</span>}
+                </div>
 
                 {showHeatmap && <HeatmapOverlay parentId={p.nodeId} />}
 

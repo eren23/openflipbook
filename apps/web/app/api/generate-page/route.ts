@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GenerateRequestBody } from "@openflipbook/config";
 import { resolveEntitiesForPrompt } from "@/lib/world";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -9,11 +10,10 @@ export const dynamic = "force-dynamic";
 /**
  * Proxies to the user's Modal-hosted generate endpoint as SSE.
  *
- * Phase 3 — before forwarding, we resolve the session's world-memory
- * registry and attach a slim continuity slice (`world_context`) to the
- * outgoing body so the planner can preserve recurring characters /
- * places without the user having to re-describe them. Mongo lives on
- * this side; the backend stays stateless.
+ * Before forwarding, we resolve the session's world-memory registry and attach
+ * a slim continuity slice (`world_context`) to the outgoing body so the planner
+ * can preserve recurring characters / places without the user having to
+ * re-describe them. Mongo lives on this side; the backend stays stateless.
  */
 export async function POST(req: Request) {
   const modalUrl = process.env.MODAL_API_URL;
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     upstreamBody = rawText;
   }
 
-  const upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/sse/generate`, {
+  const upstream = await fetch(joinModalUrl(modalUrl, "/sse/generate"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

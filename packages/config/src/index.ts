@@ -3,7 +3,7 @@ export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 export type GenerateMode = "query" | "tap" | "edit" | "expand";
 
 // Scale of a node's subject relative to its parent's focal subject, for the
-// scale-space world map + zoom level-of-detail (M3). Composes into an integer
+// scale-space world map + zoom level-of-detail. Composes into an integer
 // scale-level: component = -1, peer = 0, container = +1.
 export type ScaleKind = "component" | "peer" | "container";
 
@@ -63,11 +63,11 @@ export interface GenerateRequestBody {
   // visual style for ALL pages in the session, overriding the per-hop
   // style derived from the parent. Pin a page in the UI to populate.
   session_style_anchor?: string;
-  // Phase 3 — world-memory continuity injection. The web proxy at
-  // /api/generate-page resolves a slim slice of the session's world_state
-  // before forwarding upstream. Each entry's `appearance` gets injected
-  // into the planner's prompt so recurring characters / places preserve
-  // their look across pages without the user having to re-describe them.
+  // World-memory continuity injection. The web proxy at /api/generate-page
+  // resolves a slim slice of the session's world_state before forwarding
+  // upstream. Each entry's `appearance` gets injected into the planner's prompt
+  // so recurring characters / places preserve their look across pages without
+  // the user having to re-describe them.
   world_context?: WorldContextEntity[];
   // Image conditioning — an ordered stack of reference images (data URLs) the
   // generator blends so the page belongs to the same world: region crop (the
@@ -84,6 +84,11 @@ export interface GenerateRequestBody {
   world_mode?: boolean;
   autonomy?: Autonomy;
   render_mode?: RenderMode;
+  // Geometric world (GEOMETRIC_WORLD). The scene's observer pose + level, and the
+  // geometry engine's expected per-entity layout for this frame, so the planner
+  // can constrain placement and the grounding loop has a target to check against.
+  scene_view?: SceneView;
+  expected_layout?: ProjectedEntity[];
   trace_id?: string;
 }
 
@@ -170,6 +175,19 @@ export interface Citation {
   title?: string | null;
 }
 
+// Geometric grounding result (VLM_GROUNDING): how well the rendered frame
+// matched the expected layout, plus whether a corrective edit ran. Present on
+// `final` only when grounding was enabled for the request.
+export interface GroundingSummary {
+  score: number; // 0..1 layout-fidelity (presence + IoU + position agreement)
+  mean_iou: number;
+  matched: string[]; // expected labels the detector found
+  missing: string[]; // expected labels with no detection
+  extra: string[]; // detections that weren't expected
+  repaired: boolean; // a corrective edit was applied + kept
+  iterations: number;
+}
+
 export interface GenerateFinalEvent {
   type: "final";
   image_data_url: string;
@@ -181,6 +199,8 @@ export interface GenerateFinalEvent {
   // Web-search citations the planner used. Empty when web search is off
   // or the model returned none. Already domain-deduped, capped at ~3.
   sources?: Citation[];
+  // Geometric grounding summary — present only when VLM_GROUNDING was on.
+  grounding?: GroundingSummary;
   trace_id?: string;
 }
 
@@ -194,7 +214,8 @@ export type GenerateStage =
   | "click_resolving"
   | "click_resolved"
   | "planning"
-  | "generating_image";
+  | "generating_image"
+  | "verifying";
 
 export interface GenerateStatusEvent {
   type: "status";
@@ -328,9 +349,9 @@ export type EntityKind = "person" | "place" | "item" | "creature";
 export type EntityState = Record<string, string | number | boolean>;
 
 // 0..1 normalized bounding box of an entity inside a page image. Top-left
-// origin. Used by the in-image hover-chip overlay (Phase 4) to position
-// the tooltip; an entity's appearance count is independent of how many
-// of its appearances have a bbox.
+// origin. Used by the in-image hover-chip overlay to position the tooltip; an
+// entity's appearance count is independent of how many of its appearances have
+// a bbox.
 export interface EntityBBox {
   x_pct: number;
   y_pct: number;
@@ -374,6 +395,134 @@ export interface Entity {
   updated_at: string;
 }
 
+// ── Geometric world model ────────────────────────────────────────────────────
+// A persistent 2D coordinate world: entities sit at numeric map positions with a
+// height + footprint; an observer has a pose; a rendered scene is a VIEW of the
+// in-frame entities from that pose (there is no single correct view). All
+// additive + dormant until GEOMETRIC_WORLD is enabled. The geometry engine
+// (apps/web/lib/world-geometry.ts ↔ apps/modal-backend/providers/geometry.py)
+// projects (map + observer) → the per-frame layout below.
+
+// A point in world units (arbitrary scale; origin top-left, +x east, +y south).
+export interface WorldVec2 {
+  x: number;
+  y: number;
+}
+
+// An entity placed on the map: where it is, how tall, how much ground it covers.
+//
+// Nested frames (the sub-entity consistency model): a place you can ENTER (the
+// Unseen University) is its own little world. Its sub-entities (Tower of Art,
+// Library, Great Hall) carry `parent_id` = that place's geo id, and their `pos`
+// is LOCAL to the parent's frame — so the University's internal layout is fixed
+// ONCE and stays consistent across every view of it, and editing one ripples to
+// its siblings. Top-level city entities have `parent_id: null` (pos == world).
+export interface WorldEntityGeo {
+  id: string;
+  // The Codex Entity.id this geometry belongs to, or null for a map-only prop.
+  entity_id: string | null;
+  // The geo id of the place this entity lives INSIDE (its sub-world), or null
+  // for a top-level city-frame entity. `pos` is interpreted in the parent's
+  // local frame; resolve up the chain for an absolute world position.
+  parent_id?: string | null;
+  kind: EntityKind;
+  label: string;
+  pos: WorldVec2;
+  height: number; // world units, the entity's vertical extent (top = elevation+height)
+  // Base elevation: world-z of the entity's foot above the ground plane. 0 (the
+  // default) = sits on the ground; >0 lifts it (a bird aloft, a clifftop castle,
+  // a wall-mounted lantern). The projector reads `elevation ?? 0`.
+  elevation?: number;
+  footprint: { w: number; d: number }; // ground extent: width (x) × depth (y)
+  // Per-frame scale: the size of ONE unit of THIS place's INTERIOR frame, in its
+  // parent's units (default 1). Set when the place is first entered (its
+  // footprint extent ÷ the interior's local extent) so a child's local `pos`
+  // resolves to a true absolute position INSIDE this place. Metric — distinct
+  // from the categorical Entity.scale LOD bucket.
+  scale?: number;
+  heading?: number; // facing, radians, 0 = +x; optional
+  visual: string; // short appearance descriptor (mirrors Entity.appearance)
+  state: EntityState;
+  confidence: number; // 0..1
+  // How this geometry was set: "user" (hand-placed, authoritative), "extracted"
+  // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
+  source: "extracted" | "user" | "derived";
+  updated_at: string;
+}
+
+// Where the camera stands for a scene. Null observer ⇒ a top-down map view.
+export interface ObserverPose {
+  pos: WorldVec2;
+  eye_height: number;
+  gaze: number; // heading (yaw), radians, 0 = +x
+  // Camera tilt, radians, 0 (default) = level / horizon-locked. +pitch looks UP
+  // (the horizon drops on screen), -pitch looks down. The projector reads
+  // `pitch ?? 0`. Lets a scene tilt up at a tower or down a slope.
+  pitch?: number;
+  fov: number; // horizontal field of view, radians
+}
+
+// A rectangular window into the world, in world units (sub-map crop / bounds).
+export interface MapCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// What level a scene renders at — there is no single correct view.
+export type ViewLevel = "map" | "building" | "street" | "eye";
+
+// The view a given node (scene) renders: its level + observer pose (non-map
+// levels) and/or the map crop (map level). Persisted on the node.
+export interface SceneView {
+  node_id: string;
+  level: ViewLevel;
+  observer: ObserverPose | null;
+  map_crop: MapCrop | null;
+  // The entity you ENTERED to get here (the tapped place). Its sub-entities seed
+  // into this place's child frame (parent_id = its geo) so the interior layout
+  // stays consistent across re-entries. Null for a top-level map view.
+  focus_id?: string | null;
+}
+
+// One entity's projected place in a rendered frame (geometry-engine output),
+// 0..1 normalized in the frame. Drives prompt constraints + VLM verification.
+export interface ProjectedEntity {
+  id: string;
+  label: string;
+  x_pct: number; // screen centre
+  y_pct: number;
+  w_pct: number; // apparent size
+  h_pct: number;
+  depth: number; // distance from observer; lower = nearer (drawn on top)
+  // Coarse bins — what prompts + the VLM judge actually consume (honest: bins,
+  // not pixels). h_pos ∈ far-left..far-right, v_pos ∈ top|mid|bottom, size bin.
+  h_pos: string;
+  v_pos: string;
+  size: string;
+}
+
+// What the camera estimator reads out of a generated image, so the geometry
+// layer doesn't assume top-down. `projection` decides how a detection
+// box back-projects: top_down → the box is a footprint; oblique/perspective →
+// its vertical extent reads as apparent height.
+export type ViewProjection = "top_down" | "oblique" | "perspective";
+export interface ViewEstimate {
+  level: ViewLevel;
+  projection: ViewProjection;
+  pitch_deg: number;
+}
+
+// A per-session snapshot of the geometric world (the `world_map` collection).
+export interface WorldMapSnapshot {
+  session_id: string;
+  entities: WorldEntityGeo[];
+  bounds: MapCrop;
+  schema_version: number;
+  updated_at: string;
+}
+
 // Backend → web wire format for one extraction pass. The web layer takes
 // this, allocates ids for `added`, merges into the WorldStateDoc, emits
 // SSE events to subscribed frontends. State changes ride inside
@@ -397,6 +546,10 @@ export interface EntityUpdate {
   match_name: string;
   changes: Partial<Pick<Entity, "name" | "appearance" | "facts" | "state" | "aliases">>;
   confidence: number;
+  // Re-localized box on THIS node: a recurring entity is detected again so it
+  // keeps an appearance_bbox per node — without it, geometry/overlay drop the
+  // entity on every re-appearance. Omitted when localization fails.
+  bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
 }
 
 export interface EntityExtractionResult {
@@ -429,10 +582,8 @@ export interface WorldStateSnapshot {
   updated_at: string;
 }
 
-// User-override CRUD on the codex. Ships in Phase 5 of the plan; types
-// land now so the read surface (Phase 2) is wire-compatible from day one.
-// `undo_delete` (Phase 7b) restores a soft-deleted entity within the
-// undo window the codex panel exposes.
+// User-override CRUD on the codex. `undo_delete` restores a soft-deleted entity
+// within the undo window the codex panel exposes.
 export type WorldEntityMutation =
   | { op: "create"; entity: Omit<Entity, "id" | "updated_at"> }
   | { op: "rename"; id: string; name: string; aliases?: string[] }
@@ -441,3 +592,51 @@ export type WorldEntityMutation =
   | { op: "undo_delete"; id: string }
   | { op: "pin"; id: string; pinned: boolean }
   | { op: "set_appearance"; id: string; appearance: string; reference_image_url?: string | null };
+
+// ── Geometry edits: NL-editable map ──────────────────────────────────────────
+// A structured edit to the geometric world map (WorldEntityGeo by id). These are
+// what `edit_entities_nl` turns a natural-language instruction into ("move the
+// lighthouse north" → {op:"move", target, dx, dy}). `target` is a WorldEntityGeo
+// id; deltas are op-specific and in world units. Applied by lib/world-map.ts.
+export type EntityGeoEdit =
+  | { op: "move"; target: string; dx: number; dy: number }
+  | { op: "set_height"; target: string; height: number }
+  | { op: "set_appearance"; target: string; visual: string }
+  | { op: "remove"; target: string }
+  | {
+      op: "add";
+      label: string;
+      pos: WorldVec2;
+      height?: number;
+      footprint?: { w: number; d: number };
+    };
+
+// The result of an NL edit: the structured ops plus the blast-radius — the node
+// ids whose saved render references an edited entity and so are now stale (the
+// codex can offer "editing this restages N scenes — restage now?").
+export interface EntityEditPlan {
+  edits: EntityGeoEdit[];
+  blast_radius: string[];
+}
+
+export interface EditEntitiesRequestBody {
+  session_id: string;
+  instruction: string;
+  // The geo entities the editor may target (current map state, trimmed).
+  entities: Array<
+    Pick<
+      WorldEntityGeo,
+      "id" | "entity_id" | "label" | "pos" | "height" | "footprint" | "visual"
+    >
+  >;
+  // geo-id → node ids that show it; lets the backend compute blast-radius
+  // without the full codex registry (web side builds it from appears_on_node_ids).
+  references?: Record<string, string[]>;
+  scene_view?: SceneView | null;
+  trace_id?: string;
+}
+
+export interface EditEntitiesResponse {
+  plan: EntityEditPlan;
+  trace_id?: string;
+}

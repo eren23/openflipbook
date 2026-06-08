@@ -119,10 +119,6 @@ export function startLTXStream(config: StreamConfig): StreamClient {
   };
 }
 
-export function hasWSStreaming(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_LTX_WS_URL);
-}
-
 export function getWSUrl(): string | null {
   return process.env.NEXT_PUBLIC_LTX_WS_URL || null;
 }

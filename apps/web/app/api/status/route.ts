@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export async function GET() {
     );
   }
   try {
-    const upstream = await fetch(`${modalUrl.replace(/\/$/, "")}/status`, {
+    const upstream = await fetch(joinModalUrl(modalUrl, "/status"), {
       method: "GET",
       cache: "no-store",
       signal: AbortSignal.timeout(4000),

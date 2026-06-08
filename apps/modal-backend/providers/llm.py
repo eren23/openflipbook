@@ -16,9 +16,11 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeGuard, cast
 
 from openai import AsyncOpenAI, BadRequestError
+
+from _env import env_flag
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
@@ -129,7 +131,7 @@ class Neighbor:
 # wire format is JSON. Any other kind emitted by the VLM is dropped on parse.
 ENTITY_KINDS = ("person", "place", "item", "creature")
 
-# Relative scale buckets for the scale-space map (M3). Composed into an integer
+# Relative scale buckets for the scale-space map. Composed into an integer
 # scale-level (component=-1, peer=0, container=+1) for zoom level-of-detail.
 SCALE_KINDS = ("component", "peer", "container")
 
@@ -150,7 +152,9 @@ class ExtractedEntity:
     appearance: str
     aliases: list[str]
     facts: list[str]
-    state: dict[str, Any]
+    # Mirrors EntityState in packages/config: primitive-only key/value bag
+    # (the builder below already drops non-primitives), not freeform JSON.
+    state: dict[str, str | int | float | bool]
     confidence: float
     bbox: dict[str, float] | None = None
 
@@ -160,6 +164,10 @@ class EntityUpdate:
     match_name: str
     changes: dict[str, Any]
     confidence: float
+    # Re-localized box on the current node. The VLM doesn't emit this; the
+    # extract endpoint's detector fills it so recurring entities keep a
+    # per-node bbox for geometry + the overlay.
+    bbox: dict[str, float] | None = None
 
 
 @dataclass
@@ -268,7 +276,7 @@ def _client() -> AsyncOpenAI:
 
 
 def _cache_enabled() -> bool:
-    return os.environ.get("OPENROUTER_CACHE", "true").lower() in ("1", "true", "yes")
+    return env_flag("OPENROUTER_CACHE", "true")
 
 
 def _system_message(text: str) -> Any:
@@ -330,11 +338,7 @@ def _web_search_enabled(online: bool) -> bool:
     # just without OpenRouter-brokered grounding).
     if _llm_provider() != "openrouter":
         return False
-    return os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    return env_flag("OPENROUTER_ENABLE_WEB_SEARCH", "true")
 
 
 def _supports_online_suffix(model: str) -> bool:
@@ -343,13 +347,12 @@ def _supports_online_suffix(model: str) -> bool:
     return "gemini" not in model.lower()
 
 
-# Phase 7d — model-swap robustness. `response_format={"type": "json_object"}`
-# isn't universally supported on OpenRouter: most Mistral / Grok / older
-# Llama slugs silently strip it and return freeform text. The downstream
-# `_safe_json` then collapses the response to `{}` — a silent regression of
-# the entire world-memory pipeline + planner JSON contract. Branch by model
-# family so a deployer can swap to any of the known-good families without
-# losing structured output.
+# `response_format={"type": "json_object"}` isn't universally supported on
+# OpenRouter: most Mistral / Grok / older Llama slugs silently strip it and
+# return freeform text, which `_safe_json` then collapses to `{}` — silently
+# breaking the world-memory pipeline + planner JSON contract. Branch by model
+# family so a deployer can swap to any known-good family without losing
+# structured output.
 _STRUCTURED_OUTPUT_FAMILIES = ("gemini", "gpt", "claude", "qwen")
 
 # Instruct tunes that follow forced tool-calls more reliably than JSON mode.
@@ -370,12 +373,9 @@ def _resolve_structured_tier(provider: str, model: str) -> str:
     fidelity). `LLM_STRUCTURED_OUTPUT` (default ``auto``) lets an operator pin
     a tier explicitly. This is a pure substring ladder — data, not a registry.
 
-    Back-compat is load-bearing: on the **openrouter** provider a known-good
-    family resolves to ``json_object`` exactly as today, and everything else
-    falls to ``prompt`` (which today already happens via the empty
-    response_format, just without the repair pass). The ``tool`` rung is
-    reserved for direct/custom providers so the default deployment is byte
-    unchanged.
+    On the **openrouter** provider a known-good family resolves to
+    ``json_object`` and everything else falls to ``prompt``. The ``tool`` rung
+    is reserved for direct/custom providers.
     """
     override = os.environ.get("LLM_STRUCTURED_OUTPUT", "auto").strip().lower()
     if override and override != "auto":
@@ -1885,10 +1885,9 @@ def _coerce_extracted_entity(entry: Any) -> ExtractedEntity | None:
         return None
     kind = str(entry.get("kind", "")).strip().lower()
     name = str(entry.get("name", "")).strip()[:120]
-    # `appearance` is the descriptor Phase 3 will inject into image-gen
-    # prompts. Cap it so a runaway VLM doesn't blow up the planner's
-    # ~120-word prompt budget when multiple entities are stacked into
-    # the same composed_prompt.
+    # `appearance` is the descriptor injected into image-gen prompts. Cap it
+    # so a runaway VLM doesn't blow up the planner's ~120-word prompt budget
+    # when multiple entities are stacked into the same composed_prompt.
     appearance = str(entry.get("appearance", "")).strip()[:280]
     if kind not in ENTITY_KINDS or not name or not appearance:
         return None
@@ -1905,7 +1904,7 @@ def _coerce_extracted_entity(entry: Any) -> ExtractedEntity | None:
         else []
     )
     state_raw = entry.get("state", {}) or {}
-    state: dict[str, Any] = {}
+    state: dict[str, str | int | float | bool] = {}
     if isinstance(state_raw, dict):
         for k, v in state_raw.items():
             if not isinstance(k, str):
@@ -1938,9 +1937,8 @@ def _coerce_entity_update(entry: Any) -> EntityUpdate | None:
     record, the VLM is still asked to emit an `updated` entry so the
     merge layer can bump `last_seen_node_id`, append to `appears_on_node_ids`,
     and keep the entity inside the recency-based prior slice on the next
-    extraction. Dropping these empty pings was the original Phase 1 bug —
-    recurring entities silently fell off the slice and got re-added as
-    duplicates.
+    extraction. Dropping these empty pings makes recurring entities fall off
+    the slice and get re-added as duplicates.
     """
     if not isinstance(entry, dict):
         return None
@@ -1970,7 +1968,8 @@ def _coerce_entity_update(entry: Any) -> EntityUpdate | None:
                 str(a).strip() for a in v if isinstance(a, str) and a.strip()
             ]
         elif k == "state" and isinstance(v, dict):
-            state: dict[str, Any] = {}
+            # EntityState sub-bag (primitive-only), mirroring packages/config.
+            state: dict[str, str | int | float | bool] = {}
             for sk, sv in v.items():
                 if isinstance(sk, str) and isinstance(sv, (str, int, float, bool)):
                     state[sk] = sv
@@ -2016,3 +2015,165 @@ def _safe_json(raw: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 return {}
     return {}
+
+
+# ── Natural-language editing of the geometric world map ───────────────────────
+# Turn an instruction ("move the lighthouse north", "make the tower taller") into
+# validated structured edits to WorldEntityGeo entities, plus the blast-radius
+# (which saved scenes now reference an edited entity → re-stage candidates). The
+# parse + blast are pure + tolerant (garbage drops, never raises); the LLM call is
+# mocked in tests. Edit shapes mirror EntityGeoEdit in packages/config.
+
+ENTITY_EDIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"edits": {"type": "array", "items": {"type": "object"}}},
+    "required": ["edits"],
+}
+
+ENTITY_EDIT_SYSTEM = (
+    "You translate a natural-language instruction into structured edits to a 2D "
+    "world map. World coords: origin top-left, +x EAST, +y SOUTH (so NORTH is "
+    "-y and WEST is -x). Distances are in world units — match the rough scale of "
+    'the positions you are given. Output JSON {"edits":[...]} where each edit is '
+    "exactly one of:\n"
+    '- {"op":"move","target":<id>,"dx":<number>,"dy":<number>}  (relative shift)\n'
+    '- {"op":"set_height","target":<id>,"height":<number>}\n'
+    '- {"op":"set_appearance","target":<id>,"visual":<short visual phrase>}\n'
+    '- {"op":"remove","target":<id>}\n'
+    '- {"op":"add","label":<name>,"pos":{"x":<number>,"y":<number>},"height":<number?>}\n'
+    "RULES: `target` MUST be one of the listed entity ids — never invent an id. "
+    "Only emit edits the instruction actually asks for; if nothing applies, emit "
+    'an empty list {"edits":[]}. No prose, no markdown.'
+)
+
+
+@dataclass(frozen=True)
+class EditPlan:
+    edits: list[dict[str, Any]]
+    blast_radius: list[str]
+
+
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_vec2(v: Any) -> TypeGuard[dict[str, Any]]:
+    return isinstance(v, dict) and _is_number(v.get("x")) and _is_number(v.get("y"))
+
+
+def parse_entity_edits(payload: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
+    """Coerce an NL-edit reply into validated EntityGeoEdit dicts. Tolerant: an
+    edit with an unknown op, a `target` not in `valid_ids`, or a missing/ill-typed
+    field is dropped — never raises (mirrors detector.parse_detections)."""
+    if isinstance(payload, dict):
+        payload = payload.get("edits", [])
+    if not isinstance(payload, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for d in payload:
+        if not isinstance(d, dict):
+            continue
+        op = str(d.get("op", "")).strip()
+        if op == "add":
+            label = str(d.get("label", "")).strip()
+            pos = d.get("pos")
+            if not label or not _is_vec2(pos):
+                continue
+            edit: dict[str, Any] = {
+                "op": "add",
+                "label": label,
+                "pos": {"x": float(pos["x"]), "y": float(pos["y"])},
+            }
+            if _is_number(d.get("height")):
+                edit["height"] = float(d["height"])
+            fp = d.get("footprint")
+            if isinstance(fp, dict) and _is_number(fp.get("w")) and _is_number(fp.get("d")):
+                edit["footprint"] = {"w": float(fp["w"]), "d": float(fp["d"])}
+            out.append(edit)
+            continue
+        target = str(d.get("target", "")).strip()
+        if op not in ("move", "set_height", "set_appearance", "remove"):
+            continue
+        if target not in valid_ids:
+            continue
+        if op == "move":
+            if not (_is_number(d.get("dx")) and _is_number(d.get("dy"))):
+                continue
+            out.append({"op": "move", "target": target,
+                        "dx": float(d["dx"]), "dy": float(d["dy"])})
+        elif op == "set_height":
+            if not _is_number(d.get("height")):
+                continue
+            out.append({"op": "set_height", "target": target, "height": float(d["height"])})
+        elif op == "set_appearance":
+            visual = str(d.get("visual", "")).strip()
+            if not visual:
+                continue
+            out.append({"op": "set_appearance", "target": target, "visual": visual})
+        else:  # remove
+            out.append({"op": "remove", "target": target})
+    return out
+
+
+def compute_blast_radius(
+    edits: list[dict[str, Any]], references: dict[str, list[str]]
+) -> list[str]:
+    """Node ids whose saved render references an edited entity → the re-stage
+    candidates. Union of `references[target]` over edits that carry a target (an
+    `add` introduces a new entity, so it stales nothing)."""
+    nodes: set[str] = set()
+    for e in edits:
+        target = e.get("target")
+        if isinstance(target, str):
+            for n in references.get(target, []):
+                if isinstance(n, str):
+                    nodes.add(n)
+    return sorted(nodes)
+
+
+def _edit_roster(entities: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for e in entities[:60]:  # bound the prompt
+        eid = str(e.get("id", "")).strip()
+        if not eid:
+            continue
+        label = str(e.get("label", "")).strip() or eid
+        pos = e.get("pos") or {}
+        lines.append(
+            f'- id="{eid}" label="{label}" at (x={pos.get("x")}, y={pos.get("y")}) '
+            f'height={e.get("height")}'
+        )
+    return "\n".join(lines)
+
+
+async def edit_entities_nl(
+    instruction: str,
+    entities: list[dict[str, Any]],
+    references: dict[str, list[str]] | None = None,
+    scene_view: dict[str, Any] | None = None,
+) -> EditPlan:
+    """Turn a natural-language instruction into validated structured geo edits +
+    a blast-radius. The model only sees the entities it may target (id + label +
+    current geo); ids it invents are dropped by parse_entity_edits, so a bad
+    completion degrades to a thinner/empty plan rather than a wrong mutation."""
+    from obs import span
+
+    references = references or {}
+    valid_ids = {str(e["id"]) for e in entities if e.get("id")}
+    roster = _edit_roster(entities)
+    user = f'Instruction: "{instruction.strip()}"\n\nEntities you may edit:\n{roster}'
+    async with span("llm.edit_entities", model=_text_model(online=False)) as ctx:
+        parsed = await _complete_json(
+            model=_text_model(online=False),
+            messages=[
+                _system_message(ENTITY_EDIT_SYSTEM),
+                {"role": "user", "content": user},
+            ],
+            schema=ENTITY_EDIT_SCHEMA,
+            schema_name="entity_edits",
+            temperature=0.0,
+            max_tokens=900,
+            span_ctx=ctx,
+        )
+    edits = parse_entity_edits(parsed, valid_ids)
+    return EditPlan(edits=edits, blast_radius=compute_blast_radius(edits, references))

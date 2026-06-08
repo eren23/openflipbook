@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import type {
   Citation,
   GenerateRequestBody,
   GenerateEvent,
+  MapCrop,
+  ObserverPose,
+  SceneView,
+  ViewLevel,
+  WorldEntityGeo,
 } from "@openflipbook/config";
 import {
   annotateClickPoint,
@@ -56,6 +61,14 @@ import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
 import { HelpOverlay } from "@/components/PlayPage/HelpOverlay";
 import { CodexPanel } from "@/components/PlayPage/CodexPanel";
+import GeometryOverlay from "@/components/PlayPage/GeometryOverlay";
+import WorldMiniMap from "@/components/PlayPage/WorldMiniMap";
+import ClickDetailPopover, {
+  type ClickDetailResult,
+} from "@/components/PlayPage/ClickDetailPopover";
+import Breadcrumb from "@/components/PlayPage/Breadcrumb";
+import SpatialPath from "@/components/PlayPage/SpatialPath";
+import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
@@ -65,6 +78,10 @@ import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
+import { useWorldMap } from "@/hooks/useWorldMap";
+import { geoTapRequest, type GeoTapOverride } from "@/lib/geo-tap";
+import { childrenOf } from "@/lib/world-geometry";
+import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -89,6 +106,10 @@ interface Page {
   // event and from /api/nodes/[id] on permalink replay. Empty when web
   // search returned nothing or is disabled.
   sources?: Citation[];
+  // The view this page was entered from (geo tap). Its focus_id scopes the
+  // minimap to the place you're inside; null/absent on the world map + classic
+  // pages → the minimap shows the whole world frame.
+  sceneView?: SceneView | null;
 }
 
 function newSessionId(): string {
@@ -118,6 +139,7 @@ interface PersistBody {
   sources?: { url: string; title: string | null }[] | null;
   relation?: "descend" | "expand";
   scale?: "component" | "peer" | "container";
+  scene_view?: SceneView | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -173,6 +195,9 @@ function triggerExtraction(args: {
   imageDataUrl: string;
   caption: string;
   sceneDescription?: string | null;
+  // The view this node renders (geo-tap intent). When it carries a focus_id, the
+  // extract route seeds this scene's sub-entities into that place's child frame.
+  sceneView?: SceneView | null;
   traceId: string | null;
 }): void {
   const t0 = nowMs();
@@ -190,6 +215,7 @@ function triggerExtraction(args: {
         image_data_url: args.imageDataUrl,
         caption: args.caption,
         scene_description: args.sceneDescription ?? null,
+        scene_view: args.sceneView ?? null,
       }),
     }
   )
@@ -284,10 +310,9 @@ export default function PlayPage() {
     yPx: number;
     key: number;
   } | null>(null);
-  // ⌘/Ctrl-click hint capture. Replaces the old `window.prompt` with an
-  // inline floating input anchored at the click point. The promise resolves
-  // to the typed hint (or null on cancel/Esc) so the click handler can stay
-  // a single async function.
+  // ⌘/Ctrl-click hint capture via an inline floating input anchored at the
+  // click point. The promise resolves to the typed hint (or null on
+  // cancel/Esc) so the click handler can stay a single async function.
   const [hintPrompt, setHintPrompt] = useState<{
     xPx: number;
     yPx: number;
@@ -302,6 +327,32 @@ export default function PlayPage() {
       });
     },
     []
+  );
+  // ⌘/Ctrl-click on a geo-enterable place → the structured "set your view"
+  // popover (mounts the observer/gaze editor). Mirrors promptForHint: the
+  // promise resolves to the chosen view (or null on cancel) so the click
+  // handler stays one async function.
+  type ClickDetailRequest = {
+    xPx: number;
+    yPx: number;
+    entities: WorldEntityGeo[];
+    crop: MapCrop;
+    initial: {
+      observer: ObserverPose;
+      level: ViewLevel;
+      focusLabel: string;
+      canSubmap: boolean;
+      mode: "scene" | "submap";
+    };
+    resolve: (r: ClickDetailResult | null) => void;
+  };
+  const [clickDetail, setClickDetail] = useState<ClickDetailRequest | null>(null);
+  const promptForClickDetail = useCallback(
+    (
+      args: Omit<ClickDetailRequest, "resolve">,
+    ): Promise<ClickDetailResult | null> =>
+      new Promise((resolve) => setClickDetail({ ...args, resolve })),
+    [],
   );
   // Morph state. The new page is rendered as a second <img> above the old
   // one, scaling from the click origin while the old layer fades. See
@@ -320,11 +371,11 @@ export default function PlayPage() {
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
+  const [geoOverlayOn, setGeoOverlayOn] = useState(false);
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
   // would conflict with keyboard tab-order; we expose a small toggle
-  // inside the codex header instead). Persisted only in component state
-  // for now — Phase 5's user preferences will move this to localStorage.
+  // inside the codex header instead). Persisted only in component state.
   const [entityChipsEnabled, setEntityChipsEnabled] = useState(false);
   const [scrubberOpen, setScrubberOpen] = useState(false);
   // True between an SSE `progress` (fast-tier draft) and the matching
@@ -339,6 +390,17 @@ export default function PlayPage() {
   const { bindTrace } = useTraceEmitter();
   const { state: worldState, mutate: mutateWorldEntity } =
     useWorldState(sessionId);
+  // Geometric world map (entity coordinates). Empty unless GEOMETRIC_WORLD seeded
+  // it; drives the geometry overlay/minimap + the geometric tap (close the loop).
+  const geoMap = useWorldMap(sessionId);
+  // Extraction seeds the geo map AFTER the node loads, so reload it whenever the
+  // codex grows (same trigger) — otherwise a tap right after a render routes
+  // against a stale/empty world and the geometric path never fires.
+  const geoRefetch = geoMap.refetch;
+  const codexCount = worldState.entities.length;
+  useEffect(() => {
+    void geoRefetch();
+  }, [codexCount, geoRefetch]);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -569,6 +631,7 @@ export default function PlayPage() {
                     url: s.url,
                     title: s.title ?? null,
                   })),
+                  scene_view: body.scene_view ?? null,
                 },
                 traceId
               ).then((saved) => {
@@ -581,6 +644,9 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     parentId: body.current_node_id || null,
                     sources: evtSources,
+                    sceneView: body.scene_view
+                      ? { ...body.scene_view, node_id: saved.id }
+                      : null,
                     ...(body.mode === "tap" && body.click
                       ? {
                           clickInParent: {
@@ -591,7 +657,15 @@ export default function PlayPage() {
                       : {}),
                   };
                   setPage((prev) =>
-                    prev ? { ...prev, nodeId: saved.id } : prev
+                    prev
+                      ? {
+                          ...prev,
+                          nodeId: saved.id,
+                          sceneView: body.scene_view
+                            ? { ...body.scene_view, node_id: saved.id }
+                            : null,
+                        }
+                      : prev
                   );
                   const newId = saved.id;
                   setHistory((prev) => {
@@ -619,6 +693,9 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     caption: evt.page_title,
                     sceneDescription: evt.final_prompt ?? null,
+                    sceneView: body.scene_view
+                      ? { ...body.scene_view, node_id: saved.id }
+                      : null,
                     traceId,
                   });
                 }
@@ -870,6 +947,12 @@ export default function PlayPage() {
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
+  // Where-am-I trail (root … current) — clicking an ancestor jumps straight
+  // back to it (the leftmost crumb is the map you started from).
+  const breadcrumb = useMemo(
+    () => buildBreadcrumb(page?.nodeId ?? null, history.items),
+    [page?.nodeId, history.items],
+  );
 
   const navigateToTrailIdx = (
     prev: typeof history,
@@ -984,6 +1067,7 @@ export default function PlayPage() {
             image_url: string;
             click_in_parent: { x_pct: number; y_pct: number } | null;
             sources?: { url: string; title: string | null }[] | null;
+            scene_view?: SceneView | null;
           }>;
         };
         if (cancelled) return;
@@ -996,6 +1080,7 @@ export default function PlayPage() {
           imageDataUrl: n.image_url,
           parentId: n.parent_id,
           sources: Array.isArray(n.sources) ? n.sources : [],
+          sceneView: n.scene_view ?? null,
           ...(n.click_in_parent
             ? {
                 clickInParent: {
@@ -1276,6 +1361,8 @@ export default function PlayPage() {
       // ripple/morph state so the bubble is the first thing they see; on
       // cancel we release the in-flight slot so the next click is honored.
       let hint = "";
+      // The user's set-your-view override from the click-detail popover (if any).
+      let geoOverride: GeoTapOverride | undefined;
       // World Mode "semi": resolve the tap up front and, when the model has
       // clarifying questions, ask them in the hint bubble before entering.
       let worldResolved:
@@ -1311,15 +1398,88 @@ export default function PlayPage() {
         }
       } else if (evt.metaKey || evt.ctrlKey) {
         const rect = img.getBoundingClientRect();
-        const raw = await promptForHint(
-          evt.clientX - rect.left,
-          evt.clientY - rect.top
-        );
-        if (raw === null) {
-          clickInFlightRef.current = false;
-          return;
+        const px2 = evt.clientX - rect.left;
+        const py2 = evt.clientY - rect.top;
+        // On a geo-enterable place, open the structured "set your view" popover
+        // (mounts the observer/gaze editor); otherwise keep the plain hint bubble.
+        // The world_map seeds a beat after a generation and this handler's geoMap
+        // closure can lag it — so the FIRST ⌘-tap after a gen would see no
+        // entities and silently fall to the hint. Fetch fresh when it's empty.
+        let geoEntities = geoMap.entities;
+        let geoBounds = geoMap.bounds;
+        if (worldEnabled && geoEntities.length === 0) {
+          const fresh = (await fetch(
+            `/api/world/${encodeURIComponent(sessionId)}/map`,
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)) as
+            | { entities: WorldEntityGeo[]; bounds: MapCrop }
+            | null;
+          if (fresh?.entities?.length) {
+            geoEntities = fresh.entities;
+            geoBounds = fresh.bounds;
+          }
         }
-        hint = raw;
+        const previewTap =
+          worldEnabled && geoEntities.length > 0
+            ? geoTapRequest(
+                { entities: geoEntities, bounds: geoBounds },
+                page.nodeId ?? "",
+                click,
+                16 / 9,
+                undefined,
+                // Preview in the CURRENT frame too (children of the place you're
+                // inside), so the ⌘-popover nests deeper rather than re-routing
+                // to a city landmark.
+                page.sceneView,
+              )
+            : null;
+        const previewObserver = previewTap?.scene_view.observer ?? null;
+        if (previewTap && previewObserver) {
+          // Frame the editor on the camera↔place axis (not the whole city).
+          const focusEnt = geoEntities.find((e) => e.id === previewTap.focus_id);
+          const fx = focusEnt?.pos.x ?? previewObserver.pos.x;
+          const fy = focusEnt?.pos.y ?? previewObserver.pos.y;
+          const cx = (previewObserver.pos.x + fx) / 2;
+          const cy = (previewObserver.pos.y + fy) / 2;
+          const span = Math.max(
+            Math.abs(previewObserver.pos.x - fx),
+            Math.abs(previewObserver.pos.y - fy),
+            focusEnt?.footprint.w ?? 10,
+          ) * 2.5;
+          const editorCrop: MapCrop = {
+            x: cx - span / 2,
+            y: cy - span / 2,
+            w: span,
+            h: span,
+          };
+          const detail = await promptForClickDetail({
+            xPx: px2,
+            yPx: py2,
+            entities: previewTap.layout_entities,
+            crop: editorCrop,
+            initial: {
+              observer: previewObserver,
+              level: previewTap.scene_view.level,
+              focusLabel: previewTap.focus_label ?? "here",
+              canSubmap: false,
+              mode: "scene",
+            },
+          });
+          if (detail === null) {
+            clickInFlightRef.current = false;
+            return;
+          }
+          hint = detail.note;
+          geoOverride = { observer: detail.observer, level: detail.level };
+        } else {
+          const raw = await promptForHint(px2, py2);
+          if (raw === null) {
+            clickInFlightRef.current = false;
+            return;
+          }
+          hint = raw;
+        }
       }
       const rect = img.getBoundingClientRect();
       const px = evt.clientX - rect.left;
@@ -1375,6 +1535,45 @@ export default function PlayPage() {
       } catch {
         // leave condition empty → text-only generation
       }
+      // Close the geometric loop: a tap on the seeded world map → an observer
+      // pose + the projected layout, so the entered scene is steered and
+      // grounded by where the entities actually are. Only when World Mode is on
+      // AND the geo world is seeded; null falls back to the existing World Mode
+      // path. generate.py acts on these only under WORLD_GEOMETRY_GEN /
+      // VLM_GROUNDING, so sending them is otherwise inert.
+      // The world_map seeds a beat after a generation and this handler's geoMap
+      // closure can lag it — so a tap right after a gen would see no entities,
+      // produce a null geoTap, and persist the entered node with scene_view:null
+      // (which breaks all downstream nesting). Fetch fresh when empty.
+      let geoEntities = geoMap.entities;
+      let geoBounds = geoMap.bounds;
+      if (worldEnabled && geoEntities.length === 0) {
+        const fresh = (await fetch(
+          `/api/world/${encodeURIComponent(sessionId)}/map`,
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)) as
+          | { entities: WorldEntityGeo[]; bounds: MapCrop }
+          | null;
+        if (fresh?.entities?.length) {
+          geoEntities = fresh.entities;
+          geoBounds = fresh.bounds;
+        }
+      }
+      const geoTap =
+        worldEnabled && geoEntities.length > 0
+          ? geoTapRequest(
+              { entities: geoEntities, bounds: geoBounds },
+              page.nodeId ?? "",
+              { x_pct: click.x_pct, y_pct: click.y_pct },
+              16 / 9,
+              geoOverride,
+              // Route in the CURRENT frame: on the city map this is the whole
+              // map; INSIDE a place it's that place's children, so the tap nests
+              // one level deeper instead of resolving to a city landmark.
+              page.sceneView,
+            )
+          : null;
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -1424,6 +1623,37 @@ export default function PlayPage() {
               autonomy: worldAutonomy,
               ...(enterAsToRenderMode(worldResolved?.enter_as) !== "explainer"
                 ? { render_mode: enterAsToRenderMode(worldResolved?.enter_as) }
+                : {}),
+            }
+          : {}),
+        ...(geoTap
+          ? {
+              scene_view: geoTap.scene_view,
+              expected_layout: geoTap.expected_layout,
+              // Enter the aligned-zoom path: a submap stays in map mode and
+              // zoom-continues (Kontext) rather than a loose fresh gen, so the
+              // sub-map is a true zoom of the tapped region. A scene first-enter
+              // keeps the (reprojecting) fresh path until B2 wires the guarded
+              // scene→scene continuation. Spread last so it wins.
+              render_mode:
+                geoTap.kind === "submap" ? "place_submap" : "place_scene",
+              // The geometric tap KNOWS which entity you hit (by coordinates) —
+              // make it the subject so tapping the Tower of Art enters the Tower,
+              // overriding the looser VLM read that picked its container. Spread
+              // last so it wins over the cached / world-resolved subjects above.
+              ...(geoTap.focus_label
+                ? { prefetched_subject: geoTap.focus_label }
+                : {}),
+              // Anchor the entity's IDENTITY across zoom levels: feed its
+              // appearance as the authoritative subject context, view-neutral so
+              // it carries the materials/architecture (ancient stone, concentric
+              // rings) without forcing the angle it was captured at.
+              ...(viewNeutralAppearance(geoTap.focus_visual)
+                ? {
+                    prefetched_subject_context: viewNeutralAppearance(
+                      geoTap.focus_visual,
+                    ),
+                  }
                 : {}),
             }
           : {}),
@@ -1754,7 +1984,12 @@ export default function PlayPage() {
       )}
 
       {page?.imageDataUrl && history.items.length > 0 && (
-        <div className="flex items-center justify-between gap-3 text-xs opacity-80">
+        <div className="flex flex-col gap-1.5">
+          <Breadcrumb crumbs={breadcrumb} onJump={selectFromMap} />
+          {worldEnabled && (
+            <SpatialPath crumbs={breadcrumb} onNavigate={selectFromMap} />
+          )}
+          <div className="flex items-center justify-between gap-3 text-xs opacity-80">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1798,6 +2033,7 @@ export default function PlayPage() {
               ? ` · ${history.items.length} pages explored`
               : ""}
           </span>
+          </div>
         </div>
       )}
 
@@ -1817,6 +2053,11 @@ export default function PlayPage() {
           activeNodeId={page?.nodeId ?? null}
           onSelect={selectFromMap}
           onClose={() => setViewMode("page")}
+          sceneViews={Object.fromEntries(
+            history.items
+              .filter((p): p is Page & { nodeId: string } => Boolean(p.nodeId))
+              .map((p) => [p.nodeId, p.sceneView ?? null]),
+          )}
         />
       ) : page?.imageDataUrl ? (
         <figure
@@ -1959,6 +2200,23 @@ export default function PlayPage() {
                   }}
                 />
               )}
+              {clickDetail && (
+                <ClickDetailPopover
+                  xPx={clickDetail.xPx}
+                  yPx={clickDetail.yPx}
+                  entities={clickDetail.entities}
+                  crop={clickDetail.crop}
+                  initial={clickDetail.initial}
+                  onConfirm={(r) => {
+                    clickDetail.resolve(r);
+                    setClickDetail(null);
+                  }}
+                  onCancel={() => {
+                    clickDetail.resolve(null);
+                    setClickDetail(null);
+                  }}
+                />
+              )}
               <EntityHoverOverlay
                 nodeId={page?.nodeId ?? null}
                 entities={worldState.entities}
@@ -1968,7 +2226,43 @@ export default function PlayPage() {
                   streamStatus === "off"
                 }
                 onSelect={() => setCodexOpen(true)}
+                imgRef={imgRef}
               />
+              {geoOverlayOn && page?.nodeId && (
+                <GeometryOverlay
+                  nodeId={page.nodeId}
+                  entities={worldState.entities}
+                  imgRef={imgRef}
+                  allowedEntityIds={
+                    // Inside a place → only its own children's boxes (scoped to
+                    // the current frame). At the top-level map → all (null).
+                    page?.sceneView &&
+                    page.sceneView.level !== "map" &&
+                    page.sceneView.focus_id
+                      ? new Set(
+                          childrenOf(geoMap.entities, page.sceneView.focus_id)
+                            .map((g) => g.entity_id)
+                            .filter((id): id is string => id != null),
+                        )
+                      : null
+                  }
+                />
+              )}
+              {geoOverlayOn && (
+                <WorldMiniMap
+                  sessionId={sessionId}
+                  focusId={
+                    page?.sceneView && page.sceneView.level !== "map"
+                      ? page.sceneView.focus_id ?? null
+                      : null
+                  }
+                  crop={
+                    page?.sceneView?.level === "map"
+                      ? page.sceneView.map_crop ?? null
+                      : null
+                  }
+                />
+              )}
             </div>
 
             {page?.nodeId &&
@@ -2024,6 +2318,19 @@ export default function PlayPage() {
               >
                 <BloomGlyph className="h-3.5 w-3.5" />
                 Around
+              </button>
+              <button
+                type="button"
+                onClick={() => setGeoOverlayOn((v) => !v)}
+                aria-pressed={geoOverlayOn}
+                disabled={!page?.nodeId}
+                className={
+                  "rounded-full px-3 py-1 text-xs text-white disabled:opacity-50 " +
+                  (geoOverlayOn ? "bg-emerald-600" : "bg-slate-600/85 hover:bg-slate-600")
+                }
+                title="Geometry layer — draw each entity's detected coordinate box on the image"
+              >
+                ⊞ geo
               </button>
               <button
                 type="button"
@@ -2201,6 +2508,7 @@ export default function PlayPage() {
         onToggleChips={() => setEntityChipsEnabled((v) => !v)}
         overrideEnabled={worldState.overrideEnabled}
         onMutate={mutateWorldEntity}
+        geoEditSessionId={sessionId}
       />
 
       {/* Hide the coach while the Around tray is open — both are pinned to

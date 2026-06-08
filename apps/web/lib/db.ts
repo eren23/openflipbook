@@ -1,4 +1,5 @@
 import { MongoClient, type Collection, type Db, type Document } from "mongodb";
+import type { SceneView } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -53,6 +54,11 @@ async function ensureIndexes(db: Db): Promise<void> {
   const nodes = db.collection<NodeDoc>("nodes");
   const errors = db.collection<ErrorDoc>("errors");
   const world = db.collection("world_state");
+  // Geometric world model — per-session map of entity coordinates. `_id` is the
+  // session id (auto-indexed); the sparse secondary index supports atlas anchor
+  // lookups that link a map entity back to its Codex Entity. Created up front so
+  // we don't migrate a populated collection later.
+  const worldMap = db.collection("world_map");
   await Promise.all([
     nodes.createIndex(
       { session_id: 1, created_at: -1 },
@@ -64,12 +70,16 @@ async function ensureIndexes(db: Db): Promise<void> {
       { name: "parent_created_idx" }
     ),
     errors.createIndex({ ts: -1 }, { name: "errors_ts_idx" }),
-    // World-memory layer. `_id` is the session id (auto-indexed). The
-    // secondary index supports atlas-overlay queries that will land in
-    // Phase 4 — added now so we don't migrate a populated collection later.
+    // World-memory layer. `_id` is the session id (auto-indexed). The secondary
+    // index supports atlas-overlay queries; created eagerly to avoid migrating a
+    // populated collection later.
     world.createIndex(
       { "entities.appears_on_node_ids": 1 },
       { name: "world_entity_appears_idx", sparse: true }
+    ),
+    worldMap.createIndex(
+      { "entities.entity_id": 1 },
+      { name: "world_map_entity_idx", sparse: true }
     ),
   ]);
 }
@@ -108,6 +118,9 @@ export interface NodeDoc extends Document {
   // subject. Optional + defaulted for back-compat with pre-M3 rows.
   relation?: "descend" | "expand" | null;
   scale?: "component" | "peer" | "container" | null;
+  // Geometric world (GEOMETRIC_WORLD): the observer pose + view level this
+  // scene was rendered from. Optional + null for pre-geometry / classic nodes.
+  scene_view?: SceneView | null;
   created_at: Date;
 }
 
@@ -125,6 +138,7 @@ export interface NodeInsert {
   sources?: NodeSource[] | null;
   relation?: "descend" | "expand" | null;
   scale?: "component" | "peer" | "container" | null;
+  scene_view?: SceneView | null;
 }
 
 export interface NodeRow {
@@ -142,11 +156,16 @@ export interface NodeRow {
   sources: NodeSource[];
   relation: "descend" | "expand";
   scale: "component" | "peer" | "container";
+  // The observer pose + view level this node was rendered from. Null on
+  // pre-geometry / classic nodes. Read back on revisit so the minimap scopes to
+  // the right frame and the entered angle is reproducible.
+  scene_view: SceneView | null;
   created_at: string;
 }
 
-function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, click_in_parent, sources, relation, scale, ...rest } = doc;
+export function toRow(doc: NodeDoc): NodeRow {
+  const { _id, created_at, click_in_parent, sources, relation, scale, scene_view, ...rest } =
+    doc;
   return {
     id: _id,
     ...rest,
@@ -154,6 +173,7 @@ function toRow(doc: NodeDoc): NodeRow {
     sources: Array.isArray(sources) ? sources : [],
     relation: relation ?? "descend",
     scale: scale ?? "peer",
+    scene_view: scene_view ?? null,
     created_at: created_at.toISOString(),
   };
 }
@@ -175,6 +195,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     sources: n.sources ?? null,
     relation: n.relation ?? "descend",
     scale: n.scale ?? "peer",
+    scene_view: n.scene_view ?? null,
     created_at: new Date(),
   };
   await collection.insertOne(doc);

@@ -8,6 +8,7 @@ import {
   undoDeleteEntity,
 } from "@/lib/world";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
 import type { WorldEntityMutation } from "@openflipbook/config";
 
 export const runtime = "nodejs";
@@ -17,20 +18,15 @@ interface Params {
   params: Promise<{ sessionId: string }>;
 }
 
-// User-override CRUD on the codex. Phase 5 of the world-memory plan
-// (pin/rename/merge/delete) lands the wire surface here; the UI hook-ups
-// land alongside the codex panel editing surface. Endpoint exists now so
-// the read surface (Phase 2) can rely on a stable shape.
+// User-override CRUD on the codex (pin/rename/merge/delete).
 //
-// Gated behind `WORLD_OVERRIDE_ENABLED` until Phase 5 adds proper auth.
-// Today the only "auth" is knowing a session id (sessions are user-scoped
-// but ids are guessable on a deployed instance), and these mutations
-// (rename / merge / delete / pin) are destructive enough that we don't
-// want them callable on a production deploy by accident. Local dev sets
-// the flag in `.env.local` to iterate on the UI.
+// Gated behind `WORLD_OVERRIDE_ENABLED` because there is no real auth yet: the
+// only "auth" is knowing a session id (sessions are user-scoped but ids are
+// guessable on a deployed instance), and these mutations are destructive enough
+// that they shouldn't be callable on a production deploy by accident. Local dev
+// sets the flag in `.env.local` to iterate on the UI.
 function overridesEnabled(): boolean {
-  const flag = (process.env.WORLD_OVERRIDE_ENABLED ?? "").toLowerCase();
-  return flag === "1" || flag === "true" || flag === "yes";
+  return envFlag("WORLD_OVERRIDE_ENABLED");
 }
 
 export async function POST(req: Request, { params }: Params) {
@@ -98,7 +94,7 @@ export async function POST(req: Request, { params }: Params) {
         return NextResponse.json(snapshot);
       }
       case "create": {
-        // Phase 5 won't allow blind user-create without a name; reject early.
+        // Blind user-create without a name isn't supported; reject early.
         return NextResponse.json(
           { error: "create op not yet supported; will land in Phase 5 UI" },
           { status: 501 }

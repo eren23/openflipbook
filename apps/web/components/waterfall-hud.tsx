@@ -9,6 +9,7 @@ type StageKey =
   | "click_resolved"
   | "planning"
   | "generating_image"
+  | "verifying"
   | "final"
   | "decode"
   | "morph";
@@ -24,6 +25,7 @@ const STAGE_INFO: Record<StageKey, StageInfo> = {
   click_resolved: { label: "tap → subject", color: "rgba(59,130,246,0.85)" },
   planning: { label: "planner", color: "rgba(34,197,94,0.85)" },
   generating_image: { label: "image gen", color: "rgba(234,88,12,0.85)" },
+  verifying: { label: "vlm: verify", color: "rgba(20,184,166,0.85)" },
   final: { label: "final", color: "rgba(239,68,68,0.9)" },
   decode: { label: "decode", color: "rgba(168,85,247,0.85)" },
   morph: { label: "reveal", color: "rgba(217,70,239,0.85)" },

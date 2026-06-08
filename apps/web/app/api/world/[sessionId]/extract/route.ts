@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
+import { deriveGeoFromExtraction } from "@/lib/world-map";
+import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
+import { envFlag } from "@/lib/env-flag";
+import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type {
   Entity,
   EntityExtractionResult,
   EntityKind,
+  SceneView,
+  ViewEstimate,
 } from "@openflipbook/config";
 
 export const runtime = "nodejs";
@@ -20,6 +26,10 @@ interface ExtractRequestBody {
   image_data_url?: string;
   caption?: string;
   scene_description?: string | null;
+  // The view this node renders (the geo-tap intent). When it carries a focus_id
+  // (an entered place), this scene's sub-entities seed into that place's CHILD
+  // frame instead of the top-level city map.
+  scene_view?: SceneView | null;
 }
 
 // Post-final extraction trigger. The web client calls this once a generated
@@ -83,9 +93,10 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   let upstreamResult: EntityExtractionResult;
+  let upstreamView: ViewEstimate | null = null;
   try {
     const upstream = await fetch(
-      `${env.MODAL_API_URL.replace(/\/$/, "")}/extract-entities`,
+      joinModalUrl(env.MODAL_API_URL, "/extract-entities"),
       {
         method: "POST",
         headers: {
@@ -116,8 +127,10 @@ export async function POST(req: Request, { params }: Params) {
     }
     const payload = (await upstream.json()) as {
       result: EntityExtractionResult;
+      view?: ViewEstimate | null;
     };
     upstreamResult = payload.result;
+    upstreamView = payload.view ?? null;
   } catch (err) {
     return NextResponse.json(
       {
@@ -134,6 +147,97 @@ export async function POST(req: Request, { params }: Params) {
       node_id: body.node_id,
       result: upstreamResult,
     });
+    // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
+    // entities localized on this node — the world map populates for free. Default
+    // scene_view = a top-down map so each bbox maps straight into a normalized
+    // world crop. Best-effort, off the response path.
+    const geoNodeId = body.node_id;
+    const sceneView = body.scene_view ?? null;
+    const viewLevel = upstreamView?.level ?? "map";
+    // An ENTERED place (the geo-tap carried a focus): seed this scene's
+    // sub-entities into that place's CHILD frame, so the interior layout
+    // persists + stays consistent across re-entries. Otherwise we only seed a
+    // top-down MAP into the city frame — a scene's boxes don't belong in a fake
+    // top-down crop.
+    const parentFrameId =
+      sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
+    const geoOn = envFlag("GEOMETRIC_WORLD");
+    if (geoNodeId && geoOn && (parentFrameId || viewLevel === "map")) {
+      try {
+        // Map an on-node entity → a seedable geo item (or null to skip). Drops
+        // boxes that are huge (a backdrop river → area ~0.7) or specks, and — in
+        // a child frame — the focus place itself (it lives one frame up).
+        const toItem = (e: Entity, childFrame: boolean) => {
+          const bbox = e.appearance_bboxes?.[geoNodeId];
+          if (!bbox) return null;
+          if (childFrame) {
+            if (`geo_${e.id}` === parentFrameId) return null; // skip the parent
+          } else if (e.kind !== "place") {
+            return null; // top-level map: enterable PLACES only
+          }
+          const area = bbox.w_pct * bbox.h_pct;
+          if (area > 0.5 || area < 0.0005) return null;
+          return {
+            entity_id: e.id,
+            kind: e.kind,
+            label: e.name,
+            bbox,
+            visual: e.appearance,
+            state: e.state,
+            confidence: e.confidence,
+          };
+        };
+        if (parentFrameId && sceneView) {
+          // Child frame: seed the interior as a TOP-DOWN map in the SAME
+          // MAP_IMAGE_FRAME the city uses — so a child's local pos spans the same
+          // {0,0,100,60} frame that tap-routing inside the place reads (geo-tap
+          // routes the interior identically to the city). The parent's `scale`,
+          // learned in deriveGeoFromExtraction (footprint ÷ interior extent),
+          // composes this local frame to a true absolute coordinate.
+          const items = merged.snapshot.entities
+            .map((e) => toItem(e, true))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          if (items.length > 0) {
+            await deriveGeoFromExtraction(
+              sessionId,
+              {
+                node_id: geoNodeId,
+                level: "map",
+                observer: null,
+                map_crop: MAP_IMAGE_FRAME,
+              },
+              16 / 9,
+              items,
+              "top_down",
+              -60,
+              parentFrameId,
+            );
+          }
+        } else {
+          // Top-level city map (parent_id = null) — the original seeding.
+          const items = merged.snapshot.entities
+            .map((e) => toItem(e, false))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          if (items.length > 0) {
+            await deriveGeoFromExtraction(
+              sessionId,
+              {
+                node_id: geoNodeId,
+                level: "map",
+                observer: null,
+                map_crop: MAP_IMAGE_FRAME,
+              },
+              16 / 9,
+              items,
+              upstreamView?.projection ?? "top_down",
+              upstreamView?.pitch_deg ?? -60,
+            );
+          }
+        }
+      } catch {
+        /* seeding is best-effort — never block the extraction response */
+      }
+    }
     // Inline projection of added/updated records so the debug HUD (and any
     // future hover-chip prefetch) can render names without a follow-up GET
     // on the snapshot. Cheap — these are already in memory from the merge.
