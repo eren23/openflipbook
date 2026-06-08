@@ -7,17 +7,24 @@ import pytest
 from providers import model_router
 
 
-@pytest.mark.parametrize("rm", ["place_submap", "place_scene"])
-def test_entering_a_place_or_submap_with_region_zoom_continues(rm) -> None:
-    # Both ENTERING a place and cropping a sub-map are a faithful Kontext zoom of
-    # the map crop (same walls/buildings/style), not a fresh reinvention.
-    assert model_router.select_operation(rm, True) == "zoom_continue"
+def test_submap_with_region_zoom_continues() -> None:
+    # A sub-map is a faithful closer MAP of the crop — same viewpoint, same
+    # walls/style — so it strict-zoom-continues (Kontext).
+    assert model_router.select_operation("place_submap", True) == "zoom_continue"
 
 
-@pytest.mark.parametrize("rm", ["place_submap", "place_scene"])
-def test_no_region_falls_back_to_fresh(rm) -> None:
+def test_scene_is_fresh_conditioned_not_a_zoom() -> None:
+    # Stepping INSIDE a place is a view CHANGE (exterior -> interior), not a strict
+    # zoom of the crop — Kontext can only zoom it ("just a zoom"). So a scene is a
+    # fresh, reference-conditioned gen that keeps the place's architecture/style
+    # from the crop while actually going within.
+    assert model_router.select_operation("place_scene", True) == "fresh"
+
+
+def test_no_region_falls_back_to_fresh() -> None:
     # No region crop to continue from → a fresh generation.
-    assert model_router.select_operation(rm, False) == "fresh"
+    assert model_router.select_operation("place_submap", False) == "fresh"
+    assert model_router.select_operation("place_scene", False) == "fresh"
 
 
 @pytest.mark.parametrize("rm", ["explainer", None])
