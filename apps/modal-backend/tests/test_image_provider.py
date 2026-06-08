@@ -152,8 +152,14 @@ def test_conditioning_preamble_place_scene_reveals_within() -> None:
     # World Mode entering a place: the region ref should say to reveal the
     # fuller place within (a scene), distinct from the explainer "inside".
     out = image.conditioning_preamble(["region", "parent"], "place_scene")
-    assert "reveal the fuller place within" in out.lower()
-    assert "outward" not in out.lower()
+    low = out.lower()
+    assert "reveal the fuller place within" in low
+    assert "outward" not in low
+    # …and FAITHFULLY: a closer view of THAT exact place, not a re-invention
+    # (the fix for sub-parts drifting into unrelated renders).
+    assert "faithfully" in low and "exact place" in low
+    # the faithful-continuation clause is place_scene-only, not a plain tap
+    assert "faithfully" not in image.conditioning_preamble(["region"], "tap").lower()
 
 
 def test_first_image_extracts_first_dict() -> None:

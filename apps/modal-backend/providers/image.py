@@ -144,9 +144,19 @@ def conditioning_preamble(roles: list[str], mode: str) -> str:
     lines: list[str] = []
     for i, role in enumerate(roles, start=1):
         if role == "region":
+            # Entering a place must be a FAITHFUL closer view of that exact spot,
+            # not a fresh invention — otherwise the sub-part drifts into an
+            # unrelated render (the loose-refs failure the user hit).
+            faithful = (
+                " Reproduce ITS structures, colours, landmarks and layout"
+                " faithfully — this page is a closer, continued view of that"
+                " exact place, not a new invention."
+                if mode == "place_scene"
+                else ""
+            )
             lines.append(
                 f"Image {i}: the spot you are entering — {enter.lower()} it, "
-                "keeping its composition, depth and framing."
+                "keeping its composition, depth and framing." + faithful
             )
         elif role == "parent":
             lines.append(
