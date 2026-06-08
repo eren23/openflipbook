@@ -8,7 +8,7 @@
  * backend just uploads these data URLs and hands them to nano-banana.
  */
 
-export type ConditionRole = "region" | "parent" | "anchor";
+export type ConditionRole = "region" | "parent" | "anchor" | "style";
 
 export interface ConditionRefs {
   urls: string[];
@@ -37,12 +37,16 @@ export function cropBox(
 
 /**
  * Order the available references into the conditioning stack — region → parent
- * → anchor — dropping any that are missing. Pure.
+ * → anchor → style — dropping any that are missing. Pure. `style` is the
+ * persistent medium exemplar (the root engraving/woodcut render): it rides last
+ * (weakest positional weight) so it locks the art MEDIUM without crowding the
+ * composition refs. The backend names it explicitly in the conditioning prompt.
  */
 export function orderedRefs(refs: {
   region?: string | null;
   parent?: string | null;
   anchor?: string | null;
+  style?: string | null;
 }): ConditionRefs {
   const urls: string[] = [];
   const roles: ConditionRole[] = [];
@@ -55,6 +59,7 @@ export function orderedRefs(refs: {
   push(refs.region, "region");
   push(refs.parent, "parent");
   push(refs.anchor, "anchor");
+  push(refs.style, "style");
   return { urls, roles };
 }
 
@@ -96,12 +101,15 @@ export async function cropRegion(
 
 /**
  * Assemble the ordered conditioning stack for a generation: region crop (parent
- * at the click) → whole parent → global anchor. No click (query/root) → no
- * region crop. The region crop is best-effort.
+ * at the click) → whole parent → global anchor → style exemplar. No click
+ * (query/root) → no region crop. The region crop is best-effort. `styleDataUrl`
+ * is the persistent medium reference (root/pinned render); thread it on every
+ * path so the art medium stays locked across the session.
  */
 export async function buildConditionRefs(opts: {
   parentDataUrl?: string | null;
   anchorDataUrl?: string | null;
+  styleDataUrl?: string | null;
   click?: { xPct: number; yPct: number } | null;
   regionFrac?: number;
 }): Promise<ConditionRefs> {
@@ -122,5 +130,6 @@ export async function buildConditionRefs(opts: {
     region,
     parent: opts.parentDataUrl ?? null,
     anchor: opts.anchorDataUrl ?? null,
+    style: opts.styleDataUrl ?? null,
   });
 }

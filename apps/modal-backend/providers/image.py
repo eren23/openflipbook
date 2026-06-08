@@ -111,9 +111,11 @@ def _args_for(
     prompt: str,
     aspect_ratio: str,
     reference_urls: list[str] | None = None,
+    negative_prompt: str | None = None,
 ) -> dict[str, Any]:
     if "seedream" in model:
-        # seedream is text-to-image only here — no reference conditioning.
+        # seedream is text-to-image only here — no reference conditioning, and it
+        # ignores negative_prompt.
         return {
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
@@ -123,6 +125,14 @@ def _args_for(
     args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
     if reference_urls and "nano-banana" in model:
         args["image_urls"] = reference_urls
+    # A negative prompt is honoured by nano-banana-pro and flux/kontext; base
+    # nano-banana and seedream ignore (or reject) it, so only attach it where it
+    # actually lands. Gated upstream behind IMAGE_NEGATIVE_PROMPT (off by default
+    # pending a fal-schema check).
+    if negative_prompt and (
+        "nano-banana-pro" in model or "flux" in model or "kontext" in model
+    ):
+        args["negative_prompt"] = negative_prompt
     return args
 
 
@@ -161,11 +171,27 @@ def conditioning_preamble(roles: list[str], mode: str) -> str:
         elif role == "parent":
             lines.append(
                 f"Image {i}: the surrounding scene — match its world, palette, "
-                "lighting and render style closely."
+                "lighting and, above all, its ART MEDIUM (the drawing/render "
+                "technique itself), not just the colours."
             )
         elif role == "anchor":
             lines.append(
-                f"Image {i}: the overall look of this world — stay consistent with it."
+                f"Image {i}: the overall look of this world — stay consistent "
+                "with its art medium and palette."
+            )
+        elif role == "style":
+            # The persistent medium exemplar (root/pinned render). This is the
+            # load-bearing line for style consistency: the user's complaint was
+            # interiors coming back photoreal / isometric when the source is an
+            # engraving. Name the medium and forbid drift explicitly.
+            lines.append(
+                f"Image {i}: the STYLE REFERENCE — the exact art MEDIUM of this "
+                "world (e.g. hand-drawn engraving / woodcut hatching / ink line "
+                "work; or watercolour, flat infographic, blueprint — whatever it "
+                "shows). Reproduce THIS medium faithfully: same linework, texture "
+                "and level of stylisation. Do NOT switch to photorealism, a 3D "
+                "render, isometric line-art or any other medium, however much the "
+                "subject might invite it."
             )
         else:
             lines.append(f"Image {i}: visual reference — stay consistent with it.")
@@ -232,6 +258,7 @@ async def generate_image(
     tier: str | None = None,
     model_override: str | None = None,
     reference_urls: list[str] | None = None,
+    negative_prompt: str | None = None,
 ) -> GeneratedImage:
     from obs import span
 
@@ -267,7 +294,7 @@ async def generate_image(
         refs=len(fal_refs or []),
     ) as ctx:
         result = await _fal_subscribe(
-            model, _args_for(model, prompt, aspect_ratio, fal_refs)
+            model, _args_for(model, prompt, aspect_ratio, fal_refs, negative_prompt)
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)

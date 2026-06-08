@@ -1109,13 +1109,18 @@ async def plan_page(
         system_parts.append(clause)
     if style_anchor:
         system_parts.append(
-            "VISUAL STYLE LOCK (CRITICAL): the new illustration MUST be drawn "
-            f"in this exact style — \"{style_anchor}\". Match the medium, "
-            "palette, line work, level of stylization, and perspective. Do "
-            "NOT switch to a different art style. Begin the `prompt` with a "
-            "leading clause that names the style explicitly so the image "
-            "model can lock onto it (e.g. \"Flat infographic illustration "
-            "with bold blue accents and clean line work, ...\")."
+            "VISUAL STYLE / MEDIUM LOCK (CRITICAL): the new illustration MUST be "
+            f"drawn in this exact style — \"{style_anchor}\". Match the art "
+            "MEDIUM above all (engraving, woodcut, ink line-work, watercolour, "
+            "flat infographic, blueprint, etc.), plus its palette, line work, "
+            "level of stylization and perspective. Do NOT switch to a different "
+            "medium — never photorealism, a 3D render, or isometric line-art — "
+            "however much the subject (a building interior, a portrait) might "
+            "invite it. Begin the `prompt` with a leading clause that NAMES the "
+            "medium explicitly (e.g. \"Hand-drawn engraving with cross-hatching "
+            "and sepia ink, ...\"), and END the prompt with a one-line lock like "
+            "\"Rendered strictly as <medium> — not photoreal, not 3D, not "
+            "isometric line-art.\" so the image model cannot drift."
         )
     if output_locale and output_locale.lower() not in ("en", "auto", ""):
         system_parts.append(
@@ -1206,6 +1211,24 @@ async def plan_page(
     return PagePlan(page_title=page_title, prompt=prompt, facts=facts, sources=sources)
 
 
+def _world_size_hint(entry: dict[str, Any]) -> str:
+    """A compact size clause for a world-context entity, when its geometry is
+    known (footprint/height in world units, carried from its WorldEntityGeo).
+    Keeps recurring entities at a consistent relative scale across pages.
+    Returns '' when no size is carried — today's behaviour."""
+    fp = entry.get("footprint")
+    w = d = None
+    if isinstance(fp, dict):
+        w, d = fp.get("w"), fp.get("d")
+    h = entry.get("height")
+    parts: list[str] = []
+    if isinstance(w, (int, float)) and isinstance(d, (int, float)):
+        parts.append(f"footprint ~{round(float(w))}x{round(float(d))} ground units")
+    if isinstance(h, (int, float)):
+        parts.append(f"~{round(float(h))} units tall")
+    return "; size " + ", ".join(parts) if parts else ""
+
+
 def _format_world_context_clause(
     world_context: list[dict[str, Any]] | None,
 ) -> str:
@@ -1252,6 +1275,10 @@ def _format_world_context_clause(
         if aliases:
             line += f" (aka: {', '.join(aliases[:3])})"
         line += f" — {appearance[:240]}{state_pairs}"
+        # FIX C: carry geometric size so recurring entities keep a consistent
+        # relative scale across pages (a place rendered large once shouldn't
+        # come back tiny). Best-effort; absent → no hint (today's behaviour).
+        line += _world_size_hint(entry)
         lines.append(line)
     if not lines:
         return ""
@@ -1262,6 +1289,9 @@ def _format_world_context_clause(
         "BELOW verbatim — same outfit, build, palette, props. Do NOT "
         "re-imagine their look. Weave each used descriptor into the image "
         "prompt as a clause like \"<Name>, <appearance descriptor>, ...\". "
+        "Keep each entity at a CONSISTENT RELATIVE SCALE across pages — where a "
+        "size is given below (footprint/height in world units), respect those "
+        "proportions so a place drawn large once is not shrunk later. "
         "If an entity is NOT relevant to this page, simply omit it; do not "
         "force entities into the scene.\n\n"
         "CAUSALITY (CRITICAL): each entity's `state=` flags below describe "

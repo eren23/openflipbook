@@ -161,6 +161,12 @@ export interface GeoEstimate {
 
 const DEFAULT_FOOTPRINT = 6;
 const DEFAULT_HEIGHT = 4;
+// A recovered footprint is clamped to a sane span so a near-frame box on an
+// oblique map can't seed a building the size of a district (or smaller than a
+// floor tile). Relative units, matching MAP_IMAGE_FRAME's 100×60.
+const MAX_FOOTPRINT = 40;
+const clampFootprint = (v: number): number =>
+  Math.min(Math.max(v, 0.5), MAX_FOOTPRINT);
 
 export function estimateGeoFromBBox(
   bbox: EntityBBox,
@@ -187,9 +193,16 @@ export function estimateGeoFromBBox(
       // -60deg oblique, ~0 looking straight down (where height-from-extent is
       // meaningless → the default floor kicks in).
       const foreshorten = Math.abs(Math.cos((pitchDeg * Math.PI) / 180));
+      // FIX A: the box WIDTH still reads as real ground width on an oblique map,
+      // so derive footprint.w from it instead of a flat default; depth (toward
+      // the camera) is foreshortened, so damp it off the width by cos(pitch).
+      // Still relative, not metric — but a wide building no longer seeds at 6×6,
+      // so its map footprint tracks the size it was rendered at.
+      const w = clampFootprint(bbox.w_pct * crop.w);
+      const d = clampFootprint(w * (0.5 + 0.5 * foreshorten));
       return {
         pos,
-        footprint: { w: DEFAULT_FOOTPRINT, d: DEFAULT_FOOTPRINT },
+        footprint: { w, d },
         height: Math.max(bbox.h_pct * crop.h * foreshorten, DEFAULT_HEIGHT),
       };
     }

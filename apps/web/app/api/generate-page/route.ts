@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GenerateRequestBody } from "@openflipbook/config";
 import { resolveEntitiesForPrompt } from "@/lib/world";
+import { getWorldMap } from "@/lib/world-map";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
@@ -44,6 +45,30 @@ export async function POST(req: Request) {
         parentNodeId: parsed.current_node_id || null,
       });
       if (world_context.length > 0) {
+        // FIX C: join geometric size (footprint/height) from the session's
+        // world_map so the planner can keep recurring entities at a consistent
+        // relative scale across pages. Best-effort — a missing/empty map just
+        // omits sizes and the planner behaves exactly as before.
+        try {
+          const geo = await getWorldMap(parsed.session_id);
+          const sizeById = new Map(
+            geo.entities
+              .filter((g) => g.entity_id)
+              .map((g) => [
+                g.entity_id as string,
+                { footprint: g.footprint, height: g.height },
+              ])
+          );
+          for (const wc of world_context) {
+            const s = sizeById.get(wc.id);
+            if (s) {
+              wc.footprint = s.footprint;
+              wc.height = s.height;
+            }
+          }
+        } catch {
+          // size enrichment is best-effort; never block generation
+        }
         upstreamBody = JSON.stringify({ ...parsed, world_context });
       }
     }

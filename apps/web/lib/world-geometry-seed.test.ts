@@ -28,7 +28,7 @@ describe("estimateGeoFromBBox (seeding bridge)", () => {
     expect(g.footprint.d).toBeCloseTo(12);
   });
 
-  it("FIX 1c — oblique map: the box's height drives entity height, not footprint", () => {
+  it("FIX A — oblique map: box width drives footprint, box height drives entity height", () => {
     const view: SceneView = {
       node_id: "n",
       level: "map",
@@ -44,7 +44,10 @@ describe("estimateGeoFromBBox (seeding bridge)", () => {
     // …but a tall box → a tall entity (0.4 * 60 * 0.5 = 12), vs the flat default (4)
     expect(flat.height).toBe(4);
     expect(oblique.height).toBeCloseTo(12);
-    expect(oblique.footprint.w).toBe(6); // footprint falls back to default
+    // FIX A: width tracks the box (0.1 * 100 = 10), depth damped by cos(pitch)
+    // at -60° → 10 * (0.5 + 0.5*0.5) = 7.5; no longer a flat 6×6 default.
+    expect(oblique.footprint.w).toBeCloseTo(10);
+    expect(oblique.footprint.d).toBeCloseTo(7.5);
   });
 
   it("codex #5 — camera pitch foreshortens height-from-extent", () => {
