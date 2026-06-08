@@ -1583,6 +1583,13 @@ export default function PlayPage() {
           ? {
               scene_view: geoTap.scene_view,
               expected_layout: geoTap.expected_layout,
+              // Enter the aligned-zoom path: a submap stays in map mode and
+              // zoom-continues (Kontext) rather than a loose fresh gen, so the
+              // sub-map is a true zoom of the tapped region. A scene first-enter
+              // keeps the (reprojecting) fresh path until B2 wires the guarded
+              // scene→scene continuation. Spread last so it wins.
+              render_mode:
+                geoTap.kind === "submap" ? "place_submap" : "place_scene",
               // The geometric tap KNOWS which entity you hit (by coordinates) —
               // make it the subject so tapping the Tower of Art enters the Tower,
               // overriding the looser VLM read that picked its container. Spread
