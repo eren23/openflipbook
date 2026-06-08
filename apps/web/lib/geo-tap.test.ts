@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { MapCrop, WorldEntityGeo } from "@openflipbook/config";
+import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
 import { geoTapRequest } from "./geo-tap";
 
@@ -158,6 +158,64 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t).not.toBeNull();
     expect(t!.kind).toBe("scene");
     expect(t!.focus_id).toBe("uni"); // would miss if routed via bounds
+  });
+
+  it("a tap INSIDE an entered place routes to its CHILD, not a city landmark", () => {
+    // The core nesting fix: when currentView is an entered place, the tap routes
+    // over THAT place's children (in their local MAP_IMAGE_FRAME), so it drills
+    // one level deeper — not back to a city entity.
+    const map = {
+      entities: [
+        geo("uu", "Unseen University", 30, 18, { height: 15 }),
+        // UU's interior, LOCAL pos in the same {0,0,100,60} frame as the city.
+        geo("tower", "Tower of Art", 20, 20, { parent_id: "uu", height: 14 }),
+        geo("lib", "Library", 70, 40, { parent_id: "uu", height: 7 }),
+        geo("palace", "Palace", 80, 70), // unrelated city entity
+      ],
+      bounds: CROP,
+    };
+    const insideUU: SceneView = {
+      node_id: "n2",
+      level: "building",
+      observer: {
+        pos: { x: 30, y: 30 },
+        eye_height: 1.7,
+        gaze: -Math.PI / 2,
+        fov: Math.PI / 2,
+        pitch: 0,
+      },
+      map_crop: null,
+      focus_id: "uu",
+    };
+    // tap the Tower's local image position (20% across, 20/60 down)
+    const t = geoTapRequest(
+      map,
+      "n2",
+      { x_pct: 20 / 100, y_pct: 20 / 60 },
+      16 / 9,
+      undefined,
+      insideUU,
+    );
+    expect(t).not.toBeNull();
+    expect(t!.focus_id).toBe("tower"); // nested deeper, NOT "uu"/"palace"
+    expect(t!.scene_view.focus_id).toBe("tower");
+  });
+
+  it("inside a place with no interior yet → null (nothing to nest into)", () => {
+    const map = {
+      entities: [geo("uu", "Unseen University", 30, 18, { height: 15 })],
+      bounds: CROP,
+    };
+    const insideUU: SceneView = {
+      node_id: "n2",
+      level: "building",
+      observer: null,
+      map_crop: null,
+      focus_id: "uu",
+    };
+    expect(
+      geoTapRequest(map, "n2", { x_pct: 0.3, y_pct: 0.3 }, 16 / 9, undefined, insideUU),
+    ).toBeNull();
   });
 
   it("empty world → null (caller keeps the existing World Mode path)", () => {
