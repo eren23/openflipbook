@@ -35,12 +35,20 @@ def resolve_model(op: str) -> str | None:
 
 
 def select_operation(render_mode: str | None, has_region: bool) -> str:
-    """Which image operation a tap generation uses. ENTERING a place
-    (`place_scene`) OR cropping a sub-map (`place_submap`) with a region crop
-    ZOOM-CONTINUES the map (Kontext) — a faithful, style-preserving closer view of
-    the SAME walls/buildings the map shows, not a fresh reinvention in a new style.
+    """Which image operation a tap generation uses.
+
+    A sub-map (`place_submap`) with a region crop ZOOM-CONTINUES the map (Kontext)
+    — a faithful, style-preserving closer MAP of the SAME walls/buildings the map
+    shows, from the same overhead viewpoint.
+
+    Stepping INSIDE a place (`place_scene`) is a view CHANGE — exterior to interior
+    — which a strict zoom can't do (Kontext just zooms the crop, the "did you only
+    zoom in?" failure). So a scene is a FRESH, reference-conditioned generation: it
+    renders the interior while the region crop + the place's appearance keep its
+    architecture, materials and style continuous with the map.
+
     Everything else is a fresh generation. (outpaint/inpaint/upscale are invoked
     explicitly by callers — the repair loop — not chosen here.)"""
-    if render_mode in ("place_submap", "place_scene") and has_region:
+    if render_mode == "place_submap" and has_region:
         return "zoom_continue"
     return "fresh"

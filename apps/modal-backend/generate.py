@@ -729,7 +729,12 @@ async def _event_stream(
             composed_prompt = (
                 f"Style: {style_anchor}\n\n{composed_prompt}"
             )
-        if plan.facts:
+        # Stepping INSIDE a place is an immersive scene, not a diagram — rendering
+        # the facts as on-image "Labels to include" turns the interior into an
+        # annotated diagram (floating captions), breaking the seamless step-in.
+        # The scene still carries that content via plan.prompt; maps/explainers
+        # keep their labels.
+        if plan.facts and render_mode != "place_scene":
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
         # Geometric world: append the engine's deterministic placement clause so
         # the model aims entities at their projected positions. Flag-gated → "".
