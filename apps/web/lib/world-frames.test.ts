@@ -47,6 +47,31 @@ describe("nested frames", () => {
     expect(resolveAbsolutePos("library", byId)).toEqual({ x: 36, y: 34 });
   });
 
+  it("resolveAbsolutePos composes per-frame scale (translation + scale)", () => {
+    // UU at city (30,18); its interior is a local frame at scale 0.1 (one
+    // interior unit = 0.1 city units). A child at local (50,50) sits at absolute
+    // (30,18)+(50,50)*0.1 = (35,23) — INSIDE UU's footprint, not flung across.
+    const geos: FrameNode[] = [
+      { id: "uu", parent_id: null, pos: { x: 30, y: 18 }, scale: 0.1 },
+      { id: "tower", parent_id: "uu", pos: { x: 50, y: 50 }, scale: 0.5 },
+      { id: "room", parent_id: "tower", pos: { x: 10, y: 0 } }, // local to the tower
+    ];
+    const byId = new Map(geos.map((g) => [g.id, g]));
+    expect(resolveAbsolutePos("uu", byId)).toEqual({ x: 30, y: 18 });
+    expect(resolveAbsolutePos("tower", byId)).toEqual({ x: 35, y: 23 });
+    // Grandchild: scales multiply down the chain (uu 0.1 × tower 0.5 = 0.05).
+    // room = tower_abs (35,23) + local (10,0) * 0.05 = (35.5, 23).
+    expect(resolveAbsolutePos("room", byId)).toEqual({ x: 35.5, y: 23 });
+  });
+
+  it("scale defaults to 1 → identical to plain translation (legacy data)", () => {
+    // CITY carries no `scale`; the affine resolver must reproduce the old
+    // translation-only sums byte-for-byte so pre-scale sessions don't shift.
+    const byId = new Map(CITY.map((g) => [g.id, g]));
+    expect(resolveAbsolutePos("tower", byId)).toEqual({ x: 22, y: 17 });
+    expect(resolveAbsolutePos("library", byId)).toEqual({ x: 36, y: 34 });
+  });
+
   it("resolveAbsolutePos is cycle-guarded and null-safe", () => {
     const cyclic = new Map<string, FrameNode>([
       ["a", { id: "a", parent_id: "b", pos: { x: 1, y: 1 } }],

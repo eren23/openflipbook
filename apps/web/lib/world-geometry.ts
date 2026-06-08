@@ -263,6 +263,10 @@ export interface FrameLink {
 }
 export interface FrameNode extends FrameLink {
   pos: WorldVec2;
+  // The size of ONE unit of THIS node's interior frame, in its parent's units
+  // (default 1). Composes the local→absolute transform with scale, not just
+  // translation — so a child's local pos lands at a true absolute position.
+  scale?: number;
 }
 
 /** Direct children of a place (its sub-entities), stable-sorted by id. */
@@ -281,25 +285,36 @@ export function siblingsOf<T extends FrameLink>(geos: T[], id: string): T[] {
   return geos.filter((g) => g.id !== id && (g.parent_id ?? null) === parent);
 }
 
-/** Walk the parent chain, summing local positions, to get an absolute world
- *  position. Cycle-guarded. Translation-only nesting (no per-frame scale yet) —
- *  honest, and enough for the minimap/atlas to show where a sub-entity sits
- *  inside its place. */
+/** Compose the parent chain into an absolute world position — an AFFINE
+ *  transform (translation + per-frame scale), cycle-guarded. A node's local
+ *  `pos` is in its PARENT's units, so it is added at the cumulative scale of the
+ *  ancestors ABOVE it; the node's own `scale` then applies to ITS children. With
+ *  every `scale` defaulting to 1 this is byte-identical to plain translation, so
+ *  pre-scale data is unaffected. This is what gives every entity BOTH a local
+ *  (relative) pos and a true absolute coordinate across the universe. */
 export function resolveAbsolutePos(
   id: string,
   byId: Map<string, FrameNode>,
 ): WorldVec2 | null {
+  // Collect self → root (cycle-guarded), then compose root → down.
+  const chain: FrameNode[] = [];
+  const seen = new Set<string>();
   let node: FrameNode | undefined = byId.get(id);
   if (!node) return null;
-  let x = 0;
-  let y = 0;
-  const seen = new Set<string>();
   while (node && !seen.has(node.id)) {
     seen.add(node.id);
-    x += node.pos.x;
-    y += node.pos.y;
+    chain.push(node);
     const pid: string | null = node.parent_id ?? null;
     node = pid ? byId.get(pid) : undefined;
+  }
+  let x = 0;
+  let y = 0;
+  let scaleAccum = 1;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const n = chain[i]!;
+    x += n.pos.x * scaleAccum;
+    y += n.pos.y * scaleAccum;
+    scaleAccum *= n.scale ?? 1;
   }
   return { x, y };
 }
