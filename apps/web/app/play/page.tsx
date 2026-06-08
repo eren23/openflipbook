@@ -1401,10 +1401,28 @@ export default function PlayPage() {
         const py2 = evt.clientY - rect.top;
         // On a geo-enterable place, open the structured "set your view" popover
         // (mounts the observer/gaze editor); otherwise keep the plain hint bubble.
+        // The world_map seeds a beat after a generation and this handler's geoMap
+        // closure can lag it — so the FIRST ⌘-tap after a gen would see no
+        // entities and silently fall to the hint. Fetch fresh when it's empty.
+        let geoEntities = geoMap.entities;
+        let geoBounds = geoMap.bounds;
+        if (worldEnabled && geoEntities.length === 0) {
+          const fresh = (await fetch(
+            `/api/world/${encodeURIComponent(sessionId)}/map`,
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)) as
+            | { entities: WorldEntityGeo[]; bounds: MapCrop }
+            | null;
+          if (fresh?.entities?.length) {
+            geoEntities = fresh.entities;
+            geoBounds = fresh.bounds;
+          }
+        }
         const previewTap =
-          worldEnabled && geoMap.entities.length > 0
+          worldEnabled && geoEntities.length > 0
             ? geoTapRequest(
-                { entities: geoMap.entities, bounds: geoMap.bounds },
+                { entities: geoEntities, bounds: geoBounds },
                 page.nodeId ?? "",
                 click,
                 16 / 9,
@@ -1413,7 +1431,7 @@ export default function PlayPage() {
         const previewObserver = previewTap?.scene_view.observer ?? null;
         if (previewTap && previewObserver) {
           // Frame the editor on the camera↔place axis (not the whole city).
-          const focusEnt = geoMap.entities.find((e) => e.id === previewTap.focus_id);
+          const focusEnt = geoEntities.find((e) => e.id === previewTap.focus_id);
           const fx = focusEnt?.pos.x ?? previewObserver.pos.x;
           const fy = focusEnt?.pos.y ?? previewObserver.pos.y;
           const cx = (previewObserver.pos.x + fx) / 2;
