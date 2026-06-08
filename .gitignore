@@ -45,6 +45,14 @@ scripts/record-demo/node_modules/
 apps/web/test-results/
 apps/web/playwright-report/
 
+# Paid-eval generated artefacts (region/without/with renders + reports).
+apps/modal-backend/tests/**/reports/
+
+# Demo render outputs (regenerable; keep the recorders, not the binaries).
+scripts/record-demo/geo-tour-demo.mp4
+scripts/record-demo/geo-descent.mp4
+scripts/record-demo/geo-storyboard.png
+
 # Vitest coverage HTML/json output.
 apps/web/coverage/
 

@@ -122,6 +122,31 @@ async def score_entity_consistency(
     )
 
 
+async def score_continuation(region_crop: bytes, candidate: bytes) -> JudgeResult:
+    """B3 — visual coherence of an ENTERED place vs the map region it came from.
+
+    Image 1 is a crop of the top-down map (the spot you tapped); image 2 is the
+    generated closer/entered view that should be THAT SAME place, just nearer.
+    """
+    system = (
+        "You judge VISUAL CONTINUITY between a map and a closer view. Image 1 is a "
+        "cropped region of a top-down map showing a specific place. Image 2 is a "
+        "generated closer / entered view that is SUPPOSED to be that same place, "
+        "just nearer. Score 0-10 how faithfully image 2 continues image 1: the same "
+        "structures, colours, landmarks and layout — recognisably the SAME place, "
+        "not a new invention. 10 = unmistakably the same place seen closer; 5 = the "
+        "right kind of place but invented details; 0 = an unrelated place."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        "Image 1 = the map region you entered. Image 2 = the rendered closer view. "
+        "Score how faithfully image 2 is a continuation of the SAME place (0-10)."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(region_crop), _image_block(candidate)]
+    )
+
+
 async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
     system = (
         "You are a prompt-alignment judge. Score on a 0-10 scale how "
