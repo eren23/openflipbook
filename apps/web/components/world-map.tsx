@@ -16,12 +16,16 @@ import {
   type LaidOutPage,
   type LayoutInput,
 } from "@/lib/world-layout";
+import type { SceneView } from "@openflipbook/config";
+import { nodeKind } from "@/lib/node-kind";
 
 interface WorldMapProps {
   pages: LayoutInput[];
   activeNodeId: string | null;
   onSelect: (nodeId: string) => void;
   onClose: () => void;
+  // Per-node saved view → the tile type badge (map / building / scene).
+  sceneViews?: Record<string, SceneView | null>;
 }
 
 interface Camera {
@@ -38,6 +42,7 @@ export default function WorldMap({
   activeNodeId,
   onSelect,
   onClose,
+  sceneViews,
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<{ w: number; h: number }>({
@@ -64,6 +69,13 @@ export default function WorldMap({
     );
     return { laid: result.pages, connectors: result.connectors };
   }, [pages]);
+
+  // A connector's CHILD relation → so a zoom-in (descend) reads distinctly from
+  // an expanded neighbour, instead of every edge looking the same.
+  const relById = useMemo(
+    () => new Map(laid.map((p) => [p.nodeId, p.relation])),
+    [laid],
+  );
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -219,6 +231,17 @@ export default function WorldMap({
               >
                 <path d="M0,0 L10,5 L0,10 z" fill="rgba(15,15,15,0.55)" />
               </marker>
+              <marker
+                id="ofb-arrow-expand"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0 L10,5 L0,10 z" fill="rgba(13,148,136,0.7)" />
+              </marker>
             </defs>
             {connectors.map((c) => {
               const dx = c.to.x - c.from.x;
@@ -232,22 +255,23 @@ export default function WorldMap({
               const c1y = c.from.y + dy * 0.33 + py * bend;
               const c2x = c.from.x + dx * 0.67 - px * bend;
               const c2y = c.from.y + dy * 0.67 - py * bend;
+              const isExpand = relById.get(c.toNodeId) === "expand";
               return (
                 <g key={c.fromNodeId + "->" + c.toNodeId}>
                   <path
                     d={`M ${c.from.x} ${c.from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${c.to.x} ${c.to.y}`}
                     fill="none"
-                    stroke="rgba(15,15,15,0.55)"
+                    stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
                     strokeWidth={8}
                     strokeLinecap="round"
-                    strokeDasharray="2 22"
-                    markerEnd="url(#ofb-arrow)"
+                    strokeDasharray={isExpand ? "10 16" : "2 22"}
+                    markerEnd={isExpand ? "url(#ofb-arrow-expand)" : "url(#ofb-arrow)"}
                   />
                   <circle
                     cx={c.from.x}
                     cy={c.from.y}
                     r={14}
-                    fill="rgba(239,68,68,0.85)"
+                    fill={isExpand ? "rgba(13,148,136,0.85)" : "rgba(239,68,68,0.85)"}
                     stroke="white"
                     strokeWidth={4}
                   />
@@ -257,7 +281,13 @@ export default function WorldMap({
           </svg>
         )}
 
-        {laid.map((p) => (
+        {laid.map((p) => {
+          const kind = nodeKind({
+            level: sceneViews?.[p.nodeId]?.level ?? null,
+            relation: p.relation ?? null,
+            isRoot: !p.parentId,
+          });
+          return (
           <button
             key={p.nodeId}
             data-tile="1"
@@ -289,8 +319,19 @@ export default function WorldMap({
                 (loading)
               </div>
             )}
+            <span
+              className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium text-white"
+              data-testid="map-tile-kind"
+              title={`${kind.levelLabel} · ${kind.relLabel}`}
+            >
+              <span>{kind.levelGlyph}</span>
+              <span className="opacity-80">
+                {kind.relGlyph} {kind.relLabel}
+              </span>
+            </span>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-3 py-2 text-[11px] opacity-70">

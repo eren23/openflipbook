@@ -1999,6 +1999,11 @@ export default function PlayPage() {
           activeNodeId={page?.nodeId ?? null}
           onSelect={selectFromMap}
           onClose={() => setViewMode("page")}
+          sceneViews={Object.fromEntries(
+            history.items
+              .filter((p): p is Page & { nodeId: string } => Boolean(p.nodeId))
+              .map((p) => [p.nodeId, p.sceneView ?? null]),
+          )}
         />
       ) : page?.imageDataUrl ? (
         <figure
