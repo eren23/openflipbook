@@ -188,26 +188,28 @@ export async function POST(req: Request, { params }: Params) {
           };
         };
         if (parentFrameId && sceneView) {
-          // Child frame: position sub-entities in the place's LOCAL frame
-          // (observer at the local origin) so they're relative to the place, not
-          // the city. Reuses the entered scene's observer pose + angle.
+          // Child frame: seed the interior as a TOP-DOWN map in the SAME
+          // MAP_IMAGE_FRAME the city uses — so a child's local pos spans the same
+          // {0,0,100,60} frame that tap-routing inside the place reads (geo-tap
+          // routes the interior identically to the city). The parent's `scale`,
+          // learned in deriveGeoFromExtraction (footprint ÷ interior extent),
+          // composes this local frame to a true absolute coordinate.
           const items = merged.snapshot.entities
             .map((e) => toItem(e, true))
             .filter((x): x is NonNullable<typeof x> => x !== null);
           if (items.length > 0) {
-            const localView: SceneView = {
-              ...sceneView,
-              observer: sceneView.observer
-                ? { ...sceneView.observer, pos: { x: 0, y: 0 } }
-                : null,
-            };
             await deriveGeoFromExtraction(
               sessionId,
-              localView,
+              {
+                node_id: geoNodeId,
+                level: "map",
+                observer: null,
+                map_crop: MAP_IMAGE_FRAME,
+              },
               16 / 9,
               items,
-              upstreamView?.projection ?? "perspective",
-              upstreamView?.pitch_deg ?? 0,
+              "top_down",
+              -60,
               parentFrameId,
             );
           }
