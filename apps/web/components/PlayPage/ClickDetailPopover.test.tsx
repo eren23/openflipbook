@@ -98,4 +98,21 @@ describe("ClickDetailPopover", () => {
     fireEvent.click(screen.getByTestId("detail-confirm"));
     expect(onConfirm.mock.calls[0]![0].note).toBe("lit by torchlight");
   });
+
+  it("Escape dismisses the popover so the click slot is freed", () => {
+    // Without this, a ⌘-tap that opens the popover leaves clickInFlightRef stuck
+    // (onCancel → resolve(null) is the only thing that frees it), so the NEXT tap
+    // is silently dead — the "finicky popover" symptom.
+    const { onCancel } = setup();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("a click outside cancels; a click inside does not", () => {
+    const { onCancel } = setup();
+    fireEvent.mouseDown(screen.getByTestId("click-detail-popover"));
+    expect(onCancel).not.toHaveBeenCalled();
+    fireEvent.mouseDown(document.body);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });
