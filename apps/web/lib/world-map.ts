@@ -16,6 +16,7 @@ import { getDb } from "./db";
 import { optimisticReplace } from "./optimistic-update";
 import {
   estimateGeoFromBBox,
+  localExtent,
   resolveAbsolutePos,
   siblingsOf,
   type FrameNode,
@@ -60,6 +61,7 @@ function geoDiffers(a: WorldEntityGeo, b: WorldEntityGeo): boolean {
     a.height !== b.height ||
     a.footprint.w !== b.footprint.w ||
     a.footprint.d !== b.footprint.d ||
+    (a.scale ?? 1) !== (b.scale ?? 1) ||
     a.label !== b.label ||
     a.visual !== b.visual ||
     a.kind !== b.kind ||
@@ -359,6 +361,21 @@ export async function deriveGeoFromExtraction(
     };
   });
   if (geos.length === 0) return getWorldMap(sessionId);
+  // Seeding INTO a place's frame → LEARN that place's `scale` so its children
+  // resolve INSIDE its footprint (a true absolute coordinate across the
+  // universe), not summed flat into the city: scale = the parent's footprint
+  // extent ÷ the interior's local extent. Best-effort + clamped so a bad extent
+  // can't explode the map; the parent keeps its source authority (scale-only).
+  if (parentId) {
+    const parent = (await getWorldMap(sessionId)).entities.find(
+      (e) => e.id === parentId,
+    );
+    if (parent) {
+      const footprint = Math.max(parent.footprint.w, parent.footprint.d);
+      const scale = Math.min(Math.max(footprint / localExtent(geos), 1e-3), 10);
+      if ((parent.scale ?? 1) !== scale) geos.push({ ...parent, scale });
+    }
+  }
   return upsertEntityGeos(sessionId, geos);
 }
 
