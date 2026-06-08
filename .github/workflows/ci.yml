@@ -22,6 +22,15 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: ESLint
         run: pnpm lint --max-warnings=20
+      - name: No demo artifacts tracked
+        run: |
+          hits=$(git ls-files | grep -E 'scripts/record-demo/(artifacts.*/|[^/]*\.(mp4|webm)|geo-storyboard\.png)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Tracked demo-recorder artifacts found (regenerable — keep them gitignored, never 'git add -f'):"
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK: no demo-recorder artifacts tracked"
 
   typecheck:
     runs-on: ubuntu-latest

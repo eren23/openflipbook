@@ -36,10 +36,8 @@ flipbook-steam.jpg
 ec-*.jpg
 ec-*.png
 
-# Demo recorder intermediates (raw webm captures)
-scripts/record-demo/artifacts/
-scripts/record-demo/artifacts-geo*/
-scripts/record-demo/artifacts-mappan/
+# Demo recorder intermediates (screenshots + raw webm captures — all regenerable)
+scripts/record-demo/artifacts*/
 scripts/record-demo/node_modules/
 
 # Playwright artifacts (committing reports = noisy + binary churn).
@@ -50,8 +48,10 @@ apps/web/playwright-report/
 apps/modal-backend/tests/**/reports/
 
 # Demo render outputs (regenerable; keep the recorders, not the binaries).
-scripts/record-demo/geo-tour-demo.mp4
-scripts/record-demo/geo-descent.mp4
+# NOTE: the landing-page clip lives at apps/web/public/demo.mp4 (a different dir),
+# so these globs never touch it. Everything under scripts/record-demo/ is output.
+scripts/record-demo/*.mp4
+scripts/record-demo/*.webm
 scripts/record-demo/geo-storyboard.png
 
 # Vitest coverage HTML/json output.

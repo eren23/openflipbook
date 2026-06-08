@@ -211,8 +211,10 @@ screenshots) returned a two-word verdict:
 - [ ] **Pre-PR hygiene.** Branch is **+13.4k / −471 over 170 files**, based on _pre-merge_
   world-mode → **merge `main` first**. ~~Stray root-level debug pngs~~ — `state-check.png`
   (1.2 MB), `ankh-topdown.png`, `geo-overlay-figure.png`, `geo-overlay-on.png` were tracked
-  cruft at the repo root; **removed** (the legit demo artefacts stay under
-  `scripts/record-demo/artifacts-geo/`).
+  cruft at the repo root; **removed**. _(Update 2026-06-08: the
+  `scripts/record-demo/artifacts-geo/` + `artifacts-mappan/` screenshots and the
+  `*-demo.mp4`/`*.webm` clips were also purged from history — they are regenerable
+  via the recorders and are now gitignored, not tracked.)_
 - [ ] **Deferred backend depth (Ph7–9).** Per-entity VLM verdicts, detect→confirm→edit loop,
   model-per-category routing. Available, not started.
 
