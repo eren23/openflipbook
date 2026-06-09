@@ -70,6 +70,13 @@ eval-coherence:
 # self-contained, no session needed:  make eval-style
 eval-style:
 	cd apps/modal-backend && STYLE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.style_runner
+# B2 OUTWARD-drift A/B: synthesize each container TWICE — the default zero-drift
+# BRIA outpaint vs the SCALE_OUTWARD_RERENDER fresh path — and judge how faithfully
+# each keeps the source's medium → the drift number + a trust threshold. Run before
+# enabling SCALE_OUTWARD_RERENDER. PAID (fal gens + Gemini judge); no session:
+#   make eval-outward-drift
+eval-outward-drift:
+	cd apps/modal-backend && OUTWARD_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.outward_runner
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q

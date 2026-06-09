@@ -173,4 +173,31 @@ describe("scale-tree reparentRoots (the multi-root geo store)", () => {
     ).toThrow(/no root/);
     expect(() => reparentRoots(cityTree(), geo({ id: "c" }), NOW)).toThrow(/already exists/);
   });
+
+  it("derives the shared pScale from the MODAL rung, not an arbitrary first root", () => {
+    // A district root listed FIRST, but the city rung is the majority (3 of 4).
+    const before = [
+      geo({ id: "d", pos: { x: 5, y: 5 }, scale_tier: "district" }),
+      geo({ id: "c1", pos: { x: 10, y: 10 }, scale_tier: "city" }),
+      geo({ id: "c2", pos: { x: 70, y: 40 }, scale_tier: "city" }),
+      geo({ id: "c3", pos: { x: 40, y: 55 }, scale_tier: "city" }),
+    ];
+    const beforeAbs = absMap(before);
+    const region = geo({
+      id: "p",
+      pos: { x: 30, y: 25 },
+      footprint: { w: 90, d: 60 },
+      scale_tier: "region",
+    });
+    const { learnedScale, geos: after } = reparentRoots(before, region, NOW);
+    // The majority (city) sets the ratio — not the first root (district).
+    expect(learnedScale).toBeCloseTo(tierMetricMultiplier("region", "city"), 12);
+    expect(learnedScale).not.toBeCloseTo(tierMetricMultiplier("region", "district"), 6);
+    // INV-1 still holds for EVERY root (incl. the minority district one).
+    const afterAbs = absMap(after);
+    for (const id of ["d", "c1", "c2", "c3"]) {
+      expect(afterAbs.get(id)!.x).toBeCloseTo(beforeAbs.get(id)!.x, 9);
+      expect(afterAbs.get(id)!.y).toBeCloseTo(beforeAbs.get(id)!.y, 9);
+    }
+  });
 });

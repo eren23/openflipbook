@@ -122,13 +122,36 @@ function makeRootParent(
   return { ...parentGeo, parent_id: null, scale: pScale, source: "user", updated_at: nowIso };
 }
 
+// The most-common rung among a set of geos (insertion order breaks ties), or
+// undefined if none carry one. P has ONE `scale` field that `resolveAbsolutePos`
+// applies uniformly to all its children, so a single shared pScale is unavoidable;
+// the MODAL rung makes it representative of the majority (a uniform-tier map — the
+// normal case — is exact) instead of an arbitrary first root. A genuinely mixed
+// set is a relative-scale approximation; INV-1 is conserved either way.
+function modalTier(geos: WorldEntityGeo[]): WorldEntityGeo["scale_tier"] {
+  const counts = new Map<NonNullable<WorldEntityGeo["scale_tier"]>, number>();
+  for (const g of geos) {
+    if (g.scale_tier) counts.set(g.scale_tier, (counts.get(g.scale_tier) ?? 0) + 1);
+  }
+  let best: WorldEntityGeo["scale_tier"];
+  let bestN = 0;
+  for (const [t, n] of counts) {
+    if (n > bestN) {
+      best = t;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 /**
  * The OUTWARD reparent the session geo store actually needs: a map is seeded as
  * MANY top-level roots (its buildings), not one — so re-point EVERY current root
  * under the synthesized parent P, conserving each one's absolute position (INV-1).
- * One shared `pScale` (from the roots' common rung, or their joint extent) re-
- * expresses every root via the same affine inverse. Non-root entities (sub-place
- * interiors) are untouched — they ride along as P's grandchildren, still conserved.
+ * One shared `pScale` (P has a single `scale` field) from the roots' MODAL rung
+ * (or their joint extent) re-expresses every root via the same affine inverse.
+ * Non-root entities (sub-place interiors) are untouched — they ride along as P's
+ * grandchildren, still conserved.
  */
 export function reparentRoots(
   geos: WorldEntityGeo[],
@@ -142,7 +165,7 @@ export function reparentRoots(
   if (geos.some((g) => g.id === parentGeo.id)) {
     throw new Error(`reparentRoots: parent id "${parentGeo.id}" already exists`);
   }
-  const childTier = roots.find((r) => r.scale_tier)?.scale_tier;
+  const childTier = modalTier(roots);
   const pScale = learnPScale(parentGeo, childTier, localExtent(roots));
   const rootIds = new Set(roots.map((r) => r.id));
   const newParent = makeRootParent(parentGeo, pScale, nowIso);

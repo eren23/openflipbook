@@ -2,7 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import type { GenerateEvent, GenerateRequestBody, ScaleKind } from "@openflipbook/config";
+import type {
+  GenerateEvent,
+  GenerateRequestBody,
+  ScaleKind,
+  ScaleTier,
+} from "@openflipbook/config";
 
 import type { NeighbourItem } from "@/components/PlayPage/NeighbourTray";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -30,6 +35,9 @@ export type PersistNeighbour = (
     final_prompt: string;
     relation: "expand";
     scale: ScaleKind;
+    // B2 logical AROUND: the rung these same-scale peers sit at (the focus's tier),
+    // when the bloom was constrained by SCALE_AROUND_LOGICAL. Omitted otherwise.
+    scale_tier?: ScaleTier;
   },
   traceId: string | null,
 ) => Promise<{ id: string } | null>;
@@ -118,6 +126,7 @@ export function useExpandBloom(persist: PersistNeighbour): {
                     final_prompt: evt.final_prompt,
                     relation: "expand",
                     scale: evt.scale,
+                    ...(body.around_tier ? { scale_tier: body.around_tier } : {}),
                   },
                   traceId,
                 ).then((saved) => {
