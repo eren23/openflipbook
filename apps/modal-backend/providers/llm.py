@@ -16,11 +16,18 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, TypeGuard, cast
+from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 from openai import AsyncOpenAI, BadRequestError
 
 from _env import env_flag
+
+if TYPE_CHECKING:
+    # Annotation-only. The SceneGraph dataclasses are imported lazily at runtime
+    # inside parse_scene_graph (Modal cold-start), but the return/local
+    # annotations on parse_scene_graph + plan_world_from_description need the
+    # names at module scope.
+    from .layout_solver import EmptyRegion, PlannedEntity, PlannedRelation, SceneGraph
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
@@ -2326,7 +2333,7 @@ PLAN_WORLD_SYSTEM = (
 )
 
 
-def parse_scene_graph(payload: Any) -> Any:
+def parse_scene_graph(payload: Any) -> SceneGraph:
     """Coerce a planner reply into a SceneGraph. Tolerant: an entity missing
     ref/label/visual or with an unknown kind is dropped; a relation whose subject
     isn't a known entity ref, whose relation is unknown, or whose object resolves
@@ -2345,7 +2352,7 @@ def parse_scene_graph(payload: Any) -> Any:
         bounds_hint = {"w": float(bounds["w"]), "h": float(bounds["h"])}
 
     raw_entities = payload.get("entities")
-    entities: list[Any] = []
+    entities: list[PlannedEntity] = []
     refs: set[str] = set()
     for e in raw_entities if isinstance(raw_entities, list) else []:
         if not isinstance(e, dict):
@@ -2367,7 +2374,7 @@ def parse_scene_graph(payload: Any) -> Any:
                                       footprint=footprint, height=height, count=count))
 
     raw_regions = payload.get("empty_regions")
-    empty_regions: list[Any] = []
+    empty_regions: list[EmptyRegion] = []
     region_refs: set[str] = set()
     for r in raw_regions if isinstance(raw_regions, list) else []:
         if not isinstance(r, dict):
@@ -2390,7 +2397,7 @@ def parse_scene_graph(payload: Any) -> Any:
         return any(t in _WALL_WORDS for t in toks)
 
     raw_relations = payload.get("relations")
-    relations: list[Any] = []
+    relations: list[PlannedRelation] = []
     for rel in raw_relations if isinstance(raw_relations, list) else []:
         if not isinstance(rel, dict):
             continue
@@ -2415,7 +2422,7 @@ def parse_scene_graph(payload: Any) -> Any:
     )
 
 
-async def plan_world_from_description(description: str, answers: list[str] | None = None) -> Any:
+async def plan_world_from_description(description: str, answers: list[str] | None = None) -> SceneGraph:
     """Parse a place description into a SceneGraph (one text-LLM call + tolerant
     parse). On a re-run, `answers` are appended so the planner resolves the prior
     round's clarifiers; a malformed completion degrades to a thinner graph."""
