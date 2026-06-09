@@ -52,6 +52,26 @@ def test_expand_args_north_south_grow_height() -> None:
     assert north["original_image_location"] == [0, 450]  # parent bottom, new above
 
 
+# --- OUTWARD zoom-out geometry (centered, not edge-pinned) --------------------
+
+
+def test_zoomout_args_center_the_source() -> None:
+    args = image_edit._zoomout_args_for("u", 3.0, 100, 60)
+    assert args["canvas_size"] == [300, 180]
+    assert args["original_image_size"] == [100, 60]
+    # Equal margin on every side → the source is the central sub-region.
+    assert args["original_image_location"] == [100, 60]
+    left = args["original_image_location"][0]
+    right = args["canvas_size"][0] - left - args["original_image_size"][0]
+    assert left == right
+
+
+def test_zoomout_factor_clamped_per_hop() -> None:
+    assert image_edit._clamp_zoom_factor(10.0) == 4.0  # capped
+    assert image_edit._clamp_zoom_factor(1.1) == 1.5  # floored
+    assert image_edit._clamp_zoom_factor(3.0) == 3.0  # in range
+
+
 # --- dimension probing (Pillow-free) ------------------------------------------
 
 
@@ -118,3 +138,35 @@ async def test_expand_image_parses_bria_and_uses_real_dims(
     assert captured["args"]["original_image_size"] == [1024, 576]
     assert captured["args"]["canvas_size"] == [1536, 576]  # +50% of measured width
     assert captured["fetched"] == {"url": "http://x", "content_type": "image/png"}
+
+
+async def test_expand_image_zoomout_centers_and_uses_real_dims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    async def fake_to_fal(data_url: str) -> str:
+        return "fal://parent"
+
+    async def fake_sub(model: str, args: dict) -> dict:
+        captured["model"] = model
+        captured["args"] = args
+        return {"image": {"url": "http://x", "content_type": "image/png"}}
+
+    async def fake_fetch(info: dict) -> tuple[bytes, str]:
+        return b"jpeg", "image/png"
+
+    monkeypatch.setenv("FAL_KEY", "fk")
+    monkeypatch.setattr(image_edit, "to_fal_url", fake_to_fal)
+    monkeypatch.setattr(image_edit, "_fal_subscribe", fake_sub)
+    monkeypatch.setattr(image_edit, "_fetch_image_bytes", fake_fetch)
+
+    data_url = "data:image/png;base64," + base64.b64encode(_png(1024, 576)).decode()
+    # factor 10 is clamped to 4x per hop; the parent is centered on the canvas.
+    out = await image_edit.expand_image_zoomout(data_url, factor=10.0)
+
+    assert out.jpeg_bytes == b"jpeg"
+    assert "bria" in captured["model"]
+    assert captured["args"]["original_image_size"] == [1024, 576]
+    assert captured["args"]["canvas_size"] == [4096, 2304]  # 4x clamp of measured dims
+    assert captured["args"]["original_image_location"] == [1536, 864]  # centered
