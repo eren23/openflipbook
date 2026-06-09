@@ -65,12 +65,17 @@ export function reparent(
 
   const parentTier = parentGeo.scale_tier;
   const childTier = child.scale_tier;
-  const pScale =
+  const rawScale =
     parentTier && childTier
-      ? clampScale(tierMetricMultiplier(parentTier, childTier))
-      : clampScale(
-          Math.max(parentGeo.footprint.w, parentGeo.footprint.d) / localExtent([child]),
-        );
+      ? tierMetricMultiplier(parentTier, childTier)
+      : Math.max(parentGeo.footprint.w, parentGeo.footprint.d) / localExtent([child]);
+  // Guard a NaN / 0 / Infinity ratio (a malformed footprint, or a scale_tier that
+  // isn't on the ladder) that would otherwise poison EVERY reparented coordinate;
+  // fall back to an identity frame (which still conserves INV-1 — its inverse is
+  // identity). NOTE: `learnedScale` is the CLAMPED value. For astronomical hops
+  // (<= star_system) the true ratio is far below the 1e-3 floor, so it floors to
+  // 1e-3 — do not compare it literally against `tierMetricMultiplier` once clamped.
+  const pScale = Number.isFinite(rawScale) && rawScale > 0 ? clampScale(rawScale) : 1;
 
   const newChild: WorldEntityGeo = {
     ...child,

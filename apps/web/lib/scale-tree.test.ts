@@ -106,6 +106,25 @@ describe("scale-tree reparent (B2 OUTWARD)", () => {
     }
   });
 
+  it("never poisons coords when the scale ratio is NaN (malformed footprint, no tier)", () => {
+    const before = [
+      geo({ id: "c", pos: { x: 10, y: 20 }, footprint: { w: NaN, d: NaN } }),
+      geo({ id: "k", parent_id: "c", pos: { x: 1, y: 2 } }),
+    ];
+    const { geos, learnedScale } = reparent(
+      before,
+      "c",
+      geo({ id: "p", footprint: { w: NaN, d: NaN } }),
+      NOW,
+    );
+    expect(Number.isFinite(learnedScale)).toBe(true); // fell back to an identity frame
+    const after = absMap(geos);
+    for (const id of ["c", "k", "p"]) {
+      expect(Number.isFinite(after.get(id)!.x)).toBe(true);
+      expect(Number.isFinite(after.get(id)!.y)).toBe(true);
+    }
+  });
+
   it("rejects a double ascend (C is not a root)", () => {
     expect(() =>
       reparent(cityTree(), "a", geo({ id: "p" }), NOW),
