@@ -41,6 +41,7 @@ import {
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
+import { type Ascended, useAscend } from "@/hooks/useAscend";
 import { buildConditionRefs, orderedRefs } from "@/lib/image-condition";
 import { enterAsToRenderMode, findRevisitTarget } from "@/lib/world-mode";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
@@ -1154,6 +1155,55 @@ export default function PlayPage() {
     setViewMode("page");
   }, []);
 
+  // OUTWARD / zoom-out landed: mirror the persisted reparent into the live
+  // session — insert the container P, re-point the old root C under it (so the
+  // breadcrumb shows P above C), navigate to P, and refetch the geo store.
+  const onAscended = useCallback(
+    (a: Ascended) => {
+      const parentPage: Page = {
+        nodeId: a.parentNodeId,
+        sessionId,
+        query: a.pageTitle,
+        title: a.pageTitle,
+        imageDataUrl: a.imageDataUrl,
+        parentId: null,
+        sceneView: a.sceneView,
+      };
+      setHistory((prev) => {
+        const items = prev.items.map((p) =>
+          p.nodeId === a.childNodeId ? { ...p, parentId: a.parentNodeId } : p,
+        );
+        const trail = [...prev.trail.slice(0, prev.trailIdx + 1), a.parentNodeId];
+        return { items: [...items, parentPage], trail, trailIdx: trail.length - 1 };
+      });
+      setPage(parentPage);
+      setPhase("ready");
+      setViewMode("page");
+      const url = new URL(window.location.href);
+      url.pathname = `/n/${a.parentNodeId}`;
+      window.history.replaceState({}, "", url.toString());
+      void geoRefetch();
+    },
+    [sessionId, geoRefetch],
+  );
+  const { start: startAscend, pending: ascendPending, error: ascendError } =
+    useAscend(onAscended);
+  // OUTWARD is offered only from a ROOT page (a top-level map): it synthesizes the
+  // container ABOVE it. Gated by worldEnabled (client) + SCALE_OUTWARD (server).
+  const canAscend = Boolean(
+    worldEnabled && page?.nodeId && page.imageDataUrl && !page.parentId && !ascendPending,
+  );
+  const handleAscend = useCallback(() => {
+    if (!page?.nodeId || !page.imageDataUrl) return;
+    startAscend(sessionId, {
+      nodeId: page.nodeId,
+      query: page.query,
+      imageDataUrl: page.imageDataUrl,
+      aspectRatio: "16:9",
+      sceneView: page.sceneView ?? null,
+    });
+  }, [page, sessionId, startAscend]);
+
   useKeyboardShortcuts({
     onBack: goBack,
     onForward: goForward,
@@ -2167,6 +2217,24 @@ export default function PlayPage() {
           <Breadcrumb crumbs={breadcrumb} onJump={selectFromMap} />
           {worldEnabled && (
             <SpatialPath crumbs={breadcrumb} onNavigate={selectFromMap} />
+          )}
+          {worldEnabled && (page?.parentId == null || ascendPending) && (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={handleAscend}
+                disabled={!canAscend}
+                className="rounded-full border border-[var(--color-ink)]/40 px-3 py-1 hover:bg-[var(--color-ink)]/5 disabled:opacity-40"
+                title="Zoom out to the place that contains this one (OUTWARD)"
+              >
+                {ascendPending ? "⤡ zooming out…" : "⤡ zoom out / step back"}
+              </button>
+              {ascendError && (
+                <span className="text-red-700/80" title={ascendError}>
+                  couldn’t zoom out
+                </span>
+              )}
+            </div>
           )}
           <div className="flex items-center justify-between gap-3 text-xs opacity-80">
           <div className="flex items-center gap-2">

@@ -315,13 +315,30 @@ export interface GenerateExpandDoneEvent {
   trace_id?: string;
 }
 
+// OUTWARD (mode:"ascend"): the synthesized container image is ready; the client
+// hands it to the /ascend route to persist the reparent. `scale_tier` is the
+// container's rung, `from_tier` the source's.
+export interface GenerateAscendReadyEvent {
+  type: "ascend_ready";
+  page_title: string;
+  image_data_url: string;
+  image_model: string;
+  prompt_author_model: string;
+  final_prompt: string;
+  scale_tier: ScaleTier;
+  from_tier: ScaleTier;
+  session_id: string;
+  trace_id?: string;
+}
+
 export type GenerateEvent =
   | GenerateStatusEvent
   | GenerateProgressEvent
   | GenerateFinalEvent
   | GenerateErrorEvent
   | GenerateNeighborEvent
-  | GenerateExpandDoneEvent;
+  | GenerateExpandDoneEvent
+  | GenerateAscendReadyEvent;
 
 export interface NodeRecord {
   id: string;

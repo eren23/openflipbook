@@ -1,4 +1,4 @@
-import type { WorldEntityGeo } from "@openflipbook/config";
+import type { WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
 import { localExtent } from "./world-geometry";
@@ -24,6 +24,47 @@ export interface ReparentResult {
 const SCALE_MIN = 1e-3;
 const SCALE_MAX = 10;
 const clampScale = (s: number): number => Math.min(Math.max(s, SCALE_MIN), SCALE_MAX);
+
+// P's fine frame scale: the METRIC ratio meters(child)/meters(parent) =
+// `tierMetricMultiplier(parentTier, childTier)` (< 1: a city is a small part of a
+// region), falling back to the footprint÷extent law `deriveGeoFromExtraction`
+// uses when a rung is missing. Guards a NaN / 0 / ∞ ratio (a malformed footprint
+// or an off-ladder tier) that would poison every coordinate → identity frame (1).
+// NOTE: the result is CLAMPED — astronomical hops (≤ star_system) floor to 1e-3.
+function learnPScale(
+  parentGeo: WorldEntityGeo,
+  childTier: WorldEntityGeo["scale_tier"],
+  childExtent: number,
+): number {
+  const parentTier = parentGeo.scale_tier;
+  const raw =
+    parentTier && childTier
+      ? tierMetricMultiplier(parentTier, childTier)
+      : Math.max(parentGeo.footprint.w, parentGeo.footprint.d) / childExtent;
+  return Number.isFinite(raw) && raw > 0 ? clampScale(raw) : 1;
+}
+
+// Re-express a former root R inside P's frame so abs(R) and ALL its descendants
+// are conserved (INV-1): the exact affine inverse of inserting the (P.pos, pScale)
+// frame above R. resolveAbsolutePos composes the same (x, y) as before for any
+// chosen P.pos / pScale, because the inserted pScale frame and the /pScale here
+// cancel identically.
+function reExpressUnder(
+  node: WorldEntityGeo,
+  parentId: string,
+  parentPos: WorldVec2,
+  pScale: number,
+  nowIso: string,
+): WorldEntityGeo {
+  return {
+    ...node,
+    parent_id: parentId,
+    pos: { x: (node.pos.x - parentPos.x) / pScale, y: (node.pos.y - parentPos.y) / pScale },
+    scale: (node.scale ?? 1) / pScale,
+    source: "user", // protect the new edge from a later derived re-seed (SOURCE_RANK)
+    updated_at: nowIso,
+  };
+}
 
 /**
  * Re-root `oldRootId` (the current root C) under the synthesized parent `parentGeo`
@@ -63,40 +104,51 @@ export function reparent(
     throw new Error(`reparent: parent id "${parentGeo.id}" already exists`);
   }
 
-  const parentTier = parentGeo.scale_tier;
-  const childTier = child.scale_tier;
-  const rawScale =
-    parentTier && childTier
-      ? tierMetricMultiplier(parentTier, childTier)
-      : Math.max(parentGeo.footprint.w, parentGeo.footprint.d) / localExtent([child]);
-  // Guard a NaN / 0 / Infinity ratio (a malformed footprint, or a scale_tier that
-  // isn't on the ladder) that would otherwise poison EVERY reparented coordinate;
-  // fall back to an identity frame (which still conserves INV-1 — its inverse is
-  // identity). NOTE: `learnedScale` is the CLAMPED value. For astronomical hops
-  // (<= star_system) the true ratio is far below the 1e-3 floor, so it floors to
-  // 1e-3 — do not compare it literally against `tierMetricMultiplier` once clamped.
-  const pScale = Number.isFinite(rawScale) && rawScale > 0 ? clampScale(rawScale) : 1;
-
-  const newChild: WorldEntityGeo = {
-    ...child,
-    parent_id: parentGeo.id,
-    pos: {
-      x: (child.pos.x - parentGeo.pos.x) / pScale,
-      y: (child.pos.y - parentGeo.pos.y) / pScale,
-    },
-    scale: (child.scale ?? 1) / pScale,
-    source: "user",
-    updated_at: nowIso,
-  };
-  const newParent: WorldEntityGeo = {
-    ...parentGeo,
-    parent_id: null,
-    scale: pScale,
-    source: "user",
-    updated_at: nowIso,
-  };
+  const pScale = learnPScale(parentGeo, child.scale_tier, localExtent([child]));
+  const newChild = reExpressUnder(child, parentGeo.id, parentGeo.pos, pScale, nowIso);
+  const newParent = makeRootParent(parentGeo, pScale, nowIso);
 
   const geosOut = geos.map((g) => (g.id === oldRootId ? newChild : g));
+  geosOut.push(newParent);
+  return { geos: geosOut, parentGeoId: parentGeo.id, learnedScale: pScale };
+}
+
+// P always lands as a fresh root with the learned fine scale.
+function makeRootParent(
+  parentGeo: WorldEntityGeo,
+  pScale: number,
+  nowIso: string,
+): WorldEntityGeo {
+  return { ...parentGeo, parent_id: null, scale: pScale, source: "user", updated_at: nowIso };
+}
+
+/**
+ * The OUTWARD reparent the session geo store actually needs: a map is seeded as
+ * MANY top-level roots (its buildings), not one — so re-point EVERY current root
+ * under the synthesized parent P, conserving each one's absolute position (INV-1).
+ * One shared `pScale` (from the roots' common rung, or their joint extent) re-
+ * expresses every root via the same affine inverse. Non-root entities (sub-place
+ * interiors) are untouched — they ride along as P's grandchildren, still conserved.
+ */
+export function reparentRoots(
+  geos: WorldEntityGeo[],
+  parentGeo: WorldEntityGeo,
+  nowIso: string,
+): ReparentResult {
+  const roots = geos.filter((g) => (g.parent_id ?? null) === null);
+  if (roots.length === 0) {
+    throw new Error("reparentRoots: no root entities to reparent");
+  }
+  if (geos.some((g) => g.id === parentGeo.id)) {
+    throw new Error(`reparentRoots: parent id "${parentGeo.id}" already exists`);
+  }
+  const childTier = roots.find((r) => r.scale_tier)?.scale_tier;
+  const pScale = learnPScale(parentGeo, childTier, localExtent(roots));
+  const rootIds = new Set(roots.map((r) => r.id));
+  const newParent = makeRootParent(parentGeo, pScale, nowIso);
+  const geosOut = geos.map((g) =>
+    rootIds.has(g.id) ? reExpressUnder(g, parentGeo.id, parentGeo.pos, pScale, nowIso) : g,
+  );
   geosOut.push(newParent);
   return { geos: geosOut, parentGeoId: parentGeo.id, learnedScale: pScale };
 }
