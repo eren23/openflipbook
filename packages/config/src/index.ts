@@ -53,6 +53,13 @@ export function tierTransitionValid(from: ScaleTier, to: ScaleTier): boolean {
   const m = tierMetricMultiplier(from, to);
   return step > 0 ? m <= 1 : m >= 1;
 }
+// One rung FINER (toward `object`, DEEPER); clamps at `object`. The inverse of the
+// Python `model_router.coarser_tier` used by OUTWARD — together they make a tap a
+// `tierStep` of +1 and an OUTWARD −1 on the SAME ladder.
+export function finerTier(t: ScaleTier): ScaleTier {
+  const i = tierIndex(t);
+  return SCALE_LADDER[Math.min(i + 1, SCALE_LADDER.length - 1)] ?? t;
+}
 
 // How a node relates to its parent: "descend" = went IN (a tap child, the
 // default), "expand" = bloomed OUT (a neighbour from mode:"expand"), "ascend" =

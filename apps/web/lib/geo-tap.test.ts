@@ -64,6 +64,38 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t!.scene_view.focus_id).toBe("clock");
   });
 
+  it("D — DEEPER stamps the child rung (one finer than the frame you tapped from)", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const cityView: SceneView = {
+      node_id: "n0",
+      level: "map",
+      observer: null,
+      map_crop: { x: 0, y: 0, w: 100, h: 60 },
+      scale_tier: "city",
+    };
+    const t = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 60 / 100, y_pct: 30 / 60 },
+      16 / 9,
+      undefined,
+      cityView,
+    );
+    expect(t!.scene_view.scale_tier).toBe("district"); // finerTier("city")
+  });
+
+  it("D — no rung stamped when the source frame has none (back-compat)", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
+    expect(t!.scene_view.scale_tier).toBeUndefined();
+  });
+
   it("P7c — a place with a saved interior steers by its sub-entities, not the city", () => {
     const map = {
       entities: [
