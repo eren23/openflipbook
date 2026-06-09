@@ -128,6 +128,37 @@ export function projectScene(
   return out;
 }
 
+// Top-down map projection: the solved/seeded geos live in a flat MAP_IMAGE_FRAME
+// (the map IS the image), so screen position is linear in the frame — no observer.
+// Mirrors projectScene's ProjectedEntity[] output + bins so a described place's
+// plan steers the render through the same layout clause + grounding diff as a tap.
+export function projectTopDown(
+  entities: ProjectInput[],
+  frame: { w: number; h: number },
+): ProjectedEntity[] {
+  const out: ProjectedEntity[] = [];
+  for (const e of entities) {
+    const xPct = e.pos.x / frame.w;
+    const yPct = e.pos.y / frame.h;
+    const wPct = e.footprint.w / frame.w;
+    const hPct = e.footprint.d / frame.h;
+    out.push({
+      id: e.id,
+      label: e.label ?? "",
+      x_pct: xPct,
+      y_pct: yPct,
+      w_pct: wPct,
+      h_pct: hPct,
+      depth: e.pos.y, // +y = south; list north-first for a stable reading order
+      h_pos: hPos(xPct),
+      v_pos: vPos(yPct),
+      size: sizeBin(Math.max(wPct, hPct)),
+    });
+  }
+  out.sort((a, b) => a.depth - b.depth || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return out;
+}
+
 export function cropEntities<T extends ProjectInput>(
   entities: T[],
   crop: MapCrop,

@@ -81,9 +81,9 @@ import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { geoTapRequest, type GeoTapOverride } from "@/lib/geo-tap";
+import { geoTapRequest, MAP_IMAGE_FRAME, type GeoTapOverride } from "@/lib/geo-tap";
 import { selectNeighbors } from "@/lib/scale-neighbors";
-import { childrenOf } from "@/lib/world-geometry";
+import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -1037,6 +1037,15 @@ export default function PlayPage() {
         output_locale: resolveOutputLocale(outputLocale),
         world_mode: true,
         render_mode: "place_submap",
+        // Steer the render with the solved layout (top-down). Inert unless the
+        // backend WORLD_GEOMETRY_GEN flag is on; +0.33 layout fidelity in the A/B.
+        expected_layout: projectTopDown(solved, MAP_IMAGE_FRAME),
+        scene_view: {
+          node_id: page?.nodeId ?? "",
+          level: "map",
+          observer: null,
+          map_crop: MAP_IMAGE_FRAME,
+        },
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     } catch (err) {

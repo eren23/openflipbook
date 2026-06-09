@@ -10,6 +10,7 @@ import {
   neighborsOf,
   project,
   projectScene,
+  projectTopDown,
   type ProjectInput,
 } from "./world-geometry";
 
@@ -120,5 +121,30 @@ describe("world-geometry properties", () => {
     const nb = neighborsOf([ent("a", 0, 0), ent("b", 100, 0), ent("c", 5, 0)], "a", 5);
     expect(nb.map((n) => n.id)).toEqual(["c", "b"]);
     expect(nb[0]!.dist).toBeCloseTo(5);
+  });
+});
+
+describe("projectTopDown (flat map, no observer)", () => {
+  const td = (id: string, x: number, y: number, fw: number, fd: number): ProjectInput => ({
+    id,
+    label: id,
+    pos: { x, y },
+    height: 4,
+    footprint: { w: fw, d: fd },
+  });
+  it("maps MAP_IMAGE_FRAME coords linearly + bins + orders north-first", () => {
+    const out = projectTopDown([td("a", 50, 30, 20, 12), td("b", 10, 6, 6, 6)], {
+      w: 100,
+      h: 60,
+    });
+    expect(out.map((e) => e.id)).toEqual(["b", "a"]); // depth=y ascending (north first)
+    const a = out.find((e) => e.id === "a")!;
+    expect(a.x_pct).toBeCloseTo(0.5);
+    expect(a.y_pct).toBeCloseTo(0.5);
+    expect(a.w_pct).toBeCloseTo(0.2);
+    expect(a.h_pct).toBeCloseTo(0.2);
+    expect([a.h_pos, a.v_pos, a.size]).toEqual(["center", "mid", "medium"]);
+    const b = out.find((e) => e.id === "b")!;
+    expect([b.h_pos, b.v_pos, b.size]).toEqual(["far-left", "top", "small"]);
   });
 });
