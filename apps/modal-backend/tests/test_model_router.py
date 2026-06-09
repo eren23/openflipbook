@@ -45,3 +45,41 @@ def test_resolve_model_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert model_router.resolve_model("zoom_continue") == "fal-ai/custom/kontext2"
     monkeypatch.setenv("FAL_OUTPAINT_MODEL", "fal-ai/custom/expand2")
     assert model_router.resolve_model("outpaint") == "fal-ai/custom/expand2"
+
+
+# ── B2 OUTWARD op selection (pure, by tier delta) ────────────────────────────
+@pytest.mark.parametrize(
+    "from_tier,to_tier",
+    [
+        ("city", "region"),  # same-plane surface hop
+        ("place", "district"),
+        ("region", "world"),
+        ("world", "planet"),  # still surface (planet is the surface, not orbital)
+    ],
+)
+def test_select_outward_op_surface_hop_is_outpaint(from_tier, to_tier) -> None:
+    # The source's pixels survive as the central sub-region → centered BRIA outpaint.
+    assert model_router.select_outward_op(from_tier, to_tier) == "outpaint_zoomout"
+
+
+@pytest.mark.parametrize(
+    "from_tier,to_tier",
+    [
+        ("planet", "star_system"),  # surface -> orbital: a new framing
+        ("star_system", "galaxy"),
+        ("galaxy", "universe"),
+    ],
+)
+def test_select_outward_op_medium_flip_is_fresh(from_tier, to_tier) -> None:
+    assert model_router.select_outward_op(from_tier, to_tier) == "scale_parent_fresh"
+
+
+def test_select_outward_op_unknown_tier_defaults_to_outpaint() -> None:
+    # An unknown rung is treated as same-plane — the safe, style-conserving path.
+    assert model_router.select_outward_op("city", "bogus") == "outpaint_zoomout"
+
+
+def test_resolve_model_outward_slots() -> None:
+    # outpaint_zoomout reuses the BRIA slot; the medium-flip fresh op is tier-based.
+    assert "bria" in (model_router.resolve_model("outpaint_zoomout") or "")
+    assert model_router.resolve_model("scale_parent_fresh") is None
