@@ -12,6 +12,7 @@ import type {
   WorldEntityGeo,
   WorldMapSnapshot,
 } from "@openflipbook/config";
+import { tierStep } from "@openflipbook/config";
 
 import { getDb } from "./db";
 import { optimisticReplace } from "./optimistic-update";
@@ -54,6 +55,31 @@ async function collection(): Promise<Collection<WorldMapDoc>> {
 }
 
 // ── Pure merge core (unit-tested; no Mongo) ──────────────────────────────────
+
+/**
+ * INV-4 (one ladder): the coarse `scale_tier` rung and the fine learned `scale`
+ * must agree in DIRECTION — they're two resolutions of the same axis, never a
+ * parallel system. Seeding a FINER child rung (DEEPER) the child frame should
+ * occupy a fraction of the parent footprint (`scale <= 1`); a learned scale pinned
+ * the other way while the rungs say "much smaller" is a mis-seed. Pure; returns a
+ * warning string or null (agree / unknown rung). The caller WARNS + keeps the
+ * learned scale — never blocks (a wrong rung shouldn't break seeding).
+ */
+export function ladderDisagreement(
+  parentTier: ScaleTier | null | undefined,
+  childTier: ScaleTier | null | undefined,
+  learnedScale: number,
+): string | null {
+  if (!parentTier || !childTier) return null;
+  const step = tierStep(parentTier, childTier); // child finer => +, coarser => -
+  if (step > 0 && learnedScale > 1.0001) {
+    return `DEEPER (${parentTier}→${childTier}) but learned scale ${learnedScale} > 1`;
+  }
+  if (step < 0 && learnedScale < 0.9999) {
+    return `OUTWARD (${parentTier}→${childTier}) but learned scale ${learnedScale} < 1`;
+  }
+  return null;
+}
 
 function geoDiffers(a: WorldEntityGeo, b: WorldEntityGeo): boolean {
   return (
@@ -383,6 +409,9 @@ export async function deriveGeoFromExtraction(
     if (parent) {
       const footprint = Math.max(parent.footprint.w, parent.footprint.d);
       const scale = Math.min(Math.max(footprint / localExtent(geos), 1e-3), 10);
+      // INV-4: warn (never block) if the learned scale contradicts the rung step.
+      const warn = ladderDisagreement(parent.scale_tier, scaleTier, scale);
+      if (warn) console.warn(`[world-map] INV-4: ${warn} — keeping the learned scale`);
       if ((parent.scale ?? 1) !== scale) geos.push({ ...parent, scale });
     }
   }
