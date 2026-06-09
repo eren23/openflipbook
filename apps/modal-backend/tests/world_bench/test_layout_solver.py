@@ -170,3 +170,30 @@ def test_facing_heads_toward_the_object() -> None:
     chair = _by_label(solve_layout(g).geos, "chair")[0]
     # placed to the right of the desk -> faces WEST back at it (heading ~ ±pi).
     assert abs(abs(chair["heading"]) - math.pi) < 0.1
+
+
+def test_centre_empty_region_is_central_not_a_corner() -> None:
+    from providers.layout_solver import _region_rect
+
+    rect = _region_rect(EmptyRegion("c", "the centre of the room kept open"), 100, 60)
+    assert rect[0] > 0 and rect[1] > 0  # not anchored at the origin corner
+    cx, cy = (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
+    assert abs(cx - 50) < 1 and abs(cy - 30) < 1  # centred in the room
+
+
+def test_wall_object_survives_a_central_clear_region() -> None:
+    # The wizard-study case the demo caught: a desk on the back wall + a globe on
+    # it must NOT collide with a "centre kept clear" region -> solves, not blocked.
+    g = SceneGraph(
+        place_label="study",
+        entities=[
+            PlannedEntity("desk", "item", "desk", "an oak desk", footprint={"w": 6, "d": 3}, height=4),
+            PlannedEntity("globe", "item", "globe", "a brass globe", footprint={"w": 1, "d": 1}, height=1),
+        ],
+        relations=[
+            PlannedRelation("desk", "near", "back_wall"),
+            PlannedRelation("globe", "on_top_of", "desk"),
+        ],
+        empty_regions=[EmptyRegion("circle", "the centre of the room kept open")],
+    )
+    assert solve_layout(g).blocked is False
