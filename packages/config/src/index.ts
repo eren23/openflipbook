@@ -132,6 +132,12 @@ export interface GenerateRequestBody {
   world_mode?: boolean;
   autonomy?: Autonomy;
   render_mode?: RenderMode;
+  // B2 logical AROUND (mode:"expand", SCALE_AROUND_LOGICAL). The same-scale
+  // neighbours the client already knows from geometry (excluded) + the focus's
+  // rung, so the bloom proposes NEW peers at that scale. Ignored unless the flag
+  // is on; absent → today's unconstrained bloom.
+  known_neighbors?: string[];
+  around_tier?: ScaleTier;
   // Geometric world (GEOMETRIC_WORLD). The scene's observer pose + level, and the
   // geometry engine's expected per-entity layout for this frame, so the planner
   // can constrain placement and the grounding loop has a target to check against.
