@@ -1061,7 +1061,7 @@ export default function PlayPage() {
       if (!instruction || !page?.imageDataUrl) return;
       // Carry the style exemplar (pinned page, else root) so an edit can't drift
       // the art medium. The backend edit path now threads both this "style" ref
-      // and the session text lock (it used to drop both).
+      // and the session text lock.
       const styleRefUrl =
         (styleAnchor
           ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)

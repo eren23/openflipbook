@@ -74,7 +74,7 @@ class WorldContextEntity(BaseModel):
     # primitives only (door=open, lantern=lit, mira_present=true). The tightened
     # union (not dict[str, Any]) keeps the TS<->Py schema-parity check meaningful.
     state: dict[str, str | int | float | bool] = Field(default_factory=dict)
-    # FIX C: optional geometric size carried from the entity's WorldEntityGeo so
+    # Optional geometric size carried from the entity's WorldEntityGeo so
     # the planner can keep recurring entities at a consistent relative scale.
     # Mirrors the TS `footprint?: {w,d}` / `height?` (schema-parity gated).
     footprint: dict[str, float] | None = None

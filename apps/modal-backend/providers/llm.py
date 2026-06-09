@@ -1299,9 +1299,9 @@ def _format_world_context_clause(
         if aliases:
             line += f" (aka: {', '.join(aliases[:3])})"
         line += f" — {appearance[:240]}{state_pairs}"
-        # FIX C: carry geometric size so recurring entities keep a consistent
-        # relative scale across pages (a place rendered large once shouldn't
-        # come back tiny). Best-effort; absent → no hint (today's behaviour).
+        # Carry geometric size so recurring entities keep a consistent relative
+        # scale across pages (a place rendered large once shouldn't come back
+        # tiny). Best-effort; absent → no hint.
         line += _world_size_hint(entry)
         lines.append(line)
     if not lines:

@@ -91,7 +91,7 @@ function geoDiffers(a: WorldEntityGeo, b: WorldEntityGeo): boolean {
     (a.scale ?? 1) !== (b.scale ?? 1) ||
     // Topology + rung: an equal-rank write that re-points (or re-tiers) an entity
     // must register as a change, or an OUTWARD reparent could be silently undone
-    // by a later same-source edit that carries the stale parent_id (audit follow-up).
+    // by a later same-source edit that carries the stale parent_id.
     (a.parent_id ?? null) !== (b.parent_id ?? null) ||
     a.scale_tier !== b.scale_tier ||
     a.label !== b.label ||
