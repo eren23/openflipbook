@@ -42,6 +42,7 @@ const sceneView: SceneView = {
   observer: observerPose,
   map_crop: null,
   focus_id: "g1",
+  scale_tier: "city",
 };
 const projectedEntity: ProjectedEntity = {
   id: "g1",
@@ -65,6 +66,7 @@ const worldEntityGeo: WorldEntityGeo = {
   elevation: 0,
   footprint: { w: 4, d: 4 },
   scale: 1,
+  scale_tier: "place",
   heading: 0,
   visual: "red-and-white striped tower",
   state: { lit: true },

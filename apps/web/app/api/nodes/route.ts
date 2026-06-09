@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { SceneView } from "@openflipbook/config";
+import type { ScaleTier, SceneView } from "@openflipbook/config";
 import { insertNode } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { readServerEnv } from "@/lib/env";
@@ -19,8 +19,9 @@ interface CreateBody {
   final_prompt?: string | null;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
-  relation?: "descend" | "expand";
+  relation?: "descend" | "expand" | "ascend";
   scale?: "component" | "peer" | "container";
+  scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
 }
 
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
     sources: Array.isArray(body.sources) ? body.sources.slice(0, 3) : null,
     relation: body.relation ?? "descend",
     scale: body.scale ?? "peer",
+    scale_tier: body.scale_tier ?? null,
     scene_view: body.scene_view ?? null,
   });
 

@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type Document } from "mongodb";
-import type { SceneView } from "@openflipbook/config";
+import type { ScaleTier, SceneView } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -114,10 +114,13 @@ export interface NodeDoc extends Document {
   // pre-citations nodes and treated as []. Domain-deduped, max ~3.
   sources?: NodeSource[] | null;
   // M3 scale-space: how this node relates to its parent ("descend" = tap-in /
-  // default, "expand" = bloomed neighbour) + its size vs the parent's focal
-  // subject. Optional + defaulted for back-compat with pre-M3 rows.
-  relation?: "descend" | "expand" | null;
+  // default, "expand" = bloomed neighbour, "ascend" = OUTWARD container) + its
+  // size vs the parent's focal subject. Optional + defaulted for back-compat.
+  relation?: "descend" | "expand" | "ascend" | null;
   scale?: "component" | "peer" | "container" | null;
+  // B2 scale ladder: the coarse absolute rung this node's frame sits at.
+  // Optional + null for pre-B2 rows.
+  scale_tier?: ScaleTier | null;
   // Geometric world (GEOMETRIC_WORLD): the observer pose + view level this
   // scene was rendered from. Optional + null for pre-geometry / classic nodes.
   scene_view?: SceneView | null;
@@ -136,8 +139,9 @@ export interface NodeInsert {
   final_prompt: string | null;
   click_in_parent?: ClickInParent | null;
   sources?: NodeSource[] | null;
-  relation?: "descend" | "expand" | null;
+  relation?: "descend" | "expand" | "ascend" | null;
   scale?: "component" | "peer" | "container" | null;
+  scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
 }
 
@@ -154,8 +158,9 @@ export interface NodeRow {
   final_prompt: string | null;
   click_in_parent: ClickInParent | null;
   sources: NodeSource[];
-  relation: "descend" | "expand";
+  relation: "descend" | "expand" | "ascend";
   scale: "component" | "peer" | "container";
+  scale_tier: ScaleTier | null;
   // The observer pose + view level this node was rendered from. Null on
   // pre-geometry / classic nodes. Read back on revisit so the minimap scopes to
   // the right frame and the entered angle is reproducible.
@@ -164,8 +169,17 @@ export interface NodeRow {
 }
 
 export function toRow(doc: NodeDoc): NodeRow {
-  const { _id, created_at, click_in_parent, sources, relation, scale, scene_view, ...rest } =
-    doc;
+  const {
+    _id,
+    created_at,
+    click_in_parent,
+    sources,
+    relation,
+    scale,
+    scale_tier,
+    scene_view,
+    ...rest
+  } = doc;
   return {
     id: _id,
     ...rest,
@@ -173,6 +187,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     sources: Array.isArray(sources) ? sources : [],
     relation: relation ?? "descend",
     scale: scale ?? "peer",
+    scale_tier: scale_tier ?? null,
     scene_view: scene_view ?? null,
     created_at: created_at.toISOString(),
   };
@@ -195,6 +210,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     sources: n.sources ?? null,
     relation: n.relation ?? "descend",
     scale: n.scale ?? "peer",
+    scale_tier: n.scale_tier ?? null,
     scene_view: n.scene_view ?? null,
     created_at: new Date(),
   };
