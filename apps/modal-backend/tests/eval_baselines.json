@@ -1,0 +1,19 @@
+{
+  "_comment": "Committed known-good eval baselines + regression bands. test_eval_baselines.py validates this file FREE every commit; a paid runner calls tests._baseline.compare(name, fresh_metric, n) so a silent eval regression fails loud (REGRESSION below the band, IMPROVED above, LOW_N when undersampled). Re-baseline only via a reviewed diff to this file. Bands are wide because the VLM judge is a ranker (~0.6 Spearman), not a calibrated meter — gate on drop-vs-baseline, not absolute scores.",
+  "baselines": {
+    "layout_fidelity": {
+      "metric": "mean_lift",
+      "baseline": 0.33,
+      "regression_band": 0.15,
+      "n_min": 2,
+      "source": "docs/research/07 + make eval-layout (with-clause vs without)"
+    },
+    "style_medium_lock": {
+      "metric": "mean_lift",
+      "baseline": 8.5,
+      "regression_band": 2.0,
+      "n_min": 1,
+      "source": "SESSION_AUDIT.md §5 + make eval-style"
+    }
+  }
+}
