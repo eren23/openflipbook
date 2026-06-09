@@ -64,6 +64,12 @@ eval-edit:
 #   COHERENCE_BENCH_SESSION=session_xxx make eval-coherence
 eval-coherence:
 	cd apps/modal-backend && COHERENCE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.coherence_runner
+# Style medium-consistency A/B: edit a styled source WITH vs WITHOUT the medium
+# lock → judge how faithfully each edit keeps the source's medium → the lift + a
+# pass threshold. Guards the edit-path style fix. PAID (fal edits + Gemini judge);
+# self-contained, no session needed:  make eval-style
+eval-style:
+	cd apps/modal-backend && STYLE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.style_runner
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
