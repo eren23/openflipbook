@@ -124,9 +124,12 @@ def _region_rect(r: EmptyRegion, w: float, h: float) -> tuple[float, float, floa
         rh = float(r.approx.get("h", 0.3)) * h
         return (x, y, x + rw, y + rh)
     note = r.note.lower()
+    # "centre / middle of the room" -> a central reserved box, NOT a corner.
+    if any(s in note for s in ("centre", "center", "middle")):
+        return (w * 0.3, h * 0.3, w * 0.7, h * 0.7)
+    # else a corner/edge quadrant chosen by the side words in the note.
     qx = w / 2 if any(s in note for s in ("right", "east")) else 0.0
     qy = h / 2 if any(s in note for s in ("front", "bottom", "south")) else 0.0
-    # default to a quadrant
     return (qx, qy, qx + w / 2, qy + h / 2)
 
 
