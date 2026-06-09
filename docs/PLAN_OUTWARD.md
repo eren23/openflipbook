@@ -99,12 +99,16 @@ consistency already holds via the learned per-frame `scale`. One small change + 
 
 ## Phase E — invariants live + the drift number
 
-- INV-4 (one ladder): a cheap assertion that `scale_tier` sign agrees with the learned fine
-  `scale` in `deriveGeoFromExtraction` (warn + fall back on disagreement, never block).
-- Reuse the `coherence_runner` harness (`make eval-coherence`) for an **N≥10 A/B of OUTWARD
-  drift** — the design's risk #1 (compounding style/content drift across hops). Prefer
-  outpaint where possible (zero drift); keep `SCALE_OUTWARD_RERENDER` off by default until the
-  number justifies it.
+- **INV-4 (one ladder) — SHIPPED.** `ladderDisagreement(parentTier, childTier, learnedScale)`
+  in `world-map.ts` (pure, unit-tested); `deriveGeoFromExtraction` warns + keeps the learned
+  scale on a sign disagreement, never blocks.
+- **OUTWARD drift A/B — deferred to when rerender is enabled (paid + manual).** The default
+  OUTWARD path is the **centered BRIA outpaint, which is zero-drift by construction** (the
+  source's pixels are preserved as the central sub-region), so there is no drift to measure
+  while `SCALE_OUTWARD_RERENDER` is off — which it is by default. Only the medium-flip *fresh*
+  path can drift; before enabling `SCALE_OUTWARD_RERENDER`, run an **N≥10 A/B** reusing the
+  `coherence_runner` harness (`make eval-coherence`) — the design's risk #1 — and keep the flag
+  off until the number justifies it. Not run here (paid; needs a live session + keys).
 
 ---
 

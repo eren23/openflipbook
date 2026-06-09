@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EntityGeoEdit, WorldEntityGeo } from "@openflipbook/config";
 
-import { __test } from "./world-map";
+import { __test, ladderDisagreement } from "./world-map";
 
 const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
   __test;
@@ -196,5 +196,27 @@ describe("buildGeoReferences (geo id → node refs)", () => {
       { id: "e2", appears_on_node_ids: [] },
     ];
     expect(buildGeoReferences(geos, codex)).toEqual({ geo_a: ["n1", "n2"] });
+  });
+});
+
+describe("ladderDisagreement (INV-4: one ladder)", () => {
+  it("flags a DEEPER seed whose learned scale magnifies instead of shrinking", () => {
+    // child rung finer than parent (DEEPER) but scale > 1 → the interior is bigger
+    // than the parent footprint, contradicting the rung.
+    expect(ladderDisagreement("city", "district", 3)).toMatch(/DEEPER/);
+  });
+
+  it("is silent when the learned scale agrees with the rung step", () => {
+    expect(ladderDisagreement("city", "district", 0.2)).toBeNull(); // DEEPER, shrinks ✓
+    expect(ladderDisagreement("district", "city", 5)).toBeNull(); // OUTWARD, grows ✓
+  });
+
+  it("flags an OUTWARD seed that shrinks instead of growing", () => {
+    expect(ladderDisagreement("district", "city", 0.2)).toMatch(/OUTWARD/);
+  });
+
+  it("never fires when a rung is unknown (back-compat)", () => {
+    expect(ladderDisagreement(null, "city", 99)).toBeNull();
+    expect(ladderDisagreement("city", undefined, 99)).toBeNull();
   });
 });
