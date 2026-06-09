@@ -1,6 +1,6 @@
 export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 
-export type GenerateMode = "query" | "tap" | "edit" | "expand";
+export type GenerateMode = "query" | "tap" | "edit" | "expand" | "ascend";
 
 // Scale of a node's subject relative to its parent's focal subject, for the
 // scale-space world map + zoom level-of-detail. Composes into an integer
@@ -55,8 +55,9 @@ export function tierTransitionValid(from: ScaleTier, to: ScaleTier): boolean {
 }
 
 // How a node relates to its parent: "descend" = went IN (a tap child, the
-// default), "expand" = bloomed OUT (a neighbour from mode:"expand").
-export type NodeRelation = "descend" | "expand";
+// default), "expand" = bloomed OUT (a neighbour from mode:"expand"), "ascend" =
+// zoomed OUT to a synthesized container (the OUTWARD reparent, SCALE_OUTWARD).
+export type NodeRelation = "descend" | "expand" | "ascend";
 
 export type ImageTier = "fast" | "balanced" | "pro";
 
@@ -494,6 +495,10 @@ export interface WorldEntityGeo {
   // resolves to a true absolute position INSIDE this place. Metric — distinct
   // from the categorical Entity.scale LOD bucket.
   scale?: number;
+  // Coarse absolute rung on SCALE_LADDER (city / place / room …) — which order of
+  // magnitude this entity's frame sits at, independent of the fine metric `scale`.
+  // Optional; seeded by the view estimator, used by B2 scale navigation.
+  scale_tier?: ScaleTier;
   heading?: number; // facing, radians, 0 = +x; optional
   visual: string; // short appearance descriptor (mirrors Entity.appearance)
   state: EntityState;
@@ -538,6 +543,9 @@ export interface SceneView {
   // into this place's child frame (parent_id = its geo) so the interior layout
   // stays consistent across re-entries. Null for a top-level map view.
   focus_id?: string | null;
+  // Coarse absolute rung on SCALE_LADDER for this view (DEEPER stamps childTier,
+  // OUTWARD stamps parentTier) — so both directions share one ladder. Optional.
+  scale_tier?: ScaleTier;
 }
 
 // One entity's projected place in a rendered frame (geometry-engine output),
@@ -566,6 +574,9 @@ export interface ViewEstimate {
   level: ViewLevel;
   projection: ViewProjection;
   pitch_deg: number;
+  // Coarse SCALE_LADDER rung the estimator read (or the ViewLevel→tier fallback).
+  // Optional; mirrored in the Python ViewEstimate TypedDict (view_estimator.py).
+  scale_tier?: ScaleTier;
 }
 
 // A per-session snapshot of the geometric world (the `world_map` collection).

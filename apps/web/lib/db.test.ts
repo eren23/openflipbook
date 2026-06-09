@@ -49,3 +49,16 @@ describe("toRow scene_view round-trip", () => {
     expect(row.scene_view).toBeNull();
   });
 });
+
+describe("toRow scale_tier round-trip (B2)", () => {
+  it("preserves a persisted scale_tier and an ascend relation", () => {
+    const row = toRow(doc({ scale_tier: "city", relation: "ascend" }));
+    expect(row.scale_tier).toBe("city");
+    expect(row.relation).toBe("ascend");
+  });
+
+  it("defaults a missing scale_tier to null (back-compat with pre-B2 rows)", () => {
+    const row = toRow(doc());
+    expect(row.scale_tier).toBeNull();
+  });
+});

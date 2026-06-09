@@ -6,6 +6,7 @@ import type {
   EntityKind,
   EntityState,
   MapCrop,
+  ScaleTier,
   SceneView,
   ViewProjection,
   WorldEntityGeo,
@@ -339,6 +340,9 @@ export async function deriveGeoFromExtraction(
   // id) — i.e. these are sub-entities INSIDE a place, positioned in its local
   // frame, not top-level city entities.
   parentId: string | null = null,
+  // The coarse SCALE_LADDER rung the view estimator read for this frame (B2).
+  // Stamped on each seeded geo so a fresh session carries a rung for free.
+  scaleTier?: ScaleTier,
 ): Promise<WorldMapSnapshot> {
   const nowIso = new Date().toISOString();
   const geos: WorldEntityGeo[] = items.map((item) => {
@@ -352,6 +356,7 @@ export async function deriveGeoFromExtraction(
       pos: est.pos,
       height: est.height,
       footprint: est.footprint,
+      ...(scaleTier ? { scale_tier: scaleTier } : {}),
       visual: item.visual ?? "",
       state: item.state ?? {},
       // Derived placements are discounted so a later user/extracted write wins.

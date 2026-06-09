@@ -211,6 +211,7 @@ export async function POST(req: Request, { params }: Params) {
               "top_down",
               -60,
               parentFrameId,
+              upstreamView?.scale_tier,
             );
           }
         } else {
@@ -231,6 +232,8 @@ export async function POST(req: Request, { params }: Params) {
               items,
               upstreamView?.projection ?? "top_down",
               upstreamView?.pitch_deg ?? -60,
+              null,
+              upstreamView?.scale_tier,
             );
           }
         }

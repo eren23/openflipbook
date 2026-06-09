@@ -112,6 +112,10 @@ class SceneView(BaseModel):
     # sets it and the extract route reads it to anchor the child frame; without
     # it the field was silently dropped on validation, breaking the round-trip.
     focus_id: str | None = None
+    # Coarse SCALE_LADDER rung for this view (B2 scale navigation). Mirrors the
+    # optional `scale_tier?` on the TS SceneView; a free str so the ladder lives
+    # in one place (packages/config).
+    scale_tier: str | None = None
 
 
 class ProjectedEntity(BaseModel):
