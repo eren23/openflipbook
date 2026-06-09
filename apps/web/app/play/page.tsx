@@ -1865,6 +1865,13 @@ export default function PlayPage() {
                     ),
                   }
                 : {}),
+              // FAITHFUL backdrop: the focus's frame-mates straight from the geo
+              // (real bearings + appearances), so a stepped-into scene draws the
+              // SAME landmarks the map shows in the right directions — overriding
+              // the VLM-invented surroundings above (geoTap is spread last → wins).
+              ...(geoTap.surroundings
+                ? { prefetched_surroundings: geoTap.surroundings }
+                : {}),
             }
           : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),

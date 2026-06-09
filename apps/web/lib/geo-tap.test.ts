@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
-import { geoTapRequest } from "./geo-tap";
+import { describeSurroundings, geoTapRequest } from "./geo-tap";
 
 function geo(
   id: string,
@@ -62,6 +62,34 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     };
     const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
     expect(t!.scene_view.focus_id).toBe("clock");
+  });
+
+  it("describeSurroundings names frame-mates with map directions + appearances", () => {
+    const entities = [
+      geo("sq", "Market Square", 50, 30, { visual: "a cobbled plaza" }),
+      geo("cit", "The Citadel", 80, 15, { visual: "square-towered keep" }), // NE
+      geo("dock", "The Docks", 50, 55, { visual: "masted ships" }), // due south
+    ];
+    const s = describeSurroundings("sq", entities);
+    expect(s).toMatch(/north-east, The Citadel \(square-towered keep\)/);
+    expect(s).toMatch(/south, The Docks \(masted ships\)/);
+  });
+
+  it("describeSurroundings is empty for a lone focus (cold start)", () => {
+    expect(describeSurroundings("only", [geo("only", "Alone", 0, 0)])).toBe("");
+    expect(describeSurroundings("missing", [geo("a", "A", 0, 0)])).toBe("");
+  });
+
+  it("a scene tap carries the geo-derived surroundings", () => {
+    const map = {
+      entities: [
+        geo("clock", "clock tower", 60, 30, { height: 18 }),
+        geo("lh", "lighthouse", 30, 30, { visual: "white-and-red tower" }),
+      ],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
+    expect(t!.surroundings).toContain("lighthouse");
   });
 
   it("D — DEEPER stamps the child rung (one finer than the frame you tapped from)", () => {

@@ -43,6 +43,57 @@ export interface GeoTap {
   // stone, concentric rings, moss-covered) across zoom levels, even as the angle
   // changes between map and scene.
   focus_visual: string | null;
+  // The focus's FRAME-MATES drawn straight from the geo (their real bearings +
+  // appearance descriptors), e.g. "to the north-east, The Citadel (square-towered
+  // stone bastion on a rise); to the south, The Docks (masted ships)". Fed as the
+  // enter's `surroundings` so a stepped-into scene renders the SAME landmarks the
+  // map shows, in the right directions — instead of the model reinventing them
+  // (nano-banana ignores the image ref on a fresh gen; only text carries this).
+  surroundings: string;
+}
+
+// Image-frame bearing → a cartographer's cardinal. +x = east, +y = SOUTH (the
+// world frame's y grows downward, like the map image).
+function cardinal(dx: number, dy: number): string {
+  const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+  const dirs = [
+    "east", "south-east", "south", "south-west",
+    "west", "north-west", "north", "north-east",
+  ];
+  return dirs[Math.round(deg / 45) % 8] ?? "nearby";
+}
+
+/** Describe the focus's frame-mates (same parent frame) as visible backdrop —
+ *  each with its real bearing from the focus + its appearance — so an entered
+ *  scene stays faithful to the map's geography. Pure; empty when the focus has no
+ *  mapped neighbours (cold start → the planner's own surroundings stand). */
+export function describeSurroundings(
+  focusId: string,
+  entities: WorldEntityGeo[],
+  max = 5,
+): string {
+  const focus = entities.find((e) => e.id === focusId);
+  if (!focus) return "";
+  const parent = focus.parent_id ?? null;
+  const mates = entities
+    .filter(
+      (e) => e.id !== focusId && (e.parent_id ?? null) === parent && e.label.trim(),
+    )
+    .map((m) => ({
+      label: m.label.trim(),
+      visual: (m.visual ?? "").trim(),
+      dir: cardinal(m.pos.x - focus.pos.x, m.pos.y - focus.pos.y),
+      // nearest first, so the most relevant backdrop survives the cap
+      dist: Math.hypot(m.pos.x - focus.pos.x, m.pos.y - focus.pos.y),
+    }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, max);
+  if (mates.length === 0) return "";
+  return (
+    mates
+      .map((m) => `to the ${m.dir}, ${m.label}${m.visual ? ` (${m.visual})` : ""}`)
+      .join("; ") + "."
+  );
 }
 
 /**
@@ -123,6 +174,7 @@ export function geoTapRequest(
       focus_id: route.focus_id,
       focus_label: route.focus_id ? byId.get(route.focus_id)?.label ?? null : null,
       focus_visual: route.focus_id ? byId.get(route.focus_id)?.visual ?? null : null,
+      surroundings: route.focus_id ? describeSurroundings(route.focus_id, map.entities) : "",
     };
   }
 
@@ -162,5 +214,6 @@ export function geoTapRequest(
     focus_id: route.focus_id,
     focus_label: byId.get(route.focus_id)?.label ?? null,
     focus_visual: byId.get(route.focus_id)?.visual ?? null,
+    surroundings: describeSurroundings(route.focus_id, map.entities),
   };
 }
