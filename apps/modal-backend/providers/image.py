@@ -118,8 +118,16 @@ def _args_for(
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
         }
-    # nano-banana + nano-banana-pro both accept aspect_ratio directly, plus an
-    # optional `image_urls` list for multi-reference conditioning.
+    # nano-banana + nano-banana-pro accept aspect_ratio directly, plus an optional
+    # `image_urls` list. NOTE (verified via scripts/verify-fal-models.py): NO image
+    # model in use accepts `negative_prompt` (nano-banana, nano-banana-pro and
+    # flux-pro/kontext all omit it) — so we never send one; the MEDIUM LOCK in the
+    # prompt text is the model-agnostic style guard. And the text-to-image nano
+    # endpoints accept `image_urls` but IGNORE it — an empirical test (a photoreal
+    # prompt + an engraving ref came back still-photoreal) confirms fresh-gen image
+    # conditioning is a no-op here; refs only bite on the edit/continue endpoints
+    # (nano-banana/edit takes image_urls, kontext a singular image_url). We still
+    # pass them (harmless, future-proof), but the prompt TEXT does the real work.
     args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
     if reference_urls and "nano-banana" in model:
         args["image_urls"] = reference_urls
@@ -161,11 +169,27 @@ def conditioning_preamble(roles: list[str], mode: str) -> str:
         elif role == "parent":
             lines.append(
                 f"Image {i}: the surrounding scene — match its world, palette, "
-                "lighting and render style closely."
+                "lighting and, above all, its ART MEDIUM (the drawing/render "
+                "technique itself), not just the colours."
             )
         elif role == "anchor":
             lines.append(
-                f"Image {i}: the overall look of this world — stay consistent with it."
+                f"Image {i}: the overall look of this world — stay consistent "
+                "with its art medium and palette."
+            )
+        elif role == "style":
+            # The persistent medium exemplar (root/pinned render). This is the
+            # load-bearing line for style consistency: the user's complaint was
+            # interiors coming back photoreal / isometric when the source is an
+            # engraving. Name the medium and forbid drift explicitly.
+            lines.append(
+                f"Image {i}: the STYLE REFERENCE — the exact art MEDIUM of this "
+                "world (e.g. hand-drawn engraving / woodcut hatching / ink line "
+                "work; or watercolour, flat infographic, blueprint — whatever it "
+                "shows). Reproduce THIS medium faithfully: same linework, texture "
+                "and level of stylisation. Do NOT switch to photorealism, a 3D "
+                "render, isometric line-art or any other medium, however much the "
+                "subject might invite it."
             )
         else:
             lines.append(f"Image {i}: visual reference — stay consistent with it.")

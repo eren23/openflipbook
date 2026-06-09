@@ -751,11 +751,19 @@ export default function PlayPage() {
     // Image conditioning: every neighbour shares the parent's world + the
     // session anchor so the bloom reads as one place. No region crop — expand
     // is whole-page outward (directional edge-crops are a later phase).
-    const anchorImage =
-      history.items.find((p) => p.parentId == null)?.imageDataUrl ?? null;
+    // Persistent style exemplar: the pinned style page's image if one is
+    // pinned, else the root render. Rides as the "style" role (strong medium
+    // lock in the backend preamble) so the bloom can't drift the art medium.
+    const styleRefUrl =
+      (styleAnchor
+        ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)
+            ?.imageDataUrl
+        : null) ??
+      history.items.find((p) => p.parentId == null)?.imageDataUrl ??
+      null;
     const condition = orderedRefs({
       parent: page.imageDataUrl,
-      anchor: anchorImage !== page.imageDataUrl ? anchorImage : null,
+      style: styleRefUrl !== page.imageDataUrl ? styleRefUrl : null,
     });
     startBloom({
       query: page.query,
@@ -924,6 +932,19 @@ export default function PlayPage() {
       e.preventDefault();
       const instruction = editInstruction.trim();
       if (!instruction || !page?.imageDataUrl) return;
+      // Carry the style exemplar (pinned page, else root) so an edit can't drift
+      // the art medium. The backend edit path now threads both this "style" ref
+      // and the session text lock (it used to drop both).
+      const styleRefUrl =
+        (styleAnchor
+          ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)
+              ?.imageDataUrl
+          : null) ??
+        history.items.find((p) => p.parentId == null)?.imageDataUrl ??
+        null;
+      const editCondition = orderedRefs({
+        style: styleRefUrl !== page.imageDataUrl ? styleRefUrl : null,
+      });
       void generate({
         query: instruction,
         aspect_ratio: "16:9",
@@ -937,12 +958,18 @@ export default function PlayPage() {
         parent_title: page.title,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(editCondition.urls.length
+          ? {
+              condition_image_urls: editCondition.urls,
+              condition_roles: editCondition.roles,
+            }
+          : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
       setEditInstruction("");
       setEditMode(false);
     },
-    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor]
+    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor, history]
   );
 
   const canGoBack = history.trailIdx > 0;
@@ -1523,13 +1550,20 @@ export default function PlayPage() {
       // parent (not the marker-annotated one) — region crop at the tap → whole
       // parent → session root as the anti-drift anchor (skipped when this page
       // *is* the root). Best-effort; on failure we send nothing → text-only.
-      const anchorImage =
-        history.items.find((p) => p.parentId == null)?.imageDataUrl ?? null;
+      // The persistent style exemplar (pinned style page, else the root render)
+      // rides as the strong "style" role so an enter can't drift the art medium.
+      const styleRefUrl =
+        (styleAnchor
+          ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)
+              ?.imageDataUrl
+          : null) ??
+        history.items.find((p) => p.parentId == null)?.imageDataUrl ??
+        null;
       let condition = { urls: [] as string[], roles: [] as string[] };
       try {
         condition = await buildConditionRefs({
           parentDataUrl: currentImage,
-          anchorDataUrl: anchorImage !== currentImage ? anchorImage : null,
+          styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
           click: { xPct: click.x_pct, yPct: click.y_pct },
         });
       } catch {
@@ -1792,6 +1826,20 @@ export default function PlayPage() {
       // planner emphasises the stroked area in the next page.
       const strokeHint =
         "User circled / annotated this region with a freehand stroke. Treat the stroked area as the focus.";
+      // Same style lock as a click-tap: carry the medium exemplar so a freehand
+      // "go inside" can't drift the art medium either (the parent grounds the
+      // world; the style ref pins the medium).
+      const strokeStyleRef =
+        (styleAnchor
+          ? history.items.find((p) => p.nodeId === styleAnchor.nodeId)
+              ?.imageDataUrl
+          : null) ??
+        history.items.find((p) => p.parentId == null)?.imageDataUrl ??
+        null;
+      const strokeCondition = orderedRefs({
+        parent: currentImage,
+        style: strokeStyleRef !== currentImage ? strokeStyleRef : null,
+      });
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -1806,6 +1854,12 @@ export default function PlayPage() {
         click_hint: strokeHint,
         image_tier: imageTier,
         output_locale: resolveOutputLocale(outputLocale),
+        ...(strokeCondition.urls.length
+          ? {
+              condition_image_urls: strokeCondition.urls,
+              condition_roles: strokeCondition.roles,
+            }
+          : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     };

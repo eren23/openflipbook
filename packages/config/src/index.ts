@@ -105,6 +105,13 @@ export interface WorldContextEntity {
   // Free-form key/value state. Helps the planner thread the entity's
   // current condition (door open / lit / wounded) into the prompt.
   state?: EntityState;
+  // Optional geometric size (world units) carried from the entity's
+  // WorldEntityGeo when the web proxy resolves the slice. Lets the planner
+  // hint a consistent relative scale for recurring entities across pages so a
+  // building rendered large once doesn't come back tiny next time. Omitted →
+  // today's behaviour (appearance text only).
+  footprint?: { w: number; d: number };
+  height?: number;
 }
 
 export interface ResolveClickRequestBody {

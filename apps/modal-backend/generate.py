@@ -74,6 +74,11 @@ class WorldContextEntity(BaseModel):
     # primitives only (door=open, lantern=lit, mira_present=true). The tightened
     # union (not dict[str, Any]) keeps the TS<->Py schema-parity check meaningful.
     state: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    # FIX C: optional geometric size carried from the entity's WorldEntityGeo so
+    # the planner can keep recurring entities at a consistent relative scale.
+    # Mirrors the TS `footprint?: {w,d}` / `height?` (schema-parity gated).
+    footprint: dict[str, float] | None = None
+    height: float | None = None
 
 
 # Geometric world model — Pydantic mirrors of the packages/config TS shapes.
@@ -191,6 +196,18 @@ def _geometric_world_on() -> bool:
 def _world_geometry_gen_on() -> bool:
     """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
     return env_flag("WORLD_GEOMETRY_GEN")
+
+
+def _condition_url_for_role(body: GenerateBody, role: str) -> str | None:
+    """The first condition image URL tagged with `role` (e.g. "style"), or None.
+    Lets the edit path pull the style exemplar the client already sends in the
+    condition stack (condition_image_urls / condition_roles, same index)."""
+    urls = body.condition_image_urls or []
+    roles = body.condition_roles or []
+    for u, r in zip(urls, roles, strict=False):
+        if r == role and u:
+            return u
+    return None
 
 
 def _layout_clause_for(body: GenerateBody) -> str:
@@ -414,9 +431,16 @@ async def _event_stream(
                 yield _sse({"type": "error", "message": "edit mode requires an instruction"}, trace_id)
                 return
             yield _sse({"type": "status", "stage": "planning"}, trace_id)
+            # Style consistency on edits: the web client already sends the session
+            # style lock + a "style" condition ref, but the edit path used to drop
+            # both. Thread the text lock into the polish and the exemplar image into
+            # the edit so an edit can't drift the world's art medium.
+            edit_style_lock = (body.session_style_anchor or "").strip() or None
+            edit_style_ref = _condition_url_for_role(body, "style")
             polished = await llm.polish_edit_instruction(
                 instruction=raw_instruction,
                 page_title=body.parent_title,
+                style_anchor=edit_style_lock,
             )
             yield _sse(
                 {
@@ -431,6 +455,7 @@ async def _event_stream(
                 instruction=polished,
                 tier=body.image_tier,
                 model_override=body.image_model,
+                style_ref_url=edit_style_ref,
             )
             edit_data_url = image_provider.encode_data_url(
                 edit_result.jpeg_bytes, edit_result.mime_type
