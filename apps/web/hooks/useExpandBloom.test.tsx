@@ -104,6 +104,44 @@ describe("useExpandBloom", () => {
     );
   });
 
+  it("persists scale_tier on each neighbour when the bloom is logical (around_tier)", async () => {
+    const persist = vi.fn().mockResolvedValue({ id: "node-x" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        cannedResponse([
+          neighbor({ subject: "The Library", scale: "peer", index: 0, total: 1 }),
+          { type: "expand_done", count: 1 },
+        ]),
+      ),
+    );
+    const { result } = renderHook(() =>
+      useExpandBloom(persist as unknown as PersistNeighbour),
+    );
+    act(() => result.current.start({ ...BODY, around_tier: "room" }));
+    await waitFor(() => expect(result.current.bloom?.done).toBe(true));
+    expect(persist).toHaveBeenCalledWith(
+      expect.objectContaining({ relation: "expand", scale_tier: "room" }),
+      expect.anything(),
+    );
+  });
+
+  it("omits scale_tier for an unconstrained bloom (no around_tier)", async () => {
+    const persist = vi.fn().mockResolvedValue({ id: "n" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        cannedResponse([neighbor({ index: 0, total: 1 }), { type: "expand_done", count: 1 }]),
+      ),
+    );
+    const { result } = renderHook(() =>
+      useExpandBloom(persist as unknown as PersistNeighbour),
+    );
+    act(() => result.current.start(BODY));
+    await waitFor(() => expect(result.current.bloom?.done).toBe(true));
+    expect("scale_tier" in (persist.mock.calls[0]![0] as object)).toBe(false);
+  });
+
   it("resolves the bloom (done) when the stream closes without an expand_done", async () => {
     // Defensive: if the backend ever closes the stream without a terminal
     // expand_done (e.g. an early bail), the bloom must still flip to done so

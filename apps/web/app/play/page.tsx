@@ -8,6 +8,7 @@ import type {
   GenerateEvent,
   MapCrop,
   ObserverPose,
+  ScaleTier,
   SceneView,
   ViewLevel,
   WorldEntityGeo,
@@ -141,6 +142,7 @@ interface PersistBody {
   sources?: { url: string; title: string | null }[] | null;
   relation?: "descend" | "expand";
   scale?: "component" | "peer" | "container";
+  scale_tier?: ScaleTier;
   scene_view?: SceneView | null;
 }
 
