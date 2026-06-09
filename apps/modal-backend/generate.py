@@ -1569,6 +1569,65 @@ async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
     )
 
 
+class PlanWorldBody(BaseModel):
+    session_id: str
+    description: str
+    answers: list[str] = Field(default_factory=list, max_length=8)
+    trace_id: str | None = None
+
+
+@fastapi_app.post("/plan-world")
+async def plan_world_endpoint(req: Request, body: PlanWorldBody):
+    """Describe a place -> a logical object world (B1, WORLD_FROM_DESCRIPTION).
+
+    Parse the description into a SceneGraph (one text-LLM call), then run the pure
+    deterministic solver server-side. Returns {graph, solved, trace_id}: `solved`
+    is the WorldEntityGeo[] ready for upsertEntityGeos, or null when the graph is
+    BLOCKED (hard contradiction / over-pack / empty-region collision) -> the
+    client must ASK first. Gated by WORLD_FROM_DESCRIPTION (403 when off). One LLM
+    call + pure CPU; no Mongo/R2 here.
+    """
+    import time
+    from dataclasses import asdict
+
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import llm as llm_provider
+    from providers.layout_solver import solve_layout
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    if not env_flag("WORLD_FROM_DESCRIPTION"):
+        return JSONResponse(
+            {"error": "describe-a-place disabled (set WORLD_FROM_DESCRIPTION=1)", "trace_id": trace_id},
+            status_code=403,
+            headers={"X-Trace-Id": trace_id},
+        )
+    log("info", "plan_world.request", session_id=body.session_id,
+        description_len=len(body.description or ""), answers=len(body.answers))
+    try:
+        graph = await llm_provider.plan_world_from_description(body.description, body.answers or None)
+        result = solve_layout(graph)
+    except Exception as exc:
+        record_error("plan_world", exc, session_id=body.session_id)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
+    # Union the solver's mechanical questions (Layer B, blocking-first) with the
+    # planner's (Layer A), deduped + capped at 2.
+    questions = list(dict.fromkeys([*result.clarifiers, *graph.clarifiers]))[:2]
+    graph_dict = asdict(graph)
+    graph_dict["clarifiers"] = questions
+    solved = None
+    if not result.blocked:
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        solved = [{**g, "updated_at": now} for g in result.geos]
+    return JSONResponse(
+        {"graph": graph_dict, "solved": solved, "trace_id": trace_id},
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
 @fastapi_app.get("/health")
 async def health() -> dict:
     return {"ok": True, "service": APP_NAME}

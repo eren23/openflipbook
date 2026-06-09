@@ -647,3 +647,80 @@ export interface EditEntitiesResponse {
   plan: EntityEditPlan;
   trace_id?: string;
 }
+
+// ── Describe a place -> logical object world (WORLD_FROM_DESCRIPTION) ─────────
+// Turn a natural-language place description into all its objects on the shared 2D
+// plane. The planner emits STRUCTURE (entities + relations), NEVER coordinates —
+// the deterministic solver (providers/layout_solver.py) turns relations into
+// WorldEntityGeo positions. All additive + flag-gated; no existing type changes.
+
+// Relations the planner may express between two refs. Never coordinates.
+export type SpatialRelation =
+  | "near"
+  | "on_wall"
+  | "behind"
+  | "in_front_of"
+  | "left_of"
+  | "right_of"
+  | "inside"
+  | "on_top_of"
+  | "facing";
+
+// One named / functionally-implied object. `ref` is the stable slug relations
+// point at; `visual` is one render-ready sentence (the extractor's appearance
+// contract). `count` fans out into N instances at solve time.
+export interface PlannedEntity {
+  ref: string;
+  kind: EntityKind;
+  label: string;
+  visual: string;
+  footprint?: { w: number; d: number };
+  height?: number;
+  count?: number;
+}
+
+// A placement constraint: `subject` is positioned relative to `object`.
+export interface PlannedRelation {
+  subject: string;
+  relation: SpatialRelation;
+  object: string;
+  gap?: number;
+}
+
+// A region the description explicitly says is empty / clear / reserved. The
+// solver keeps every footprint out of its AABB; the renderer gets a negative
+// clause. `approx` (0..1 of the place) is an optional hint box.
+export interface EmptyRegion {
+  ref: string;
+  note: string;
+  approx?: { x: number; y: number; w: number; h: number };
+}
+
+// The structured read of the description (tolerant-parsed; malformed members are
+// dropped). `contradictions` non-empty -> blocking; `clarifiers` (<=2) are the
+// questions to ask. Both empty -> the graph is solvable as-is.
+export interface SceneGraph {
+  place_label: string;
+  place_kind: EntityKind;
+  bounds_hint?: { w: number; h: number };
+  entities: PlannedEntity[];
+  relations: PlannedRelation[];
+  empty_regions: EmptyRegion[];
+  clarifiers: string[];
+  contradictions: string[];
+}
+
+export interface PlanWorldRequestBody {
+  session_id: string;
+  description: string;
+  answers?: string[]; // replies to a prior round's clarifiers (re-run)
+  trace_id?: string;
+}
+
+export interface PlanWorldResponse {
+  graph: SceneGraph;
+  // The solved layout (ready for upsertEntityGeos), or null when the graph is
+  // blocked (hard contradiction / unresolved blocking clarifier) -> the client asks.
+  solved: WorldEntityGeo[] | null;
+  trace_id?: string;
+}
