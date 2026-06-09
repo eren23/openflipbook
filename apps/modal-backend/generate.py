@@ -575,9 +575,22 @@ async def _event_stream(
                         style_anchor=style_lock,
                         render_mode="scale_parent",
                     )
-                    img = await image_provider.generate_image(
-                        plan.prompt, body.aspect_ratio, reference_urls=[body.image]
-                    )
+                    if env_flag("SCALE_OUTWARD_EDIT_REF"):
+                        # The source ref is a no-op on the text-to-image endpoint
+                        # (research 01-model-bakeoff); the edit endpoint honors it, so
+                        # the container continues the source's medium + content instead
+                        # of free-styling. Opt-in until the paid S4 A/B confirms the lift.
+                        medium = style_lock or "the same hand-drawn art style as the centre"
+                        img = await image_edit_provider.edit_image(
+                            body.image,
+                            f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
+                            f"keeping this exact view as the centre. {medium}; one continuous "
+                            "view in that style, NOT a photograph, no photorealism.",
+                        )
+                    else:
+                        img = await image_provider.generate_image(
+                            plan.prompt, body.aspect_ratio, reference_urls=[body.image]
+                        )
                     page_title = plan.page_title or f"The surrounding {to_tier.replace('_', ' ')}".title()
                     final_prompt = plan.prompt
             except Exception as exc:

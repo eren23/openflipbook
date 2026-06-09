@@ -135,3 +135,33 @@ async def test_query_mode_unaffected_by_ascend_branch(monkeypatch: pytest.Monkey
     finals = [e for e in events if e["type"] == "final"]
     assert len(finals) == 1
     assert not [e for e in events if e["type"] == "ascend_ready"]
+
+
+async def test_ascend_edit_ref_under_flag_routes_through_edit_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SCALE_OUTWARD_EDIT_REF: route the fresh container through the edit endpoint
+    # (which honors the source ref) instead of the no-op text-to-image ref path.
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    monkeypatch.setenv("SCALE_OUTWARD_EDIT_REF", "1")
+    monkeypatch.setattr(
+        llm_mod,
+        "plan_page",
+        AsyncMock(return_value=PagePlan("The Vallen Sea", "a wider engraving map", [], [])),
+    )
+    gen = AsyncMock()
+    monkeypatch.setattr(image_mod, "generate_image", gen)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    body = _ascend_body(session_style_anchor="hand-drawn engraving, sepia ink")
+    events = await _collect(_event_stream(body, "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["from_tier"] == "city"
+    edit.assert_awaited_once()  # routed through the edit endpoint (ref honored)
+    gen.assert_not_awaited()  # NOT the no-op text-to-image ref path
+    assert edit.await_args.args[0] == "data:image/jpeg;base64,abc"  # the source image
+    assert "engraving" in edit.await_args.args[1]  # the medium reaches the instruction
