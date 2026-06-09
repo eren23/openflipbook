@@ -927,6 +927,117 @@ export default function PlayPage() {
     [input, sessionId, page, generate, imageTier, outputLocale, styleAnchor]
   );
 
+  // B1 — "Describe a place": turn the input description into a logical object
+  // world. POST /plan-world (parse -> deterministic solver, server-side); if it's
+  // BLOCKED (contradiction / over-pack / reserved-region collision) loop the
+  // clarifiers through the SAME hint bubble taps use, re-POST with the answers;
+  // on a non-null `solved`, seed the geos (the logical plane the map taps route
+  // through) and render a top-down plan from the description + planned visuals.
+  // Gated behind World Mode; the backend gates WORLD_FROM_DESCRIPTION (403 off).
+  const planWorld = useCallback(async () => {
+    const description = input.trim();
+    if (!description || phase === "generating") return;
+    type PW = {
+      graph?: {
+        place_label?: string;
+        entities?: { visual?: string }[];
+        empty_regions?: { note?: string }[];
+        clarifiers?: string[];
+        contradictions?: string[];
+      };
+      solved?: WorldEntityGeo[] | null;
+      error?: string;
+    };
+    const cx = typeof window !== "undefined" ? window.innerWidth / 2 : 400;
+    const cy = typeof window !== "undefined" ? window.innerHeight / 2 : 280;
+    let answers: string[] = [];
+    let graph: PW["graph"] = undefined;
+    let solved: WorldEntityGeo[] | null = null;
+    try {
+      for (let round = 0; round < 4; round += 1) {
+        const res = await fetch(
+          `/api/world/${encodeURIComponent(sessionId)}/plan-world`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, description, answers }),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as PW;
+        if (!res.ok) {
+          setError(data.error ?? "describe-a-place is off (set WORLD_FROM_DESCRIPTION)");
+          return;
+        }
+        graph = data.graph;
+        solved = data.solved ?? null;
+        if (solved) break;
+        const questions = graph?.clarifiers ?? [];
+        if (questions.length === 0) {
+          setError(
+            `That place doesn't quite work: ${(graph?.contradictions ?? []).join("; ") || "unresolved"}`,
+          );
+          return;
+        }
+        const answer = await promptForHint(cx, cy, questions.join("  ·  "));
+        if (answer == null) return; // cancelled
+        answers = [...answers, answer];
+      }
+      if (!solved || !graph) {
+        setError("Couldn't resolve the place after a few rounds — try rephrasing.");
+        return;
+      }
+      // Seed the logical plane (best-effort; needs GEOMETRIC_WORLD on the server).
+      await fetch(`/api/world/${encodeURIComponent(sessionId)}/map`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ geos: solved }),
+      }).catch(() => {});
+      // Render a top-down plan from the description + the planned visuals. The
+      // empty-region notes ride in the query text (the doc-sanctioned render-layer
+      // enforcement of "empty stays empty", alongside the grounding extras penalty).
+      const visuals = (graph.entities ?? [])
+        .map((e) => e.visual)
+        .filter((v): v is string => !!v && v.trim().length > 0)
+        .slice(0, 12)
+        .join("; ");
+      const empties = (graph.empty_regions ?? [])
+        .map((r) => r.note)
+        .filter((n): n is string => !!n && n.trim().length > 0);
+      const emptyClause = empties.length
+        ? ` Leave these areas clear and empty: ${empties.join(", ")}.`
+        : "";
+      const query =
+        `A top-down illustrated map of ${graph.place_label ?? "the place"}. ${description}.` +
+        (visuals ? ` Showing: ${visuals}.` : "") +
+        emptyClause;
+      void generate({
+        query,
+        aspect_ratio: "16:9",
+        web_search: false,
+        session_id: sessionId,
+        current_node_id: page?.nodeId ?? "",
+        mode: "query",
+        image_tier: imageTier,
+        output_locale: resolveOutputLocale(outputLocale),
+        world_mode: true,
+        render_mode: "place_submap",
+        ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+      });
+    } catch (err) {
+      setError(`describe-a-place failed: ${(err as Error).message}`);
+    }
+  }, [
+    input,
+    phase,
+    sessionId,
+    page,
+    generate,
+    imageTier,
+    outputLocale,
+    styleAnchor,
+    promptForHint,
+  ]);
+
   const submitEdit = useCallback(
     (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
@@ -2028,6 +2139,20 @@ export default function PlayPage() {
         autonomy={worldAutonomy}
         setAutonomy={setWorldAutonomy}
       />
+
+      {worldEnabled && (
+        <div className="-mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void planWorld()}
+            disabled={!input.trim() || phase === "generating"}
+            title="Turn the text above into a logical object layout (asks if it's contradictory)"
+            className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-40"
+          >
+            ✍ Describe a place
+          </button>
+        </div>
+      )}
 
       {isDraggingFile && <DragDropOverlay />}
 
