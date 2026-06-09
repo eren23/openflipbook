@@ -1,18 +1,17 @@
 """OUTWARD-DRIFT — style A/B for the zoom-out container (the design's risk #1).
 
-The default OUTWARD path is the centered BRIA outpaint, which keeps the source's
-pixels as the central sub-region → ZERO style drift by construction. The riskier
-medium-flip path (`SCALE_OUTWARD_RERENDER`) synthesizes the container FRESH,
-conditioned on the source. This A/B quantifies that risk BEFORE the flag is
-enabled: for each styled source we synthesize its container TWICE —
-  - OUTPAINT: `expand_image_zoomout` (the default — the zero-drift baseline).
-  - FRESH:    `generate_image(scale_parent clause + source as a reference)`
-              (exactly what the `mode:"ascend"` SCALE_OUTWARD_RERENDER path sends).
+NOTE: a live run corrected the original assumption. The centered BRIA outpaint is
+NOT zero-drift — without a medium prompt it paints a PHOTOREAL margin (an engraving
+poster in a real sea), and even with one it leaves the source a hard rectangle
+inset. The fresh `scale_parent` gen (now the DEFAULT) makes a seamless wider view
+in the same medium. This A/B scores both so the opt-in outpaint can be measured
+against the default: for each styled source we synthesize its container TWICE —
+  - OUTPAINT: `expand_image_zoomout(..., prompt=medium)` (opt-in, SCALE_OUTWARD_OUTPAINT).
+  - FRESH:    `generate_image(scale_parent clause + source as a reference)` (the default).
 `score_style_pair(source, container)` judges how faithfully each container keeps
 the source's art MEDIUM (palette / linework / stylisation, subject ignored). The
-DRIFT number = outpaint_mean - fresh_mean (how much the rerender path loses vs the
-pixel-preserving outpaint). We ASSERT the FRESH arm clears a threshold before
-trusting it — keep `SCALE_OUTWARD_RERENDER` off until it does, at N >= 10.
+DRIFT number = outpaint_mean - fresh_mean. The fresh arm is the live-verified
+default; this confirms it holds the medium + quantifies the outpaint alternative.
 
 Paid (fal gens + Gemini judge). Self-contained — no session / web needed:
     cd apps/modal-backend && OUTWARD_BENCH_RUN=1 \

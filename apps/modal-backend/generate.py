@@ -507,36 +507,44 @@ async def _event_stream(
                     trace_id,
                 )
                 return
-            op = model_router.select_outward_op(from_tier, to_tier)
             _dims = {
                 "16:9": (1600, 900), "9:16": (900, 1600), "1:1": (1024, 1024),
                 "4:3": (1280, 960), "3:4": (960, 1280),
             }
             pw, ph = _dims.get(body.aspect_ratio, (1600, 900))
+            style_lock = (body.session_style_anchor or "").strip() or None
+            # DEFAULT = the fresh `scale_parent` container: a seamless wider view of
+            # the SAME world in the SAME medium, the source as a small sub-region
+            # (live-verified far more coherent than the outpaint, which leaves the
+            # source a rectangle inset). The centered outpaint is opt-in
+            # (SCALE_OUTWARD_OUTPAINT) for pixel-preservation, and only for a
+            # same-plane hop — and now STEERS its margin with the medium so it isn't
+            # photoreal. Astronomical (medium-flip) hops are always fresh.
+            use_outpaint = (
+                env_flag("SCALE_OUTWARD_OUTPAINT")
+                and model_router.select_outward_op(from_tier, to_tier) == "outpaint_zoomout"
+            )
             yield _sse({"type": "status", "stage": "rendering"}, trace_id)
             await _abort_if_disconnected("pre-ascend")
             try:
-                if op == "outpaint_zoomout":
-                    # Centered BRIA outpaint: the source becomes the central
-                    # sub-region of the wider frame — style conserved by construction.
+                if use_outpaint:
+                    medium = style_lock or "the same hand-drawn art style as the centre"
+                    margin = (
+                        f"{medium}; extend OUTWARD into the surrounding "
+                        f"{to_tier.replace('_', ' ')}, drawn in the SAME style as the "
+                        "centre — one continuous view, NOT a photograph, no photorealism"
+                    )
                     img = await image_edit_provider.expand_image_zoomout(
-                        body.image, 3.0, pw, ph
+                        body.image, 3.0, pw, ph, prompt=margin
                     )
                     page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
-                    final_prompt = f"outward zoom: {from_tier} -> {to_tier} (centered outpaint)"
-                else:  # scale_parent_fresh — the medium-flip fresh path (riskier)
-                    if not env_flag("SCALE_OUTWARD_RERENDER"):
-                        yield _sse(
-                            {
-                                "type": "error",
-                                "message": f"medium-flip OUTWARD to '{to_tier}' needs SCALE_OUTWARD_RERENDER",
-                            },
-                            trace_id,
-                        )
-                        return
-                    style_lock = (body.session_style_anchor or "").strip() or None
+                    final_prompt = f"outward outpaint: {from_tier} -> {to_tier}"
+                else:
                     plan = await llm.plan_page(
-                        query=body.query or from_tier,
+                        query=(
+                            f"the {to_tier.replace('_', ' ')} that contains "
+                            f"{body.query or 'this place'}"
+                        ),
                         web_search=False,
                         style_anchor=style_lock,
                         render_mode="scale_parent",
@@ -544,7 +552,7 @@ async def _event_stream(
                     img = await image_provider.generate_image(
                         plan.prompt, body.aspect_ratio, reference_urls=[body.image]
                     )
-                    page_title = plan.page_title or to_tier.replace("_", " ").title()
+                    page_title = plan.page_title or f"The surrounding {to_tier.replace('_', ' ')}".title()
                     final_prompt = plan.prompt
             except Exception as exc:
                 log("warn", "ascend.failed", error=f"{type(exc).__name__}: {exc}")

@@ -306,20 +306,28 @@ def _clamp_zoom_factor(factor: float) -> float:
 
 
 def _zoomout_args_for(
-    image_url: str, factor: float, width: int, height: int
+    image_url: str, factor: float, width: int, height: int, prompt: str | None = None
 ) -> dict[str, Any]:
     """OUTWARD: the source CENTERED on a `factor`x larger canvas, full margin
     painted on ALL sides — so it becomes the recognizable central sub-region of a
     wider view of the same world. Contrast `_expand_args_for`, which pins the
-    original to one EDGE for a directional map-pan."""
+    original to one EDGE for a directional map-pan.
+
+    `prompt` STEERS the painted margin: WITHOUT it BRIA fills photorealistically,
+    so a hand-drawn map ends up an engraving poster floating in a real sea. Passing
+    the source's medium keeps the margin in-style (it still leaves a soft seam at
+    the source rectangle — the fresh `scale_parent` path is the seamless default)."""
     cw, ch = int(width * factor), int(height * factor)
     loc = [(cw - width) // 2, (ch - height) // 2]
-    return {
+    args: dict[str, Any] = {
         "image_url": image_url,
         "canvas_size": [cw, ch],
         "original_image_size": [width, height],
         "original_image_location": loc,
     }
+    if prompt and prompt.strip():
+        args["prompt"] = prompt.strip()
+    return args
 
 
 async def expand_image_zoomout(
@@ -328,13 +336,15 @@ async def expand_image_zoomout(
     width: int = 1600,
     height: int = 900,
     model_override: str | None = None,
+    prompt: str | None = None,
 ) -> GeneratedImage:
     """OUTWARD / zoom-out (B2): paint the CONTAINER around the source — the source
     centered on a `factor`x larger canvas with the full margin outpainted, so it
-    becomes the central sub-region of a wider frame of the SAME world (style is
-    conserved by construction: the original pixels stay). Same BRIA machinery as
-    `expand_image`; only the canvas is centered, not edge-pinned. `factor` is
-    clamped to ~1.5-4x per hop."""
+    becomes the central sub-region of a wider frame. The source's pixels are kept,
+    but the painted MARGIN drifts to photoreal unless `prompt` carries the source's
+    medium — so callers MUST pass it. Same BRIA machinery as `expand_image`; only
+    the canvas is centered, not edge-pinned. `factor` is clamped to ~1.5-4x. This is
+    the opt-in (SCALE_OUTWARD_OUTPAINT) path; the seamless default is `scale_parent`."""
     from obs import span
 
     _ensure_fal_key()
@@ -348,7 +358,7 @@ async def expand_image_zoomout(
     w, h = _dims_from_data_url(image_data_url) or (width, height)
     image_url = await to_fal_url(image_data_url)
     async with span("image.zoomout", model=model, factor=f, w=w, h=h) as ctx:
-        result = await _fal_subscribe(model, _zoomout_args_for(image_url, f, w, h))
+        result = await _fal_subscribe(model, _zoomout_args_for(image_url, f, w, h, prompt))
         image_info = _expand_first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
         ctx["bytes"] = len(jpeg_bytes)

@@ -72,6 +72,14 @@ def test_zoomout_factor_clamped_per_hop() -> None:
     assert image_edit._clamp_zoom_factor(3.0) == 3.0  # in range
 
 
+def test_zoomout_args_carry_the_medium_prompt() -> None:
+    # Without a prompt BRIA fills photoreal (the engraving-poster-in-a-real-sea bug);
+    # callers MUST pass the medium so the painted margin stays in style.
+    assert "prompt" not in image_edit._zoomout_args_for("u", 3.0, 100, 60)
+    steered = image_edit._zoomout_args_for("u", 3.0, 100, 60, "engraving, sepia ink")
+    assert steered["prompt"] == "engraving, sepia ink"
+
+
 # --- dimension probing (Pillow-free) ------------------------------------------
 
 

@@ -102,13 +102,20 @@ consistency already holds via the learned per-frame `scale`. One small change + 
 - **INV-4 (one ladder) — SHIPPED.** `ladderDisagreement(parentTier, childTier, learnedScale)`
   in `world-map.ts` (pure, unit-tested); `deriveGeoFromExtraction` warns + keeps the learned
   scale on a sign disagreement, never blocks.
-- **OUTWARD drift A/B — deferred to when rerender is enabled (paid + manual).** The default
-  OUTWARD path is the **centered BRIA outpaint, which is zero-drift by construction** (the
-  source's pixels are preserved as the central sub-region), so there is no drift to measure
-  while `SCALE_OUTWARD_RERENDER` is off — which it is by default. Only the medium-flip *fresh*
-  path can drift; before enabling `SCALE_OUTWARD_RERENDER`, run an **N≥10 A/B** reusing the
-  `coherence_runner` harness (`make eval-coherence`) — the design's risk #1 — and keep the flag
-  off until the number justifies it. Not run here (paid; needs a live session + keys).
+- **OUTWARD coherence — CORRECTED BY A LIVE RUN.** The original design made the centered BRIA
+  outpaint the "zero-drift default" and the fresh `scale_parent` gen the risky gated path. A live
+  run on a Port Vallen engraving city map proved that **backwards**: the outpaint kept the source
+  pixels but painted a **photoreal** margin (an engraving poster floating in a real sea) because
+  the BRIA call sent no medium guidance — and even with a medium prompt it leaves the source a
+  hard rectangle inset. The fresh `scale_parent` path produced a **seamless wider engraving map**
+  (the city a small sub-region of a coherent region). So the ascend branch now **defaults to the
+  fresh `scale_parent` container** (no `SCALE_OUTWARD_RERENDER` gate — it's the good path); the
+  centered outpaint is **opt-in via `SCALE_OUTWARD_OUTPAINT`** and now **steers its margin with
+  the source's medium** so it isn't photoreal. Proof images in `~/Desktop/ofb-outward-demo/`.
+- **Drift A/B — the runner stands, reframed.** `make eval-outward-drift` scores both containers'
+  medium-faithfulness to the source (the default fresh vs the opt-in outpaint); run it (paid,
+  N≥10) before trusting the outpaint alternative. Single-hop fresh is now the live-verified
+  default; compounding drift across MANY hops is still the design's risk #1 to watch.
 
 ---
 
