@@ -292,3 +292,69 @@ async def expand_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+# B2 OUTWARD: per-hop visual-zoom clamp. The metric span follows the scale ladder
+# independently; a big metric jump inserts intermediate rungs upstream rather than
+# cramming many orders of magnitude into one outpaint.
+_ZOOMOUT_FACTOR_MIN = 1.5
+_ZOOMOUT_FACTOR_MAX = 4.0
+
+
+def _clamp_zoom_factor(factor: float) -> float:
+    return max(_ZOOMOUT_FACTOR_MIN, min(_ZOOMOUT_FACTOR_MAX, factor))
+
+
+def _zoomout_args_for(
+    image_url: str, factor: float, width: int, height: int
+) -> dict[str, Any]:
+    """OUTWARD: the source CENTERED on a `factor`x larger canvas, full margin
+    painted on ALL sides — so it becomes the recognizable central sub-region of a
+    wider view of the same world. Contrast `_expand_args_for`, which pins the
+    original to one EDGE for a directional map-pan."""
+    cw, ch = int(width * factor), int(height * factor)
+    loc = [(cw - width) // 2, (ch - height) // 2]
+    return {
+        "image_url": image_url,
+        "canvas_size": [cw, ch],
+        "original_image_size": [width, height],
+        "original_image_location": loc,
+    }
+
+
+async def expand_image_zoomout(
+    image_data_url: str,
+    factor: float = 3.0,
+    width: int = 1600,
+    height: int = 900,
+    model_override: str | None = None,
+) -> GeneratedImage:
+    """OUTWARD / zoom-out (B2): paint the CONTAINER around the source — the source
+    centered on a `factor`x larger canvas with the full margin outpainted, so it
+    becomes the central sub-region of a wider frame of the SAME world (style is
+    conserved by construction: the original pixels stay). Same BRIA machinery as
+    `expand_image`; only the canvas is centered, not edge-pinned. `factor` is
+    clamped to ~1.5-4x per hop."""
+    from obs import span
+
+    _ensure_fal_key()
+    model = (
+        model_override
+        or os.environ.get("FAL_OUTPAINT_MODEL")
+        or EXPAND_MODEL_DEFAULT
+    )
+    f = _clamp_zoom_factor(factor)
+    # BRIA needs the parent's REAL pixel size or it rescales/seams the original.
+    w, h = _dims_from_data_url(image_data_url) or (width, height)
+    image_url = await to_fal_url(image_data_url)
+    async with span("image.zoomout", model=model, factor=f, w=w, h=h) as ctx:
+        result = await _fal_subscribe(model, _zoomout_args_for(image_url, f, w, h))
+        image_info = _expand_first_image(result)
+        jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        ctx["bytes"] = len(jpeg_bytes)
+    return GeneratedImage(
+        jpeg_bytes=jpeg_bytes,
+        mime_type=mime,
+        model=model,
+        provider_request_id=str(result.get("requestId") or "") or None,
+    )

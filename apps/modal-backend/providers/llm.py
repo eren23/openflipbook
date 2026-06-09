@@ -1040,6 +1040,18 @@ def _render_base_instruction(render_mode: str | None) -> str:
             "map and not a scene), facts (3-6 named sub-areas or landmarks shown "
             "on the map). Do not include any text outside the JSON."
         )
+    if rmode == "scale_parent":
+        return (
+            "You design the WIDER VIEW that CONTAINS this place — one scale step "
+            "OUT (a city as one district of its region; a planet as one dot in its "
+            "star system). Return JSON with keys: page_title (<=8 words, the "
+            "container's name), prompt (<=120 words describing the containing "
+            "frame, with the SOURCE placed as a small but recognizable sub-region "
+            "near its centre — the EXACT same palette, art medium and style, a "
+            "wider view of the SAME world and NOT a new invention), facts (3-6 "
+            "named sibling areas or landmarks that share this container). Do not "
+            "include any text outside the JSON."
+        )
     return (
         "You design a visual-explainer page for a given user query. Return "
         "JSON with keys: page_title (<=8 words, title case), prompt (<=120 "
@@ -1172,6 +1184,11 @@ async def plan_page(
     elif rmode == "place_submap":
         user_parts.append(
             "Draw the district map. Keep the labels readable at 1280x720."
+        )
+    elif rmode == "scale_parent":
+        user_parts.append(
+            "Draw the containing frame with the source as a small central "
+            "sub-region. Keep the same art medium; readable at 1280x720."
         )
     else:
         user_parts.append(
