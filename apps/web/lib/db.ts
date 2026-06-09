@@ -128,6 +128,9 @@ export interface NodeDoc extends Document {
 }
 
 export interface NodeInsert {
+  // Optional caller-supplied id (default: a fresh UUID). Lets the OUTWARD reparent
+  // build the new parent's self-referential scene_view.node_id before inserting.
+  id?: string;
   parent_id: string | null;
   session_id: string;
   query: string;
@@ -196,7 +199,7 @@ export function toRow(doc: NodeDoc): NodeRow {
 export async function insertNode(n: NodeInsert): Promise<NodeRow> {
   const collection = await nodes();
   const doc: NodeDoc = {
-    _id: crypto.randomUUID(),
+    _id: n.id ?? crypto.randomUUID(),
     parent_id: n.parent_id,
     session_id: n.session_id,
     query: n.query,
@@ -222,6 +225,30 @@ export async function getNode(id: string): Promise<NodeRow | null> {
   const collection = await nodes();
   const doc = await collection.findOne({ _id: id });
   return doc ? toRow(doc) : null;
+}
+
+/** Re-root a CURRENT ROOT under a synthesized parent — the ONLY mutate path on the
+ *  nodes collection, for the OUTWARD reparent. A single-field `$set` on one doc,
+ *  atomic in Mongo, **guarded on `parent_id: null`** so it only ever re-points a
+ *  root: a concurrent double-ascend that already re-rooted this node loses the race
+ *  (`matchedCount === 0`) instead of stacking a second parent. Returns whether it
+ *  matched. Deliberately narrow (parent_id only) so it can't rewrite arbitrary
+ *  topology or invert an interior edge. */
+export async function updateNodeParent(id: string, parentId: string | null): Promise<boolean> {
+  const collection = await nodes();
+  const res = await collection.updateOne(
+    { _id: id, parent_id: null },
+    { $set: { parent_id: parentId } },
+  );
+  return res.matchedCount === 1;
+}
+
+/** Delete a node by id — used only to roll back an orphaned parent P when an
+ *  OUTWARD reparent aborts after inserting P but before re-pointing the child. */
+export async function deleteNode(id: string): Promise<boolean> {
+  const collection = await nodes();
+  const res = await collection.deleteOne({ _id: id });
+  return res.deletedCount === 1;
 }
 
 export interface ListNodesResult {

@@ -478,6 +478,93 @@ async def _event_stream(
             )
             return
 
+        # OUTWARD / zoom-out (SCALE_LADDER_NAV + SCALE_OUTWARD): synthesize the
+        # CONTAINER that holds the current root and stream it back as `ascend_ready`
+        # — the web /ascend route persists the reparent. Isolated like edit/expand:
+        # returns early, never touches the tap/query single-`final` path below.
+        if body.mode == "ascend":
+            if not (env_flag("SCALE_LADDER_NAV") and env_flag("SCALE_OUTWARD")):
+                yield _sse(
+                    {"type": "error", "message": "OUTWARD disabled (SCALE_LADDER_NAV+SCALE_OUTWARD)"},
+                    trace_id,
+                )
+                return
+            if not body.image:
+                yield _sse(
+                    {"type": "error", "message": "ascend mode requires an image"}, trace_id
+                )
+                return
+            from_tier = (body.scene_view.scale_tier if body.scene_view else None) or "city"
+            to_tier = model_router.coarser_tier(from_tier)
+            if to_tier is None:
+                yield _sse(
+                    {"type": "error", "message": f"no coarser rung above '{from_tier}'"},
+                    trace_id,
+                )
+                return
+            op = model_router.select_outward_op(from_tier, to_tier)
+            _dims = {
+                "16:9": (1600, 900), "9:16": (900, 1600), "1:1": (1024, 1024),
+                "4:3": (1280, 960), "3:4": (960, 1280),
+            }
+            pw, ph = _dims.get(body.aspect_ratio, (1600, 900))
+            yield _sse({"type": "status", "stage": "rendering"}, trace_id)
+            await _abort_if_disconnected("pre-ascend")
+            try:
+                if op == "outpaint_zoomout":
+                    # Centered BRIA outpaint: the source becomes the central
+                    # sub-region of the wider frame — style conserved by construction.
+                    img = await image_edit_provider.expand_image_zoomout(
+                        body.image, 3.0, pw, ph
+                    )
+                    page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
+                    final_prompt = f"outward zoom: {from_tier} -> {to_tier} (centered outpaint)"
+                else:  # scale_parent_fresh — the medium-flip fresh path (riskier)
+                    if not env_flag("SCALE_OUTWARD_RERENDER"):
+                        yield _sse(
+                            {
+                                "type": "error",
+                                "message": f"medium-flip OUTWARD to '{to_tier}' needs SCALE_OUTWARD_RERENDER",
+                            },
+                            trace_id,
+                        )
+                        return
+                    style_lock = (body.session_style_anchor or "").strip() or None
+                    plan = await llm.plan_page(
+                        query=body.query or from_tier,
+                        web_search=False,
+                        style_anchor=style_lock,
+                        render_mode="scale_parent",
+                    )
+                    img = await image_provider.generate_image(
+                        plan.prompt, body.aspect_ratio, reference_urls=[body.image]
+                    )
+                    page_title = plan.page_title or to_tier.replace("_", " ").title()
+                    final_prompt = plan.prompt
+            except Exception as exc:
+                log("warn", "ascend.failed", error=f"{type(exc).__name__}: {exc}")
+                record_error("ascend", exc)
+                yield _sse({"type": "error", "message": f"ascend failed: {exc}"}, trace_id)
+                return
+            data_url = await _asyncio.to_thread(
+                image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
+            )
+            yield _sse(
+                {
+                    "type": "ascend_ready",
+                    "page_title": page_title,
+                    "image_data_url": data_url,
+                    "image_model": img.model,
+                    "prompt_author_model": "",
+                    "final_prompt": final_prompt,
+                    "scale_tier": to_tier,
+                    "from_tier": from_tier,
+                    "session_id": body.session_id,
+                },
+                trace_id,
+            )
+            return
+
         # Expand mode blooms the world AROUND the focal subject: propose a few
         # neighbouring subjects across scales (component/peer/container), then
         # generate their pages concurrently and stream one `neighbor` event per

@@ -72,6 +72,14 @@ def _tier_index(tier: str) -> int:
         return -1
 
 
+def coarser_tier(tier: str) -> str | None:
+    """The rung one step OUTWARD (coarser) on the ladder, or None if already at the
+    coarsest (universe) or the tier is unknown. The OUTWARD branch picks the target
+    rung with this."""
+    i = _tier_index(tier)
+    return _SCALE_LADDER[i - 1] if i > 0 else None
+
+
 def _is_medium_flip(from_tier: str, to_tier: str) -> bool:
     """A hop crosses the surface↔astronomical boundary when its COARSER endpoint is
     star_system or coarser — a planet surface becomes an orbital/starfield view,

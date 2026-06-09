@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WorldEntityGeo } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
-import { reparent } from "./scale-tree";
+import { reparent, reparentRoots } from "./scale-tree";
 import { type FrameNode, resolveAbsolutePos } from "./world-geometry";
 
 // Build a WorldEntityGeo with sensible defaults; override what a test cares about.
@@ -134,5 +134,43 @@ describe("scale-tree reparent (B2 OUTWARD)", () => {
   it("rejects an unknown root and a duplicate parent id", () => {
     expect(() => reparent(cityTree(), "nope", geo({ id: "p" }), NOW)).toThrow(/not in the entity set/);
     expect(() => reparent(cityTree(), "c", geo({ id: "a" }), NOW)).toThrow(/already exists/);
+  });
+});
+
+describe("scale-tree reparentRoots (the multi-root geo store)", () => {
+  it("re-points EVERY root under P, conserving all absolute positions", () => {
+    // A map seeded as several top-level roots (its buildings), one with an interior.
+    const before = [
+      geo({ id: "b1", pos: { x: 10, y: 10 }, scale_tier: "city" }),
+      geo({ id: "b2", pos: { x: 70, y: 40 }, scale: 0.3, scale_tier: "city" }),
+      geo({ id: "b2i", parent_id: "b2", pos: { x: 5, y: 5 } }), // interior of b2
+      geo({ id: "b3", pos: { x: 40, y: 55 }, scale_tier: "city" }),
+    ];
+    const beforeAbs = absMap(before);
+    const region = geo({
+      id: "p",
+      pos: { x: 30, y: 25 },
+      footprint: { w: 90, d: 60 },
+      scale_tier: "region",
+    });
+    const { geos: after, learnedScale } = reparentRoots(before, region, NOW);
+
+    expect(learnedScale).toBeCloseTo(tierMetricMultiplier("region", "city"), 12);
+    for (const id of ["b1", "b2", "b3"]) {
+      expect(after.find((g) => g.id === id)!.parent_id).toBe("p"); // every root -> P
+    }
+    expect(after.find((g) => g.id === "b2i")!.parent_id).toBe("b2"); // interior untouched
+    const afterAbs = absMap(after);
+    for (const id of ["b1", "b2", "b2i", "b3"]) {
+      expect(afterAbs.get(id)!.x).toBeCloseTo(beforeAbs.get(id)!.x, 9);
+      expect(afterAbs.get(id)!.y).toBeCloseTo(beforeAbs.get(id)!.y, 9);
+    }
+  });
+
+  it("rejects when there are no roots or the parent id already exists", () => {
+    expect(() =>
+      reparentRoots([geo({ id: "x", parent_id: "missing" })], geo({ id: "p" }), NOW),
+    ).toThrow(/no root/);
+    expect(() => reparentRoots(cityTree(), geo({ id: "c" }), NOW)).toThrow(/already exists/);
   });
 });

@@ -83,3 +83,11 @@ def test_resolve_model_outward_slots() -> None:
     # outpaint_zoomout reuses the BRIA slot; the medium-flip fresh op is tier-based.
     assert "bria" in (model_router.resolve_model("outpaint_zoomout") or "")
     assert model_router.resolve_model("scale_parent_fresh") is None
+
+
+def test_coarser_tier_steps_outward() -> None:
+    assert model_router.coarser_tier("city") == "region"
+    assert model_router.coarser_tier("region") == "world"
+    assert model_router.coarser_tier("place") == "district"
+    assert model_router.coarser_tier("universe") is None  # already the coarsest
+    assert model_router.coarser_tier("bogus") is None  # unknown rung
