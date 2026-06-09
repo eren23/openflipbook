@@ -366,6 +366,36 @@ def _sse(data: dict, trace_id: str | None = None) -> bytes:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
+_FRAME_DIMS: dict[str, tuple[int, int]] = {
+    "16:9": (1600, 900), "9:16": (900, 1600), "1:1": (1024, 1024),
+    "4:3": (1280, 960), "3:4": (960, 1280),
+}
+
+
+def _frame_dims(aspect_ratio: str) -> tuple[int, int]:
+    """Pixel (width, height) for an aspect-ratio slug; 16:9 default."""
+    return _FRAME_DIMS.get(aspect_ratio, (1600, 900))
+
+
+def _err_json(exc: Exception, trace_id: str, *, status: int = 502) -> JSONResponse:
+    """The endpoint error envelope shared by every handler. The caller still
+    record_error()s with its own label before returning this."""
+    return JSONResponse(
+        {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
+        status_code=status,
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
+def _gate_json(message: str, trace_id: str) -> JSONResponse:
+    """403 envelope for a disabled feature-flag gate."""
+    return JSONResponse(
+        {"error": message, "trace_id": trace_id},
+        status_code=403,
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
 async def _event_stream(
     body: GenerateBody,
     trace_id: str,
@@ -507,11 +537,7 @@ async def _event_stream(
                     trace_id,
                 )
                 return
-            _dims = {
-                "16:9": (1600, 900), "9:16": (900, 1600), "1:1": (1024, 1024),
-                "4:3": (1280, 960), "3:4": (960, 1280),
-            }
-            pw, ph = _dims.get(body.aspect_ratio, (1600, 900))
+            pw, ph = _frame_dims(body.aspect_ratio)
             style_lock = (body.session_style_anchor or "").strip() or None
             # DEFAULT = the fresh `scale_parent` container: a seamless wider view of
             # the SAME world in the SAME medium, the source as a small sub-region
@@ -606,14 +632,7 @@ async def _event_stream(
                     ("north", "Northward"),
                     ("south", "Southward"),
                 ]
-                _dims = {
-                    "16:9": (1600, 900),
-                    "9:16": (900, 1600),
-                    "1:1": (1024, 1024),
-                    "4:3": (1280, 960),
-                    "3:4": (960, 1280),
-                }
-                pw, ph = _dims.get(body.aspect_ratio, (1600, 900))
+                pw, ph = _frame_dims(body.aspect_ratio)
                 total = len(_dirs)
                 parent_image = body.image  # non-None (checked above); narrows for the closure
 
@@ -1498,11 +1517,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         )
     except Exception as exc:
         record_error("extract_entities", exc, node_id=body.node_id)
-        return JSONResponse(
-            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
-            status_code=502,
-            headers={"X-Trace-Id": trace_id},
-        )
+        return _err_json(exc, trace_id)
 
     # Localize the catalogued entities so the world map can seed and the overlay
     # can draw. The extractor's bbox is best-effort and often empty on dense
@@ -1641,11 +1656,7 @@ async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     if not _geometric_world_on():
-        return JSONResponse(
-            {"error": "geometric world disabled (set GEOMETRIC_WORLD=1)", "trace_id": trace_id},
-            status_code=403,
-            headers={"X-Trace-Id": trace_id},
-        )
+        return _gate_json("geometric world disabled (set GEOMETRIC_WORLD=1)", trace_id)
     log(
         "info",
         "edit_entities.request",
@@ -1662,11 +1673,7 @@ async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
         )
     except Exception as exc:
         record_error("edit_entities", exc, session_id=body.session_id)
-        return JSONResponse(
-            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
-            status_code=502,
-            headers={"X-Trace-Id": trace_id},
-        )
+        return _err_json(exc, trace_id)
     return JSONResponse(
         {
             "plan": {"edits": plan.edits, "blast_radius": plan.blast_radius},
@@ -1703,11 +1710,7 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody):
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     if not env_flag("WORLD_FROM_DESCRIPTION"):
-        return JSONResponse(
-            {"error": "describe-a-place disabled (set WORLD_FROM_DESCRIPTION=1)", "trace_id": trace_id},
-            status_code=403,
-            headers={"X-Trace-Id": trace_id},
-        )
+        return _gate_json("describe-a-place disabled (set WORLD_FROM_DESCRIPTION=1)", trace_id)
     log("info", "plan_world.request", session_id=body.session_id,
         description_len=len(body.description or ""), answers=len(body.answers))
     try:
@@ -1715,11 +1718,7 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody):
         result = solve_layout(graph)
     except Exception as exc:
         record_error("plan_world", exc, session_id=body.session_id)
-        return JSONResponse(
-            {"error": f"{type(exc).__name__}: {exc}", "trace_id": trace_id},
-            status_code=502,
-            headers={"X-Trace-Id": trace_id},
-        )
+        return _err_json(exc, trace_id)
     # Union the solver's mechanical questions (Layer B, blocking-first) with the
     # planner's (Layer A), deduped + capped at 2.
     questions = list(dict.fromkeys([*result.clarifiers, *graph.clarifiers]))[:2]
