@@ -1706,6 +1706,7 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody):
 
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers.geometry_checks import check_geo_entities
     from providers.layout_solver import solve_layout
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
@@ -1728,6 +1729,12 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody):
     if not result.blocked:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         solved = [{**g, "updated_at": now} for g in result.geos]
+        # Anchor: the solver is pure + golden-tested, but log any geometry
+        # invariant break in its output so a regression surfaces in traces.
+        geo_issues = check_geo_entities(solved)
+        if geo_issues:
+            log("warn", "plan_world.geo_issues", session_id=body.session_id,
+                count=len(geo_issues), issues=[str(i) for i in geo_issues][:8])
     return JSONResponse(
         {"graph": graph_dict, "solved": solved, "trace_id": trace_id},
         headers={"X-Trace-Id": trace_id},
