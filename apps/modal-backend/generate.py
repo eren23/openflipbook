@@ -210,21 +210,6 @@ def _condition_url_for_role(body: GenerateBody, role: str) -> str | None:
     return None
 
 
-def _negative_prompt_for(style_anchor: str | None) -> str | None:
-    """A medium-guard negative prompt, gated behind IMAGE_NEGATIVE_PROMPT (off by
-    default — fal nano-banana ignores it and a wrong schema can 422). Only the
-    pro/flux models actually honour it (see image._args_for). Returns None when
-    disabled or when there's no style to protect."""
-    if not style_anchor:
-        return None
-    if not env_flag("IMAGE_NEGATIVE_PROMPT", "false"):
-        return None
-    return (
-        "photorealistic, photograph, 3D render, octane render, CGI, "
-        "isometric line-art, flat vector, anime, cel-shaded"
-    )
-
-
 def _layout_clause_for(body: GenerateBody) -> str:
     """The geometry layout-constraint clause for this request, or "" when the
     geometry-gen flag is off or no expected layout was sent."""
@@ -628,7 +613,6 @@ async def _event_stream(
                     tier=body.image_tier,
                     model_override=body.image_model,
                     reference_urls=expand_cond_refs,
-                    negative_prompt=_negative_prompt_for(expand_style_lock),
                 )
                 return idx, neighbor, plan, img
 
@@ -967,7 +951,6 @@ async def _event_stream(
                     tier=body.image_tier,
                     model_override=body.image_model,
                     reference_urls=cond_refs,
-                    negative_prompt=_negative_prompt_for(style_anchor),
                 )
             )
         # Drive both tasks to completion. If the draft finishes first, emit

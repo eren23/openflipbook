@@ -111,28 +111,23 @@ def _args_for(
     prompt: str,
     aspect_ratio: str,
     reference_urls: list[str] | None = None,
-    negative_prompt: str | None = None,
 ) -> dict[str, Any]:
     if "seedream" in model:
-        # seedream is text-to-image only here — no reference conditioning, and it
-        # ignores negative_prompt.
+        # seedream is text-to-image only here — no reference conditioning.
         return {
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
         }
-    # nano-banana + nano-banana-pro both accept aspect_ratio directly, plus an
-    # optional `image_urls` list for multi-reference conditioning.
+    # nano-banana + nano-banana-pro accept aspect_ratio directly, plus an optional
+    # `image_urls` list. NOTE (verified via scripts/verify-fal-models.py): NO image
+    # model in use accepts `negative_prompt` (nano-banana, nano-banana-pro and
+    # flux-pro/kontext all omit it) — so we never send one; the MEDIUM LOCK in the
+    # prompt text is the model-agnostic style guard. Also: the text-to-image
+    # nano-banana schemas don't list `image_urls`, so refs are only reliably
+    # honoured on the edit/continue endpoints (kontext takes a singular image_url).
     args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
     if reference_urls and "nano-banana" in model:
         args["image_urls"] = reference_urls
-    # A negative prompt is honoured by nano-banana-pro and flux/kontext; base
-    # nano-banana and seedream ignore (or reject) it, so only attach it where it
-    # actually lands. Gated upstream behind IMAGE_NEGATIVE_PROMPT (off by default
-    # pending a fal-schema check).
-    if negative_prompt and (
-        "nano-banana-pro" in model or "flux" in model or "kontext" in model
-    ):
-        args["negative_prompt"] = negative_prompt
     return args
 
 
@@ -258,7 +253,6 @@ async def generate_image(
     tier: str | None = None,
     model_override: str | None = None,
     reference_urls: list[str] | None = None,
-    negative_prompt: str | None = None,
 ) -> GeneratedImage:
     from obs import span
 
@@ -294,7 +288,7 @@ async def generate_image(
         refs=len(fal_refs or []),
     ) as ctx:
         result = await _fal_subscribe(
-            model, _args_for(model, prompt, aspect_ratio, fal_refs, negative_prompt)
+            model, _args_for(model, prompt, aspect_ratio, fal_refs)
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
