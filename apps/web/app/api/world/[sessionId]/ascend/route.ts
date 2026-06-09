@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ScaleTier, SceneView, WorldEntityGeo } from "@openflipbook/config";
+import { tierTransitionValid } from "@openflipbook/config";
 
 import { deleteNode, getNode, insertNode, updateNodeParent } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
@@ -73,6 +74,20 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json(
       { error: "child is not a root (already ascended)", parent_id: child.parent_id },
       { status: 409 },
+    );
+  }
+
+  // INV-2 runtime guard (P6): an OUTWARD hop must land on a strictly coarser rung
+  // whose metric span agrees with the step. A mis-classified parent_tier (finer
+  // than the child, or metric-inconsistent) would corrupt the ladder — reject it
+  // here rather than persist a bad transition. tierTransitionValid was test-only
+  // until now (SESSION_AUDIT: "no runtime INV-2 enforcement").
+  if (child.scale_tier && !tierTransitionValid(child.scale_tier, body.parent_tier)) {
+    return NextResponse.json(
+      {
+        error: `invalid OUTWARD tier transition: ${child.scale_tier} -> ${body.parent_tier}`,
+      },
+      { status: 400 },
     );
   }
 
