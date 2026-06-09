@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  finerTier,
   SCALE_LADDER,
   SCALE_TIER_METERS,
   tierMetricMultiplier,
@@ -30,6 +31,13 @@ describe("scale ladder (B2 keystone)", () => {
   it("tierStep: DEEPER is +, OUTWARD is -", () => {
     expect(tierStep("city", "district")).toBe(1); // deeper (finer)
     expect(tierStep("city", "region")).toBe(-1); // outward (coarser)
+  });
+
+  it("finerTier steps one rung toward object and clamps there", () => {
+    expect(finerTier("city")).toBe("district");
+    expect(finerTier("place")).toBe("room");
+    expect(finerTier("room")).toBe("object");
+    expect(finerTier("object")).toBe("object"); // clamped at the finest
   });
 
   it("tierMetricMultiplier: city->region grows ~20x; region->city shrinks", () => {

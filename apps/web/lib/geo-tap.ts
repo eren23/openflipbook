@@ -6,6 +6,7 @@ import type {
   ViewLevel,
   WorldEntityGeo,
 } from "@openflipbook/config";
+import { finerTier } from "@openflipbook/config";
 
 import { routeClick, type ClickPoint } from "./click-route";
 import {
@@ -97,6 +98,13 @@ export function geoTapRequest(
   if (route.kind === "explainer") return null;
   const byId = new Map(map.entities.map((e) => [e.id, e]));
 
+  // DEEPER shares ONE ladder with OUTWARD: the entered view sits one rung FINER
+  // than the frame you tapped from (a tap = tierStep +1). Stamp it on the entered
+  // scene_view so a node's rung is consistent however it was reached. Optional —
+  // only when the source frame carries a rung (PR A seeds it).
+  const parentTier = currentView?.scale_tier ?? byId.get(route.focus_id ?? "")?.scale_tier ?? null;
+  const childTier = parentTier ? finerTier(parentTier) : undefined;
+
   // Tap on empty map area that still holds a cluster → stay in MAP mode + crop
   // the region (a sub-map), instead of entering a single place.
   if (route.kind === "submap") {
@@ -108,6 +116,7 @@ export function geoTapRequest(
         observer: null,
         map_crop: route.crop,
         focus_id: route.focus_id,
+        ...(childTier ? { scale_tier: childTier } : {}),
       },
       expected_layout: [],
       layout_entities: cropEntities(candidates.entities, route.crop),
@@ -146,6 +155,7 @@ export function geoTapRequest(
       // The place you entered: its geo id anchors the child frame the entered
       // scene's sub-entities seed into.
       focus_id: route.focus_id,
+      ...(childTier ? { scale_tier: childTier } : {}),
     },
     expected_layout: projectScene(layoutEntities, observer, aspect),
     layout_entities: layoutEntities,
