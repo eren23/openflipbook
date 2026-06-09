@@ -197,3 +197,12 @@ def test_wall_object_survives_a_central_clear_region() -> None:
         empty_regions=[EmptyRegion("circle", "the centre of the room kept open")],
     )
     assert solve_layout(g).blocked is False
+
+
+def test_solver_output_passes_geometry_invariants() -> None:
+    """The solver geos must satisfy the geometry invariants (the anchor guarding
+    the description->map output), not just the per-test shape asserts."""
+    from providers.geometry_checks import check_geo_entities
+
+    issues = check_geo_entities(solve_layout(_coffee_shop()).geos)
+    assert issues == [], f"solver output violates invariants: {[str(i) for i in issues]}"

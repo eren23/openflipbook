@@ -17,7 +17,7 @@
       "includeEntryExports": false
     },
     "scripts/record-demo": {
-      "entry": ["record.ts", "record-geo.ts", "record-geo-nav.ts"],
+      "entry": ["record.ts", "record-geo.ts", "record-geo-nav.ts", "record-mappan.ts"],
       "project": ["*.ts"]
     },
     "scripts/perfbudget": {

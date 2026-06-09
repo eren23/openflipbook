@@ -193,7 +193,7 @@ export function estimateGeoFromBBox(
       // -60deg oblique, ~0 looking straight down (where height-from-extent is
       // meaningless → the default floor kicks in).
       const foreshorten = Math.abs(Math.cos((pitchDeg * Math.PI) / 180));
-      // FIX A: the box WIDTH still reads as real ground width on an oblique map,
+      // The box WIDTH still reads as real ground width on an oblique map,
       // so derive footprint.w from it instead of a flat default; depth (toward
       // the camera) is foreshortened, so damp it off the width by cos(pitch).
       // Still relative, not metric — but a wide building no longer seeds at 6×6,
