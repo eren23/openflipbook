@@ -15,6 +15,14 @@ to 14 refs + identity). So the one model call to **change** is OUTWARD `scale_pa
 today it passes a ref through the text-to-image endpoint (a no-op) → route it through the edit
 endpoint (or drop the inert ref). [confirmed by code + fal docs]
 
+**Update (`07`, paid broad bakeoff):** tried the whole field — gpt-image-2, Recraft v4.1,
+Riverflow v2.5 vs the incumbents. The layout clause saturates fidelity for ALL of them (tight
+0.94–0.99), so effect is model-independent and the ratio is dominated by price. The current
+default `nano-banana-pro` is ~7× worse price/effect than the cheap-compliant models
+(riverflow-fast / seedream / gpt-image-2-low) at equal layout fidelity; `riverflow-v2.5-pro` leads
+on quality + medium (pilot it for the final render). Re-price the tiers; pay premium only on the
+final artifact; the label-legibility axis is the untested follow-up. Price-to-effect table in `07`.
+
 **Prompting** (`02`). The MEDIUM-LOCK *text* clause is the universal style workhorse (refs only
 bite on edit paths). Coordinate constraints should stay **coarse relative bins** (`h_pos`/`v_pos`/
 `size`), never raw `x_pct` — Gemini-class structured prompting reports >90% spatial compliance on
