@@ -2212,3 +2212,188 @@ async def edit_entities_nl(
         )
     edits = parse_entity_edits(parsed, valid_ids)
     return EditPlan(edits=edits, blast_radius=compute_blast_radius(edits, references))
+
+
+# ── Describe a place → a logical object world (WORLD_FROM_DESCRIPTION) ─────────
+# Parse a place description into a SceneGraph: STRUCTURE (entities + relations,
+# never coordinates) the deterministic layout_solver turns into geometry. Same
+# discipline as the NL-edit: one _complete_json call + a tolerant coercer that
+# drops malformed members and never raises.
+
+_PLAN_RELATIONS = {
+    "near", "on_wall", "behind", "in_front_of", "left_of", "right_of",
+    "inside", "on_top_of", "facing",
+}
+_WALL_WORDS = {
+    "north", "south", "east", "west", "back", "front", "left", "right",
+    "top", "bottom", "rear", "wall",
+}
+
+PLAN_WORLD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "place_label": {"type": "string"},
+        "place_kind": {"type": "string", "enum": list(ENTITY_KINDS)},
+        "bounds_hint": {"type": "object"},
+        "entities": {"type": "array", "items": {"type": "object"}},
+        "relations": {"type": "array", "items": {"type": "object"}},
+        "empty_regions": {"type": "array", "items": {"type": "object"}},
+        "clarifiers": {"type": "array", "items": {"type": "string"}},
+        "contradictions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["place_label", "entities"],
+}
+
+PLAN_WORLD_SYSTEM = (
+    "You read a description of a single PLACE and return its objects as STRUCTURE "
+    "— a JSON scene graph the layout engine turns into a 2D map. You NEVER output "
+    "coordinates. World sense: +x EAST, +y SOUTH (toward the viewer); 'behind' is "
+    "away from the viewer.\n\n"
+    'Return JSON exactly: {"place_label","place_kind","bounds_hint?",'
+    '"entities":[...],"relations":[...],"empty_regions":[...],"clarifiers":[...],'
+    '"contradictions":[...]}.\n'
+    '- entity: {"ref":<slug>,"kind":person|place|item|creature,"label":<short '
+    'name>,"visual":<ONE concrete sentence, <=25 words: materials, colour, form '
+    '— injected verbatim into the image prompt>,"footprint?":{"w","d"},'
+    '"height?":<n>,"count?":<n>}\n'
+    '- relation: {"subject":<ref>,"relation":near|on_wall|behind|in_front_of|'
+    'left_of|right_of|inside|on_top_of|facing,"object":<another ref OR a wall '
+    'side like "back_wall">,"gap?":<n>}\n'
+    '- empty_region: {"ref":<slug>,"note":<what is clear / reserved here>}\n\n'
+    "RULES:\n"
+    "1. RELEVANCE. Emit only objects the description NAMES or clearly IMPLIES by "
+    "function (a bar implies stools + bottles behind the counter). Do NOT pad the "
+    "place with generic scenery. Anything called empty / clear / open / reserved "
+    "becomes an empty_region — and you place NOTHING there.\n"
+    "2. PLACEMENT = RELATIONS ONLY. Express where each object is ONLY via "
+    "`relations` between refs. Never output x/y, grid cells or pixels — you do "
+    "not know the scale; the engine computes positions from your relations.\n"
+    "3. CHECK LOGIC, THEN ASK. Before finalizing, look for (a) physical "
+    "impossibilities (a window in a sealed underground vault; a door on a wall "
+    "you also called solid rock), (b) an object whose only sensible placement "
+    "needs a wall/anchor the description never gave, (c) more objects than the "
+    "place can hold. For each, add a SHORT question (<=8 words) to `clarifiers` "
+    "(AT MOST 2) and one line to `contradictions`. Do NOT invent a resolution to "
+    "a hard contradiction — leave it for the user. A merely-vague gap the engine "
+    "can default does NOT need a clarifier.\n"
+    "4. No prose, no markdown — JSON only."
+)
+
+
+def parse_scene_graph(payload: Any) -> Any:
+    """Coerce a planner reply into a SceneGraph. Tolerant: an entity missing
+    ref/label/visual or with an unknown kind is dropped; a relation whose subject
+    isn't a known entity ref, whose relation is unknown, or whose object resolves
+    to neither a known ref, a wall side, nor an empty region is dropped; clarifiers
+    capped at 2. Never raises — a weak completion degrades to a thinner graph."""
+    from .layout_solver import EmptyRegion, PlannedEntity, PlannedRelation, SceneGraph
+
+    if not isinstance(payload, dict):
+        payload = {}
+    kind = str(payload.get("place_kind", "place")).strip().lower()
+    if kind not in ENTITY_KINDS:
+        kind = "place"
+    bounds = payload.get("bounds_hint")
+    bounds_hint = None
+    if isinstance(bounds, dict) and _is_number(bounds.get("w")) and _is_number(bounds.get("h")):
+        bounds_hint = {"w": float(bounds["w"]), "h": float(bounds["h"])}
+
+    raw_entities = payload.get("entities")
+    entities: list[Any] = []
+    refs: set[str] = set()
+    for e in raw_entities if isinstance(raw_entities, list) else []:
+        if not isinstance(e, dict):
+            continue
+        ref = str(e.get("ref", "")).strip()
+        label = str(e.get("label", "")).strip()
+        visual = str(e.get("visual", "")).strip()
+        ekind = str(e.get("kind", "item")).strip().lower()
+        if not ref or not label or not visual or ekind not in ENTITY_KINDS or ref in refs:
+            continue
+        refs.add(ref)
+        fp = e.get("footprint")
+        footprint = None
+        if isinstance(fp, dict) and _is_number(fp.get("w")) and _is_number(fp.get("d")):
+            footprint = {"w": float(fp["w"]), "d": float(fp["d"])}
+        height = float(e["height"]) if _is_number(e.get("height")) else None
+        count = max(1, int(e["count"])) if _is_number(e.get("count")) else 1
+        entities.append(PlannedEntity(ref=ref, kind=ekind, label=label, visual=visual,
+                                      footprint=footprint, height=height, count=count))
+
+    raw_regions = payload.get("empty_regions")
+    empty_regions: list[Any] = []
+    region_refs: set[str] = set()
+    for r in raw_regions if isinstance(raw_regions, list) else []:
+        if not isinstance(r, dict):
+            continue
+        rref = str(r.get("ref", "")).strip()
+        note = str(r.get("note", "")).strip()
+        if not rref or not note:
+            continue
+        region_refs.add(rref)
+        approx = r.get("approx")
+        ap = None
+        if isinstance(approx, dict) and all(_is_number(approx.get(k)) for k in ("x", "y", "w", "h")):
+            ap = {k: float(approx[k]) for k in ("x", "y", "w", "h")}
+        empty_regions.append(EmptyRegion(ref=rref, note=note, approx=ap))
+
+    def _ok_object(o: str) -> bool:
+        if o in refs or o in region_refs:
+            return True
+        toks = o.lower().replace("_", " ").replace("-", " ").split()
+        return any(t in _WALL_WORDS for t in toks)
+
+    raw_relations = payload.get("relations")
+    relations: list[Any] = []
+    for rel in raw_relations if isinstance(raw_relations, list) else []:
+        if not isinstance(rel, dict):
+            continue
+        subj = str(rel.get("subject", "")).strip()
+        relation = str(rel.get("relation", "")).strip().lower()
+        obj = str(rel.get("object", "")).strip()
+        if subj not in refs or relation not in _PLAN_RELATIONS or not _ok_object(obj):
+            continue
+        gap = float(rel["gap"]) if _is_number(rel.get("gap")) else None
+        relations.append(PlannedRelation(subject=subj, relation=relation, object=obj, gap=gap))
+
+    def _strs(key: str, cap: int | None = None) -> list[str]:
+        v = payload.get(key, [])
+        out = [str(s).strip() for s in v if isinstance(s, str) and str(s).strip()] if isinstance(v, list) else []
+        return out[:cap] if cap is not None else out
+
+    return SceneGraph(
+        place_label=str(payload.get("place_label", "")).strip() or "the place",
+        place_kind=kind, bounds_hint=bounds_hint, entities=entities,
+        relations=relations, empty_regions=empty_regions,
+        clarifiers=_strs("clarifiers", 2), contradictions=_strs("contradictions"),
+    )
+
+
+async def plan_world_from_description(description: str, answers: list[str] | None = None) -> Any:
+    """Parse a place description into a SceneGraph (one text-LLM call + tolerant
+    parse). On a re-run, `answers` are appended so the planner resolves the prior
+    round's clarifiers; a malformed completion degrades to a thinner graph."""
+    from obs import span
+
+    user = f"Place description:\n{description.strip()}"
+    if answers:
+        joined = "\n".join(f"- {a.strip()}" for a in answers if a.strip())
+        if joined:
+            user += (
+                "\n\nThe user clarified (resolve these — they are no longer open "
+                f"questions):\n{joined}"
+            )
+    async with span("llm.plan_world", model=_text_model(online=False)) as ctx:
+        parsed = await _complete_json(
+            model=_text_model(online=False),
+            messages=[
+                _system_message(PLAN_WORLD_SYSTEM),
+                {"role": "user", "content": user},
+            ],
+            schema=PLAN_WORLD_SCHEMA,
+            schema_name="scene_graph",
+            temperature=0.0,
+            max_tokens=1600,
+            span_ctx=ctx,
+        )
+    return parse_scene_graph(parsed)
