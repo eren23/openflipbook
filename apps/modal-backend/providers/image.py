@@ -122,9 +122,12 @@ def _args_for(
     # `image_urls` list. NOTE (verified via scripts/verify-fal-models.py): NO image
     # model in use accepts `negative_prompt` (nano-banana, nano-banana-pro and
     # flux-pro/kontext all omit it) — so we never send one; the MEDIUM LOCK in the
-    # prompt text is the model-agnostic style guard. Also: the text-to-image
-    # nano-banana schemas don't list `image_urls`, so refs are only reliably
-    # honoured on the edit/continue endpoints (kontext takes a singular image_url).
+    # prompt text is the model-agnostic style guard. And the text-to-image nano
+    # endpoints accept `image_urls` but IGNORE it — an empirical test (a photoreal
+    # prompt + an engraving ref came back still-photoreal) confirms fresh-gen image
+    # conditioning is a no-op here; refs only bite on the edit/continue endpoints
+    # (nano-banana/edit takes image_urls, kontext a singular image_url). We still
+    # pass them (harmless, future-proof), but the prompt TEXT does the real work.
     args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
     if reference_urls and "nano-banana" in model:
         args["image_urls"] = reference_urls
