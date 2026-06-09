@@ -7,6 +7,53 @@ export type GenerateMode = "query" | "tap" | "edit" | "expand";
 // scale-level: component = -1, peer = 0, container = +1.
 export type ScaleKind = "component" | "peer" | "container";
 
+// ── Scale ladder (B2, SCALE_LADDER_NAV) ──────────────────────────────────────
+// An explicit, ordered, metric-anchored zoom axis: a node's COARSE absolute
+// "where on the zoom axis am I". Distinct from ScaleKind (relative:
+// component/peer/container) and from WorldEntityGeo.scale (fine metric: the size
+// of one unit of this frame). B2 navigation (OUTWARD/AROUND/DEEPER) moves along
+// this ladder; it EXTENDS the existing relative scale, never replaces it.
+export const SCALE_LADDER = [
+  "universe", "galaxy", "star_system", "planet",
+  "world", "region", "city", "district", "place", "room", "object",
+] as const;
+export type ScaleTier = (typeof SCALE_LADDER)[number];
+
+// Order-of-magnitude metric anchor (metres) per rung — the bridge that makes the
+// ladder metric-conserving. ~27 orders of magnitude end to end, so callers
+// store/compare in LOG space. `world` and `planet` share an anchor by design (a
+// "world" is a planet-surface framing); tierStep still separates them by index.
+export const SCALE_TIER_METERS: Record<ScaleTier, number> = {
+  universe: 8.8e26, galaxy: 9.5e20, star_system: 1.5e13, planet: 1.3e7,
+  world: 1.3e7, region: 3e5, city: 1.5e4, district: 1.5e3,
+  place: 1.2e2, room: 1.0e1, object: 1.0e0,
+};
+
+export function tierIndex(t: ScaleTier): number {
+  return SCALE_LADDER.indexOf(t);
+}
+// Signed index delta (universe=0 .. object=last). A finer target (toward
+// `object`, DEEPER) is +; a coarser target (toward `universe`, OUTWARD) is -.
+export function tierStep(from: ScaleTier, to: ScaleTier): number {
+  return tierIndex(to) - tierIndex(from);
+}
+// Per-transition metric multiplier = ratio of rung metres. OUTWARD (coarser)
+// is > 1 (region/city ~= 20x); DEEPER (finer) is < 1.
+export function tierMetricMultiplier(from: ScaleTier, to: ScaleTier): number {
+  return SCALE_TIER_METERS[to] / SCALE_TIER_METERS[from];
+}
+// INV-2: the metric span must move monotonically with the rung step — going
+// DEEPER (step > 0) shrinks it (multiplier <= 1), OUTWARD (step < 0) grows it
+// (multiplier >= 1); ==1 is allowed only between the deliberately-equal
+// world/planet rungs. A transition that violates this is a mis-classified rung
+// and must be rejected (don't persist; fall back).
+export function tierTransitionValid(from: ScaleTier, to: ScaleTier): boolean {
+  const step = tierStep(from, to);
+  if (step === 0) return true;
+  const m = tierMetricMultiplier(from, to);
+  return step > 0 ? m <= 1 : m >= 1;
+}
+
 // How a node relates to its parent: "descend" = went IN (a tap child, the
 // default), "expand" = bloomed OUT (a neighbour from mode:"expand").
 export type NodeRelation = "descend" | "expand";
