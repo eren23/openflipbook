@@ -178,6 +178,11 @@ class GenerateBody(BaseModel):
     world_mode: bool = False
     autonomy: str = "auto"
     render_mode: str | None = None
+    # B2 logical AROUND (SCALE_AROUND_LOGICAL): the same-scale neighbours the client
+    # already knows from geometry (to exclude) + the focus's rung, so the expand
+    # bloom proposes NEW peers at that scale. Ignored unless the flag is on.
+    known_neighbors: list[str] | None = None
+    around_tier: str | None = None
     # Geometric world (GEOMETRIC_WORLD): the scene's observer pose/level + the
     # geometry engine's expected per-entity layout for this frame.
     scene_view: SceneView | None = None
@@ -659,11 +664,14 @@ async def _event_stream(
             expand_world_context = [e.model_dump() for e in body.world_context]
             yield _sse({"type": "status", "stage": "planning"}, trace_id)
             await _abort_if_disconnected("pre-expand-plan")
+            around_on = env_flag("SCALE_AROUND_LOGICAL")
             neighbors = await llm.propose_neighbors(
                 image_data_url=body.image,
                 parent_title=body.parent_title or body.query,
                 parent_query=body.parent_query or body.query,
                 output_locale=body.output_locale,
+                known_neighbors=body.known_neighbors if around_on else None,
+                scale_tier=body.around_tier if around_on else None,
             )
             total = len(neighbors)
             if total == 0:

@@ -1633,12 +1633,20 @@ async def propose_neighbors(
     subject_context: str | None = None,
     output_locale: str | None = None,
     max_neighbors: int = 4,
+    known_neighbors: list[str] | None = None,
+    scale_tier: str | None = None,
 ) -> list[Neighbor]:
     """Survey the neighbourhood of a page's focal subject for "expand outward".
 
     Returns up to ``max_neighbors`` notable neighbouring subjects across scales
     (component / peer / container), each a good next page to bloom. Falls back
     to an empty list on parse failure — the caller just blooms nothing.
+
+    B2 logical AROUND (SCALE_AROUND_LOGICAL): when ``scale_tier`` /
+    ``known_neighbors`` are passed (the geometry the session already knows), the
+    survey is CONSTRAINED to NEW peers at the SAME scale, excluding what's mapped —
+    so the bloom is "more places like these", not an arbitrary cross-scale survey.
+    Both empty → today's exact behaviour (back-compat).
     """
     locale_clause = (
         f" Each `subject` MUST be written in language code '{output_locale}'."
@@ -1650,15 +1658,36 @@ async def propose_neighbors(
         if subject_context and subject_context.strip()
         else ""
     )
+    if scale_tier:
+        # Logical AROUND: same-scale peers only, excluding what's already mapped.
+        known = [n.strip() for n in (known_neighbors or []) if n and n.strip()]
+        known_clause = (
+            " These peers are ALREADY known — do NOT repeat them: "
+            + "; ".join(known[:12])
+            + "."
+            if known
+            else ""
+        )
+        survey_clause = (
+            f"Propose up to {max_neighbors} NEW subjects that are PEERS at the SAME "
+            f"scale ('{scale_tier}') — beside the focal subject, not larger or "
+            f"smaller — each a good next page to explore.{known_clause} Set every "
+            "`scale` to \"peer\". Do NOT repeat the focal subject itself."
+        )
+    else:
+        survey_clause = (
+            f"Propose up to {max_neighbors} notable NEIGHBOURING subjects: things "
+            "adjacent to it, larger things that contain it, and notable things it "
+            "is composed of — each of which would make a good next page to explore. "
+            "Favour variety across scales and do NOT repeat the focal subject "
+            "itself."
+        )
     system = (
         f"You examine an illustrated page titled '{parent_title}' (user query: "
         f"'{parent_query}'). The user wants to EXPAND OUTWARD — to see the "
         f"wider world this page's focal subject sits in.{context_clause} "
-        f"Propose up to {max_neighbors} notable NEIGHBOURING subjects: things "
-        "adjacent to it, larger things that contain it, and notable things it "
-        "is composed of — each of which would make a good next page to explore. "
-        "Favour variety across scales and do NOT repeat the focal subject "
-        "itself. Return JSON: {\"neighbors\": [{\"subject\": \"2-8 word noun "
+        + survey_clause
+        + " Return JSON: {\"neighbors\": [{\"subject\": \"2-8 word noun "
         "phrase\", \"scale\": \"component|peer|container\", \"note\": \"<=15 "
         "word reason it neighbours the focal subject\"}]}. `scale` is the "
         "neighbour's size relative to the focal subject: \"component\" (a part "

@@ -81,6 +81,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import { geoTapRequest, type GeoTapOverride } from "@/lib/geo-tap";
+import { selectNeighbors } from "@/lib/scale-neighbors";
 import { childrenOf } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
@@ -766,6 +767,15 @@ export default function PlayPage() {
       parent: page.imageDataUrl,
       style: styleRefUrl !== page.imageDataUrl ? styleRefUrl : null,
     });
+    // Logical AROUND (SCALE_AROUND_LOGICAL, server-gated): when you're INSIDE a
+    // place, ground the bloom in the same-scale neighbours the geometry already
+    // knows — pass them as exclusions + the focus's rung so the bloom proposes NEW
+    // peers at that scale. No focus (top-level map) → today's unconstrained bloom.
+    const focusId = page.sceneView?.focus_id ?? null;
+    const around =
+      worldEnabled && focusId
+        ? selectNeighbors(focusId, geoMap.entities, page.sceneView?.scale_tier ?? null)
+        : null;
     startBloom({
       query: page.query,
       aspect_ratio: "16:9",
@@ -785,6 +795,9 @@ export default function PlayPage() {
           }
         : {}),
       ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+      ...(around?.tier
+        ? { known_neighbors: around.known, around_tier: around.tier }
+        : {}),
     });
   }, [
     page,
