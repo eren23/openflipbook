@@ -149,12 +149,15 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  // 3. Commit: re-point C's node under P (atomic single-field $set).
+  // 3. Commit: re-point C's node under P (atomic single-field $set, guarded on C
+  //    still being a root). A concurrent ascend that already re-rooted C loses here
+  //    (matchedCount 0) → tidy this loser's orphan P node so it can't strand.
   const repointed = await updateNodeParent(body.child_node_id, pId);
   if (!repointed) {
+    await deleteNode(pId).catch(() => {});
     return NextResponse.json(
-      { error: "failed to re-point child (it may have been removed)", parent_node_id: pId },
-      { status: 500 },
+      { error: "child was concurrently reparented or removed", parent_node_id: pId },
+      { status: 409 },
     );
   }
 
