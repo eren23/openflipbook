@@ -110,6 +110,10 @@ export interface GenerateRequestBody {
   // frames"). Backend feeds this to plan_page as authoritative meaning so
   // ambiguous phrases stay in the parent's domain.
   prefetched_subject_context?: string;
+  // World Mode: the resolver's spatial-anchor note ("river to the south, the
+  // Citadel NE") carried back so the planner keeps the entered place's
+  // neighbours where the parent map had them. Mirrors GenerateBody.
+  prefetched_surroundings?: string;
   // Multi-turn refer (SAMA / MM-Conv): when the user rejects a resolved
   // subject and taps again nearby, the client forwards the rejected
   // phrase so the VLM picks something different next time.
@@ -796,13 +800,6 @@ export interface SceneGraph {
   empty_regions: EmptyRegion[];
   clarifiers: string[];
   contradictions: string[];
-}
-
-export interface PlanWorldRequestBody {
-  session_id: string;
-  description: string;
-  answers?: string[]; // replies to a prior round's clarifiers (re-run)
-  trace_id?: string;
 }
 
 export interface PlanWorldResponse {

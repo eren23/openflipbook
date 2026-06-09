@@ -115,7 +115,12 @@ def test_generate_body_carries_geo_round_trip_fields() -> None:
     (scene_view incl. focus_id, expected_layout) — the path the web proxy
     forwards verbatim. Guards against a future geo field being dropped here."""
     body_fields = set(generate.GenerateBody.model_fields.keys())
-    assert {"scene_view", "expected_layout"} <= body_fields
+    # Full field parity (not just a subset): the same drift class as the
+    # SceneView.focus_id bug also bites GenerateBody — a conditional spread on
+    # the TS sender bypasses excess-property checks, so tsc never flags a field
+    # present on the Pydantic mirror but missing from the source-of-truth
+    # interface. Assert the two field sets are equal so any divergence fails.
+    assert body_fields == _ts_interface_fields("GenerateRequestBody")
     body = generate.GenerateBody.model_validate(
         {
             "query": "q",
