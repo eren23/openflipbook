@@ -1,9 +1,11 @@
 """Integration tests for the OUTWARD (ascend) branch in generate.py.
 
-Drives the real `_event_stream` with mode="ascend" and the BRIA outpaint provider
-mocked — asserts the `ascend_ready` event (shape + target rung), the flag gate
-(off by default → refuses), the image requirement, the medium-flip guard, and
-that the additive branch leaves the tap/query `final` path intact.
+The DEFAULT path is the fresh `scale_parent` container (a seamless wider view of
+the same world in the same medium — live-verified far more coherent than the
+outpaint). The centered outpaint is OPT-IN via SCALE_OUTWARD_OUTPAINT, and now
+steers its painted margin with the medium so it isn't photoreal. These assert the
+flag gate, the default-fresh path, the opt-in medium-guided outpaint, the image
+requirement, and that the tap/query path is untouched.
 
 generate.py imports `modal` at module level (deploy-only); stub it before import.
 """
@@ -19,9 +21,12 @@ import pytest
 
 sys.modules.setdefault("modal", MagicMock())
 
+import providers.image as image_mod  # noqa: E402
 import providers.image_edit as image_edit_mod  # noqa: E402
+import providers.llm as llm_mod  # noqa: E402
 from generate import GenerateBody, SceneView, _event_stream  # noqa: E402
 from providers.image import GeneratedImage  # noqa: E402
+from providers.llm import PagePlan  # noqa: E402
 
 
 async def _collect(agen: Any) -> list[dict[str, Any]]:
@@ -37,7 +42,7 @@ async def _collect(agen: Any) -> list[dict[str, Any]]:
 
 def _ascend_body(**over: Any) -> GenerateBody:
     base: dict[str, Any] = {
-        "query": "Ankh-Morpork",
+        "query": "Port Vallen",
         "session_id": "s1",
         "mode": "ascend",
         "image": "data:image/jpeg;base64,abc",
@@ -53,19 +58,49 @@ def _enable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SCALE_OUTWARD", "1")
 
 
-async def test_ascend_outpaints_the_container(monkeypatch: pytest.MonkeyPatch) -> None:
+def _mock_fresh(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    monkeypatch.setattr(
+        llm_mod,
+        "plan_page",
+        AsyncMock(return_value=PagePlan("The Vallen Sea and Coastline", "a wider engraving map", [], [])),
+    )
+    gen = AsyncMock(
+        return_value=GeneratedImage(b"jpegbytes", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_mod, "generate_image", gen)
+    return gen
+
+
+async def test_ascend_fresh_container_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch)
-    img = GeneratedImage(b"jpegbytes", "image/jpeg", "fal-ai/bria/expand", "req-1")
-    mock = AsyncMock(return_value=img)
-    monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", mock)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    gen = _mock_fresh(monkeypatch)
+    outpaint = AsyncMock()
+    monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", outpaint)
 
     events = await _collect(_event_stream(_ascend_body(), "t1"))
     ready = next(e for e in events if e["type"] == "ascend_ready")
     assert ready["scale_tier"] == "region"  # one rung coarser than city
     assert ready["from_tier"] == "city"
-    assert ready["image_data_url"].startswith("data:image/jpeg;base64,")
+    assert ready["page_title"] == "The Vallen Sea and Coastline"
+    gen.assert_awaited_once()  # the fresh scale_parent container
+    outpaint.assert_not_awaited()  # NOT the outpaint
+
+
+async def test_ascend_outpaint_under_flag_steers_the_medium(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_OUTPAINT", "1")
+    img = GeneratedImage(b"jpegbytes", "image/jpeg", "fal-ai/bria/expand", "req-1")
+    mock = AsyncMock(return_value=img)
+    monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", mock)
+
+    body = _ascend_body(session_style_anchor="hand-drawn engraving, sepia ink, cross-hatching")
+    events = await _collect(_event_stream(body, "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
     assert ready["image_model"] == "fal-ai/bria/expand"
     mock.assert_awaited_once()
+    # The medium MUST reach BRIA, or the painted margin comes back photoreal.
+    assert "engraving" in (mock.await_args.kwargs.get("prompt") or "")
 
 
 async def test_ascend_gated_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,24 +118,8 @@ async def test_ascend_requires_an_image(monkeypatch: pytest.MonkeyPatch) -> None
     assert any(e["type"] == "error" and "requires an image" in e["message"] for e in events)
 
 
-async def test_ascend_medium_flip_needs_rerender_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    # planet → star_system is a medium flip; without SCALE_OUTWARD_RERENDER it refuses
-    # (the riskier fresh path stays off until the drift eval justifies it).
-    _enable(monkeypatch)
-    monkeypatch.delenv("SCALE_OUTWARD_RERENDER", raising=False)
-    body = _ascend_body(scene_view=SceneView(node_id="n0", level="map", scale_tier="planet"))
-    events = await _collect(_event_stream(body, "t1"))
-    assert any(
-        e["type"] == "error" and "SCALE_OUTWARD_RERENDER" in e["message"] for e in events
-    )
-
-
 async def test_query_mode_unaffected_by_ascend_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     # Regression: the additive ascend branch must not disturb the tap/query path.
-    import providers.image as image_mod
-    import providers.llm as llm_mod
-    from providers.llm import PagePlan
-
     _enable(monkeypatch)
     monkeypatch.setenv("PROGRESSIVE_DRAFT", "false")
     monkeypatch.setattr(
