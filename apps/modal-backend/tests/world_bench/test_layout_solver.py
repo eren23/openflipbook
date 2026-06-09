@@ -7,6 +7,8 @@ geometry golden — same input, same output.
 """
 from __future__ import annotations
 
+import math
+
 from providers.layout_solver import (
     EmptyRegion,
     PlannedEntity,
@@ -137,3 +139,34 @@ def test_solver_is_deterministic() -> None:
     b = solve_layout(_coffee_shop())
     assert a.geos == b.geos
     assert a.clarifiers == b.clarifiers
+
+
+def test_inside_sits_within_container_flat() -> None:
+    g = SceneGraph(
+        place_label="kitchen",
+        entities=[
+            PlannedEntity("cabinet", "item", "cabinet", "an oak cabinet", footprint={"w": 6, "d": 3}),
+            PlannedEntity("mug", "item", "mug", "a clay mug", footprint={"w": 1, "d": 1}),
+        ],
+        relations=[PlannedRelation("mug", "inside", "cabinet")],
+    )
+    res = solve_layout(g)
+    cab = _by_label(res.geos, "cabinet")[0]
+    mug = _by_label(res.geos, "mug")[0]
+    # nested prop shares its container's spot (not de-overlapped away); flat v1.
+    assert mug["pos"] == cab["pos"]
+    assert mug["parent_id"] is None
+
+
+def test_facing_heads_toward_the_object() -> None:
+    g = SceneGraph(
+        place_label="office",
+        entities=[
+            PlannedEntity("desk", "item", "desk", "a desk", footprint={"w": 6, "d": 3}),
+            PlannedEntity("chair", "item", "chair", "a chair", footprint={"w": 2, "d": 2}),
+        ],
+        relations=[PlannedRelation("chair", "facing", "desk")],
+    )
+    chair = _by_label(solve_layout(g).geos, "chair")[0]
+    # placed to the right of the desk -> faces WEST back at it (heading ~ ±pi).
+    assert abs(abs(chair["heading"]) - math.pi) < 0.1

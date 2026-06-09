@@ -157,8 +157,6 @@ def _is_wall(ref: str) -> bool:
 def _resolve_pos(it: dict, rels: list[PlannedRelation], by_ref: dict, first: dict,
                  w: float, h: float) -> tuple[float, float] | None:
     for rel in sorted(rels, key=lambda r: (r.relation, r.object)):
-        if rel.relation == "inside":
-            continue  # nesting, handled after placement
         if rel.relation == "on_wall" or _is_wall(rel.object):
             return _wall_pos(rel.object, it, w, h)
         obj = by_ref.get(first.get(rel.object, ""))
@@ -168,6 +166,12 @@ def _resolve_pos(it: dict, rels: list[PlannedRelation], by_ref: dict, first: dic
         ox, oy = obj["pos"]
         ow, od = obj["fp"]["w"], obj["fp"]["d"]
         iw, idp = it["fp"]["w"], it["fp"]["d"]
+        if rel.relation == "inside":
+            # Flat nesting (v1): sit within the container's footprint, same frame,
+            # exempt from de-overlap (a prop on a shelf, not a separate sub-world;
+            # true sub-frame nesting is deferred — see docs/PLAN_PLACE_TO_WORLD.md).
+            it["nested"] = True
+            return (ox, oy)
         if rel.relation == "behind":
             return (ox, oy - (od / 2 + idp / 2 + gap))
         if rel.relation == "in_front_of":
@@ -180,17 +184,21 @@ def _resolve_pos(it: dict, rels: list[PlannedRelation], by_ref: dict, first: dic
             it["elevation"] = obj["elevation"] + obj["height"]
             return (ox, oy)
         if rel.relation == "facing":
-            it["heading"] = math.atan2(oy - 0, ox - 0)  # placeholder; refined below
-            return (ox + (ow / 2 + iw / 2 + gap), oy)
+            # placed beside the object; heading points back AT it from there.
+            sx, sy = ox + (ow / 2 + iw / 2 + gap), oy
+            it["heading"] = math.atan2(oy - sy, ox - sx)
+            return (sx, sy)
         # "near" (and any default) — nearest free side, default right.
         return (ox + (ow / 2 + iw / 2 + gap), oy)
     return None
 
 
-def _de_overlap(insts: list[dict], reserved: list[tuple], w: float, h: float) -> None:
-    # Stacked items (elevation > 0, e.g. a lamp ON a desk) intentionally share
-    # their support's x/y — keep them out of 2D separation.
-    movable = [it for it in insts if it["pos"] is not None and not it["elevation"]]
+def _de_overlap(insts: list[dict], reserved: list[_Rect], w: float, h: float) -> None:
+    # Stacked items (elevation > 0, a lamp ON a desk) and nested items (a mug
+    # INSIDE a cabinet) intentionally share their support's x/y — keep them out
+    # of 2D separation.
+    movable = [it for it in insts
+               if it["pos"] is not None and not it["elevation"] and not it.get("nested")]
     for _ in range(20):
         moved = False
         for i in range(len(movable)):
@@ -217,6 +225,11 @@ def _de_overlap(insts: list[dict], reserved: list[tuple], w: float, h: float) ->
                     by += oy if by >= a["pos"][1] else -oy
                 b["pos"] = (_clamp(bx, b["fp"]["w"] / 2, w - b["fp"]["w"] / 2),
                             _clamp(by, b["fp"]["d"] / 2, h - b["fp"]["d"] / 2))
+                # Separation must never shove b into a declared-empty region —
+                # push it back out (the final solve check blocks if it's stuck).
+                for rr in reserved:
+                    if _intersects(_aabb(b["pos"], b["fp"]), rr):
+                        b["pos"] = _push_out(b["pos"], b["fp"], rr)
                 moved = True
         if not moved:
             break
@@ -241,26 +254,11 @@ def _push_out(pos: tuple, fp: dict, rr: tuple) -> tuple[float, float]:
     return (x, y)
 
 
-def _apply_nesting(insts: list[dict], graph: SceneGraph, by_ref: dict, first: dict) -> None:
-    for rel in graph.relations:
-        if rel.relation != "inside":
-            continue
-        sub = by_ref.get(first.get(rel.subject, ""))
-        cont = by_ref.get(first.get(rel.object, ""))
-        if sub is None or cont is None or cont["pos"] is None:
-            continue
-        sub["parent_id"] = f"geo_plan_{cont['ref'].split('#')[0]}"
-        # local pos inside the container's frame; container learns a scale.
-        sub["pos"] = (cont["fp"]["w"] / 2, cont["fp"]["d"] / 2)
-        extent = max(cont["fp"]["w"], cont["fp"]["d"], 1e-3)
-        cont["scale"] = _clamp(extent / extent, 1e-3, 10.0)  # 1.0 — interior == its own footprint
-
-
 def _emit(it: dict) -> dict[str, Any]:
     geo: dict[str, Any] = {
-        "id": f"geo_plan_{it['ref'].split('#')[0]}" if it["parent_id"] else f"geo_plan_{it['ref']}",
+        "id": f"geo_plan_{it['ref']}",  # `ref` carries the #n instance suffix -> unique
         "entity_id": None,
-        "parent_id": it["parent_id"],
+        "parent_id": None,  # flat v1: all objects share the place's frame
         "kind": it["kind"],
         "label": it["label"],
         "pos": {"x": round(it["pos"][0], 3), "y": round(it["pos"][1], 3)},
@@ -271,14 +269,10 @@ def _emit(it: dict) -> dict[str, Any]:
         "confidence": DERIVED_CONFIDENCE,
         "source": "derived",
     }
-    # geo_plan_<ref> must be unique per instance — keep the instance suffix.
-    geo["id"] = f"geo_plan_{it['ref']}"
     if it["elevation"]:
         geo["elevation"] = round(it["elevation"], 3)
     if it["heading"] is not None:
         geo["heading"] = round(it["heading"], 4)
-    if it.get("scale") is not None:
-        geo["scale"] = it["scale"]
     return geo
 
 
@@ -313,8 +307,7 @@ def solve_layout(graph: SceneGraph) -> SolveResult:
             insts.append({
                 "ref": ref, "base": e.ref, "kind": e.kind, "label": e.label,
                 "visual": e.visual, "fp": dict(fp), "height": height,
-                "elevation": 0.0, "heading": None, "parent_id": None,
-                "scale": None, "pos": None,
+                "elevation": 0.0, "heading": None, "pos": None,
             })
     by_ref = {it["ref"]: it for it in insts}
 
@@ -382,7 +375,6 @@ def solve_layout(graph: SceneGraph) -> SolveResult:
             blocked = True
             break
 
-    # 7. nesting + emit.
-    _apply_nesting(insts, graph, by_ref, first)
+    # 7. emit.
     geos = [_emit(it) for it in insts]
     return SolveResult(geos=geos, clarifiers=_dedupe(clar)[:2], blocked=blocked)
