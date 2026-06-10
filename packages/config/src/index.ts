@@ -97,6 +97,14 @@ export interface GenerateRequestBody {
   image_tier?: ImageTier;
   image_model?: string;
   edit_instruction?: string;
+  // Mask-scoped edit (EDIT_REGION; the backend gates it behind the env flag so
+  // it's a no-op until enabled). `edit_mask` is an opaque PNG data URL at the
+  // page's natural dims, WHITE = edit / black = keep (flux fill's native
+  // convention); `edit_region` is the drag selection that produced it,
+  // normalized to natural-image space — the mask drives the model, the box
+  // scopes the judge's inside crop. Absent -> the legacy whole-image edit.
+  edit_mask?: string;
+  edit_region?: { x: number; y: number; w: number; h: number };
   // BCP-47 short tag (e.g. "en", "tr", "ja"). When set, the planner +
   // click-resolver are instructed to emit titles, labels, and the click
   // subject in this language. Image labels render in-pixel via the model.
@@ -260,6 +268,17 @@ export interface GroundingSummary {
   iterations: number;
 }
 
+// The edit loop's verdict on a mask-scoped edit (EDIT_REGION): what the
+// critics saw on the kept attempt. Present on `final` only when the judged
+// inpaint path ran (image_op === "inpaint" and the inputs were judgeable).
+export interface EditVerdict {
+  alignment: number | null; // 0-10: the asked change landed (inside crop)
+  medium: number | null; // 0-10: the art medium held (style pair judge)
+  outside_change: number | null; // 0-1 pixel fraction beyond the mask (free diff)
+  attempts: number;
+  accepted: boolean; // false = best-effort keep-best, gates not all met
+}
+
 export interface GenerateFinalEvent {
   type: "final";
   image_data_url: string;
@@ -276,6 +295,8 @@ export interface GenerateFinalEvent {
   image_op?: string;
   // Geometric grounding summary — present only when VLM_GROUNDING was on.
   grounding?: GroundingSummary;
+  // Judged mask-scoped edit verdict — present only on the EDIT_REGION path.
+  edit_verdict?: EditVerdict;
   trace_id?: string;
 }
 

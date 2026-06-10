@@ -63,6 +63,17 @@ class Click(BaseModel):
     y_pct: float = Field(ge=0.0, le=1.0)
 
 
+class EditRegion(BaseModel):
+    """The drag-selected area of a mask-scoped edit (EDIT_REGION), normalized
+    to natural-image space. Mirrors `edit_region` on the TS request body; the
+    mask PNG is authoritative for the model, this box scopes the judge crop."""
+
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    w: float = Field(gt=0.0, le=1.0)
+    h: float = Field(gt=0.0, le=1.0)
+
+
 class WorldContextEntity(BaseModel):
     id: str
     kind: str
@@ -165,6 +176,12 @@ class GenerateBody(BaseModel):
     image_tier: str | None = None
     image_model: str | None = None
     edit_instruction: str | None = None
+    # Mask-scoped edit (EDIT_REGION, default off): an opaque PNG data URL at
+    # the page's natural dims, WHITE = edit / black = keep, plus the selection
+    # box that produced it. Absent -> the legacy whole-image edit path,
+    # byte-identical to today.
+    edit_mask: str | None = None
+    edit_region: EditRegion | None = None
     output_locale: str | None = None
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
@@ -631,6 +648,131 @@ async def _event_stream(
             # the edit so an edit can't drift the world's art medium.
             edit_style_lock = (body.session_style_anchor or "").strip() or None
             edit_style_ref = _condition_url_for_role(body, "style")
+            # Mask-scoped judged edit (EDIT_REGION, default off): the drag
+            # selection arrives as a white=edit mask PNG; flux fill repaints
+            # ONLY that region (the 2026-06-10 smoke: outside-mask pixels come
+            # back byte-identical) and the edit loop judges by construction —
+            # outside stability is a free pixel-diff, the inside gets the
+            # alignment + medium critics, one retry folds their rationales
+            # back in. Flag off or no mask -> the legacy whole-image path
+            # below, byte-identical to today.
+            if env_flag("EDIT_REGION") and body.edit_mask:
+                from providers import edit_loop, judge
+                from providers import inpaint as inpaint_provider
+                from providers.render_loop import data_url_bytes
+
+                described = await llm.polish_fill_description(
+                    instruction=raw_instruction,
+                    page_title=body.parent_title,
+                    style_anchor=edit_style_lock,
+                )
+                yield _sse(
+                    {
+                        "type": "status",
+                        "stage": "generating_image",
+                        "page_title": raw_instruction,
+                    },
+                    trace_id,
+                )
+                edit_mask: str = body.edit_mask
+
+                async def _render_inpaint(suffix: str) -> Any:
+                    instr = described if not suffix else f"{described}\n\n{suffix}"
+                    return await inpaint_provider.inpaint_image(
+                        image_data_url=body.image or "",
+                        mask_data_url=edit_mask,
+                        instruction=instr,
+                        model_override=body.image_model,
+                    )
+
+                source_bytes = data_url_bytes(body.image)
+                mask_bytes = data_url_bytes(body.edit_mask)
+                region_box = (
+                    (
+                        body.edit_region.x,
+                        body.edit_region.y,
+                        body.edit_region.w,
+                        body.edit_region.h,
+                    )
+                    if body.edit_region
+                    else None
+                )
+                verdict: dict[str, Any] | None = None
+                if source_bytes is None or mask_bytes is None:
+                    # Remote refs / undecodable inputs: no critic signal, so a
+                    # single un-judged shot (the loop's no-critic rule) — the
+                    # result is still mask-scoped by the model.
+                    log(
+                        "warn",
+                        "edit.loop.unjudged",
+                        reason="source_or_mask_not_data_url",
+                    )
+                    inp_result = await _render_inpaint("")
+                else:
+                    edit_cfg = edit_loop.edit_loop_config_from_env()
+                    edit_attempts: list[Any] = []
+                    # The alignment judge checks the inside crop against the
+                    # fill DESCRIPTION (the region's expected final content) —
+                    # a raw command like "remove the tower" isn't judgeable
+                    # against pixels, its described aftermath is.
+                    async for edit_att in edit_loop.iter_edit_attempts(
+                        _render_inpaint,
+                        source_bytes=source_bytes,
+                        mask_png=mask_bytes,
+                        region_box=region_box,
+                        judge_alignment=judge.score_prompt_alignment,
+                        judge_medium=judge.score_style_pair,
+                        instruction=described,
+                        config=edit_cfg,
+                        abort=_abort_if_disconnected,
+                    ):
+                        edit_attempts.append(edit_att)
+                        # Stream only verdict-REJECTED attempts (a correction
+                        # is coming); a degraded attempt is the final.
+                        if (
+                            not edit_att.accepted
+                            and edit_att.alignment is not None
+                            and edit_att.index + 1 < edit_cfg.max_attempts
+                        ):
+                            frame_b64 = (
+                                await _asyncio.to_thread(
+                                    base64.b64encode, edit_att.image.jpeg_bytes
+                                )
+                            ).decode("ascii")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "frame_index": edit_att.index,
+                                    "jpeg_b64": frame_b64,
+                                },
+                                trace_id,
+                            )
+                    edit_loop_result = edit_loop.conclude_edit(edit_attempts)
+                    inp_result = edit_loop_result.image
+                    best = edit_loop_result.best
+                    verdict = {
+                        "alignment": best.alignment.score if best.alignment else None,
+                        "medium": best.medium.score if best.medium else None,
+                        "outside_change": best.outside_change,
+                        "attempts": len(edit_attempts),
+                        "accepted": edit_loop_result.accepted,
+                    }
+                final_frame: dict[str, Any] = {
+                    "type": "final",
+                    "image_data_url": image_provider.encode_data_url(
+                        inp_result.jpeg_bytes, inp_result.mime_type
+                    ),
+                    "page_title": raw_instruction,
+                    "image_model": inp_result.model,
+                    "prompt_author_model": llm._text_model(online=False),
+                    "session_id": body.session_id,
+                    "final_prompt": described,
+                    "image_op": "inpaint",
+                }
+                if verdict is not None:
+                    final_frame["edit_verdict"] = verdict
+                yield _sse(final_frame, trace_id)
+                return
             polished = await llm.polish_edit_instruction(
                 instruction=raw_instruction,
                 page_title=body.parent_title,

@@ -1560,6 +1560,69 @@ async def polish_edit_instruction(
         return instruction
 
 
+async def polish_fill_description(
+    instruction: str,
+    page_title: str | None = None,
+    style_anchor: str | None = None,
+) -> str:
+    """Rewrite an edit COMMAND as a DESCRIPTION of the masked region's final
+    content — inpaint fills (flux-pro/v1/fill, the primary since the mask
+    smoke) paint what you describe, they don't follow commands. "add a red
+    balloon here" -> "a single bright red hot-air balloon floating over the
+    sea". Removals describe the background that should remain. The medium
+    lock is appended deterministically (fill takes no style ref image).
+
+    Unlike polish_edit_instruction there is no long-instruction skip: a
+    command stays a command however long it is — the register conversion IS
+    the point. LLM failure degrades to the raw instruction + medium lock.
+    """
+    instruction = instruction.strip()
+    if not instruction:
+        return instruction
+
+    def _locked(text: str) -> str:
+        if style_anchor:
+            return f"{text} In the existing art medium: {style_anchor}."
+        return text
+
+    client = _client()
+    system = (
+        "You convert an image-edit request into a description of what the "
+        "edited region should look like AFTER the edit, for an inpainting "
+        "model that repaints only that region. Describe the region's final "
+        "content — subjects, their look, how they sit in their surroundings "
+        "— never the operation: no imperative verbs like add, remove or "
+        "replace, and never mention what was there before. For removals, "
+        "describe the background that should remain. Aim for 10-30 words. "
+        "Return ONLY the description, no preamble."
+    )
+    context_parts = [f"Edit request: {instruction}"]
+    if page_title:
+        context_parts.append(f"Current page: {page_title}")
+    if style_anchor:
+        context_parts.append(f"Existing visual style to preserve: {style_anchor}")
+    user = "\n".join(context_parts)
+    from obs import span
+
+    text_model = _text_model(online=False)
+    try:
+        async with span("llm.polish_fill") as ctx:
+            response = await client.chat.completions.create(
+                model=text_model,
+                messages=[
+                    _system_message(system),
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.3,
+                max_tokens=120,
+            )
+            _log_cache_usage(ctx, response)
+        described = (response.choices[0].message.content or "").strip()
+        return _locked(described or instruction)
+    except Exception:
+        return _locked(instruction)
+
+
 async def precompute_click_candidates(
     image_data_url: str,
     parent_title: str,
