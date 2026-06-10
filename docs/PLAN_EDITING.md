@@ -12,7 +12,7 @@ predate everything we now know.
 | Full-image instruct edit (`mode:"edit"` + the page's edit box) | Shipped. `polish_edit_instruction` + `edit_image`, medium-locked since the style fix. | Whole-image only; un-judged (no verification the edit did what was asked or didn't wreck the rest); no region scope; history only implicitly via nodes. |
 | NL entity editor (codex → "move the lighthouse north") | Shipped (`/edit-entities`, GeoEditPanel, blast radius). | Edits the WORLD MODEL (coordinates) only — never the pixels. The two systems don't talk. |
 | Grounding repair (auto `add a X / move the Y`) | Shipped, flag-gated, system-driven. | Never user-triggerable; its `repair_instruction` machinery is exactly a "fix this" primitive going unused by humans. |
-| Inpaint | Declared only — `fal-ai/flux-pro/v1/fill` sits in `MODEL_SLOTS` with no provider function and no UI. Meanwhile `openai/gpt-image-2/edit` is wired AND its schema takes `mask_url` (verified 2026-06-10). | No mask path at all, no area selection. |
+| Inpaint | SMOKE-VERIFIED (2026-06-10, `tests/edit_bench/mask_smoke.py`): `fal-ai/flux-pro/v1/fill` is a true compositor — inside 0.395 changed, outside 0.0000, white=inpaint, dims kept. It is the PRIMARY. `openai/gpt-image-2/edit` accepts `mask_url` but repaints the whole canvas under every convention (outside 0.28/0.999/1.0; no-mask churn floor 0.089) — not an inpaint fallback. | Provider function + UI still to wire (E1). |
 | Region machinery | `cropRegion` (TS) / `crop_box` (py) ship for enter-conditioning. | Not exposed as a selection tool. |
 | The new assets (reuse these, don't rebuild) | `providers/judge.py` (5 judges incl. `score_prompt_alignment` + `score_feature_articulation`), `providers/render_loop.py` (critic-guided retries, keep-best, feedback clauses), `prompt_library` (medium locks, registers), `routeClick` (geo hit-test: we KNOW what you clicked). | — |
 
@@ -24,11 +24,12 @@ the selection → a MASK-scoped edit:
 - Frontend: selection overlay on the image (the `objectContainRect` +
   crop math already handle the coordinate mapping); build a mask PNG (white =
   selected) + send `mask_url` + the region crop + the instruction.
-- Backend: a real `inpaint` op — primary `openai/gpt-image-2/edit` with
-  `mask_url` (schema verified; BEHAVIOR needs one paid smoke before trusting),
-  fallback `fal-ai/flux-pro/v1/fill` (wire the provider function the slot has
-  been waiting for). Instruction through `polish_edit_instruction` + the
-  medium lock.
+- Backend: a real `inpaint` op — primary `fal-ai/flux-pro/v1/fill` (the
+  smoke settled it: a true compositor, outside-mask pixel-identical; gpt's
+  mask_url is decorative). Fill takes a DESCRIPTION of what fills the mask,
+  not an edit command — its own instruction register, + the medium lock.
+  No mask-honoring fallback exists; on fill failure degrade to the
+  whole-image edit path.
 - **Judged by construction**: outside-mask pixels stable (that's what masks
   are for — assert it with a cheap pixel-diff, no VLM needed), inside judged
   with `score_prompt_alignment` (did the asked change land?) + the medium
@@ -90,8 +91,9 @@ gpt-image-2 `mask_url` behavior smoke.
 E1 → E3 → E2 → E4, E5 built alongside E1 (the smoke gates everything).
 Per-feature kill-switch flags (the `ENTER_EDIT_REF`/`VIEW_LOOP` precedent),
 byte-identity for untouched paths, `make eval` green per commit, judged
-features get a bench before they get a default-on flag. Known unknowns to
-clear first: gpt-image-2 `mask_url` real behavior (one ~$0.5 smoke), mask
-coordinate mapping under object-contain letterboxing, and whether flux fill
-needs its own instruction register (research/10's family pattern says
-probably yes).
+features get a bench before they get a default-on flag. Known unknowns:
+~~gpt-image-2 `mask_url` real behavior~~ (RESOLVED 2026-06-10: decorative —
+fill is primary, see the inventory row), mask coordinate mapping under
+object-contain letterboxing (solved by the existing `objectContainRect`
+math), and flux fill DOES need its own instruction register — it's now the
+primary, so describe-what-fills-the-mask is the main path.

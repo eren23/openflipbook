@@ -24,7 +24,18 @@ NO_EDIT. The decision table:
   - all gpt arms are EDITED_EVERYWHERE or NO_EDIT -> flux-pro/v1/fill
     becomes primary (it composites; outside is pixel-identical).
 
-FINDINGS: not yet run — this docstring records the verdict after the run.
+FINDINGS (2026-06-10 run; reports/edit_mask_smoke.json + arm images):
+  - gpt-image-2/edit ACCEPTS mask_url but honors NO convention — every
+    masked arm regenerated the whole canvas (white: outside 0.278, black:
+    0.999, alpha: 1.0). Its no-mask control still churned 0.089 of the
+    canvas: even an unmasked "small edit" repaints everything slightly.
+  - flux-pro/v1/fill (white = inpaint) is a TRUE compositor: inside 0.395,
+    outside 0.0000 — pixel-identical beyond the selection, source dims
+    kept. PRIMARY INPAINT MODEL; the long-dormant MODEL_SLOTS["inpaint"]
+    default was right all along. White=edit is its native convention (no
+    mask adaptation needed) and EDIT_LOOP_OUTSIDE_MAX can sit tight (0.02).
+  - Consequence: there is no mask-honoring fallback model — if fill fails,
+    degrade to the whole-image edit path rather than pretend gpt confines.
 
 Usage:  cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 \
           .venv/bin/python -m tests.edit_bench.mask_smoke
