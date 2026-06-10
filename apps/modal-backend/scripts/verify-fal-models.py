@@ -11,6 +11,7 @@ why fresh-gen conditioning is best-effort):
                                                    NO negative_prompt, NO image_urls
   - nano-banana(-pro/-2)/edit:                     take image_urls (list) + aspect_ratio
   - flux-pro/kontext (edit/continue):              NO negative_prompt, takes image_url (singular)
+  - flux-pro/v1/fill (inpaint):                    image_url (singular) + mask_url, NO aspect_ratio
   - seedream v4 (text-to-image):                   text-only (image_size, no refs)
   - openai/gpt-image-2:                            image_size + quality, NO refs
   - openai/gpt-image-2/edit:                       image_urls (list) + image_size/quality/mask_url
@@ -40,11 +41,12 @@ SLUGS = [
     "fal-ai/nano-banana-2/edit",
     "fal-ai/bytedance/seedream/v4/text-to-image",
     "fal-ai/flux-pro/kontext",
+    "fal-ai/flux-pro/v1/fill",
     "fal-ai/bria/expand",
     "openai/gpt-image-2",
     "openai/gpt-image-2/edit",
 ]
-PROBE = ["prompt", "image_url", "image_urls", "negative_prompt", "aspect_ratio", "guidance_scale"]
+PROBE = ["prompt", "image_url", "image_urls", "mask_url", "negative_prompt", "aspect_ratio", "guidance_scale"]
 
 
 def input_props(schema: dict) -> set[str]:

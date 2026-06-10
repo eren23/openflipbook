@@ -8,3 +8,4 @@ uvicorn[standard]>=0.32
 python-dotenv>=1.0
 tenacity>=9.0
 sentry-sdk[fastapi]>=2.18
+Pillow>=10.0
