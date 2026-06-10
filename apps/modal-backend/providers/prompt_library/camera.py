@@ -30,7 +30,9 @@ _PROJECTION_LANGUAGE: dict[str, dict[str, str]] = {
             "Drawn in flat top-down plan view, looking straight down from "
             "directly overhead: every building seen roof-on, no facades "
             "visible, no horizon anywhere on the sheet, uniform scale across "
-            "the whole map."
+            "the whole map. Courtyards, baileys, plazas and other open-air "
+            "spaces stay OPEN — draw the structures inside them; never seal "
+            "an open compound under an invented roof."
         ),
         "negative": (
             "NO perspective, no isometric tilt, no vanishing point, no 3D depth."

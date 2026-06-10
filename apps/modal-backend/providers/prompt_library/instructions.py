@@ -146,7 +146,10 @@ def _transform_sentence(view: ViewSpec) -> str:
         return (
             "Redraw this exact place as a flat top-down plan map of it, "
             "closer in: looking straight down from directly overhead, every "
-            "structure seen roof-on, no facades visible, no horizon."
+            "structure seen roof-on, no facades visible, no horizon. "
+            "Courtyards and open baileys stay OPEN — draw the inner "
+            "structures within the walls; never seal an open compound under "
+            "an invented roof."
         )
     if proj == "oblique":
         pd = abs(float(view.get("pitch_deg") or 45.0))

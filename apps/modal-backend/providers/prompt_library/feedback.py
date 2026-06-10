@@ -22,10 +22,12 @@ def retry_feedback_clause(
     *,
     conformance_rationale: str | None = None,
     same_place_rationale: str | None = None,
+    detail_rationale: str | None = None,
     family: str | None = None,
 ) -> str:
     conf = _clean(conformance_rationale)
     same = _clean(same_place_rationale)
+    det = _clean(detail_rationale)
     parts: list[str] = []
     if conf:
         reminder = register_reminder(projection, family)
@@ -48,6 +50,19 @@ def retry_feedback_clause(
         text += (
             " It must remain recognisably the SAME place as the reference; "
             "only the camera changes."
+        )
+        parts.append(text)
+    if det:
+        text = (
+            "It also lost interior richness — the judge saw: "
+            f"{det}"
+        )
+        if not text.endswith("."):
+            text += "."
+        text += (
+            " Keep the place's internal structure fully articulated: open "
+            "courtyards stay open with their inner buildings drawn; do not "
+            "simplify or seal the compound."
         )
         parts.append(text)
     return " ".join(parts)

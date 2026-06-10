@@ -216,3 +216,32 @@ async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
         "Score how faithfully the image uses that projection (0-10)."
     )
     return await _ask_judge(system, user_text, [_image_block(image)])
+
+
+async def score_feature_articulation(
+    image: bytes, place_label: str, features: list[str]
+) -> JudgeResult:
+    """The richness critic — does the render ARTICULATE the place's interior
+    structure, or did it collapse into a sealed/simplified mass? Closes the
+    render loop's critic gap: a retry that fixed the projection while roofing
+    over the bailey scored 10/10 on the other axes (the Goodhart failure this
+    judge exists to catch)."""
+    named = "; ".join(f.strip() for f in features if f and f.strip())[:300]
+    system = (
+        "You judge STRUCTURAL RICHNESS of an illustrated place. Score 0-10 "
+        "how well the image articulates the place's internal structure: "
+        "courtyards and open compounds drawn OPEN with their inner buildings "
+        "visible, distinct sub-structures distinguishable, walls/gates/towers "
+        "individually drawn. 10 = richly articulated interior; 5 = the right "
+        "outline but the inside is mostly empty or generic; 0 = the place is "
+        "sealed into one simplified mass (e.g. a compound covered by a single "
+        "invented roof) or its interior is blank. Judge structure only — "
+        "ignore art style and camera angle."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        f'The place is "{place_label}".'
+        + (f" Expected interior features: {named}." if named else "")
+        + " Score how richly its internal structure is articulated (0-10)."
+    )
+    return await _ask_judge(system, user_text, [_image_block(image)])

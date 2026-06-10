@@ -218,3 +218,33 @@ async def test_run_view_loop_drains_and_concludes() -> None:
     )
     assert result.accepted is True and result.image.jpeg_bytes == b"b"
     assert len(result.attempts) == 2
+
+
+async def test_detail_axis_rejects_and_feeds_back() -> None:
+    # The critic-gap fix: a retry that fixes the camera but seals the interior
+    # is rejected; the feedback names the richness loss.
+    render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    conf = AsyncMock(return_value=_j(9.0))
+    same = AsyncMock(return_value=_j(9.0))
+    detail = AsyncMock(side_effect=[_j(3.0, "courtyard sealed under a roof"), _j(8.0)])
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=conf, judge_same_place=same, judge_detail=detail,
+        config=_cfg(),
+    )
+    assert len(attempts) == 2 and attempts[1].accepted
+    suffix = render.await_args_list[1].args[0]
+    assert "courtyard sealed under a roof" in suffix
+    assert "lost interior richness" in suffix
+    assert "open courtyards stay open" in suffix.lower()
+
+
+async def test_no_detail_judge_ignores_the_axis() -> None:
+    render = AsyncMock(return_value=_Img(b"a"))
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        config=_cfg(),
+    )
+    assert attempts[0].accepted and attempts[0].detail is None

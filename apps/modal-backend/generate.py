@@ -1431,6 +1431,19 @@ async def _event_stream(
                         style_ref_url=enter_style_ref,
                     )
 
+                # The richness critic: the named interior features (the
+                # planner's facts) must stay articulated across retries — a
+                # retry that fixes the camera but seals the bailey under an
+                # invented roof is REJECTED, not accepted (the critic gap a
+                # live regression exposed).
+                detail_features = [f for f in plan.facts if f and f.strip()]
+                detail_title = plan.page_title or effective_query
+
+                async def _judge_detail(img_bytes: bytes) -> Any:
+                    return await judge.score_feature_articulation(
+                        img_bytes, detail_title, detail_features
+                    )
+
                 loop_cfg = render_loop.loop_config_from_env()
                 loop_attempts: list[Any] = []
                 async for loop_att in render_loop.iter_attempts(
@@ -1440,6 +1453,7 @@ async def _event_stream(
                     judge_conformance=judge.score_view_conformance,
                     judge_same_place=judge.score_continuation,
                     config=loop_cfg,
+                    judge_detail=_judge_detail,
                     family=enter_family,
                     abort=_abort_if_disconnected,
                 ):

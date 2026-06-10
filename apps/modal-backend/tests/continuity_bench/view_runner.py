@@ -191,6 +191,11 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                     region_url, full, model_override=_m, style_ref_url=map_url
                 )
 
+            async def _judge_detail(
+                img: bytes, _label: str = case.place_label, _f: list[str] = case.facts
+            ) -> Any:
+                return await judge_mod.score_feature_articulation(img, _label, _f)
+
             loop_result = await render_loop.run_view_loop(
                 _render,
                 projection=_ARM_INTENT[arm],
@@ -198,6 +203,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 judge_conformance=judge_mod.score_view_conformance,
                 judge_same_place=judge_mod.score_continuation,
                 config=render_loop.LoopConfig(max_attempts=3),
+                judge_detail=_judge_detail,
             )
             for i, att in enumerate(loop_result.attempts):
                 (_REPORTS / f"view_{case.name}_{arm}_a{i}.jpg").write_bytes(
