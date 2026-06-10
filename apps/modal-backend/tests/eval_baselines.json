@@ -20,7 +20,14 @@
       "baseline": 2.33,
       "regression_band": 2.0,
       "n_min": 2,
-      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter)"
+      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter). 3-run history: +2.33, -1.0 (one noisy castle sample; goldens byte-identical), +2.33 — the band catches single bad samples by design"
+    },
+    "view_conformance": {
+      "metric": "intended_conformance_mean",
+      "baseline": 6.0,
+      "regression_band": 2.5,
+      "n_min": 2,
+      "source": "make eval-view 2026-06-10 (calibrated judge): per-arm reality from a top-down map crop — oblique 10.0, isometric 9.0 (the policy's auto registers: rock-solid), top_down/eye_level 2.5-6 across runs (nano-edit drifts to its aerial attractor on steep view changes ~half the time; the bench's eye_level case is harder than the product's interior-enter case). same_place floor 8.5-10 on every arm — no view change costs identity"
     }
   }
 }
