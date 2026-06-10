@@ -53,6 +53,7 @@ _SCRUB = (
     # View grammar (default ON — same hermeticity reasoning).
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",
+    "FAL_ENTER_MODEL_STEEP",
     "FAL_EDIT_TIER",
     "FAL_EDIT_MODEL_FAST",
     "FAL_EDIT_MODEL_BALANCED",

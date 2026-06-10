@@ -1307,7 +1307,12 @@ async def _event_stream(
         # oblique establishing / isometric / closer plan) instead of the old
         # hardcoded "ground level".
         enter_view = view_spec if image_op == "enter_scene" else None
-        enter_model_slug = body.image_model or model_router.resolve_model("enter_scene")
+        # Steep transforms route to the gpt family (view-bench A/B: eye_level
+        # 8.0 vs the nano family's 2.5 from an aerial source, same-place
+        # equal); aerial registers + the legacy no-view enter keep the slot.
+        enter_model_slug = body.image_model or model_router.select_enter_model(
+            str(enter_view.get("projection")) if enter_view else None
+        )
         enter_family = camera_lib.model_family(enter_model_slug)
         if enter_view is not None and enter_family == "kontext":
             # Kontext can't change projection (3.33/10 same-place on view
@@ -1385,24 +1390,23 @@ async def _event_stream(
                 )
             )
         elif use_enter_edit and enter_source is not None:
-            # Explicit per-request model wins (mirrors the continuation call);
-            # else the router's enter_scene slot (FAL_ENTER_MODEL override).
-            enter_model = body.image_model or model_router.resolve_model(
-                "enter_scene"
-            )
+            # ONE selection for both the instruction's family grammar and the
+            # dispatch: explicit per-request model > the steep-aware router
+            # pick (enter_model_slug, resolved above with the view).
             enter_style_ref = _condition_url_for_role(body, "style")
             log(
                 "info",
                 "tap.enter_edit",
-                model=enter_model,
+                model=enter_model_slug,
                 source="region" if region_ref else "parent_image",
                 style_ref=bool(enter_style_ref),
+                projection=(enter_view or {}).get("projection"),
             )
             main_task = _asyncio.create_task(
                 image_edit_provider.edit_image(
                     enter_source,
                     enter_instruction,
-                    model_override=enter_model,
+                    model_override=enter_model_slug,
                     style_ref_url=enter_style_ref,
                 )
             )

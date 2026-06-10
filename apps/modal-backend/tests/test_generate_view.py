@@ -295,3 +295,34 @@ async def test_eye_level_enter_keeps_layout_clause(
     instruction = edit.await_args.args[1]
     assert "eye level" in instruction  # tavern -> interior -> eye_level
     assert "SCENE LAYOUT" in instruction  # matching register: clause kept
+
+
+async def test_steep_enter_routes_to_gpt_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An interior (eye_level policy) enter must dispatch on the gpt-family
+    # model AND speak its change-first grammar; an establishing (oblique)
+    # enter keeps the nano slot.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+
+    await _collect(
+        _event_stream(
+            _tap_body(
+                prefetched_subject="The Dusty Tavern",
+                prefetched_subject_context="a low-beamed tavern interior",
+            ),
+            "t1",
+        )
+    )
+    assert edit.await_args.kwargs["model_override"] == "openai/gpt-image-2/edit"
+    assert edit.await_args.args[1].startswith("Change only the camera:")
+
+    edit.reset_mock()
+    await _collect(_event_stream(_tap_body(), "t1"))  # the castle -> oblique
+    from providers import model_router
+
+    assert edit.await_args.kwargs["model_override"] == model_router.resolve_model(
+        "enter_scene"
+    )
