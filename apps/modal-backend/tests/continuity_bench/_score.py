@@ -157,3 +157,62 @@ async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
     )
     user_text = f"Prompt:\n{prompt}\n\nScore the rendering on a 0-10 scale."
     return await _ask_judge(system, user_text, [_image_block(image)])
+
+
+async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
+    """Does the render actually use the INTENDED projection? (the view grammar's
+    conformance judge). Per-projection criteria spelled out so the judge can
+    discriminate the hard pair — isometric (parallel verticals, no vanishing
+    point) vs oblique perspective (the known iso failure mode, V1 finding 10)."""
+    # Calibrated to the PRODUCT promise, not pedantry (first live run scored a
+    # genuine castle PLAN 1.5 because map-convention side-view landmarks
+    # tripped "no facades"): hand-drawn cartography draws landmarks in
+    # elevation on plans, and the iso pill promises the game-art register, not
+    # strict axonometry. The hard fails stay hard: a ground-level or wholly
+    # tilted view can never pass top_down; ground/top-down can never pass iso.
+    criteria = {
+        "top_down": (
+            "a flat top-down PLAN view: the GROUND LAYOUT reads as a plan — "
+            "positions and footprints laid out as seen from straight above, "
+            "no horizon, no overall perspective tilt. Hand-drawn map "
+            "conventions are FINE and not violations: decorative side-view "
+            "landmark drawings, a compass rose, labels. Score low only when "
+            "the overall view itself is tilted, perspective, or ground-level"
+        ),
+        "oblique": (
+            "a high-angle oblique aerial view: clearly elevated and tilted "
+            "(roughly 30-60 degrees below horizontal), rooftops AND building "
+            "facades both visible, NOT straight down and NOT at ground level"
+        ),
+        "isometric": (
+            "an isometric-register illustration: an elevated three-quarter "
+            "game-art diorama view — rooftops and facades both visible, the "
+            "scene reads as a tilted parallel-ish projection. Ideal = strictly "
+            "parallel verticals with no vanishing point; minor perspective "
+            "convergence costs a point or two, NOT a failure. Score low only "
+            "when the view is ground-level, straight top-down, or a sweeping "
+            "wide-angle perspective"
+        ),
+        "eye_level": (
+            "a ground-level first-person view: camera at standing eye height "
+            "inside the scene, natural perspective with a visible horizon line, "
+            "near things large and far things small"
+        ),
+    }
+    want = criteria.get(projection, projection)
+    system = (
+        "You are a strict camera-projection judge for illustrations. Classify "
+        "the image's actual camera and score 0-10 how well it matches the "
+        "INTENDED projection. 10 = unmistakably the intended projection; 5 = "
+        "leaning the right way but compromised (e.g. perspective convergence "
+        "in a supposed isometric, facades visible in a supposed plan view); "
+        "0 = a different projection entirely. Judge geometry only — ignore "
+        "subject and art style."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one '
+        'short sentence naming the actual projection and pitch>"}.'
+    )
+    user_text = (
+        f"Intended projection: {projection} — {want}.\n"
+        "Score how faithfully the image uses that projection (0-10)."
+    )
+    return await _ask_judge(system, user_text, [_image_block(image)])

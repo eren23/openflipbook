@@ -30,6 +30,7 @@ _MODELS = {
     "WorldVec2": generate.WorldVec2,
     "ObserverPose": generate.ObserverPose,
     "MapCrop": generate.MapCrop,
+    "ViewSpec": generate.ViewSpec,
     "SceneView": generate.SceneView,
     "ProjectedEntity": generate.ProjectedEntity,
 }
@@ -108,6 +109,23 @@ def test_scene_view_observer_pose_round_trips() -> None:
     assert sv.observer.gaze == op["gaze"]
     assert sv.observer.pitch == op["pitch"]
     assert sv.observer.fov == op["fov"]
+
+
+def test_scene_view_view_spec_round_trips() -> None:
+    """The deliberate camera (view grammar) must survive validation by VALUE —
+    it is persisted on the node and restored on re-enter, so a user-pinned
+    projection can't silently degrade to the legacy hardcoded view."""
+    sv = generate.SceneView.model_validate(_FIXTURE["samples"]["SceneView"])
+    assert sv.view is not None
+    assert sv.view.projection == "eye_level"
+    assert sv.view.pitch_deg == -10
+    assert sv.view.azimuth_deg == 45
+    assert sv.view.camera_height == "eye"  # the qualitative register validates
+    assert sv.view.fov_deg == 90
+    assert sv.view.source == "user"
+    # Legacy nodes (no view) stay valid and default to None.
+    legacy = {k: v for k, v in _FIXTURE["samples"]["SceneView"].items() if k != "view"}
+    assert generate.SceneView.model_validate(legacy).view is None
 
 
 def test_generate_body_carries_geo_round_trip_fields() -> None:

@@ -183,6 +183,9 @@ async def test_enter_final_event_shows_edit_route(
 ) -> None:
     # The final event must make the route machine-checkable: the edit model,
     # the enter instruction as final_prompt, and the additive image_op key.
+    # (View grammar off: this test pins the ROUTING, not the camera wording —
+    # tests/test_generate_view.py owns the view-aware instruction content.)
+    monkeypatch.setenv("VIEW_GRAMMAR", "false")
     _mock_plan(monkeypatch)
     _mock_edit(monkeypatch)
     _mock_fresh(monkeypatch)

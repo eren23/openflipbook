@@ -1045,6 +1045,16 @@ export default function PlayPage() {
           level: "map",
           observer: null,
           map_crop: MAP_IMAGE_FRAME,
+          // The root map's camera is DELIBERATE: flat 2D top-down, stated in
+          // the prompt every render (the view grammar's locked default) —
+          // never the accidental half-2.5D drift again.
+          view: {
+            projection: "top_down",
+            pitch_deg: -90,
+            camera_height: "aerial",
+            azimuth_deg: 0,
+            source: "policy",
+          },
         },
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
@@ -1683,7 +1693,12 @@ export default function PlayPage() {
             return;
           }
           hint = detail.note;
-          geoOverride = { observer: detail.observer, level: detail.level };
+          geoOverride = {
+            observer: detail.observer,
+            level: detail.level,
+            // The projection pill (absent = auto: the backend policy decides).
+            ...(detail.view ? { view: detail.view } : {}),
+          };
         } else {
           const raw = await promptForHint(px2, py2);
           if (raw === null) {

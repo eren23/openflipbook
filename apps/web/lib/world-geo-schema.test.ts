@@ -8,6 +8,7 @@ import type {
   ObserverPose,
   ProjectedEntity,
   SceneView,
+  ViewSpec,
   WorldEntityGeo,
   WorldMapSnapshot,
   WorldVec2,
@@ -36,6 +37,14 @@ const observerPose: ObserverPose = {
   fov: 1.2,
 };
 const mapCrop: MapCrop = { x: 0, y: 0, w: 100, h: 60 };
+const viewSpec: ViewSpec = {
+  projection: "eye_level",
+  pitch_deg: -10,
+  azimuth_deg: 45,
+  camera_height: "eye",
+  fov_deg: 90,
+  source: "user",
+};
 const sceneView: SceneView = {
   node_id: "n1",
   level: "eye",
@@ -43,6 +52,7 @@ const sceneView: SceneView = {
   map_crop: null,
   focus_id: "g1",
   scale_tier: "city",
+  view: viewSpec,
 };
 const projectedEntity: ProjectedEntity = {
   id: "g1",
@@ -86,6 +96,7 @@ const witnesses: Record<string, unknown> = {
   WorldVec2: worldVec2,
   ObserverPose: observerPose,
   MapCrop: mapCrop,
+  ViewSpec: viewSpec,
   SceneView: sceneView,
   ProjectedEntity: projectedEntity,
   WorldEntityGeo: worldEntityGeo,

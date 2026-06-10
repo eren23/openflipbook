@@ -191,6 +191,39 @@ def project_scene(
     return out
 
 
+def project_top_down(
+    entities: list[ProjectInput], frame_w: float, frame_h: float
+) -> list[ProjectedEntity]:
+    """Top-down map projection — a line-for-line port of world-geometry.ts
+    projectTopDown (the map IS the image: screen position linear in the frame,
+    no observer). Lets the view eval compute CORRECT expected bins for
+    top_down/oblique arms instead of piping a perspective camera (the V1
+    red-team's invalid-probe finding); the TS twin remains the client's."""
+    out: list[ProjectedEntity] = []
+    for e in entities:
+        x_pct = e["pos"]["x"] / frame_w
+        y_pct = e["pos"]["y"] / frame_h
+        w_pct = e["footprint"]["w"] / frame_w
+        h_pct = e["footprint"]["d"] / frame_h
+        out.append(
+            {
+                "id": e["id"],
+                "label": e.get("label", ""),
+                "x_pct": x_pct,
+                "y_pct": y_pct,
+                "w_pct": w_pct,
+                "h_pct": h_pct,
+                # +y = south; list north-first for a stable reading order.
+                "depth": e["pos"]["y"],
+                "h_pos": _h_pos(x_pct),
+                "v_pos": _v_pos(y_pct),
+                "size": _size_bin(max(w_pct, h_pct)),
+            }
+        )
+    out.sort(key=lambda p: (p["depth"], p["id"]))
+    return out
+
+
 def crop_entities(
     entities: list[ProjectInput], crop: MapCrop
 ) -> list[ProjectInput]:

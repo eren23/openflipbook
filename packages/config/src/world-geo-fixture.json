@@ -5,11 +5,12 @@
     "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "scale", "scale_tier", "heading", "visual", "state", "confidence", "source", "updated_at"],
     "ObserverPose": ["pos", "eye_height", "gaze", "pitch", "fov"],
     "MapCrop": ["x", "y", "w", "h"],
-    "SceneView": ["node_id", "level", "observer", "map_crop", "focus_id", "scale_tier"],
+    "ViewSpec": ["projection", "pitch_deg", "azimuth_deg", "camera_height", "fov_deg", "source"],
+    "SceneView": ["node_id", "level", "observer", "map_crop", "focus_id", "scale_tier", "view"],
     "ProjectedEntity": ["id", "label", "x_pct", "y_pct", "w_pct", "h_pct", "depth", "h_pos", "v_pos", "size"],
     "WorldMapSnapshot": ["session_id", "entities", "bounds", "schema_version", "updated_at"]
   },
-  "shared_shapes": ["WorldVec2", "ObserverPose", "MapCrop", "SceneView", "ProjectedEntity"],
+  "shared_shapes": ["WorldVec2", "ObserverPose", "MapCrop", "ViewSpec", "SceneView", "ProjectedEntity"],
   "samples": {
     "WorldVec2": { "x": 10, "y": 20 },
     "WorldEntityGeo": {
@@ -32,13 +33,29 @@
     },
     "ObserverPose": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
     "MapCrop": { "x": 0, "y": 0, "w": 100, "h": 60 },
+    "ViewSpec": {
+      "projection": "eye_level",
+      "pitch_deg": -10,
+      "azimuth_deg": 45,
+      "camera_height": "eye",
+      "fov_deg": 90,
+      "source": "user"
+    },
     "SceneView": {
       "node_id": "n1",
       "level": "eye",
       "observer": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
       "map_crop": null,
       "focus_id": "g1",
-      "scale_tier": "city"
+      "scale_tier": "city",
+      "view": {
+        "projection": "eye_level",
+        "pitch_deg": -10,
+        "azimuth_deg": 45,
+        "camera_height": "eye",
+        "fov_deg": 90,
+        "source": "user"
+      }
     },
     "ProjectedEntity": {
       "id": "g1",

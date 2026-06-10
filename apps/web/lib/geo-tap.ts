@@ -4,6 +4,7 @@ import type {
   ProjectedEntity,
   SceneView,
   ViewLevel,
+  ViewSpec,
   WorldEntityGeo,
 } from "@openflipbook/config";
 import { finerTier } from "@openflipbook/config";
@@ -107,10 +108,13 @@ export function describeSurroundings(
  * Mode path. Pure: a thin compose over the tested routeClick + projectScene.
  */
 // A user-set view (from the click-detail popover) that overrides the pose +
-// level the click router would synthesize, before we enter.
+// level the click router would synthesize, before we enter. `view` is the
+// projection pill (2D plan / 2.5D iso / 3D eye): a pinned ViewSpec rides
+// scene_view to the backend, beating the view policy (source: "user").
 export interface GeoTapOverride {
   observer?: ObserverPose;
   level?: ViewLevel;
+  view?: ViewSpec;
 }
 
 export function geoTapRequest(
@@ -168,6 +172,7 @@ export function geoTapRequest(
         map_crop: route.crop,
         focus_id: route.focus_id,
         ...(childTier ? { scale_tier: childTier } : {}),
+        ...(override?.view ? { view: override.view } : {}),
       },
       expected_layout: [],
       layout_entities: cropEntities(candidates.entities, route.crop),
@@ -208,6 +213,8 @@ export function geoTapRequest(
       // scene's sub-entities seed into.
       focus_id: route.focus_id,
       ...(childTier ? { scale_tier: childTier } : {}),
+      // The projection pill (user-pinned camera) — beats the backend policy.
+      ...(override?.view ? { view: override.view } : {}),
     },
     expected_layout: projectScene(layoutEntities, observer, aspect),
     layout_entities: layoutEntities,

@@ -96,6 +96,11 @@ class ClickResolution:
     # object/concept to diagram). Drives the planner's render framing. Default
     # "explainer" keeps classic tap=learn behaviour for non-world callers.
     enter_as: str = "explainer"
+    # World Mode: the tapped place's FORM ("interior" | "complex" | "landscape"
+    # | "generic"), judged from the IMAGE so it is locale-proof — the view
+    # policy's strongest scene signal (beats the English word tables). Empty
+    # for classic callers / older payloads.
+    place_form: str = ""
     # Semi-autonomy: up to two short clarifying questions to ask before entering
     # (e.g. "Day or night?"). Empty in auto mode and in classic (non-world) mode.
     clarifiers: list[str] = field(default_factory=list)
@@ -455,6 +460,10 @@ CLICK_SCHEMA: dict[str, Any] = {
         },
         "scale": {"type": "string", "enum": ["component", "peer", "container"]},
         "enter_as": {"type": "string", "enum": ["scene", "submap", "explainer"]},
+        "place_form": {
+            "type": "string",
+            "enum": ["interior", "complex", "landscape", "generic"],
+        },
         "clarifiers": {"type": "array", "items": {"type": "string"}},
         "surroundings": {"type": "string"},
     },
@@ -773,6 +782,15 @@ async def click_to_subject(
             "south, a row of timbered houses to the west, a market square to the "
             "north-east\"). This anchors the entered place so its neighbours "
             "stay where they are. Empty string if nothing is discernible."
+            " (12) `place_form` — the tapped place's FORM, judged from the image "
+            "(not from the words, which may be in any language): \"interior\" = "
+            "a single enclosed volume you'd stand inside (a room, hall, tavern, "
+            "shop, workshop); \"complex\" = a multi-structure compound or "
+            "walkable outdoor area (a castle, campus, harbor, market square, "
+            "village); \"landscape\" = open terrain (a valley, coastline, "
+            "forest); \"generic\" = none of these / unclear. This picks the "
+            "entered view's camera (interior -> eye level; complex/landscape -> "
+            "a high establishing shot)."
         )
         if autonomy == "semi":
             world_clause += (
@@ -975,6 +993,9 @@ def _build_click_resolution(
     enter_as = str(parsed.get("enter_as", "")).strip().lower()
     if enter_as not in ("scene", "submap", "explainer"):
         enter_as = "explainer"
+    place_form = str(parsed.get("place_form", "")).strip().lower()
+    if place_form not in ("interior", "complex", "landscape", "generic"):
+        place_form = ""
     clarifiers_raw = parsed.get("clarifiers")
     clarifiers = (
         [c.strip() for c in clarifiers_raw if isinstance(c, str) and c.strip()][:2]
@@ -993,6 +1014,7 @@ def _build_click_resolution(
         bbox=bbox,
         scale=scale,
         enter_as=enter_as,
+        place_form=place_form,
         clarifiers=clarifiers,
         surroundings=surroundings,
     )

@@ -117,39 +117,28 @@ def build_zoom_instruction(
     page_title: str,
     facts: list[str],
     layout_clause: str = "",
+    *,
+    style_anchor: str | None = None,
+    view: dict | None = None,
+    family: str | None = None,
 ) -> str:
-    """Compose the Kontext zoom instruction from what the system already knows.
+    """Delegates to prompt_library.instructions (the body moved verbatim;
+    view=None is byte-identical to the pre-grammar string — pinned by
+    tests/test_image_continue.py + the frozen goldens). With a view, the
+    keep-camera fragment is spelled per projection in PRESERVE form."""
+    from typing import cast
 
-    The reference crop carries the *look* (walls, palette, layout); this text
-    carries the *content* the crop can't — the named sub-areas the planner found
-    inside (`facts`) and the geometry engine's placement clause — so the zoom
-    ELABORATES the place in finer detail instead of dumb-zooming the pixels.
-    Faithful-but-enhanced: keep the existing structures and style, reveal more
-    within them. Empty facts/clause (first enter, nothing seeded) degrade to a
-    plain faithful zoom — no dangling enumeration.
-    """
-    title = page_title.strip() or "this place"
-    text = (
-        f'Zoom into "{title}" — the area at the centre of this image — and draw a '
-        "closer, richer map of it. Keep the exact walls, buildings, towers and "
-        "landmarks the reference already shows, in the same hand-drawn engraving "
-        "style, palette and line work, from the SAME overhead map viewpoint; do "
-        "not reinvent them, restyle them, or switch to an eye-level or interior "
-        "view. As you move closer, elaborate them with finer architectural detail"
+    from providers.prompt_library import instructions as _instructions
+    from providers.prompt_library.types import ViewSpec as _ViewSpec
+
+    return _instructions.build_zoom_instruction(
+        page_title,
+        facts,
+        layout_clause,
+        style_anchor=style_anchor,
+        view=cast("_ViewSpec | None", view),
+        family=family,
     )
-    named = [f.strip() for f in facts if f and f.strip()]
-    if named:
-        # Worked in as features the map should SHOW, not text to write — Kontext
-        # renders label text as garble, and "label these" drags it into an
-        # interior scene. Atmospheric prose stays mood/detail, not a caption.
-        text += ", working in the features that belong here: " + "; ".join(named[:8])
-    text += (
-        ". A closer, faithful continuation of this exact map, not a new scene. "
-        "Keep any lettering sparse and legible — no garbled text."
-    )
-    if layout_clause.strip():
-        text += "\n\n" + layout_clause.strip()
-    return text.strip()
 
 
 def build_enter_instruction(
@@ -160,51 +149,31 @@ def build_enter_instruction(
     subject_context: str | None = None,
     surroundings: str | None = None,
     layout_clause: str = "",
+    view: dict | None = None,
+    family: str | None = None,
+    style_ref: bool = False,
 ) -> str:
-    """Compose the enter-edit instruction: a VIEW CHANGE that keeps the place.
+    """Delegates to prompt_library.instructions (the body moved verbatim;
+    view=None is byte-identical to the pre-grammar string). With a view, the
+    research/10 per-family skeleton applies — the hardcoded "ground level"
+    dies and the deliberate projection (eye_level / oblique / isometric /
+    top_down plan) is named instead."""
+    from typing import cast
 
-    The reference (the tapped region crop) carries the place's look — walls,
-    shapes, materials, palette; this text carries the move pixels can't show:
-    step from the overhead map to ground level INSIDE the same place. Fidelity
-    is the contract — the same architecture and landmarks the crop shows, seen
-    from within — not a fresh invention (the old text-to-image path, where refs
-    were a no-op) and not a plain zoom (the submap path). The medium clause is
-    load-bearing when FAL_ENTER_MODEL points at Kontext, which takes no second
-    style ref. Empty inputs degrade cleanly — no dangling separators.
-    """
-    title = page_title.strip() or "this place"
-    anchor = f'"{title}"'
-    if subject_context and subject_context.strip():
-        anchor += f" ({subject_context.strip()})"
-    text = (
-        f"Step INSIDE {anchor} — the place this image shows — and draw the view "
-        "from ground level within it. This is the SAME place seen from the "
-        "inside, not a new one and not the overhead map view: keep the exact "
-        "architecture, walls, towers, materials, colours and landmarks the "
-        "image shows, and reveal what they enclose"
+    from providers.prompt_library import instructions as _instructions
+    from providers.prompt_library.types import ViewSpec as _ViewSpec
+
+    return _instructions.build_enter_instruction(
+        page_title,
+        facts,
+        style_anchor=style_anchor,
+        subject_context=subject_context,
+        surroundings=surroundings,
+        layout_clause=layout_clause,
+        view=cast("_ViewSpec | None", view),
+        family=family,
+        style_ref=style_ref,
     )
-    named = [f.strip() for f in facts if f and f.strip()]
-    if named:
-        # Features to SHOW, not captions — same garble guard as the zoom path.
-        text += ", working in what belongs here: " + "; ".join(named[:8])
-    text += "."
-    if surroundings and surroundings.strip():
-        text += (
-            " Through openings and beyond the walls, keep the neighbours where "
-            f"the map placed them: {surroundings.strip()}"
-        )
-        if not text.endswith("."):
-            text += "."
-    text += " Keep the exact art medium of the reference"
-    if style_anchor and style_anchor.strip():
-        text += f" — {style_anchor.strip()} —"
-    text += (
-        " same palette and line work; NOT a photograph, no photorealism. "
-        "Keep any lettering sparse and legible — no garbled text."
-    )
-    if layout_clause.strip():
-        text += "\n\n" + layout_clause.strip()
-    return text.strip()
 
 
 async def continue_image(
