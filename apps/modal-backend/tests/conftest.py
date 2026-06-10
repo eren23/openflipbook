@@ -74,6 +74,15 @@ _SCRUB = (
     # Map-pan expand (outpaint the world outward).
     "EXPAND_MAP_PAN",
     "FAL_EXPAND_MODEL",
+    # B2 scale-ladder nav — the root .env turns these on for local demos; the
+    # OUTWARD edit-ref default is ON so scrubbing keeps the routing tests
+    # deterministic either way.
+    "SCALE_LADDER_NAV",
+    "SCALE_OUTWARD",
+    "SCALE_OUTWARD_OUTPAINT",
+    "SCALE_OUTWARD_EDIT_REF",
+    "SCALE_OUTWARD_RERENDER",
+    "SCALE_AROUND_LOGICAL",
     "SENTRY_DSN",
 )
 

@@ -575,11 +575,12 @@ async def _event_stream(
                         style_anchor=style_lock,
                         render_mode="scale_parent",
                     )
-                    if env_flag("SCALE_OUTWARD_EDIT_REF"):
+                    if env_flag("SCALE_OUTWARD_EDIT_REF", "true"):
                         # The source ref is a no-op on the text-to-image endpoint
                         # (research 01-model-bakeoff); the edit endpoint honors it, so
                         # the container continues the source's medium + content instead
-                        # of free-styling. Opt-in until the paid S4 A/B confirms the lift.
+                        # of free-styling. Default ON (kill-switch =false) — the inert
+                        # ref path exists only as the revert.
                         medium = style_lock or "the same hand-drawn art style as the centre"
                         img = await image_edit_provider.edit_image(
                             body.image,
