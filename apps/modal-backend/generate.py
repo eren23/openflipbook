@@ -1994,10 +1994,25 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                 ],
             },
             "view": view,
+            # C12: the estimator's read as a ViewSpec, ONLY when confident
+            # enough to become node truth (>= 0.7). The web extract route
+            # PATCHes it onto the node's scene_view.view (never over a user
+            # pin) so later zooms/ascends inherit the image's REAL projection.
+            "view_spec": (
+                _estimate_view_spec(cast("dict[str, object]", view))
+                if view is not None and float(view.get("confidence", 0.0)) >= 0.7
+                else None
+            ),
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},
     )
+
+
+def _estimate_view_spec(view: dict[str, object]) -> dict[str, object]:
+    from providers.prompt_library import policy as view_policy
+
+    return cast("dict[str, object]", view_policy.estimate_to_view_spec(view))
 
 
 @fastapi_app.post("/edit-entities")
