@@ -18,6 +18,10 @@ into the next fill description (edit_retry_feedback_clause); every attempt
 logged under "edit.loop". A judge failure degrades to single-attempt rather
 than blind re-rolls; an outside-gate breach alone still retries (the
 feedback names it) but pixel-diff itself failing stops the loop.
+
+mask_png=None is the WHOLE-IMAGE judged edit (E3): no confinement promise to
+assert, so the outside gate is simply not applicable — acceptance rides on
+alignment + medium alone and outside_change stays None throughout.
 """
 from __future__ import annotations
 
@@ -129,9 +133,11 @@ def _is_accepted(
     medium: JudgeResult | None,
     config: EditLoopConfig,
 ) -> bool:
-    if outside is None or alignment is None:
-        return False  # no signal — never "accepted", but also no retry
-    if outside > config.outside_change_max:
+    if alignment is None:
+        return False  # no critic signal — never "accepted", but also no retry
+    # outside=None means the gate isn't applicable (whole-image edit, no
+    # mask); a FAILED diff never reaches here (the loop stops first).
+    if outside is not None and outside > config.outside_change_max:
         return False
     if alignment.score < config.accept_alignment:
         return False
@@ -142,7 +148,7 @@ async def iter_edit_attempts[ImageT: Rendered](
     render: Callable[[str], Awaitable[ImageT]],
     *,
     source_bytes: bytes,
-    mask_png: bytes,
+    mask_png: bytes | None,
     region_box: tuple[float, float, float, float] | None,
     judge_alignment: Callable[[str, bytes], Awaitable[JudgeResult]],
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]],
@@ -180,19 +186,20 @@ async def iter_edit_attempts[ImageT: Rendered](
         outside: float | None = None
         alignment: JudgeResult | None = None
         medium: JudgeResult | None = None
-        try:
-            outside = changed_fraction(
-                source_bytes, image.jpeg_bytes, mask_png, invert_mask=True
-            )
-        except Exception as exc:
-            log(
-                "warn",
-                "edit.loop.diff_failed",
-                attempt=index,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            yield EditAttempt(index, image, suffix, None, None, None, False, latency)
-            return
+        if mask_png is not None:
+            try:
+                outside = changed_fraction(
+                    source_bytes, image.jpeg_bytes, mask_png, invert_mask=True
+                )
+            except Exception as exc:
+                log(
+                    "warn",
+                    "edit.loop.diff_failed",
+                    attempt=index,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                yield EditAttempt(index, image, suffix, None, None, None, False, latency)
+                return
         try:
             alignment = await judge_alignment(
                 instruction, inside_crop_bytes(image.jpeg_bytes, region_box)
@@ -214,7 +221,7 @@ async def iter_edit_attempts[ImageT: Rendered](
             "info",
             "edit.loop",
             attempt=index,
-            outside_change=round(outside, 4),
+            outside_change=round(outside, 4) if outside is not None else None,
             alignment=_score(alignment),
             medium=_score(medium),
             accepted=accepted,
@@ -237,7 +244,7 @@ async def iter_edit_attempts[ImageT: Rendered](
                 if medium is not None and medium.score < config.accept_medium
                 else None
             ),
-            outside_exceeded=outside > config.outside_change_max,
+            outside_exceeded=outside is not None and outside > config.outside_change_max,
         )
 
 
@@ -265,7 +272,7 @@ async def run_edit_loop[ImageT: Rendered](
     render: Callable[[str], Awaitable[ImageT]],
     *,
     source_bytes: bytes,
-    mask_png: bytes,
+    mask_png: bytes | None,
     region_box: tuple[float, float, float, float] | None,
     judge_alignment: Callable[[str, bytes], Awaitable[JudgeResult]],
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]],

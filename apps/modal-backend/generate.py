@@ -786,6 +786,99 @@ async def _event_stream(
                 },
                 trace_id,
             )
+            # Judged whole-image edits (EDIT_JUDGE, default off — E3): the same
+            # edit_loop as the mask path, minus the outside gate (no mask = no
+            # confinement promise): alignment judged on the full frame against
+            # the polished instruction + the medium critic vs the source, one
+            # rationale-folding retry, verdict on the final frame. Undecodable
+            # source (remote ref) falls through to the legacy un-judged call.
+            if env_flag("EDIT_JUDGE"):
+                from providers import edit_loop, judge
+                from providers.render_loop import data_url_bytes
+
+                judge_source = data_url_bytes(body.image)
+                if judge_source is not None:
+
+                    async def _render_judged_edit(suffix: str) -> Any:
+                        instr = polished if not suffix else f"{polished}\n\n{suffix}"
+                        return await image_edit_provider.edit_image(
+                            image_data_url=body.image or "",
+                            instruction=instr,
+                            tier=body.image_tier,
+                            model_override=body.image_model,
+                            style_ref_url=edit_style_ref,
+                        )
+
+                    judge_cfg = edit_loop.edit_loop_config_from_env()
+                    judged_attempts: list[Any] = []
+                    async for judged_att in edit_loop.iter_edit_attempts(
+                        _render_judged_edit,
+                        source_bytes=judge_source,
+                        mask_png=None,
+                        region_box=None,
+                        judge_alignment=judge.score_prompt_alignment,
+                        judge_medium=judge.score_style_pair,
+                        instruction=polished,
+                        config=judge_cfg,
+                        abort=_abort_if_disconnected,
+                    ):
+                        judged_attempts.append(judged_att)
+                        # Stream only verdict-REJECTED attempts (a correction
+                        # is coming); a degraded attempt is the final.
+                        if (
+                            not judged_att.accepted
+                            and judged_att.alignment is not None
+                            and judged_att.index + 1 < judge_cfg.max_attempts
+                        ):
+                            frame_b64 = (
+                                await _asyncio.to_thread(
+                                    base64.b64encode, judged_att.image.jpeg_bytes
+                                )
+                            ).decode("ascii")
+                            yield _sse(
+                                {
+                                    "type": "progress",
+                                    "frame_index": judged_att.index,
+                                    "jpeg_b64": frame_b64,
+                                },
+                                trace_id,
+                            )
+                    judged_result = edit_loop.conclude_edit(judged_attempts)
+                    judged_best = judged_result.best
+                    # The loop types images as the Rendered protocol; this is
+                    # the GeneratedImage our render closure returned.
+                    judged_image: Any = judged_result.image
+                    yield _sse(
+                        {
+                            "type": "final",
+                            "image_data_url": image_provider.encode_data_url(
+                                judged_image.jpeg_bytes,
+                                judged_image.mime_type,
+                            ),
+                            "page_title": raw_instruction,
+                            "image_model": judged_image.model,
+                            "prompt_author_model": llm._text_model(online=False),
+                            "session_id": body.session_id,
+                            "final_prompt": polished,
+                            "edit_verdict": {
+                                "alignment": (
+                                    judged_best.alignment.score
+                                    if judged_best.alignment
+                                    else None
+                                ),
+                                "medium": (
+                                    judged_best.medium.score
+                                    if judged_best.medium
+                                    else None
+                                ),
+                                "outside_change": judged_best.outside_change,
+                                "attempts": len(judged_attempts),
+                                "accepted": judged_result.accepted,
+                            },
+                        },
+                        trace_id,
+                    )
+                    return
             edit_result = await image_edit_provider.edit_image(
                 image_data_url=body.image,
                 instruction=polished,
