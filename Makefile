@@ -77,6 +77,15 @@ eval-style:
 #   make eval-outward-drift
 eval-outward-drift:
 	cd apps/modal-backend && OUTWARD_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.outward_runner
+# ENTER-consistency A/B: tap a landmark on a styled map and render the entered
+# scene the OLD way (fresh text-to-image, refs ignored) vs the NEW way (edit
+# endpoint on the region crop) → "same place?" judge vs the tapped region → the
+# LIFT. THE metric for cross-hop visual consistency. Optional extra arms:
+#   ENTER_BENCH_MODELS=fal-ai/flux-pro/kontext,openai/gpt-image-2/edit \
+#     make eval-enter-drift
+# PAID (fal gens + Gemini judge); self-contained, no session needed.
+eval-enter-drift:
+	cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
