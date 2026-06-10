@@ -17,11 +17,34 @@ Modules:
 """
 from __future__ import annotations
 
+from providers.prompt_library.camera import (
+    camera_clause,
+    gaze_to_compass,
+    keep_view_clause,
+    model_family,
+)
+from providers.prompt_library.instructions import (
+    build_enter_instruction,
+    build_zoom_instruction,
+    outward_clause,
+)
 from providers.prompt_library.layout import layout_constraints, repair_instruction
+from providers.prompt_library.policy import default_view, estimate_to_view_spec
+from providers.prompt_library.style import medium_lock
 from providers.prompt_library.types import ViewSpec
 
 __all__ = [
     "ViewSpec",
+    "build_enter_instruction",
+    "build_zoom_instruction",
+    "camera_clause",
+    "default_view",
+    "estimate_to_view_spec",
+    "gaze_to_compass",
+    "keep_view_clause",
     "layout_constraints",
+    "medium_lock",
+    "model_family",
+    "outward_clause",
     "repair_instruction",
 ]
