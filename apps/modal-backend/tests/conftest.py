@@ -47,6 +47,14 @@ _SCRUB = (
     # World Mode (tap enters a place; gated off by default).
     "WORLD_MODE",
     "FAL_CONTINUE_MODEL",
+    # Enter-via-edit (default ON — scrub so a host kill-switch can't silently
+    # flip the routing tests) + the edit-tier knobs it can interact with.
+    "ENTER_EDIT_REF",
+    "FAL_ENTER_MODEL",
+    "FAL_EDIT_TIER",
+    "FAL_EDIT_MODEL_FAST",
+    "FAL_EDIT_MODEL_BALANCED",
+    "FAL_EDIT_MODEL_PRO",
     # Geometric world model (numeric map, observer poses, grounded gen).
     "GEOMETRIC_WORLD",
     "WORLD_GEOMETRY_GEN",

@@ -271,6 +271,9 @@ export interface GenerateFinalEvent {
   // Web-search citations the planner used. Empty when web search is off
   // or the model returned none. Already domain-deduped, capped at ~3.
   sources?: Citation[];
+  // Which non-fresh image operation rendered this page ("zoom_continue",
+  // "enter_scene"). Absent on the fresh path — additive, backwards-compat.
+  image_op?: string;
   // Geometric grounding summary — present only when VLM_GROUNDING was on.
   grounding?: GroundingSummary;
   trace_id?: string;
