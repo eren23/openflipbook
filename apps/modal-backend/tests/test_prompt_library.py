@@ -408,3 +408,88 @@ def test_policy_ascend_and_estimator() -> None:
     est = policy.estimate_to_view_spec({"projection": "perspective", "pitch_deg": -5.0})
     assert est == {"projection": "eye_level", "pitch_deg": -5.0, "source": "estimated"}
     assert policy.estimate_to_view_spec({"projection": "junk"})["projection"] == "top_down"
+
+
+# --- coverage gap-fills (the branches the first batch missed) ----------------
+
+def test_camera_keep_view_helpers() -> None:
+    assert camera.keep_view_clause(None) == ""
+    assert camera.keep_view_fragment(None) == ""
+    assert "Maintain the identical" in camera.keep_view_clause({"projection": "oblique"})
+    assert camera.keep_view_clause({"projection": "junk"}) == ""
+    assert "eye-level camera angle" in camera.keep_view_fragment({"projection": "eye_level"})
+
+
+def test_camera_fov_fragments_drawn_vs_photo() -> None:
+    drawn = camera.camera_clause(
+        {"projection": "eye_level", "fov_deg": 30.0}, medium="watercolour"
+    )
+    assert "a tight, zoomed-in view of just the subject" in drawn
+    assert "85mm" not in drawn  # lens-mm only on photo mediums
+    photo = camera.camera_clause(
+        {"projection": "eye_level", "fov_deg": 30.0}, medium="photograph"
+    )
+    assert "85mm telephoto" in photo
+    silent = camera.camera_clause({"projection": "eye_level", "fov_deg": 90.0})
+    assert "field of view" not in silent  # default band is silent
+
+
+def test_camera_landmark_azimuth_and_observer_pitch() -> None:
+    s = camera.camera_clause(
+        {"projection": "eye_level", "azimuth_deg": 45.0}, landmark="the gatehouse"
+    )
+    assert "looking toward the gatehouse (to the north-east)" in s
+    # oblique pitch derived from a looking-DOWN observer (negative radians).
+    obs = {"pos": {"x": 0.0, "y": 0.0}, "eye_height": 30.0, "gaze": 0.0,
+           "pitch": -0.785, "fov": 1.57}
+    o = camera.camera_clause({"projection": "oblique"}, obs)  # type: ignore[arg-type]
+    assert "45 degrees below horizontal" in o
+    # eye_level + metric camera height speaks the register + parenthetical
+    high = camera.camera_clause({"projection": "eye_level", "camera_height": 12.0})
+    assert "from rooftop height" in high and "(about 12 m up)" in high
+
+
+def test_enter_raised_eye_and_gpt_top_down_and_kontext_variants() -> None:
+    raised = _rich_enter(
+        view={"projection": "eye_level", "camera_height": "rooftop", "azimuth_deg": 0.0}
+    )
+    assert "from rooftop height" in raised
+    assert "keeping every structure's true proportions" in raised
+    g = _rich_enter(view={"projection": "top_down"}, family="gpt_image")
+    assert "Change only the framing" in g and "flat top-down" in g
+    k_td = _rich_enter(view={"projection": "top_down"}, family="kontext")
+    assert "flat \ntop-down plan view".replace("\n", "") in k_td.replace("\n", "")
+    k_iso = _rich_enter(view={"projection": "isometric"}, family="kontext")
+    assert "isometric" in k_iso and "parallel edges" in k_iso
+
+
+def test_zoom_gpt_constraints_and_outward_unknown() -> None:
+    z = image_edit.build_zoom_instruction(
+        "The Tower", [], "", view={"projection": "top_down"}, family="gpt_image"
+    )
+    assert "Constraints: no viewpoint change" in z
+    assert instructions.outward_clause({"projection": "junk"}) == ""
+
+
+def test_layout_ratio_words_and_budgets() -> None:
+    from providers.prompt_library.layout import _heights_clause, _ratio_words
+
+    assert _ratio_words(2.5) == "2.5x"
+    assert _ratio_words(1.5) == "one and a half times"
+    assert _ratio_words(0.6) == "two thirds"
+    assert _ratio_words(0.5) == "half"
+    assert _ratio_words(0.35) == "a third"
+    assert _heights_clause([("X", 5.0, "a hut")], 0) == ""  # budget exhausted
+
+
+def test_policy_remaining_cells() -> None:
+    base: dict = {"render_mode": "place_scene", "world_mode": True}
+    land = policy.default_view(**base, place_form="landscape", subject="Vadi")
+    assert land is not None and land["projection"] == "oblique"
+    tiny = policy.default_view(**base, subject="X", focus_footprint=(1.5, 1.0))
+    assert tiny is not None and tiny["projection"] == "eye_level"
+    astro = policy.default_view(**base, subject="X", scale_tier="galaxy")
+    assert astro is None  # no architectural register for starfields
+    # estimator fallback on junk pitch
+    est = policy.estimate_to_view_spec({"projection": "oblique", "pitch_deg": "junk"})
+    assert est["pitch_deg"] == -90.0 and est["projection"] == "oblique"

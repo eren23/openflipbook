@@ -232,3 +232,46 @@ async def test_ascend_outward_clause_rides_the_edit_instruction(
     edit.reset_mock()
     await _collect(_event_stream(body, "t1"))
     assert "pulls back" not in edit.await_args.args[1]
+
+
+async def test_ascend_fresh_container_states_the_top_down_camera(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The fresh scale_parent container is a NEW map: the policy's deliberate
+    # top-down camera clause must reach the generation prompt.
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_EDIT_REF", "false")  # the fresh path
+    gen = _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_ascend_body(), "t1"))
+
+    prompt = gen.await_args.args[0]
+    assert "flat top-down plan view" in prompt
+    assert "North is at the top of the map." in prompt
+
+
+async def test_ascend_outpaint_margin_carries_the_source_view_rider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The opt-in outpaint extends the SOURCE's pixels: its margin prompt keeps
+    # the source's persisted projection ("the camera simply rises").
+    from generate import SceneView, ViewSpec
+
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_OUTPAINT", "1")
+    img = GeneratedImage(b"jpegbytes", "image/jpeg", "fal-ai/bria/expand", "r")
+    outpaint = AsyncMock(return_value=img)
+    monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", outpaint)
+
+    body = _ascend_body(
+        scene_view=SceneView(
+            node_id="n0",
+            level="map",
+            scale_tier="city",
+            view=ViewSpec(projection="top_down", source="estimated"),
+        )
+    )
+    await _collect(_event_stream(body, "t1"))
+    margin = outpaint.await_args.kwargs.get("prompt") or ""
+    assert "flat top-down overhead perspective" in margin
+    assert "the camera simply rises" in margin

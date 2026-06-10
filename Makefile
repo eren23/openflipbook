@@ -93,6 +93,21 @@ eval-enter-drift:
 # grammar's gate. PAID (~$2.5; fal gens + Gemini judge); no session needed.
 eval-view:
 	cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
+# The before/after regression sweep: every PAID eval that has a committed
+# baseline band (tests/eval_baselines.json), run back to back. Each prints
+# PASS / REGRESSION / IMPROVED vs its band — run it before AND after a risky
+# generation-path change and diff the verdicts. ~$7/run; keeps going past a
+# single bench failure so one flaky run doesn't hide the rest.
+# Free coverage twin: make coverage (no spend).
+eval-baselines:
+	-cd apps/modal-backend && LAYOUT_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.layout_runner
+	-cd apps/modal-backend && STYLE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.style_runner
+	-cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
+	-cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
+# Free coverage report (backend lines + the web view-path files).
+coverage:
+	cd apps/modal-backend && .venv/bin/python -m pytest -q -m "not paid" --cov=providers --cov=generate --cov-report=term | tail -30
+	cd apps/web && pnpm exec vitest run --coverage --coverage.reporter=text 2>/dev/null | grep -E "geo-tap|click-route|world-geometry|image-condition|ClickDetail|All files" || true
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
