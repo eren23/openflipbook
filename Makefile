@@ -97,6 +97,11 @@ eval-view:
 # with critic feedback, max 3 attempts) — measures what users actually get.
 eval-view-loop:
 	cd apps/modal-backend && VIEW_BENCH_RUN=1 VIEW_BENCH_LOOP=1 .venv/bin/python -m tests.continuity_bench.view_runner
+# E1's gating probe: does gpt-image-2/edit honor mask_url, and with which mask
+# convention? 4 gpt arms (3 conventions + no-mask churn control) + the dormant
+# flux-pro/v1/fill slot, scored by pixel-diff only. PAID (~$0.5, no VLM).
+eval-edit-mask-smoke:
+	cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.mask_smoke
 # The before/after regression sweep: every PAID eval that has a committed
 # baseline band (tests/eval_baselines.json), run back to back. Each prints
 # PASS / REGRESSION / IMPROVED vs its band — run it before AND after a risky
