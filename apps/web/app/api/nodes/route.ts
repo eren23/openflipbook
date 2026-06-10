@@ -19,7 +19,7 @@ interface CreateBody {
   final_prompt?: string | null;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
-  relation?: "descend" | "expand" | "ascend";
+  relation?: "descend" | "expand" | "ascend" | "edit";
   scale?: "component" | "peer" | "container";
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;

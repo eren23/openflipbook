@@ -63,8 +63,10 @@ export function finerTier(t: ScaleTier): ScaleTier {
 
 // How a node relates to its parent: "descend" = went IN (a tap child, the
 // default), "expand" = bloomed OUT (a neighbour from mode:"expand"), "ascend" =
-// zoomed OUT to a synthesized container (the OUTWARD reparent, SCALE_OUTWARD).
-export type NodeRelation = "descend" | "expand" | "ascend";
+// zoomed OUT to a synthesized container (the OUTWARD reparent, SCALE_OUTWARD),
+// "edit" = a REVISION of the parent (mode:"edit") — the same page changed, not
+// a place inside it, so the graph chrome must not read it as a tap-in.
+export type NodeRelation = "descend" | "expand" | "ascend" | "edit";
 
 export type ImageTier = "fast" | "balanced" | "pro";
 

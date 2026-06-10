@@ -255,26 +255,38 @@ export default function WorldMap({
               const c1y = c.from.y + dy * 0.33 + py * bend;
               const c2x = c.from.x + dx * 0.67 - px * bend;
               const c2y = c.from.y + dy * 0.67 - py * bend;
-              const isExpand = relById.get(c.toNodeId) === "expand";
+              const rel = relById.get(c.toNodeId) ?? "descend";
+              const isExpand = rel === "expand";
+              // A revision edge: violet, tight dots, no tap anchor — the
+              // child IS the parent, changed, not a place you tapped into.
+              const isEdit = rel === "edit";
               return (
-                <g key={c.fromNodeId + "->" + c.toNodeId}>
+                <g key={c.fromNodeId + "->" + c.toNodeId} data-relation={rel}>
                   <path
                     d={`M ${c.from.x} ${c.from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${c.to.x} ${c.to.y}`}
                     fill="none"
-                    stroke={isExpand ? "rgba(13,148,136,0.6)" : "rgba(15,15,15,0.55)"}
+                    stroke={
+                      isEdit
+                        ? "rgba(124,58,237,0.6)"
+                        : isExpand
+                          ? "rgba(13,148,136,0.6)"
+                          : "rgba(15,15,15,0.55)"
+                    }
                     strokeWidth={8}
                     strokeLinecap="round"
-                    strokeDasharray={isExpand ? "10 16" : "2 22"}
+                    strokeDasharray={isEdit ? "2 10" : isExpand ? "10 16" : "2 22"}
                     markerEnd={isExpand ? "url(#ofb-arrow-expand)" : "url(#ofb-arrow)"}
                   />
-                  <circle
-                    cx={c.from.x}
-                    cy={c.from.y}
-                    r={14}
-                    fill={isExpand ? "rgba(13,148,136,0.85)" : "rgba(239,68,68,0.85)"}
-                    stroke="white"
-                    strokeWidth={4}
-                  />
+                  {!isEdit && (
+                    <circle
+                      cx={c.from.x}
+                      cy={c.from.y}
+                      r={14}
+                      fill={isExpand ? "rgba(13,148,136,0.85)" : "rgba(239,68,68,0.85)"}
+                      stroke="white"
+                      strokeWidth={4}
+                    />
+                  )}
                 </g>
               );
             })}

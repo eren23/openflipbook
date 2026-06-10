@@ -29,7 +29,7 @@ export const NODE_KIND_LEGEND = [LEVELS.map, LEVELS.building, LEVELS.eye];
 // root map don't all read the same. Pure; the data already lives on every node.
 export function nodeKind(opts: {
   level?: ViewLevel | null;
-  relation?: "descend" | "expand" | "ascend" | null;
+  relation?: "descend" | "expand" | "ascend" | "edit" | null;
   isRoot: boolean;
 }): NodeKind {
   const lv = (opts.level && LEVELS[opts.level]) || PAGE_FALLBACK;
@@ -39,7 +39,9 @@ export function nodeKind(opts: {
       ? { glyph: "⤢", label: "expanded" }
       : opts.relation === "ascend"
         ? { glyph: "⤡", label: "container" } // OUTWARD — the synthesized parent
-        : { glyph: "↓", label: "inside" };
+        : opts.relation === "edit"
+          ? { glyph: "✎", label: "edited" } // a REVISION, not a place inside
+          : { glyph: "↓", label: "inside" };
   return {
     levelGlyph: lv.glyph,
     levelLabel: lv.label,
