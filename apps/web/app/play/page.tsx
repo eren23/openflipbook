@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent, FormEvent } from "react";
+import type { ChangeEvent, CSSProperties, DragEvent, FormEvent } from "react";
 import type {
   Citation,
   GenerateRequestBody,
@@ -76,6 +76,14 @@ import { ContextMenu } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { HintPrompt } from "@/components/PlayPage/HintPrompt";
 import { EditForm } from "@/components/PlayPage/EditForm";
+import { RegionSelectOverlay } from "@/components/PlayPage/RegionSelectOverlay";
+import {
+  buildMaskPng,
+  dragToRegion,
+  regionToDisplayRect,
+  type EditRegionBox,
+} from "@/lib/edit-mask";
+import { useContainRect } from "@/hooks/useContainRect";
 import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -93,6 +101,13 @@ import {
 } from "@/hooks/usePrefetchCache";
 
 type Phase = "idle" | "generating" | "ready" | "error";
+
+// Select-area mask edits (E1). Build-time gate so the UI never offers a drag
+// whose mask a flag-off backend would silently ignore (a whole-image edit
+// after the user drew a box is the worst surprise). Backend twin: EDIT_REGION.
+const EDIT_REGION_ENABLED = ["1", "true", "yes"].includes(
+  (process.env.NEXT_PUBLIC_EDIT_REGION ?? "").toLowerCase()
+);
 
 interface Page {
   nodeId: string | null;
@@ -463,6 +478,61 @@ export default function PlayPage() {
 
   const [editMode, setEditMode] = useState(false);
   const [editInstruction, setEditInstruction] = useState("");
+  // Select-area edit (EDIT_REGION): the committed selection (normalized,
+  // natural-image space), the live drag rect (element px), and the verdict
+  // toast the judged edit's final frame reports. All scoped to editMode.
+  const [editRegion, setEditRegion] = useState<EditRegionBox | null>(null);
+  const [editDragRect, setEditDragRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const editDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [editToast, setEditToast] = useState<string | null>(null);
+  const containRect = useContainRect(imgRef);
+  const editRegionDisplayRect = useMemo(
+    () =>
+      editRegion && containRect
+        ? regionToDisplayRect(editRegion, containRect)
+        : null,
+    [editRegion, containRect]
+  );
+  // Anchor the edit box just under the selection (clamped into the figure);
+  // no selection -> undefined -> the form keeps its bottom-bar position.
+  const editFormStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!editRegionDisplayRect || !containRect) return undefined;
+    const boxW = containRect.offsetX * 2 + containRect.width;
+    const boxH = containRect.offsetY * 2 + containRect.height;
+    const width = Math.min(320, Math.max(240, editRegionDisplayRect.width));
+    return {
+      left: Math.max(
+        4,
+        Math.min(editRegionDisplayRect.left, boxW - width - 4)
+      ),
+      right: "auto",
+      bottom: "auto",
+      top: Math.min(
+        editRegionDisplayRect.top + editRegionDisplayRect.height + 8,
+        boxH - 44
+      ),
+      width,
+      borderRadius: 9999,
+    };
+  }, [editRegionDisplayRect, containRect]);
+  useEffect(() => {
+    if (!editToast) return;
+    const timer = window.setTimeout(() => setEditToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [editToast]);
+  useEffect(() => {
+    if (!editRegion) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditRegion(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editRegion]);
 
   // Style DNA lock — when the user pins a page, every subsequent generate
   // gets `session_style_anchor` set to that page's VLM-described style.
@@ -613,6 +683,15 @@ export default function PlayPage() {
               // Flip the morph gate so the decode-then-reveal effect runs
               // ONLY on the final image, not on streamed progress partials.
               setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+              // Judged mask-scoped edit: surface what the critics saw.
+              if (evt.edit_verdict) {
+                const v = evt.edit_verdict;
+                setEditToast(
+                  v.accepted
+                    ? `edit verified ${v.alignment?.toFixed(1) ?? "—"}/10 · medium ${v.medium?.toFixed(1) ?? "—"}/10 · ${v.attempts} attempt${v.attempts === 1 ? "" : "s"}`
+                    : `edit kept best of ${v.attempts} attempt${v.attempts === 1 ? "" : "s"} — verification gates not all met`
+                );
+              }
               void persistNode(
                 {
                   parent_id: body.current_node_id || null,
@@ -1074,10 +1153,29 @@ export default function PlayPage() {
   ]);
 
   const submitEdit = useCallback(
-    (e: FormEvent<HTMLFormElement>) => {
+    async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       const instruction = editInstruction.trim();
       if (!instruction || !page?.imageDataUrl) return;
+      // Select-area edit: a committed selection rides along as a white=edit
+      // mask PNG at natural dims + the region box (judge crop scope). Mask
+      // build failure falls back to today's whole-image edit.
+      let maskFields: Partial<GenerateRequestBody> = {};
+      const imgEl = imgRef.current;
+      if (EDIT_REGION_ENABLED && editRegion && imgEl?.naturalWidth) {
+        try {
+          maskFields = {
+            edit_mask: await buildMaskPng(
+              imgEl.naturalWidth,
+              imgEl.naturalHeight,
+              editRegion
+            ),
+            edit_region: editRegion,
+          };
+        } catch {
+          /* whole-image fallback */
+        }
+      }
       // Carry the style exemplar (pinned page, else root) so an edit can't drift
       // the art medium. The backend edit path now threads both this "style" ref
       // and the session text lock.
@@ -1111,11 +1209,13 @@ export default function PlayPage() {
             }
           : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+        ...maskFields,
       });
       setEditInstruction("");
       setEditMode(false);
+      setEditRegion(null);
     },
-    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor, history]
+    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor, history, editRegion]
   );
 
   const canGoBack = history.trailIdx > 0;
@@ -1908,6 +2008,17 @@ export default function PlayPage() {
         xPx: evt.clientX - rect.left,
         yPx: evt.clientY - rect.top,
       });
+      if (editDragStartRef.current) {
+        const s = editDragStartRef.current;
+        const cur = { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        setEditDragRect({
+          left: Math.min(s.x, cur.x),
+          top: Math.min(s.y, cur.y),
+          width: Math.abs(cur.x - s.x),
+          height: Math.abs(cur.y - s.y),
+        });
+        return;
+      }
       if (phase === "generating" || editMode) return;
       if (streamStatus !== "off") return;
       // While a stroke is active, accumulate points instead of prefetching.
@@ -1946,6 +2057,27 @@ export default function PlayPage() {
       }, 450);
     };
     const down = (evt: PointerEvent) => {
+      // Select-area edit: plain drag while editMode is on (every other image
+      // gesture early-returns on editMode, so this is additive by construction).
+      if (
+        EDIT_REGION_ENABLED &&
+        editMode &&
+        evt.pointerType !== "touch" &&
+        phase !== "generating"
+      ) {
+        const rect = img.getBoundingClientRect();
+        editDragStartRef.current = {
+          x: evt.clientX - rect.left,
+          y: evt.clientY - rect.top,
+        };
+        evt.preventDefault();
+        try {
+          img.setPointerCapture(evt.pointerId);
+        } catch {
+          /* no-op */
+        }
+        return;
+      }
       if (!evt.shiftKey) return;
       if (evt.pointerType === "touch") return;
       if (phase === "generating" || editMode) return;
@@ -1969,6 +2101,29 @@ export default function PlayPage() {
       });
     };
     const up = async (evt: PointerEvent) => {
+      if (editDragStartRef.current) {
+        const s = editDragStartRef.current;
+        editDragStartRef.current = null;
+        setEditDragRect(null);
+        try {
+          img.releasePointerCapture(evt.pointerId);
+        } catch {
+          /* no-op */
+        }
+        const rect = img.getBoundingClientRect();
+        // A drag commits a selection; a plain click clears it.
+        setEditRegion(
+          dragToRegion(
+            s,
+            { x: evt.clientX - rect.left, y: evt.clientY - rect.top },
+            rect.width,
+            rect.height,
+            img.naturalWidth,
+            img.naturalHeight
+          )
+        );
+        return;
+      }
       if (!strokeActiveRef.current) return;
       try {
         img.releasePointerCapture(evt.pointerId);
@@ -2461,6 +2616,18 @@ export default function PlayPage() {
               )}
               {strokeState && <StrokeOverlay pxPoints={strokeState.pxPoints} />}
 
+              {editMode && (editDragRect ?? editRegionDisplayRect) && (
+                <RegionSelectOverlay
+                  rect={(editDragRect ?? editRegionDisplayRect)!}
+                />
+              )}
+
+              {editToast && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-xs text-white">
+                  {editToast}
+                </div>
+              )}
+
               {imgFailed && <ImageFailedOverlay />}
 
               {hoverPos &&
@@ -2649,6 +2816,8 @@ export default function PlayPage() {
                 onClick={() => {
                   setEditMode((v) => !v);
                   setEditInstruction("");
+                  setEditRegion(null);
+                  setEditDragRect(null);
                 }}
                 disabled={phase === "generating"}
                 aria-pressed={editMode}
@@ -2725,6 +2894,7 @@ export default function PlayPage() {
                 busy={phase === "generating"}
                 placeholder={t.editPlaceholder}
                 applyLabel={t.apply}
+                style={editFormStyle}
               />
             ) : (
               <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">

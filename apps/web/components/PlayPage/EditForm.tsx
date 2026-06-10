@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 
 interface Props {
   instruction: string;
@@ -9,6 +9,9 @@ interface Props {
   busy: boolean;
   placeholder: string;
   applyLabel: string;
+  /** Optional position override — the select-area edit anchors the form just
+   *  under the drag selection; absent, it keeps its bottom-bar position. */
+  style?: CSSProperties | undefined;
 }
 
 /**
@@ -23,10 +26,12 @@ export function EditForm({
   busy,
   placeholder,
   applyLabel,
+  style,
 }: Props) {
   return (
     <form
       onSubmit={onSubmit}
+      style={style}
       className="absolute bottom-0 left-0 right-0 flex items-center gap-2 bg-black/65 px-3 py-2"
     >
       <input
