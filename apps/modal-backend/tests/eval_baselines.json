@@ -1,5 +1,5 @@
 {
-  "_comment": "Committed known-good eval baselines + regression bands. test_eval_baselines.py validates this file FREE every commit; a paid runner calls tests._baseline.compare(name, fresh_metric, n) so a silent eval regression fails loud (REGRESSION below the band, IMPROVED above, LOW_N when undersampled). Re-baseline only via a reviewed diff to this file. Bands are wide because the VLM judge is a ranker (~0.6 Spearman), not a calibrated meter — gate on drop-vs-baseline, not absolute scores.",
+  "_comment": "Committed known-good eval baselines + regression bands. test_eval_baselines.py validates this file FREE every commit; a paid runner calls tests._baseline.compare(name, fresh_metric, n) so a silent eval regression fails loud (REGRESSION below the band, IMPROVED above, LOW_N when undersampled). Re-baseline only via a reviewed diff to this file. Bands are wide because the VLM judge is a ranker (~0.6 Spearman), not a calibrated meter \u2014 gate on drop-vs-baseline, not absolute scores.",
   "baselines": {
     "layout_fidelity": {
       "metric": "mean_lift",
@@ -13,21 +13,21 @@
       "baseline": 8.5,
       "regression_band": 2.0,
       "n_min": 1,
-      "source": "SESSION_AUDIT.md §5 + make eval-style"
+      "source": "SESSION_AUDIT.md \u00a75 + make eval-style"
     },
     "enter_same_place": {
       "metric": "mean_lift",
       "baseline": 2.33,
       "regression_band": 2.0,
       "n_min": 2,
-      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter). 3-run history: +2.33, -1.0 (one noisy castle sample; goldens byte-identical), +2.33 — the band catches single bad samples by design"
+      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter). 3-run history: +2.33, -1.0 (one noisy castle sample; goldens byte-identical), +2.33 \u2014 the band catches single bad samples by design"
     },
     "view_conformance": {
       "metric": "intended_conformance_mean",
       "baseline": 6.0,
       "regression_band": 2.5,
       "n_min": 2,
-      "source": "make eval-view 2026-06-10 (calibrated judge): per-arm reality from a top-down map crop — oblique 10.0, isometric 9.0 (the policy's auto registers: rock-solid), top_down/eye_level 2.5-6 across runs (nano-edit drifts to its aerial attractor on steep view changes ~half the time; the bench's eye_level case is harder than the product's interior-enter case). same_place floor 8.5-10 on every arm — no view change costs identity"
+      "source": "make eval-view 2026-06-10 (calibrated judge, single-shot bench mode): oblique 10.0, isometric 9.0 (the policy's auto registers); top_down/eye_level 2.5-6 single-shot (nano's aerial attractor). PRODUCTION (steep router + VIEW_LOOP, make eval-view-loop, same date): 9.75 mean \u2014 top_down 10.0, oblique 10.0, isometric 9.0, eye_level 10.0; view_trustworthy TRUE; same_place 9.0-10 every arm; 3/4 steep arms accepted at attempt 1, the 4th self-corrected at attempt 2. This baseline tracks the DEFAULT (single-shot) bench so the loop's lift stays measurable."
     }
   }
 }
