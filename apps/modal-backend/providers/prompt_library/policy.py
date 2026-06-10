@@ -135,7 +135,10 @@ def default_view(
         # dictated by the reference pixels (preserve-form rides the inherited
         # view on the wire, not policy). WITHOUT one it is a FRESH map render
         # — the describe-a-place ROOT lands here (V1 finding 1) — and gets the
-        # locked flat top-down camera.
+        # locked flat top-down camera. Non-world callers never see camera
+        # text (the invariant), whatever render_mode they claim.
+        if not world_mode:
+            return None
         return None if has_region else top_down_map()
     if rmode == "":
         # Query path: the only world-map cell. Map-shaped = no observer pose.

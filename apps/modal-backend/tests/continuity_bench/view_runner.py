@@ -166,12 +166,31 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
             family=family if view is not None else None,
             style_ref=True,
         )
-        rendered = await image_edit_provider.edit_image(
-            region_url,
-            instruction,
-            model_override=enter_model,
-            style_ref_url=map_url,
-        )
+        # fal occasionally 422s a perfectly valid edit ("Could not generate
+        # images... Please try again") — one bench-level retry, then record a
+        # zero arm instead of killing the whole paid run.
+        rendered = None
+        for attempt in range(2):
+            try:
+                rendered = await image_edit_provider.edit_image(
+                    region_url,
+                    instruction,
+                    model_override=enter_model,
+                    style_ref_url=map_url,
+                )
+                break
+            except Exception as exc:  # bench resilience — reported, not fatal
+                print(f"[view-bench] {case.name}/{arm} attempt {attempt + 1} failed: {exc}")
+        if rendered is None:
+            arms.append(
+                ArmResult(
+                    arm=arm,
+                    conformance=0.0,
+                    same_place=0.0,
+                    conformance_rationale="render failed twice (fal)",
+                )
+            )
+            continue
         conf = await score_view_conformance(rendered.jpeg_bytes, _ARM_INTENT[arm])
         same = await score_continuation(region_bytes, rendered.jpeg_bytes)
         (_REPORTS / f"view_{case.name}_{arm}.jpg").write_bytes(rendered.jpeg_bytes)

@@ -288,4 +288,25 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     const map = { entities: [geo("a", "a", 90, 70)], bounds: CROP };
     expect(geoTapRequest(map, "n1", { x_pct: 0.05, y_pct: 0.05 }, 16 / 9)).toBeNull();
   });
+
+  it("a projection-pill override lands on scene_view.view (the pinned camera)", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const pinned = {
+      projection: "top_down",
+      pitch_deg: -90,
+      camera_height: "aerial",
+      source: "user",
+    } as const;
+    const t = geoTapRequest(map, "n1", { x_pct: 0.6, y_pct: 0.5 }, 16 / 9, {
+      view: pinned,
+    })!;
+    expect(t.scene_view.view).toMatchObject({ projection: "top_down", source: "user" });
+    // no pill pressed -> no view key at all (auto: the backend policy decides)
+    const auto = geoTapRequest(map, "n1", { x_pct: 0.6, y_pct: 0.5 }, 16 / 9)!;
+    expect(auto.scene_view.view).toBeUndefined();
+  });
+
 });

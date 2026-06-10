@@ -193,3 +193,42 @@ async def test_ascend_edit_ref_under_flag_routes_through_edit_endpoint(
     gen.assert_not_awaited()  # NOT the no-op text-to-image ref path
     assert edit.await_args.args[0] == "data:image/jpeg;base64,abc"  # the source image
     assert "engraving" in edit.await_args.args[1]  # the medium reaches the instruction
+
+
+async def test_ascend_outward_clause_rides_the_edit_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # View grammar on OUTWARD: the SOURCE's persisted view rides the edit
+    # instruction as the outpaint-semantics rider ("the camera simply pulls
+    # back; nothing rescales") — pixel coherence with the view being extended.
+    from generate import SceneView, ViewSpec
+
+    _enable(monkeypatch)
+    monkeypatch.setattr(
+        llm_mod,
+        "plan_page",
+        AsyncMock(return_value=PagePlan("The Vallen Sea", "a wider map", [], [])),
+    )
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    body = _ascend_body(
+        scene_view=SceneView(
+            node_id="n0",
+            level="map",
+            scale_tier="city",
+            view=ViewSpec(projection="eye_level", source="user"),
+        )
+    )
+    events = await _collect(_event_stream(body, "t1"))
+    assert any(e["type"] == "ascend_ready" for e in events)
+    instr = edit.await_args.args[1]
+    assert "the camera simply pulls back" in instr  # eye_level register rider
+    assert "nothing inside the original view changes or rescales" in instr
+    # And with the grammar off, the rider is gone (legacy bytes).
+    monkeypatch.setenv("VIEW_GRAMMAR", "false")
+    edit.reset_mock()
+    await _collect(_event_stream(body, "t1"))
+    assert "pulls back" not in edit.await_args.args[1]

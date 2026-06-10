@@ -360,6 +360,8 @@ def test_policy_root_map_cells() -> None:
     assert v["azimuth_deg"] == 0.0 and v["source"] == "policy"
     # WITH a region it is a Kontext zoom-continue: policy stays silent.
     assert policy.default_view(render_mode="place_submap", world_mode=True, has_region=True) is None
+    # Non-world callers never see camera text, whatever render_mode they claim.
+    assert policy.default_view(render_mode="place_submap", world_mode=False, has_region=False) is None
     # query-path world map
     q = policy.default_view(render_mode=None, world_mode=True)
     assert q is not None and q["projection"] == "top_down"

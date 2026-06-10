@@ -115,4 +115,31 @@ describe("ClickDetailPopover", () => {
     fireEvent.mouseDown(document.body);
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it("a projection pill pins the camera: 2D plan rides onConfirm.view", () => {
+    const { onConfirm } = setup();
+    fireEvent.click(screen.getByText("2D plan"));
+    fireEvent.click(screen.getByTestId("detail-confirm"));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm.mock.calls[0]![0].view).toMatchObject({
+      projection: "top_down",
+      source: "user",
+    });
+  });
+
+  it("the auto pill (default) emits no view key — the backend policy decides", () => {
+    const { onConfirm } = setup();
+    fireEvent.click(screen.getByTestId("detail-confirm"));
+    expect(onConfirm.mock.calls[0]![0].view).toBeUndefined();
+  });
+
+  it("projection pills are scene-only: hidden in submap mode", () => {
+    const { onConfirm } = setup();
+    expect(screen.getByTestId("projection-pills")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mode-toggle")); // scene -> submap
+    expect(screen.queryByTestId("projection-pills")).toBeNull();
+    fireEvent.click(screen.getByTestId("detail-confirm"));
+    expect(onConfirm.mock.calls[0]![0].view).toBeUndefined();
+  });
+
 });

@@ -164,10 +164,20 @@ async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
     conformance judge). Per-projection criteria spelled out so the judge can
     discriminate the hard pair — isometric (parallel verticals, no vanishing
     point) vs oblique perspective (the known iso failure mode, V1 finding 10)."""
+    # Calibrated to the PRODUCT promise, not pedantry (first live run scored a
+    # genuine castle PLAN 1.5 because map-convention side-view landmarks
+    # tripped "no facades"): hand-drawn cartography draws landmarks in
+    # elevation on plans, and the iso pill promises the game-art register, not
+    # strict axonometry. The hard fails stay hard: a ground-level or wholly
+    # tilted view can never pass top_down; ground/top-down can never pass iso.
     criteria = {
         "top_down": (
-            "a FLAT top-down plan view: looking straight down, rooftops only, "
-            "no building facades visible, no horizon, no perspective tilt"
+            "a flat top-down PLAN view: the GROUND LAYOUT reads as a plan — "
+            "positions and footprints laid out as seen from straight above, "
+            "no horizon, no overall perspective tilt. Hand-drawn map "
+            "conventions are FINE and not violations: decorative side-view "
+            "landmark drawings, a compass rose, labels. Score low only when "
+            "the overall view itself is tilted, perspective, or ground-level"
         ),
         "oblique": (
             "a high-angle oblique aerial view: clearly elevated and tilted "
@@ -175,9 +185,13 @@ async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
             "facades both visible, NOT straight down and NOT at ground level"
         ),
         "isometric": (
-            "a true isometric/axonometric illustration: parallel projection — "
-            "vertical lines stay parallel, NO vanishing point, no perspective "
-            "convergence, no horizon; an elevated three-quarter game-art view"
+            "an isometric-register illustration: an elevated three-quarter "
+            "game-art diorama view — rooftops and facades both visible, the "
+            "scene reads as a tilted parallel-ish projection. Ideal = strictly "
+            "parallel verticals with no vanishing point; minor perspective "
+            "convergence costs a point or two, NOT a failure. Score low only "
+            "when the view is ground-level, straight top-down, or a sweeping "
+            "wide-angle perspective"
         ),
         "eye_level": (
             "a ground-level first-person view: camera at standing eye height "
