@@ -80,6 +80,13 @@ _SCRUB = (
     "REPAIR_BENCH_RUN",
     "EDIT_BENCH_RUN",
     "EDIT_REGION_BENCH_RUN",
+    # Mask-scoped judged edits (E1; default OFF until the bench baselines it).
+    "EDIT_REGION",
+    "EDIT_LOOP_MAX_ATTEMPTS",
+    "EDIT_LOOP_ACCEPT_ALIGNMENT",
+    "EDIT_LOOP_ACCEPT_MEDIUM",
+    "EDIT_LOOP_OUTSIDE_MAX",
+    "EDIT_LOOP_RETRY_BUDGET_S",
     "WORLD_BENCH_JUDGE_MODEL",
     "CONTINUITY_BENCH_JUDGE_MODEL",
     # Map-pan expand (outpaint the world outward).

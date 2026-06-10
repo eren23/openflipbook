@@ -66,3 +66,45 @@ def retry_feedback_clause(
         )
         parts.append(text)
     return " ".join(parts)
+
+
+def edit_retry_feedback_clause(
+    *,
+    alignment_rationale: str | None = None,
+    medium_rationale: str | None = None,
+    outside_exceeded: bool = False,
+) -> str:
+    """The edit loop's voice (the mask-scoped sibling of the clause above):
+    a failed inpaint attempt folds its critics' diagnoses into the next
+    attempt's fill description. Pure + deterministic; all-None/False -> ""."""
+    parts: list[str] = []
+    align = _clean(alignment_rationale)
+    medium = _clean(medium_rationale)
+    if align:
+        text = (
+            "IMPORTANT — your previous attempt did not show the requested "
+            f"content. The judge saw: {align}"
+        )
+        if not text.endswith("."):
+            text += "."
+        text += " Render exactly what is described, clearly visible in the region."
+        parts.append(text)
+    if medium:
+        text = (
+            "It also drifted from the surrounding artwork's medium — the "
+            f"judge saw: {medium}"
+        )
+        if not text.endswith("."):
+            text += "."
+        text += (
+            " Match the surrounding artwork's medium, palette and linework "
+            "exactly; the repainted region must blend in seamlessly."
+        )
+        parts.append(text)
+    if outside_exceeded:
+        parts.append(
+            "It also changed pixels beyond the selected region. Confine the "
+            "edit STRICTLY to the masked area; everything outside it must "
+            "remain untouched."
+        )
+    return " ".join(parts)
