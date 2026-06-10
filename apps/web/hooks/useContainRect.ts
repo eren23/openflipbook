@@ -18,9 +18,12 @@ export function useContainRect(
 ): ContainRect | null {
   const [rect, setRect] = useState<ContainRect | null>(null);
   useEffect(() => {
-    const img = imgRef?.current;
-    if (!img) return;
+    let ro: ResizeObserver | null = null;
+    let attached: HTMLImageElement | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
     const measure = () => {
+      const img = attached;
+      if (!img) return;
       setRect(
         objectContainRect(
           img.clientWidth,
@@ -30,13 +33,34 @@ export function useContainRect(
         )
       );
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(img);
-    img.addEventListener("load", measure);
+    const attach = (img: HTMLImageElement) => {
+      attached = img;
+      measure();
+      ro = new ResizeObserver(measure);
+      ro.observe(img);
+      img.addEventListener("load", measure);
+    };
+    const img = imgRef?.current;
+    if (img) {
+      attach(img);
+    } else {
+      // Callers above the conditional <figure> mount BEFORE any image exists
+      // (the play page itself, hydrating a continue-session): a one-shot
+      // effect would bail here and never measure — the invisible-marquee bug.
+      // Poll until the element appears, then attach for real.
+      poll = setInterval(() => {
+        const found = imgRef?.current;
+        if (found) {
+          if (poll) clearInterval(poll);
+          poll = null;
+          attach(found);
+        }
+      }, 300);
+    }
     return () => {
-      ro.disconnect();
-      img.removeEventListener("load", measure);
+      if (poll) clearInterval(poll);
+      ro?.disconnect();
+      attached?.removeEventListener("load", measure);
     };
   }, [imgRef]);
   return rect;

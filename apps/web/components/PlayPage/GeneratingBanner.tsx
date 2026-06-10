@@ -11,7 +11,10 @@ interface Props {
  */
 export function GeneratingBanner({ statusMsg }: Props) {
   return (
-    <div className="pointer-events-none absolute inset-0 flex items-end bg-black/35">
+    <div
+      data-testid="generating-banner"
+      className="pointer-events-none absolute inset-0 flex items-end bg-black/35"
+    >
       <div className="m-4 flex items-center gap-3 rounded-full bg-black/80 px-4 py-2 text-sm text-white shadow-lg">
         <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-white/90" />
         <span>{statusMsg ?? "Generating…"}</span>

@@ -19,6 +19,7 @@ export function RegionSelectOverlay({ rect }: Props) {
       className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
     >
       <div
+        data-testid="region-marquee"
         className="absolute rounded-sm border-2 border-dashed border-white/95"
         style={{
           left: rect.left,
