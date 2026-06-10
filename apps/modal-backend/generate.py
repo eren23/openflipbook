@@ -103,6 +103,23 @@ class MapCrop(BaseModel):
     h: float
 
 
+class ViewSpec(BaseModel):
+    """Render-intent camera spec (the view grammar), persisted on SceneView.
+
+    Distinct from the view ESTIMATOR's read-out of a generated image
+    (view_estimator.ViewEstimate); the estimator's "perspective" maps to
+    "eye_level" here via prompt_library.policy. Absent on legacy nodes ⇒ the
+    pre-grammar hardcoded behavior, byte-identical."""
+
+    projection: str  # top_down | oblique | isometric | eye_level
+    pitch_deg: float | None = None
+    azimuth_deg: float | None = None
+    # Qualitative register ("ground"/"eye"/"rooftop"/"aerial") or metric height.
+    camera_height: str | float | None = None
+    fov_deg: float | None = None
+    source: str = "policy"  # policy | user | estimated
+
+
 class SceneView(BaseModel):
     node_id: str
     level: str
@@ -116,6 +133,8 @@ class SceneView(BaseModel):
     # optional `scale_tier?` on the TS SceneView; a free str so the ladder lives
     # in one place (packages/config).
     scale_tier: str | None = None
+    # The deliberate camera for this render (the view grammar). None ⇒ legacy.
+    view: ViewSpec | None = None
 
 
 class ProjectedEntity(BaseModel):

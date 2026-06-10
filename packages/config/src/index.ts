@@ -569,6 +569,24 @@ export interface MapCrop {
 // What level a scene renders at — there is no single correct view.
 export type ViewLevel = "map" | "building" | "street" | "eye";
 
+// Render-INTENT camera vocabulary (the view grammar). Distinct from
+// ViewProjection below, which is the estimator's PERCEPTION read-out of an
+// already-generated image (estimator "perspective" maps to "eye_level" here).
+// A deliberate projection per render: flat 2D plan, 2.5D oblique bird's-eye,
+// true isometric, or 3D eye-level — plus optional numeric camera params.
+export type ViewSpecProjection = "top_down" | "oblique" | "isometric" | "eye_level";
+export interface ViewSpec {
+  projection: ViewSpecProjection;
+  pitch_deg?: number; // camera tilt: -90 straight down … 0 horizon
+  azimuth_deg?: number; // compass bearing of the gaze, 0 = north
+  // Qualitative register ("eye" ≈ 1.7 world units) or a metric height.
+  camera_height?: "ground" | "eye" | "rooftop" | "aerial" | number;
+  fov_deg?: number;
+  // Who decided this view: the per-place policy, an explicit user pick
+  // (projection pills), or the view estimator's read of a generated image.
+  source: "policy" | "user" | "estimated";
+}
+
 // The view a given node (scene) renders: its level + observer pose (non-map
 // levels) and/or the map crop (map level). Persisted on the node.
 export interface SceneView {
@@ -583,6 +601,9 @@ export interface SceneView {
   // Coarse absolute rung on SCALE_LADDER for this view (DEEPER stamps childTier,
   // OUTWARD stamps parentTier) — so both directions share one ladder. Optional.
   scale_tier?: ScaleTier;
+  // The deliberate camera for this render (the view grammar). Absent/null on
+  // legacy nodes ⇒ the pre-grammar hardcoded behavior, byte-identical.
+  view?: ViewSpec | null;
 }
 
 // One entity's projected place in a rendered frame (geometry-engine output),
