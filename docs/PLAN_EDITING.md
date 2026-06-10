@@ -5,6 +5,17 @@ first-class, judged, geometry-aware interaction — "select this area, fix this
 and that" — and revisit the manual editing features that already exist but
 predate everything we now know.
 
+> **STATUS (2026-06-10): SHIPPED, E1–E5 all merged.** PRs #36 (mask smoke +
+> pixel-diff — fill is the primary, gpt's mask is decorative), #37 (E1
+> backend: inpaint + edit_loop behind `EDIT_REGION`), #38 (E5 bench +
+> committed baseline: alignment 10.0 / outside 0.0000 / medium 10.0 first
+> run), #39 (E1 frontend: drag-select behind `NEXT_PUBLIC_EDIT_REGION`),
+> #40 (E3: `EDIT_JUDGE` + the verdict chip with revert), #41 (E2: the
+> geo-aware context menu), #42 (E4: apply-to-image + removal that sticks),
+> #43 (the EDIT_JUDGE bench arm, `EDIT_REGION_BENCH_WHOLE=1`). All judged
+> flags default OFF; flip after live play: backend `EDIT_REGION=1
+> EDIT_JUDGE=1`, web `NEXT_PUBLIC_EDIT_REGION=1`.
+
 ## Where editing stands today (honest inventory)
 
 | Feature | State | Gap |
