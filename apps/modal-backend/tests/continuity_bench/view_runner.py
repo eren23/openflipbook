@@ -173,15 +173,12 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
             family=family if view is not None else None,
             style_ref=True,
         )
-        # VIEW_BENCH_LOOP=1: steep deliberate arms render through the
-        # PRODUCTION render loop (judged retries with critic feedback) so
+        # VIEW_BENCH_LOOP=1: ALL deliberate arms render through the PRODUCTION
+        # render loop (judged retries with critic feedback — same-place +
+        # medium floors on every camera since the oblique-drift fix) so
         # eval-view-loop measures what users actually get. The default path
         # stays byte-identical (the committed baseline stays comparable).
-        if (
-            loop_mode
-            and view is not None
-            and _ARM_INTENT[arm] in model_router.STEEP_ENTER_PROJECTIONS
-        ):
+        if loop_mode and view is not None:
             from providers import judge as judge_mod
             from providers import render_loop
 
@@ -204,6 +201,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 judge_same_place=judge_mod.score_continuation,
                 config=render_loop.LoopConfig(max_attempts=3),
                 judge_detail=_judge_detail,
+                judge_medium=judge_mod.score_style_pair,
             )
             for i, att in enumerate(loop_result.attempts):
                 (_REPORTS / f"view_{case.name}_{arm}_a{i}.jpg").write_bytes(

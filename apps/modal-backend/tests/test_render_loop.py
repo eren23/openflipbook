@@ -248,3 +248,40 @@ async def test_no_detail_judge_ignores_the_axis() -> None:
         config=_cfg(),
     )
     assert attempts[0].accepted and attempts[0].detail is None
+    assert attempts[0].medium is None  # no medium judge wired either
+
+
+async def test_medium_axis_rejects_and_feeds_back() -> None:
+    # The Ankh-Morpork drift fix: camera + place fine, MEDIUM drifted — the
+    # medium critic alone rejects, and its diagnosis rides the retry.
+    render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    conf = AsyncMock(return_value=_j(9.0))
+    same = AsyncMock(return_value=_j(9.0))
+    medium = AsyncMock(side_effect=[_j(2.0, "ink wash became photoreal"), _j(8.5)])
+    attempts = await _drain(
+        render=render, projection="oblique", region_bytes=b"r",
+        judge_conformance=conf, judge_same_place=same, judge_medium=medium,
+        config=_cfg(),
+    )
+    assert len(attempts) == 2 and attempts[1].accepted
+    assert not attempts[0].accepted
+    suffix = render.await_args_list[1].args[0]
+    assert "ink wash became photoreal" in suffix
+    assert "ART MEDIUM" in suffix
+    assert "same hand" in suffix
+
+
+async def test_medium_judge_needs_region_bytes() -> None:
+    # No reference crop -> nothing to compare the medium against; the axis
+    # stays None and never gates.
+    render = AsyncMock(return_value=_Img(b"a"))
+    medium = AsyncMock(return_value=_j(0.0, "never called"))
+    attempts = await _drain(
+        render=render, projection="oblique", region_bytes=None,
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        judge_medium=medium,
+        config=_cfg(),
+    )
+    assert attempts[0].accepted and attempts[0].medium is None
+    medium.assert_not_awaited()

@@ -343,9 +343,11 @@ def _mock_judges(
     )
     same = AsyncMock(return_value=JudgeResult(score=same_score, rationale="", raw=""))
     detail = AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw=""))
+    medium = AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw=""))
     monkeypatch.setattr(judge_mod, "score_view_conformance", conf)
     monkeypatch.setattr(judge_mod, "score_continuation", same)
     monkeypatch.setattr(judge_mod, "score_feature_articulation", detail)
+    monkeypatch.setattr(judge_mod, "score_style_pair", medium)
     return conf, same
 
 
@@ -416,21 +418,75 @@ async def test_view_loop_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     same.assert_not_awaited()
 
 
-async def test_view_loop_aerial_zero_overhead(
+async def test_view_loop_judges_aerial_enters_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The castle -> oblique (aerial register): the loop never engages, the
-    # judges are never called — zero added latency on the common path.
+    # The castle -> oblique: since the Ankh-Morpork drift, EVERY deliberate
+    # camera is judged — the loop used to skip aerial registers and an
+    # unjudged oblique enter walked off the map. Good scores -> a single
+    # attempt and no retry, but the critic DID look.
     _mock_plan(monkeypatch)
     edit = _mock_edit(monkeypatch)
     _mock_fresh(monkeypatch)
-    conf, same = _mock_judges(monkeypatch, [(0.0, "never called")])
+    conf, _same = _mock_judges(monkeypatch, [(9.0, "a clean oblique")])
 
-    await _collect(_event_stream(_tap_body(), "t1"))
+    events = await _collect(_event_stream(_tap_body(), "t1"))
 
     edit.assert_awaited_once()
-    conf.assert_not_awaited()
-    same.assert_not_awaited()
+    assert conf.await_count == 1
+    assert not [e for e in events if e["type"] == "progress"]
+
+
+async def test_view_loop_medium_drift_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Ankh-Morpork regression, pinned: camera fine, place fine — but the
+    # ART MEDIUM drifted (loose-ref models treat the style ref as
+    # inspiration). The medium critic alone must force the retry, and its
+    # rationale must ride the next instruction.
+    import providers.judge as judge_mod
+    from providers.judge import JudgeResult
+
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setattr(
+        judge_mod,
+        "score_view_conformance",
+        AsyncMock(return_value=JudgeResult(score=9.0, rationale="fine", raw="")),
+    )
+    monkeypatch.setattr(
+        judge_mod,
+        "score_continuation",
+        AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw="")),
+    )
+    monkeypatch.setattr(
+        judge_mod,
+        "score_feature_articulation",
+        AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw="")),
+    )
+    monkeypatch.setattr(
+        judge_mod,
+        "score_style_pair",
+        AsyncMock(
+            side_effect=[
+                JudgeResult(
+                    score=2.0,
+                    rationale="smoky industrial engraving, not aged parchment",
+                    raw="",
+                ),
+                JudgeResult(score=9.0, rationale="", raw=""),
+            ]
+        ),
+    )
+
+    events = await _collect(_event_stream(_steep_body(), "t1"))
+
+    assert edit.await_count == 2
+    second_instr = edit.await_args_list[1].args[1]
+    assert "smoky industrial engraving" in second_instr
+    assert "ART MEDIUM" in second_instr
+    assert any(e["type"] == "final" for e in events)
 
 
 async def test_view_loop_judge_failure_degrades(

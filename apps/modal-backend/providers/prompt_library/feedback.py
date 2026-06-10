@@ -23,11 +23,13 @@ def retry_feedback_clause(
     conformance_rationale: str | None = None,
     same_place_rationale: str | None = None,
     detail_rationale: str | None = None,
+    medium_rationale: str | None = None,
     family: str | None = None,
 ) -> str:
     conf = _clean(conformance_rationale)
     same = _clean(same_place_rationale)
     det = _clean(detail_rationale)
+    med = _clean(medium_rationale)
     parts: list[str] = []
     if conf:
         reminder = register_reminder(projection, family)
@@ -63,6 +65,18 @@ def retry_feedback_clause(
             " Keep the place's internal structure fully articulated: open "
             "courtyards stay open with their inner buildings drawn; do not "
             "simplify or seal the compound."
+        )
+        parts.append(text)
+    if med:
+        text = (
+            "It also drifted from the reference's ART MEDIUM — the judge saw: "
+            f"{med}"
+        )
+        if not text.endswith("."):
+            text += "."
+        text += (
+            " Match the reference image's medium, palette, linework and paper "
+            "texture exactly; the new view must look drawn by the same hand."
         )
         parts.append(text)
     return " ".join(parts)
