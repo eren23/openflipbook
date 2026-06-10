@@ -244,7 +244,56 @@ async def _run_case(case: Case) -> CaseResult:
         )
         for arm, override in _arm_models()
     ]
+    if os.environ.get("EDIT_REGION_BENCH_WHOLE"):
+        arms.append(await _score_whole_image_arm(case, src_bytes, src_url))
     return CaseResult(name=case.name, description=description, arms=arms)
+
+
+async def _score_whole_image_arm(
+    case: Case, src_bytes: bytes, src_url: str
+) -> ArmResult:
+    """EDIT_REGION_BENCH_WHOLE=1: the EDIT_JUDGE axes (E3) on the same cases —
+    the instruction through the WHOLE-IMAGE edit path (polish_edit_instruction
+    register + the edit endpoint, balanced tier), alignment judged on the full
+    frame. `outside` here records the WHOLE-FRAME changed fraction: not a
+    gate (there's no confinement promise), but the honest number next to
+    fill's surgical patch. Reported, never gated (not the production arm)."""
+    from providers import image_edit, judge, llm, pixel_diff
+
+    polished = await llm.polish_edit_instruction(
+        instruction=case.instruction,
+        page_title=case.name.replace("_", " "),
+        style_anchor=case.style,
+    )
+    rendered = None
+    for attempt in range(2):
+        try:
+            rendered = await image_edit.edit_image(src_url, polished)
+            break
+        except Exception as exc:  # bench resilience — reported, not fatal
+            print(f"[edit-bench] {case.name}/whole_image attempt {attempt + 1} failed: {exc}")
+    if rendered is None:
+        return ArmResult(
+            arm="whole_image",
+            model="edit-tier-default",
+            alignment=0.0,
+            outside=1.0,
+            medium=0.0,
+            alignment_rationale="render failed twice (fal)",
+        )
+    out_bytes = rendered.jpeg_bytes
+    (_REPORTS / f"edit_{case.name}_whole_image.jpg").write_bytes(out_bytes)
+    churn = pixel_diff.changed_fraction(src_bytes, out_bytes, None)
+    align = await judge.score_prompt_alignment(polished, out_bytes)
+    medium = await judge.score_style_pair(src_bytes, out_bytes)
+    return ArmResult(
+        arm="whole_image",
+        model=rendered.model,
+        alignment=align.score,
+        outside=round(churn, 4),
+        medium=medium.score,
+        alignment_rationale=align.rationale,
+    )
 
 
 def summarize(results: list[CaseResult]) -> dict[str, Any]:

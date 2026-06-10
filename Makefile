@@ -105,7 +105,8 @@ eval-edit-mask-smoke:
 # E5: the mask-scoped edit bench — the asked change LANDS (alignment judge on
 # the inside crop), the edit CONFINES (outside pixel-diff, free, per-case),
 # the MEDIUM holds (style judge). EDIT_REGION_BENCH_MODELS adds A/B arms;
-# EDIT_REGION_BENCH_LOOP=1 measures the production edit loop. PAID (~$1).
+# EDIT_REGION_BENCH_LOOP=1 measures the production edit loop;
+# EDIT_REGION_BENCH_WHOLE=1 adds the EDIT_JUDGE whole-image arm. PAID (~$1).
 eval-edit-region:
 	cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.runner
 # The before/after regression sweep: every PAID eval that has a committed

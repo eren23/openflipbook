@@ -82,6 +82,7 @@ _SCRUB = (
     "EDIT_REGION_BENCH_RUN",
     "EDIT_REGION_BENCH_MODELS",
     "EDIT_REGION_BENCH_LOOP",
+    "EDIT_REGION_BENCH_WHOLE",
     # Mask-scoped judged edits (E1; default OFF until the bench baselines it).
     "EDIT_REGION",
     # Judged whole-image edits (E3; same loop, no outside gate, default OFF).
