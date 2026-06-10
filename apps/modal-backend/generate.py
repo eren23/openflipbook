@@ -1383,6 +1383,8 @@ async def _event_stream(
                 )
                 + composed_prompt
             )
+        result: Any = None
+        main_task: _asyncio.Task | None = None
         if use_continuation and region_ref is not None:
             main_task = _asyncio.create_task(
                 image_edit_provider.continue_image(
@@ -1394,6 +1396,16 @@ async def _event_stream(
             # dispatch: explicit per-request model > the steep-aware router
             # pick (enter_model_slug, resolved above with the view).
             enter_style_ref = _condition_url_for_role(body, "style")
+            # The render loop (VIEW_LOOP, default ON): steep transforms are
+            # the measured ~50% one-shot path — judge each attempt, fold the
+            # critic's rationale into a single retry, keep the best. Aerial
+            # registers + legacy enters keep the zero-overhead one-shot path.
+            view_loop = (
+                enter_view is not None
+                and str(enter_view.get("projection") or "")
+                in model_router.STEEP_ENTER_PROJECTIONS
+                and env_flag("VIEW_LOOP", "true")
+            )
             log(
                 "info",
                 "tap.enter_edit",
@@ -1401,15 +1413,66 @@ async def _event_stream(
                 source="region" if region_ref else "parent_image",
                 style_ref=bool(enter_style_ref),
                 projection=(enter_view or {}).get("projection"),
+                loop=view_loop,
             )
-            main_task = _asyncio.create_task(
-                image_edit_provider.edit_image(
-                    enter_source,
-                    enter_instruction,
-                    model_override=enter_model_slug,
-                    style_ref_url=enter_style_ref,
+            if view_loop:
+                from providers import judge, render_loop
+
+                async def _render_enter(suffix: str) -> Any:
+                    instr = (
+                        enter_instruction
+                        if not suffix
+                        else f"{enter_instruction}\n\n{suffix}"
+                    )
+                    return await image_edit_provider.edit_image(
+                        enter_source,
+                        instr,
+                        model_override=enter_model_slug,
+                        style_ref_url=enter_style_ref,
+                    )
+
+                loop_cfg = render_loop.loop_config_from_env()
+                loop_attempts: list[Any] = []
+                async for loop_att in render_loop.iter_attempts(
+                    _render_enter,
+                    projection=str((enter_view or {}).get("projection") or ""),
+                    region_bytes=render_loop.data_url_bytes(enter_source),
+                    judge_conformance=judge.score_view_conformance,
+                    judge_same_place=judge.score_continuation,
+                    config=loop_cfg,
+                    family=enter_family,
+                    abort=_abort_if_disconnected,
+                ):
+                    loop_attempts.append(loop_att)
+                    if (
+                        not loop_att.accepted
+                        and loop_att.index + 1 < loop_cfg.max_attempts
+                    ):
+                        # Stream the rejected attempt — the user watches the
+                        # agent self-correct instead of staring at a spinner.
+                        frame_b64 = (
+                            await _asyncio.to_thread(
+                                base64.b64encode, loop_att.image.jpeg_bytes
+                            )
+                        ).decode("ascii")
+                        yield _sse(
+                            {
+                                "type": "progress",
+                                "frame_index": loop_att.index,
+                                "jpeg_b64": frame_b64,
+                            },
+                            trace_id,
+                        )
+                result = render_loop.conclude(loop_attempts).image
+            else:
+                main_task = _asyncio.create_task(
+                    image_edit_provider.edit_image(
+                        enter_source,
+                        enter_instruction,
+                        model_override=enter_model_slug,
+                        style_ref_url=enter_style_ref,
+                    )
                 )
-            )
         else:
             main_task = _asyncio.create_task(
                 image_provider.generate_image(
@@ -1421,8 +1484,9 @@ async def _event_stream(
                 )
             )
         # Drive both tasks to completion. If the draft finishes first, emit
-        # `progress`; if the main finishes first, drop the draft.
-        if draft_task is not None:
+        # `progress`; if the main finishes first, drop the draft. (When the
+        # render loop produced `result` inline, there is no main_task.)
+        if main_task is not None and draft_task is not None:
             done, _ = await _asyncio.wait(
                 {draft_task, main_task}, return_when=_asyncio.FIRST_COMPLETED
             )
@@ -1461,7 +1525,7 @@ async def _event_stream(
                         trace_id,
                     )
                 result = await main_task
-        else:
+        elif main_task is not None:
             result = await main_task
 
         # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the

@@ -326,3 +326,128 @@ async def test_steep_enter_routes_to_gpt_family(
     assert edit.await_args.kwargs["model_override"] == model_router.resolve_model(
         "enter_scene"
     )
+
+
+def _mock_judges(
+    monkeypatch: pytest.MonkeyPatch,
+    conf_side: list[Any],
+    same_score: float = 9.0,
+) -> tuple[AsyncMock, AsyncMock]:
+    import providers.judge as judge_mod
+    from providers.judge import JudgeResult
+
+    conf = AsyncMock(
+        side_effect=[
+            JudgeResult(score=s, rationale=r, raw="") for s, r in conf_side
+        ]
+    )
+    same = AsyncMock(return_value=JudgeResult(score=same_score, rationale="", raw=""))
+    monkeypatch.setattr(judge_mod, "score_view_conformance", conf)
+    monkeypatch.setattr(judge_mod, "score_continuation", same)
+    return conf, same
+
+
+def _steep_body(**over: Any) -> GenerateBody:
+    # an interior -> the eye_level policy -> the STEEP loop path. The region
+    # ref must be a real data URL so the loop's same-place judge engages.
+    import base64 as _b64
+
+    region = "data:image/jpeg;base64," + _b64.b64encode(b"REGION").decode()
+    return _tap_body(
+        prefetched_subject="The Dusty Tavern",
+        prefetched_subject_context="a low-beamed tavern interior",
+        condition_image_urls=[region, "data:p", "data:s"],
+        **over,
+    )
+
+
+async def test_view_loop_retries_with_critic_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Attempt 1 fails the projection check -> exactly one progress frame, a
+    # second edit call whose instruction carries the critic's rationale, and
+    # the accepted attempt becomes the final image.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    conf, _ = _mock_judges(
+        monkeypatch, [(3.0, "looks like a bird's-eye view"), (10.0, "clean")]
+    )
+
+    events = await _collect(_event_stream(_steep_body(), "t1"))
+
+    assert edit.await_count == 2
+    second_instr = edit.await_args_list[1].args[1]
+    assert "looks like a bird's-eye view" in second_instr  # the diagnosis
+    assert "failed the projection check" in second_instr
+    progress = [e for e in events if e["type"] == "progress"]
+    assert len(progress) == 1 and progress[0]["frame_index"] == 0
+    assert any(e["type"] == "final" for e in events)
+    assert conf.await_count == 2
+
+
+async def test_view_loop_accept_fast_no_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_judges(monkeypatch, [(9.0, "good")])
+
+    events = await _collect(_event_stream(_steep_body(), "t1"))
+
+    edit.assert_awaited_once()
+    assert not [e for e in events if e["type"] == "progress"]
+
+
+async def test_view_loop_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    conf, same = _mock_judges(monkeypatch, [(0.0, "never called")])
+
+    await _collect(_event_stream(_steep_body(), "t1"))
+
+    edit.assert_awaited_once()
+    conf.assert_not_awaited()
+    same.assert_not_awaited()
+
+
+async def test_view_loop_aerial_zero_overhead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The castle -> oblique (aerial register): the loop never engages, the
+    # judges are never called — zero added latency on the common path.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    conf, same = _mock_judges(monkeypatch, [(0.0, "never called")])
+
+    await _collect(_event_stream(_tap_body(), "t1"))
+
+    edit.assert_awaited_once()
+    conf.assert_not_awaited()
+    same.assert_not_awaited()
+
+
+async def test_view_loop_judge_failure_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No critic signal -> single attempt, the final still emits normally
+    # (judging can never break generation).
+    import providers.judge as judge_mod
+
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setattr(
+        judge_mod,
+        "score_view_conformance",
+        AsyncMock(side_effect=RuntimeError("no key")),
+    )
+
+    events = await _collect(_event_stream(_steep_body(), "t1"))
+
+    edit.assert_awaited_once()
+    assert any(e["type"] == "final" for e in events)

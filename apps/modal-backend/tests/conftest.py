@@ -54,6 +54,12 @@ _SCRUB = (
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",
     "FAL_ENTER_MODEL_STEEP",
+    # The render loop (default ON for steep enters — scrub for hermeticity).
+    "VIEW_LOOP",
+    "VIEW_LOOP_MAX_ATTEMPTS",
+    "VIEW_LOOP_ACCEPT_CONFORMANCE",
+    "VIEW_LOOP_ACCEPT_SAME_PLACE",
+    "VIEW_LOOP_RETRY_BUDGET_S",
     "FAL_EDIT_TIER",
     "FAL_EDIT_MODEL_FAST",
     "FAL_EDIT_MODEL_BALANCED",
