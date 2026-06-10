@@ -575,11 +575,12 @@ async def _event_stream(
                         style_anchor=style_lock,
                         render_mode="scale_parent",
                     )
-                    if env_flag("SCALE_OUTWARD_EDIT_REF"):
+                    if env_flag("SCALE_OUTWARD_EDIT_REF", "true"):
                         # The source ref is a no-op on the text-to-image endpoint
                         # (research 01-model-bakeoff); the edit endpoint honors it, so
                         # the container continues the source's medium + content instead
-                        # of free-styling. Opt-in until the paid S4 A/B confirms the lift.
+                        # of free-styling. Default ON (kill-switch =false) — the inert
+                        # ref path exists only as the revert.
                         medium = style_lock or "the same hand-drawn art style as the centre"
                         img = await image_edit_provider.edit_image(
                             body.image,
@@ -1013,11 +1014,23 @@ async def _event_stream(
                     break
             if region_ref is None:
                 region_ref = body.condition_image_urls[0]
-        # The model router owns the op decision (same result as before: a
-        # place_submap entry with a region crop zoom-continues, else fresh gen).
-        use_continuation = (
-            model_router.select_operation(render_mode, region_ref is not None)
-            == "zoom_continue"
+        # The model router owns the op decision: a place_submap entry with a
+        # region crop zoom-continues; a place_scene entry routes through the
+        # edit endpoint; everything else is a fresh gen.
+        image_op = model_router.select_operation(render_mode, region_ref is not None)
+        use_continuation = image_op == "zoom_continue"
+        # Enter-via-edit (ENTER_EDIT_REF, default ON — a kill-switch, not an
+        # opt-in): the edit endpoint is the only path where the source ref
+        # actually bites (research/01: text-to-image accepts-but-IGNORES refs,
+        # which made every entered place an unconditioned reinvention). Source
+        # = the clean region crop the client already sends in the condition
+        # stack; body.image only as a last resort — it is the marker-ANNOTATED
+        # parent (play page annotateClickPoint).
+        enter_source: str | None = region_ref or body.image
+        use_enter_edit = (
+            image_op == "enter_scene"
+            and env_flag("ENTER_EDIT_REF", "true")
+            and enter_source is not None
         )
         # The Kontext zoom keeps the crop's LOOK faithful; feed it the system's
         # KNOWLEDGE too — the planner's named sub-areas (plan.facts) + the
@@ -1026,6 +1039,17 @@ async def _event_stream(
         # it through the world model and geometry.
         zoom_instruction = image_edit_provider.build_zoom_instruction(
             plan.page_title, plan.facts, layout_clause
+        )
+        # The enter edit is a view CHANGE on the SAME place: the region crop
+        # carries the look, this text carries the move inside + everything the
+        # system knows (identity, neighbours-by-bearing, medium, geometry).
+        enter_instruction = image_edit_provider.build_enter_instruction(
+            plan.page_title,
+            plan.facts,
+            style_anchor=style_anchor,
+            subject_context=subject_context,
+            surroundings=surroundings_for_plan,
+            layout_clause=layout_clause,
         )
 
         # 3. Image gen — with progressive fast-tier draft.
@@ -1049,6 +1073,10 @@ async def _event_stream(
             # Sub-map continuation is a single Kontext call on the region crop;
             # a nano-banana text draft would just be an unrelated preview.
             and not use_continuation
+            # Same for the enter edit: a text-only draft can't preview a
+            # conditioned edit — it would be a SECOND unconditioned reinvention
+            # flashing before the faithful render (the draft≠final complaint).
+            and not use_enter_edit
         )
         draft_task: _asyncio.Task | None = None
         if wants_draft:
@@ -1080,6 +1108,28 @@ async def _event_stream(
             main_task = _asyncio.create_task(
                 image_edit_provider.continue_image(
                     region_ref, zoom_instruction, model_override=body.image_model
+                )
+            )
+        elif use_enter_edit and enter_source is not None:
+            # Explicit per-request model wins (mirrors the continuation call);
+            # else the router's enter_scene slot (FAL_ENTER_MODEL override).
+            enter_model = body.image_model or model_router.resolve_model(
+                "enter_scene"
+            )
+            enter_style_ref = _condition_url_for_role(body, "style")
+            log(
+                "info",
+                "tap.enter_edit",
+                model=enter_model,
+                source="region" if region_ref else "parent_image",
+                style_ref=bool(enter_style_ref),
+            )
+            main_task = _asyncio.create_task(
+                image_edit_provider.edit_image(
+                    enter_source,
+                    enter_instruction,
+                    model_override=enter_model,
+                    style_ref_url=enter_style_ref,
                 )
             )
         else:
@@ -1181,9 +1231,27 @@ async def _event_stream(
             "image_model": result.model,
             "prompt_author_model": text_model,
             "session_id": body.session_id,
-            "final_prompt": zoom_instruction if use_continuation else composed_prompt,
+            "final_prompt": (
+                zoom_instruction
+                if use_continuation
+                else enter_instruction
+                if use_enter_edit
+                else composed_prompt
+            ),
             "sources": sources_payload,
         }
+        # Which non-fresh op actually rendered the image — additive, absent on
+        # the fresh path (unchanged wire shape). Lets the demo trace / A-B
+        # drivers machine-check the route instead of inferring from the model.
+        executed_op = (
+            "zoom_continue"
+            if use_continuation
+            else "enter_scene"
+            if use_enter_edit
+            else "fresh"
+        )
+        if executed_op != "fresh":
+            final_payload["image_op"] = executed_op
         # Geometric grounding summary rides on `final` only when produced (flag
         # off → key absent → unchanged wire shape).
         if grounding_summary is not None:

@@ -1,9 +1,10 @@
 """Per-operation image-model router.
 
 Every image operation has a default model and an env override, and a pure
-`select_operation` decides which op a tap generation uses: entering a place or a
-sub-map with a region crop zoom-continues (a faithful Kontext zoom of the map);
-everything else is a fresh generation.
+`select_operation` decides which op a tap generation uses: a sub-map with a
+region crop zoom-continues (a faithful Kontext zoom of the map); entering a
+place routes through an EDIT endpoint (the only path where the parent-region
+ref actually bites); everything else is a fresh generation.
 
 `outpaint`/`inpaint`/`upscale` slots are declared for the verify→repair loop
 (and map-pan reuse) but only activate once their FAL_*_MODEL is set AND a
@@ -19,6 +20,11 @@ import os
 MODEL_SLOTS: dict[str, tuple[str | None, str | None]] = {
     "fresh": (None, None),  # tier-based via image.py (FAL_IMAGE_MODEL_*)
     "zoom_continue": ("fal-ai/flux-pro/kontext", "FAL_CONTINUE_MODEL"),
+    # Entering a place: an instruction-driven EDIT of the tapped region crop —
+    # nano edit slugs honour image_urls (verified via scripts/verify-fal-models.py)
+    # and tolerate a view change, where Kontext strict-zooms. The enter eval
+    # (tests/continuity_bench/enter_runner.py) A/Bs the candidates.
+    "enter_scene": ("fal-ai/nano-banana-pro/edit", "FAL_ENTER_MODEL"),
     "outpaint": ("fal-ai/bria/expand", "FAL_OUTPAINT_MODEL"),
     # B2 OUTWARD: a centered BRIA outpaint (reuses the bria slot) paints the
     # container around the source; the medium-flip hop is a tier-based fresh gen.
@@ -52,16 +58,22 @@ def select_operation(render_mode: str | None, has_region: bool) -> str:
     — a faithful, style-preserving closer MAP of the SAME walls/buildings the map
     shows, from the same overhead viewpoint.
 
-    Stepping INSIDE a place (`place_scene`) is a view CHANGE — exterior to interior
-    — which a strict zoom can't do (Kontext just zooms the crop, the "did you only
-    zoom in?" failure). So a scene is a FRESH, reference-conditioned generation: it
-    renders the interior while the region crop + the place's appearance keep its
-    architecture, materials and style continuous with the map.
+    Stepping INSIDE a place (`place_scene`) is a view CHANGE — overhead map to
+    ground level — routed through an EDIT endpoint conditioned on the tapped
+    region crop. Fresh text-to-image is NOT an option here: fal's text-to-image
+    endpoints accept-but-ignore reference images (research/01), so a "fresh,
+    reference-conditioned" scene was really an unconditioned reinvention —
+    different walls/shapes every time. The edit endpoint is where refs bite;
+    the instruction (build_enter_instruction) carries the view change. The call
+    site still needs a source image, hence no has_region condition here — it
+    falls back to fresh only when there is nothing to condition on.
 
     Everything else is a fresh generation. (outpaint/inpaint/upscale are invoked
     explicitly by callers — the repair loop — not chosen here.)"""
     if render_mode == "place_submap" and has_region:
         return "zoom_continue"
+    if render_mode == "place_scene":
+        return "enter_scene"
     return "fresh"
 
 

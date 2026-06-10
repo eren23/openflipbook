@@ -7,9 +7,13 @@ run it by hand when wiring a new slot or before trusting a param like
 
 Findings as of 2026-06 (the reason image._args_for sends no negative_prompt and
 why fresh-gen conditioning is best-effort):
-  - nano-banana / nano-banana-pro (text-to-image): NO negative_prompt, NO image_urls
+  - nano-banana / nano-banana-pro / nano-banana-2 (text-to-image):
+                                                   NO negative_prompt, NO image_urls
+  - nano-banana(-pro/-2)/edit:                     take image_urls (list) + aspect_ratio
   - flux-pro/kontext (edit/continue):              NO negative_prompt, takes image_url (singular)
   - seedream v4 (text-to-image):                   text-only (image_size, no refs)
+  - openai/gpt-image-2:                            image_size + quality, NO refs
+  - openai/gpt-image-2/edit:                       image_urls (list) + image_size/quality/mask_url
   - bria/expand (outpaint):                        takes image_url + expansion box
 => No image model in use accepts a negative_prompt, so we never send one; the
    MEDIUM LOCK in the prompt text is the model-agnostic style guard. Image refs
@@ -31,9 +35,14 @@ SLUGS = [
     "fal-ai/nano-banana",
     "fal-ai/nano-banana-pro",
     "fal-ai/nano-banana/edit",
+    "fal-ai/nano-banana-pro/edit",
+    "fal-ai/nano-banana-2",
+    "fal-ai/nano-banana-2/edit",
     "fal-ai/bytedance/seedream/v4/text-to-image",
     "fal-ai/flux-pro/kontext",
     "fal-ai/bria/expand",
+    "openai/gpt-image-2",
+    "openai/gpt-image-2/edit",
 ]
 PROBE = ["prompt", "image_url", "image_urls", "negative_prompt", "aspect_ratio", "guidance_scale"]
 

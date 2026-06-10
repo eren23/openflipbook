@@ -71,10 +71,19 @@ def _mock_fresh(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return gen
 
 
-async def test_ascend_fresh_container_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ascend_container_continues_source_via_edit_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SCALE_OUTWARD_EDIT_REF defaults ON: the container render goes through the
+    # edit endpoint (the only path where the source ref bites) — not the inert
+    # text-to-image ref path, and not the outpaint.
     _enable(monkeypatch)
     monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
     gen = _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
     outpaint = AsyncMock()
     monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", outpaint)
 
@@ -83,8 +92,27 @@ async def test_ascend_fresh_container_by_default(monkeypatch: pytest.MonkeyPatch
     assert ready["scale_tier"] == "region"  # one rung coarser than city
     assert ready["from_tier"] == "city"
     assert ready["page_title"] == "The Vallen Sea and Coastline"
-    gen.assert_awaited_once()  # the fresh scale_parent container
+    edit.assert_awaited_once()  # the ref-honouring edit container
+    assert edit.await_args.args[0] == "data:image/jpeg;base64,abc"  # the source
+    gen.assert_not_awaited()  # NOT the no-op text-to-image ref path
     outpaint.assert_not_awaited()  # NOT the outpaint
+
+
+async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SCALE_OUTWARD_EDIT_REF=false: byte-identical to the old fresh container.
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_EDIT_REF", "false")
+    gen = _mock_fresh(monkeypatch)
+    edit = AsyncMock()
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    events = await _collect(_event_stream(_ascend_body(), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["page_title"] == "The Vallen Sea and Coastline"
+    gen.assert_awaited_once()  # the fresh scale_parent container
+    edit.assert_not_awaited()
 
 
 async def test_ascend_outpaint_under_flag_steers_the_medium(monkeypatch: pytest.MonkeyPatch) -> None:

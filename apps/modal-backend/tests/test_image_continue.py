@@ -74,6 +74,44 @@ def test_build_zoom_instruction_degrades_without_knowledge() -> None:
     assert s == s.strip()
 
 
+def test_build_enter_instruction_changes_viewpoint_keeps_place() -> None:
+    # Entering is a VIEW CHANGE on the SAME place: the instruction must demand
+    # ground level (not the map view) while locking architecture, neighbours,
+    # medium and the geometry clause to the reference crop.
+    s = image_edit.build_enter_instruction(
+        "Sentinel's Rise",
+        ["The Inner Bailey", "The Watch Bell"],
+        style_anchor="hand-drawn engraving, sepia ink",
+        subject_context="a stone castle with concentric walls",
+        surroundings="to the north-east, the striped lighthouse on the cliffs",
+        layout_clause="Place the Inner Bailey at the centre.",
+    )
+    low = s.lower()
+    assert "sentinel's rise" in low
+    assert "ground level" in low and "inside" in low       # the view change
+    assert "same place" in low and "exact" in low          # fidelity lock
+    assert "a stone castle with concentric walls" in s     # identity descriptor
+    assert "The Inner Bailey" in s and "The Watch Bell" in s
+    assert "hand-drawn engraving, sepia ink" in s          # medium rides the text (Kontext)
+    assert "striped lighthouse" in s                       # neighbours stay where mapped
+    assert "Place the Inner Bailey at the centre." in s    # geometry reaches the edit
+    assert "garbled" in low                                # no label bait
+    assert "photograph" in low                             # photoreal-drift guard
+
+
+def test_build_enter_instruction_degrades_without_knowledge() -> None:
+    # First enter with nothing seeded: still a faithful view change, no dangling
+    # enumerations or separators.
+    s = image_edit.build_enter_instruction("The Tower", [])
+    low = s.lower()
+    assert "the tower" in low
+    assert "ground level" in low and "same place" in low
+    assert "belongs here" not in low
+    assert "neighbours" not in low
+    assert "photograph" in low  # the medium guard holds even without an anchor
+    assert s == s.strip()
+
+
 async def test_continue_image_respects_env_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

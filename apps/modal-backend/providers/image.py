@@ -1,13 +1,16 @@
-"""fal-ai image generation with quality tiers.
+"""Image generation with quality tiers (fal + OpenRouter slugs).
 
-Three tiers map to fal model slugs (verified 2026-04). Each tier is overridable
-via env (`FAL_IMAGE_MODEL_FAST` / `..._BALANCED` / `..._PRO`). A request may
-also pass an explicit `tier` or `model_override` per call. Resolution order:
-explicit override > per-request tier > FAL_IMAGE_MODEL legacy env > default.
+Three tiers map to model slugs (fal verified 2026-04; OpenRouter added 2026-06
+after the broad bakeoff, docs/research/07). Each tier is overridable via env
+(`FAL_IMAGE_MODEL_FAST` / `..._BALANCED` / `..._PRO`). A request may also pass
+an explicit `tier` or `model_override` per call. Resolution order: explicit
+override > per-request tier > FAL_IMAGE_MODEL legacy env > default.
 
-`_args_for` keeps the per-model arg-shape divergence localised — seedream uses
-`image_size`, nano-banana uses `aspect_ratio`. Add new entries here as more
-models join.
+Slugs prefixed `openrouter:` route through OpenRouter's image-modality chat API
+(riverflow, recraft, …) instead of fal — same GeneratedImage out, provenance
+kept in the model string. `_args_for` keeps the per-model arg-shape divergence
+localised — seedream/gpt-image-2 use `image_size`, nano-banana family uses
+`aspect_ratio`. Add new entries here as more models join.
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ from typing import Any, cast
 
 import fal_client
 import httpx
+import openai
+from openai import AsyncOpenAI
 from tenacity import (
     AsyncRetrying,
     retry_if_exception,
@@ -26,10 +31,18 @@ from tenacity import (
     wait_exponential,
 )
 
+# OpenRouter-served image models (bakeoff field: sourceful/riverflow-v2.5-*,
+# recraft/recraft-v4.1-*). The prefix keeps fal slugs unambiguous and shows
+# provider provenance in final.image_model.
+OPENROUTER_IMAGE_PREFIX = "openrouter:"
+
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
     "balanced": "fal-ai/nano-banana-pro",
-    "pro":      "fal-ai/bytedance/seedream/v4/text-to-image",
+    # Bakeoff quality winner (docs/research/07): best medium adherence; layout
+    # fidelity is saturated across the field so this is the "I want the best
+    # one" tier. Revert knob: FAL_IMAGE_MODEL_PRO (e.g. back to seedream-v4).
+    "pro":      "openrouter:sourceful/riverflow-v2.5-pro",
 }
 TIER_ENV_KEYS: dict[str, str] = {
     "fast":     "FAL_IMAGE_MODEL_FAST",
@@ -112,8 +125,10 @@ def _args_for(
     aspect_ratio: str,
     reference_urls: list[str] | None = None,
 ) -> dict[str, Any]:
-    if "seedream" in model:
-        # seedream is text-to-image only here — no reference conditioning.
+    if "seedream" in model or "gpt-image" in model:
+        # seedream + fal-hosted gpt-image-2 take `image_size` presets (same
+        # enum) and are text-to-image only here — no reference conditioning
+        # (verified via scripts/verify-fal-models.py: no image_urls on either).
         return {
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
@@ -273,8 +288,23 @@ async def generate_image(
             ctx["bytes"] = len(generated.jpeg_bytes)
         return generated
 
-    _ensure_fal_key()
     model = _resolve_model(tier, model_override)
+    if model.startswith(OPENROUTER_IMAGE_PREFIX):
+        # OpenRouter image-modality slug (riverflow / recraft / …): needs only
+        # OPENROUTER_API_KEY (already required for the planner), not FAL_KEY.
+        # Text-to-image semantics — refs would be ignored, same as seedream.
+        slug = model.removeprefix(OPENROUTER_IMAGE_PREFIX)
+        async with span(
+            "image.generate",
+            model=model,
+            prompt_len=len(prompt),
+            provider="openrouter",
+        ) as ctx:
+            generated = await _openrouter_image(slug, prompt, aspect_ratio)
+            ctx["bytes"] = len(generated.jpeg_bytes)
+        return generated
+
+    _ensure_fal_key()
     # Reference conditioning: upload each data URL to fal storage (queue
     # endpoints choke on multi-MB inline data URLs) and pass them as image_urls.
     # Only nano-banana accepts refs; other fal models stay text-only.
@@ -412,18 +442,108 @@ async def _openai_compatible_image(
     raise RuntimeError("image provider returned neither b64_json nor url")
 
 
+_OPENROUTER_CLIENT: AsyncOpenAI | None = None
+
+
+def _openrouter_client() -> AsyncOpenAI:
+    """Module-level singleton for `openrouter:` image slugs.
+
+    Pinned to the OpenRouter base URL on purpose — NOT llm._client(), whose
+    LLM_PROVIDER seam may point at Ollama/LM Studio, which can't serve image
+    modalities. Explicit generous timeout: riverflow-pro takes 1-3 MINUTES
+    with no bytes on the wire (152s measured live, 2026-06-10), and an
+    unbounded await would hang the SSE worker.
+    """
+    global _OPENROUTER_CLIENT
+    if _OPENROUTER_CLIENT is None:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY is not set (required for openrouter: image models)"
+            )
+        _OPENROUTER_CLIENT = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            timeout=float(os.environ.get("OPENROUTER_IMAGE_TIMEOUT_S", "240")),
+            default_headers={
+                "HTTP-Referer": os.environ.get(
+                    "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
+                ),
+                "X-Title": "Endless Canvas",
+            },
+        )
+    return _OPENROUTER_CLIENT
+
+
+async def _openrouter_image(
+    slug: str, prompt: str, aspect_ratio: str
+) -> GeneratedImage:
+    """One image via OpenRouter's image-modality chat API (riverflow/recraft).
+
+    Request shape proven by the bakeoff harness (scripts/bakeoff): a chat
+    completion with `modalities: ["image"]`; the image comes back base64 in
+    `message.images[0].image_url.url` (or, defensively, an http(s) URL).
+    """
+    client = _openrouter_client()
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    ):
+        with attempt:
+            resp = await client.chat.completions.create(
+                model=slug,
+                messages=[{"role": "user", "content": prompt}],
+                extra_body={
+                    "modalities": ["image"],
+                    "image_config": {"aspect_ratio": aspect_ratio},
+                },
+            )
+            msg = (resp.model_dump().get("choices") or [{}])[0].get("message") or {}
+            images = msg.get("images") or []
+            if not images:
+                # Malformed/empty responses fail fast (RuntimeError is not
+                # retryable) — mirrors _first_image on the fal path.
+                content = str(msg.get("content"))[:160]
+                raise RuntimeError(
+                    f"openrouter image model returned no image (content={content!r})"
+                )
+            url = str((images[0].get("image_url") or {}).get("url") or "")
+            if url.startswith("data:"):
+                header, _, b64 = url.partition(",")
+                mime = header.removeprefix("data:").split(";")[0] or "image/png"
+                raw = base64.b64decode(b64)
+            elif url.startswith("http"):
+                raw, mime = await _fetch_url_bytes(url)
+            else:
+                raise RuntimeError("openrouter image url malformed")
+            return GeneratedImage(
+                jpeg_bytes=raw,
+                mime_type=mime or "image/png",
+                model=f"{OPENROUTER_IMAGE_PREFIX}{slug}",
+                provider_request_id=str(getattr(resp, "id", "") or "") or None,
+            )
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def _is_retryable(exc: BaseException) -> bool:
-    """fal/transport transients worth retrying. 4xx-other should fail fast.
+    """fal/openai/transport transients worth retrying. 4xx-other fails fast.
 
     fal_client raises its own exception hierarchy (`FalClientHTTPError`,
     `FalClientTimeoutError`) for queue/HTTP failures — NOT bare httpx
-    exceptions — so the classifier checks those first. Falls back to httpx
-    exceptions for the post-fal CDN download path.
+    exceptions — so the classifier checks those first. The openai SDK (the
+    `openrouter:` image path) likewise wraps transport errors in its own
+    types. Falls back to httpx exceptions for the post-fal CDN download path.
     """
     if isinstance(exc, fal_client.FalClientHTTPError):
         code = exc.status_code
         return code == 429 or 500 <= code < 600
     if isinstance(exc, fal_client.FalClientTimeoutError):
+        return True
+    if isinstance(exc, openai.APIStatusError):  # RateLimitError subclasses this
+        return exc.status_code == 429 or 500 <= exc.status_code < 600
+    if isinstance(exc, openai.APIConnectionError):  # APITimeoutError subclasses this
         return True
     if isinstance(exc, httpx.TransportError):
         return True
