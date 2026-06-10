@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 
-import type { EntityEditPlan } from "@openflipbook/config";
+import type { EntityEditPlan, WorldEntityGeo } from "@openflipbook/config";
 
 import { useWorldMap } from "@/hooks/useWorldMap";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -12,13 +12,16 @@ import GeoEditPanel from "./GeoEditPanel";
 interface Props {
   sessionId: string;
   prefill?: { text: string; nonce: number } | null | undefined;
+  onApplyToImage?:
+    | ((plan: EntityEditPlan, entitiesAtApply: WorldEntityGeo[]) => void)
+    | undefined;
 }
 
 // Self-contained container for the geometric-world editor: hydrates the session
 // map, wires the NL-edit route (preview via dry_run, then apply), refetches the
 // chips after a write. Drop in behind WORLD_OVERRIDE_ENABLED + GEOMETRIC_WORLD;
 // inert (empty map) when the geo flag is off, so it's safe to mount either way.
-export default function GeoEditSection({ sessionId, prefill }: Props) {
+export default function GeoEditSection({ sessionId, prefill, onApplyToImage }: Props) {
   const { entities, refetch } = useWorldMap(sessionId);
 
   const onSubmit = useCallback(
@@ -42,5 +45,12 @@ export default function GeoEditSection({ sessionId, prefill }: Props) {
     [sessionId, refetch],
   );
 
-  return <GeoEditPanel entities={entities} onSubmit={onSubmit} prefill={prefill} />;
+  return (
+    <GeoEditPanel
+      entities={entities}
+      onSubmit={onSubmit}
+      prefill={prefill}
+      onApplyToImage={onApplyToImage}
+    />
+  );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, DragEvent, FormEvent } from "react";
 import type {
   Citation,
+  EntityEditPlan,
   GenerateRequestBody,
   GenerateEvent,
   MapCrop,
@@ -22,6 +23,7 @@ import {
   type NormalizedClick,
 } from "@/lib/image-click";
 import { entityAtPoint, padBox, type EntityHit } from "@/lib/entity-hit";
+import { applyPlanInstruction } from "@/lib/geo-to-edit";
 import {
   getWSUrl,
   startLTXStream,
@@ -1242,6 +1244,24 @@ export default function PlayPage() {
     [runEdit, editInstruction, editRegion]
   );
 
+  // E4 apply-to-image: a just-landed geo plan becomes ONE page edit in the
+  // repair register ("keep everything else exactly as it is — only adjust:
+  // move the lighthouse north"). Coordinates moved; the pixels follow —
+  // judged by the edit loop when its flags are on.
+  const geoApplyToImage = useCallback(
+    (plan: EntityEditPlan, entitiesAtApply: WorldEntityGeo[]) => {
+      const frame =
+        geoMap.bounds.w > 0 && geoMap.bounds.h > 0
+          ? { w: geoMap.bounds.w, h: geoMap.bounds.h }
+          : { w: 100, h: 60 };
+      const instruction = applyPlanInstruction(plan.edits, entitiesAtApply, frame);
+      if (!instruction) return;
+      setCodexOpen(false);
+      void runEdit(instruction, null);
+    },
+    [geoMap.bounds, runEdit]
+  );
+
   // The context menu's "Enter {entity}": a synthetic click on the image at
   // the entity's bbox centre, so the EXISTING tap flow runs verbatim —
   // revisit check, world-mode routing, condition refs, morph — instead of a
@@ -1301,6 +1321,10 @@ export default function PlayPage() {
           onClick: () => {
             close();
             void runEdit(`remove the ${entity.name}`, padBox(bbox));
+            // E4: the pixels go AND the world model follows — soft delete
+            // with the codex's existing 10s undo; the edited page's
+            // re-extraction won't re-add what's no longer drawn.
+            void mutateWorldEntity({ op: "delete", id: entity.id });
           },
         });
       }
@@ -1340,7 +1364,7 @@ export default function PlayPage() {
       });
     }
     return items;
-  }, [contextMenu, phase, dispatchTapAt, runEdit, geoMap.entities.length]);
+  }, [contextMenu, phase, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
@@ -3135,6 +3159,7 @@ export default function PlayPage() {
         onMutate={mutateWorldEntity}
         geoEditSessionId={sessionId}
         geoEditPrefill={geoEditPrefill}
+        onGeoApplyToImage={geoApplyToImage}
       />
 
       {/* Hide the coach while the Around tray is open — both are pinned to

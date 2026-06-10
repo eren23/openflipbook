@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Entity,
+  EntityEditPlan,
   EntityKind,
+  WorldEntityGeo,
   WorldEntityMutation,
 } from "@openflipbook/config";
 
@@ -33,6 +35,10 @@ interface Props {
   // Seed the geo editor's instruction box (the context menu's "move/resize
   // this…" routes here). Forwarded verbatim to GeoEditSection.
   geoEditPrefill?: { text: string; nonce: number } | null | undefined;
+  // E4 apply-to-image: after a geo plan lands, let the pixels follow.
+  onGeoApplyToImage?:
+    | ((plan: EntityEditPlan, entitiesAtApply: WorldEntityGeo[]) => void)
+    | undefined;
 }
 
 interface UndoToastState {
@@ -84,6 +90,7 @@ export function CodexPanel({
   onMutate,
   geoEditSessionId,
   geoEditPrefill,
+  onGeoApplyToImage,
 }: Props) {
   const [tab, setTab] = useState<TabKind>("all");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -266,7 +273,11 @@ export function CodexPanel({
               <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-60">
                 Map · geometry
               </h3>
-              <GeoEditSection sessionId={geoEditSessionId} prefill={geoEditPrefill} />
+              <GeoEditSection
+                sessionId={geoEditSessionId}
+                prefill={geoEditPrefill}
+                onApplyToImage={onGeoApplyToImage}
+              />
             </section>
           )}
         </div>
