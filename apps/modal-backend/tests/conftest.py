@@ -74,6 +74,7 @@ _SCRUB = (
     "REPAIR_BENCH_RUN",
     "EDIT_BENCH_RUN",
     "WORLD_BENCH_JUDGE_MODEL",
+    "CONTINUITY_BENCH_JUDGE_MODEL",
     # Map-pan expand (outpaint the world outward).
     "EXPAND_MAP_PAN",
     "FAL_EXPAND_MODEL",

@@ -422,3 +422,16 @@ def camera_clause(
     else:
         parts.append(negative)
     return " ".join(parts)
+
+
+def register_reminder(projection: str, family: str | None = None) -> str:
+    """The projection's full register (positive + guard) as a retry reminder —
+    what the feedback clause re-asserts after a failed attempt. gpt-image gets
+    its constraints-block form (the officially endorsed repeat-verbatim
+    grammar); unknown projections return ""."""
+    lang = _PROJECTION_LANGUAGE.get(projection)
+    if lang is None:
+        return ""
+    if (family or "") == "gpt_image":
+        return GPT_CONSTRAINTS[projection]
+    return lang["positive"] + " " + lang["negative"]
