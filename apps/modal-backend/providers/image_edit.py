@@ -152,6 +152,61 @@ def build_zoom_instruction(
     return text.strip()
 
 
+def build_enter_instruction(
+    page_title: str,
+    facts: list[str],
+    *,
+    style_anchor: str | None = None,
+    subject_context: str | None = None,
+    surroundings: str | None = None,
+    layout_clause: str = "",
+) -> str:
+    """Compose the enter-edit instruction: a VIEW CHANGE that keeps the place.
+
+    The reference (the tapped region crop) carries the place's look — walls,
+    shapes, materials, palette; this text carries the move pixels can't show:
+    step from the overhead map to ground level INSIDE the same place. Fidelity
+    is the contract — the same architecture and landmarks the crop shows, seen
+    from within — not a fresh invention (the old text-to-image path, where refs
+    were a no-op) and not a plain zoom (the submap path). The medium clause is
+    load-bearing when FAL_ENTER_MODEL points at Kontext, which takes no second
+    style ref. Empty inputs degrade cleanly — no dangling separators.
+    """
+    title = page_title.strip() or "this place"
+    anchor = f'"{title}"'
+    if subject_context and subject_context.strip():
+        anchor += f" ({subject_context.strip()})"
+    text = (
+        f"Step INSIDE {anchor} — the place this image shows — and draw the view "
+        "from ground level within it. This is the SAME place seen from the "
+        "inside, not a new one and not the overhead map view: keep the exact "
+        "architecture, walls, towers, materials, colours and landmarks the "
+        "image shows, and reveal what they enclose"
+    )
+    named = [f.strip() for f in facts if f and f.strip()]
+    if named:
+        # Features to SHOW, not captions — same garble guard as the zoom path.
+        text += ", working in what belongs here: " + "; ".join(named[:8])
+    text += "."
+    if surroundings and surroundings.strip():
+        text += (
+            " Through openings and beyond the walls, keep the neighbours where "
+            f"the map placed them: {surroundings.strip()}"
+        )
+        if not text.endswith("."):
+            text += "."
+    text += " Keep the exact art medium of the reference"
+    if style_anchor and style_anchor.strip():
+        text += f" — {style_anchor.strip()} —"
+    text += (
+        " same palette and line work; NOT a photograph, no photorealism. "
+        "Keep any lettering sparse and legible — no garbled text."
+    )
+    if layout_clause.strip():
+        text += "\n\n" + layout_clause.strip()
+    return text.strip()
+
+
 async def continue_image(
     image_data_url: str,
     instruction: str,
