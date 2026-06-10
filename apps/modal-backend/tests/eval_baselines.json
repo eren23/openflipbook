@@ -14,6 +14,13 @@
       "regression_band": 2.0,
       "n_min": 1,
       "source": "SESSION_AUDIT.md §5 + make eval-style"
+    },
+    "enter_same_place": {
+      "metric": "mean_lift",
+      "baseline": 2.33,
+      "regression_band": 2.0,
+      "n_min": 2,
+      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter)"
     }
   }
 }
