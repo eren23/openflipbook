@@ -635,6 +635,9 @@ export interface ViewEstimate {
   // Coarse SCALE_LADDER rung the estimator read (or the ViewLevel→tier fallback).
   // Optional; mirrored in the Python ViewEstimate TypedDict (view_estimator.py).
   scale_tier?: ScaleTier;
+  // The estimator's own 0..1 confidence. Gates the C12 node PATCH backend-side
+  // (>= 0.7); optional for older payloads.
+  confidence?: number;
 }
 
 // A per-session snapshot of the geometric world (the `world_map` collection).

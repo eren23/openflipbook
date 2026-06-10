@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type Document } from "mongodb";
-import type { ScaleTier, SceneView } from "@openflipbook/config";
+import type { ScaleTier, SceneView, ViewSpec } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -363,4 +363,30 @@ export async function listRecentErrors(limit = 50): Promise<ErrorRow[]> {
     body_excerpt: doc.body_excerpt ?? null,
     source: doc.source,
   }));
+}
+
+/** C12 — record the view ESTIMATOR's read as the node's camera truth. A narrow
+ *  `$set` on `scene_view.view` only, guarded so it (a) requires an existing
+ *  scene_view (no fabricated views on legacy nodes) and (b) NEVER overwrites a
+ *  user-pinned camera (`source: "user"` is sacred; policy/estimated stamps are
+ *  fair game — the node's view must describe the image as it actually is, so
+ *  later zooms/ascends inherit the real projection). Returns whether it wrote. */
+export async function updateNodeEstimatedView(
+  id: string,
+  view: ViewSpec,
+): Promise<boolean> {
+  const collection = await nodes();
+  const res = await collection.updateOne(
+    {
+      _id: id,
+      scene_view: { $ne: null },
+      $or: [
+        { "scene_view.view": null },
+        { "scene_view.view": { $exists: false } },
+        { "scene_view.view.source": { $ne: "user" } },
+      ],
+    },
+    { $set: { "scene_view.view": view } },
+  );
+  return res.matchedCount === 1;
 }

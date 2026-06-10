@@ -1307,7 +1307,12 @@ async def _event_stream(
         # oblique establishing / isometric / closer plan) instead of the old
         # hardcoded "ground level".
         enter_view = view_spec if image_op == "enter_scene" else None
-        enter_model_slug = body.image_model or model_router.resolve_model("enter_scene")
+        # Steep transforms route to the gpt family (view-bench A/B: eye_level
+        # 8.0 vs the nano family's 2.5 from an aerial source, same-place
+        # equal); aerial registers + the legacy no-view enter keep the slot.
+        enter_model_slug = body.image_model or model_router.select_enter_model(
+            str(enter_view.get("projection")) if enter_view else None
+        )
         enter_family = camera_lib.model_family(enter_model_slug)
         if enter_view is not None and enter_family == "kontext":
             # Kontext can't change projection (3.33/10 same-place on view
@@ -1378,6 +1383,8 @@ async def _event_stream(
                 )
                 + composed_prompt
             )
+        result: Any = None
+        main_task: _asyncio.Task | None = None
         if use_continuation and region_ref is not None:
             main_task = _asyncio.create_task(
                 image_edit_provider.continue_image(
@@ -1385,27 +1392,104 @@ async def _event_stream(
                 )
             )
         elif use_enter_edit and enter_source is not None:
-            # Explicit per-request model wins (mirrors the continuation call);
-            # else the router's enter_scene slot (FAL_ENTER_MODEL override).
-            enter_model = body.image_model or model_router.resolve_model(
-                "enter_scene"
-            )
+            # ONE selection for both the instruction's family grammar and the
+            # dispatch: explicit per-request model > the steep-aware router
+            # pick (enter_model_slug, resolved above with the view).
             enter_style_ref = _condition_url_for_role(body, "style")
+            # The render loop (VIEW_LOOP, default ON): steep transforms are
+            # the measured ~50% one-shot path — judge each attempt, fold the
+            # critic's rationale into a single retry, keep the best. Aerial
+            # registers + legacy enters keep the zero-overhead one-shot path.
+            view_loop = (
+                enter_view is not None
+                and str(enter_view.get("projection") or "")
+                in model_router.STEEP_ENTER_PROJECTIONS
+                and env_flag("VIEW_LOOP", "true")
+            )
             log(
                 "info",
                 "tap.enter_edit",
-                model=enter_model,
+                model=enter_model_slug,
                 source="region" if region_ref else "parent_image",
                 style_ref=bool(enter_style_ref),
+                projection=(enter_view or {}).get("projection"),
+                loop=view_loop,
             )
-            main_task = _asyncio.create_task(
-                image_edit_provider.edit_image(
-                    enter_source,
-                    enter_instruction,
-                    model_override=enter_model,
-                    style_ref_url=enter_style_ref,
+            if view_loop:
+                from providers import judge, render_loop
+
+                async def _render_enter(suffix: str) -> Any:
+                    instr = (
+                        enter_instruction
+                        if not suffix
+                        else f"{enter_instruction}\n\n{suffix}"
+                    )
+                    return await image_edit_provider.edit_image(
+                        enter_source,
+                        instr,
+                        model_override=enter_model_slug,
+                        style_ref_url=enter_style_ref,
+                    )
+
+                # The richness critic: the named interior features (the
+                # planner's facts) must stay articulated across retries — a
+                # retry that fixes the camera but seals the bailey under an
+                # invented roof is REJECTED, not accepted (the critic gap a
+                # live regression exposed).
+                detail_features = [f for f in plan.facts if f and f.strip()]
+                detail_title = plan.page_title or effective_query
+
+                async def _judge_detail(img_bytes: bytes) -> Any:
+                    return await judge.score_feature_articulation(
+                        img_bytes, detail_title, detail_features
+                    )
+
+                loop_cfg = render_loop.loop_config_from_env()
+                loop_attempts: list[Any] = []
+                async for loop_att in render_loop.iter_attempts(
+                    _render_enter,
+                    projection=str((enter_view or {}).get("projection") or ""),
+                    region_bytes=render_loop.data_url_bytes(enter_source),
+                    judge_conformance=judge.score_view_conformance,
+                    judge_same_place=judge.score_continuation,
+                    config=loop_cfg,
+                    judge_detail=_judge_detail,
+                    family=enter_family,
+                    abort=_abort_if_disconnected,
+                ):
+                    loop_attempts.append(loop_att)
+                    # Stream only verdict-REJECTED attempts (a correction is
+                    # coming); a degraded attempt (no critic) is the final.
+                    if (
+                        not loop_att.accepted
+                        and loop_att.conformance is not None
+                        and loop_att.index + 1 < loop_cfg.max_attempts
+                    ):
+                        # Stream the rejected attempt — the user watches the
+                        # agent self-correct instead of staring at a spinner.
+                        frame_b64 = (
+                            await _asyncio.to_thread(
+                                base64.b64encode, loop_att.image.jpeg_bytes
+                            )
+                        ).decode("ascii")
+                        yield _sse(
+                            {
+                                "type": "progress",
+                                "frame_index": loop_att.index,
+                                "jpeg_b64": frame_b64,
+                            },
+                            trace_id,
+                        )
+                result = render_loop.conclude(loop_attempts).image
+            else:
+                main_task = _asyncio.create_task(
+                    image_edit_provider.edit_image(
+                        enter_source,
+                        enter_instruction,
+                        model_override=enter_model_slug,
+                        style_ref_url=enter_style_ref,
+                    )
                 )
-            )
         else:
             main_task = _asyncio.create_task(
                 image_provider.generate_image(
@@ -1417,8 +1501,9 @@ async def _event_stream(
                 )
             )
         # Drive both tasks to completion. If the draft finishes first, emit
-        # `progress`; if the main finishes first, drop the draft.
-        if draft_task is not None:
+        # `progress`; if the main finishes first, drop the draft. (When the
+        # render loop produced `result` inline, there is no main_task.)
+        if main_task is not None and draft_task is not None:
             done, _ = await _asyncio.wait(
                 {draft_task, main_task}, return_when=_asyncio.FIRST_COMPLETED
             )
@@ -1457,7 +1542,7 @@ async def _event_stream(
                         trace_id,
                     )
                 result = await main_task
-        else:
+        elif main_task is not None:
             result = await main_task
 
         # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the
@@ -1994,10 +2079,25 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                 ],
             },
             "view": view,
+            # C12: the estimator's read as a ViewSpec, ONLY when confident
+            # enough to become node truth (>= 0.7). The web extract route
+            # PATCHes it onto the node's scene_view.view (never over a user
+            # pin) so later zooms/ascends inherit the image's REAL projection.
+            "view_spec": (
+                _estimate_view_spec(cast("dict[str, object]", view))
+                if view is not None and float(view.get("confidence", 0.0)) >= 0.7
+                else None
+            ),
             "trace_id": trace_id,
         },
         headers={"X-Trace-Id": trace_id},
     )
+
+
+def _estimate_view_spec(view: dict[str, object]) -> dict[str, object]:
+    from providers.prompt_library import policy as view_policy
+
+    return cast("dict[str, object]", view_policy.estimate_to_view_spec(view))
 
 
 @fastapi_app.post("/edit-entities")

@@ -493,3 +493,30 @@ def test_policy_remaining_cells() -> None:
     # estimator fallback on junk pitch
     est = policy.estimate_to_view_spec({"projection": "oblique", "pitch_deg": "junk"})
     assert est["pitch_deg"] == -90.0 and est["projection"] == "oblique"
+
+
+def test_register_reminder_and_retry_feedback() -> None:
+    from providers.prompt_library import feedback
+
+    # the reminder re-asserts the register; gpt gets its constraints grammar
+    r = camera.register_reminder("top_down")
+    assert "flat top-down plan view" in r and "no vanishing point" in r
+    g = camera.register_reminder("top_down", "gpt_image")
+    assert g == camera.GPT_CONSTRAINTS["top_down"]
+    assert camera.register_reminder("junk") == ""
+    # the clause folds the critic's diagnosis + the reminder
+    s = feedback.retry_feedback_clause(
+        "top_down", conformance_rationale="the image uses a bird's-eye perspective"
+    )
+    assert "failed the projection check" in s
+    assert "bird's-eye perspective" in s
+    assert "Correct exactly that:" in s and "plan view" in s
+    # the same-place axis composes alongside
+    both = feedback.retry_feedback_clause(
+        "eye_level",
+        conformance_rationale="aerial view",
+        same_place_rationale="different towers",
+    )
+    assert "SAME place as the reference" in both and "different towers" in both
+    # nothing failed -> nothing said
+    assert feedback.retry_feedback_clause("top_down") == ""

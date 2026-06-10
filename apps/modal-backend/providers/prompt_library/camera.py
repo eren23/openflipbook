@@ -30,7 +30,9 @@ _PROJECTION_LANGUAGE: dict[str, dict[str, str]] = {
             "Drawn in flat top-down plan view, looking straight down from "
             "directly overhead: every building seen roof-on, no facades "
             "visible, no horizon anywhere on the sheet, uniform scale across "
-            "the whole map."
+            "the whole map. Courtyards, baileys, plazas and other open-air "
+            "spaces stay OPEN — draw the structures inside them; never seal "
+            "an open compound under an invented roof."
         ),
         "negative": (
             "NO perspective, no isometric tilt, no vanishing point, no 3D depth."
@@ -422,3 +424,16 @@ def camera_clause(
     else:
         parts.append(negative)
     return " ".join(parts)
+
+
+def register_reminder(projection: str, family: str | None = None) -> str:
+    """The projection's full register (positive + guard) as a retry reminder —
+    what the feedback clause re-asserts after a failed attempt. gpt-image gets
+    its constraints-block form (the officially endorsed repeat-verbatim
+    grammar); unknown projections return ""."""
+    lang = _PROJECTION_LANGUAGE.get(projection)
+    if lang is None:
+        return ""
+    if (family or "") == "gpt_image":
+        return GPT_CONSTRAINTS[projection]
+    return lang["positive"] + " " + lang["negative"]

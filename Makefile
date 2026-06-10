@@ -93,6 +93,10 @@ eval-enter-drift:
 # grammar's gate. PAID (~$2.5; fal gens + Gemini judge); no session needed.
 eval-view:
 	cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
+# Same bench with the PRODUCTION render loop on the steep arms (judged retries
+# with critic feedback, max 3 attempts) — measures what users actually get.
+eval-view-loop:
+	cd apps/modal-backend && VIEW_BENCH_RUN=1 VIEW_BENCH_LOOP=1 .venv/bin/python -m tests.continuity_bench.view_runner
 # The before/after regression sweep: every PAID eval that has a committed
 # baseline band (tests/eval_baselines.json), run back to back. Each prints
 # PASS / REGRESSION / IMPROVED vs its band — run it before AND after a risky

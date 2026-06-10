@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { updateNodeEstimatedView } from "@/lib/db";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
@@ -12,6 +13,7 @@ import type {
   EntityKind,
   SceneView,
   ViewEstimate,
+  ViewSpec,
 } from "@openflipbook/config";
 
 export const runtime = "nodejs";
@@ -94,6 +96,7 @@ export async function POST(req: Request, { params }: Params) {
 
   let upstreamResult: EntityExtractionResult;
   let upstreamView: ViewEstimate | null = null;
+  let upstreamViewSpec: ViewSpec | null = null;
   try {
     const upstream = await fetch(
       joinModalUrl(env.MODAL_API_URL, "/extract-entities"),
@@ -128,9 +131,11 @@ export async function POST(req: Request, { params }: Params) {
     const payload = (await upstream.json()) as {
       result: EntityExtractionResult;
       view?: ViewEstimate | null;
+      view_spec?: ViewSpec | null;
     };
     upstreamResult = payload.result;
     upstreamView = payload.view ?? null;
+    upstreamViewSpec = payload.view_spec ?? null;
   } catch (err) {
     return NextResponse.json(
       {
@@ -153,6 +158,16 @@ export async function POST(req: Request, { params }: Params) {
     // world crop. Best-effort, off the response path.
     const geoNodeId = body.node_id;
     const sceneView = body.scene_view ?? null;
+    // C12: the estimator's confident camera read becomes the node's view truth
+    // (never over a user pin — the db helper guards). Best-effort: a failed
+    // patch must not break extraction.
+    if (geoNodeId && upstreamViewSpec) {
+      try {
+        await updateNodeEstimatedView(geoNodeId, upstreamViewSpec);
+      } catch {
+        // best-effort only
+      }
+    }
     const viewLevel = upstreamView?.level ?? "map";
     // An ENTERED place (the geo-tap carried a focus): seed this scene's
     // sub-entities into that place's CHILD frame, so the interior layout

@@ -112,6 +112,8 @@ class ArmResult:
     conformance: float
     same_place: float
     conformance_rationale: str
+    # How many loop attempts produced this arm (1 = single-shot, the default).
+    attempts: int = 1
 
 
 @dataclass(frozen=True)
@@ -147,8 +149,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
     region_bytes = _crop_region(src.jpeg_bytes, case.tap)
     region_url = image_provider.encode_data_url(region_bytes)
 
-    enter_model = model_router.resolve_model("enter_scene")
-    family = camera_lib.model_family(enter_model)
+    loop_mode = bool(os.environ.get("VIEW_BENCH_LOOP"))
 
     _REPORTS.mkdir(parents=True, exist_ok=True)
     (_REPORTS / f"view_{case.name}_map.jpg").write_bytes(src.jpeg_bytes)
@@ -156,6 +157,12 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
 
     arms: list[ArmResult] = []
     for arm, view in _ARM_VIEWS.items():
+        # Per-arm model = the production router pick (steep arms route to the
+        # gpt family under PR #35), so the bench measures the full stack.
+        arm_model = model_router.select_enter_model(
+            str(view.get("projection")) if view else None
+        )
+        family = camera_lib.model_family(arm_model)
         instruction = image_edit_provider.build_enter_instruction(
             case.place_label,
             case.facts,
@@ -166,6 +173,64 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
             family=family if view is not None else None,
             style_ref=True,
         )
+        # VIEW_BENCH_LOOP=1: steep deliberate arms render through the
+        # PRODUCTION render loop (judged retries with critic feedback) so
+        # eval-view-loop measures what users actually get. The default path
+        # stays byte-identical (the committed baseline stays comparable).
+        if (
+            loop_mode
+            and view is not None
+            and _ARM_INTENT[arm] in model_router.STEEP_ENTER_PROJECTIONS
+        ):
+            from providers import judge as judge_mod
+            from providers import render_loop
+
+            async def _render(suffix: str, _i: str = instruction, _m: str | None = arm_model) -> Any:
+                full = _i if not suffix else f"{_i}\n\n{suffix}"
+                return await image_edit_provider.edit_image(
+                    region_url, full, model_override=_m, style_ref_url=map_url
+                )
+
+            async def _judge_detail(
+                img: bytes, _label: str = case.place_label, _f: list[str] = case.facts
+            ) -> Any:
+                return await judge_mod.score_feature_articulation(img, _label, _f)
+
+            loop_result = await render_loop.run_view_loop(
+                _render,
+                projection=_ARM_INTENT[arm],
+                region_bytes=region_bytes,
+                judge_conformance=judge_mod.score_view_conformance,
+                judge_same_place=judge_mod.score_continuation,
+                config=render_loop.LoopConfig(max_attempts=3),
+                judge_detail=_judge_detail,
+            )
+            for i, att in enumerate(loop_result.attempts):
+                (_REPORTS / f"view_{case.name}_{arm}_a{i}.jpg").write_bytes(
+                    att.image.jpeg_bytes
+                )
+            best = max(
+                loop_result.attempts,
+                key=lambda a: (
+                    a.conformance.score if a.conformance else -1.0,
+                    a.same_place.score if a.same_place else -1.0,
+                ),
+            )
+            (_REPORTS / f"view_{case.name}_{arm}.jpg").write_bytes(
+                loop_result.image.jpeg_bytes
+            )
+            arms.append(
+                ArmResult(
+                    arm=arm,
+                    conformance=best.conformance.score if best.conformance else 0.0,
+                    same_place=best.same_place.score if best.same_place else 0.0,
+                    conformance_rationale=(
+                        best.conformance.rationale if best.conformance else ""
+                    ),
+                    attempts=len(loop_result.attempts),
+                )
+            )
+            continue
         # fal occasionally 422s a perfectly valid edit ("Could not generate
         # images... Please try again") — one bench-level retry, then record a
         # zero arm instead of killing the whole paid run.
@@ -175,7 +240,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 rendered = await image_edit_provider.edit_image(
                     region_url,
                     instruction,
-                    model_override=enter_model,
+                    model_override=arm_model,
                     style_ref_url=map_url,
                 )
                 break
@@ -285,6 +350,7 @@ async def run_bench() -> dict[str, Any]:
     return {
         "judge_model": os.environ.get("CONTINUITY_BENCH_JUDGE_MODEL"),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "loop": bool(os.environ.get("VIEW_BENCH_LOOP")),
         "conform_threshold": _CONFORM_THRESHOLD,
         "same_place_floor": _SAME_PLACE_FLOOR,
         "cases": [asdict(r) for r in results],

@@ -23,6 +23,10 @@ class ViewEstimate(TypedDict):
     # Coarse SCALE_LADDER rung (B2). Mirrors the optional `scale_tier?` on the TS
     # ViewEstimate; a free str so the ladder is defined once (packages/config).
     scale_tier: str
+    # The model's own 0..1 confidence in the read. Gates whether the estimate
+    # is trusted enough to PATCH onto the node's persisted view (C12: >= 0.7);
+    # absent/invalid replies coerce to 0.5 — informative but never node truth.
+    confidence: float
 
 
 LEVELS: tuple[ViewLevel, ...] = ("map", "building", "street", "eye")
@@ -48,6 +52,7 @@ DEFAULT_VIEW: ViewEstimate = {
     "projection": "top_down",
     "pitch_deg": -90.0,
     "scale_tier": "city",
+    "confidence": 0.0,  # a fallback is never trusted as node truth
 }
 
 
@@ -75,6 +80,10 @@ def parse_view(payload: Any) -> ViewEstimate:
     except (TypeError, ValueError):
         pitch = -90.0
     valid_level: ViewLevel = level if level in LEVELS else "map"
+    try:
+        conf = float(payload.get("confidence"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        conf = 0.5  # informative default — below the C12 trust gate
     return {
         "level": valid_level,
         "projection": proj if proj in PROJECTIONS else "top_down",
@@ -82,6 +91,7 @@ def parse_view(payload: Any) -> ViewEstimate:
         # An unknown/absent rung falls back deterministically off the level, so a
         # fresh session is always seeded with *a* tier (the design's cheap seed).
         "scale_tier": tier if tier in SCALE_TIERS else LEVEL_TO_TIER[valid_level],
+        "confidence": max(0.0, min(1.0, conf)),
     }
 
 
@@ -94,7 +104,7 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
     system = (
         "You classify the CAMERA + SCALE of an illustration so a geometry engine "
         "knows how to read positions out of it. Return JSON exactly: "
-        '{"level":..,"projection":..,"pitch_deg":..,"scale_tier":..}.\n'
+        '{"level":..,"projection":..,"pitch_deg":..,"scale_tier":..,"confidence":..}.\n'
         "level: map (a top-down or bird's-eye map of an area), building (looking at "
         "a single structure), street (standing within a street/scene), eye "
         "(eye-level on one subject).\n"
@@ -104,7 +114,8 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
         "bird's-eye, 0 level/horizon.\n"
         "scale_tier: the real-world SCALE the frame spans, one of universe, galaxy, "
         "star_system, planet, world, region, city, district, place, room, object "
-        "(coarsest→finest)."
+        "(coarsest→finest).\n"
+        "confidence: your own 0..1 confidence in this camera read (1 = certain)."
     )
     user = "Classify this image's camera." + (
         f' Caption: "{caption[:200]}"' if caption else ""

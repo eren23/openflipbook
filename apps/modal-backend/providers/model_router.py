@@ -113,3 +113,21 @@ def select_outward_op(from_tier: str, to_tier: str) -> str:
     it's a reference-conditioned fresh gen (`scale_parent_fresh`, the riskier path,
     gated SCALE_OUTWARD_RERENDER). `resolve_model()` maps the label to a slug."""
     return "scale_parent_fresh" if _is_medium_flip(from_tier, to_tier) else "outpaint_zoomout"
+
+
+# Steep view TRANSFORMS (an overhead map crop re-rendered at eye level or as a
+# closer plan) land ~2.5/10 on the nano family — it drifts back to its aerial
+# attractor — but 8/10 on gpt-image-2/edit, at equal same-place fidelity
+# (view-bench A/B, 2026-06-10). Aerial registers (oblique/isometric) are 9-10
+# on BOTH, so the cheaper incumbent keeps those.
+STEEP_ENTER_PROJECTIONS = frozenset({"eye_level", "top_down"})
+STEEP_ENTER_DEFAULT = "openai/gpt-image-2/edit"
+
+
+def select_enter_model(projection: str | None) -> str | None:
+    """The enter model for a deliberate camera: steep transforms route to the
+    gpt family (FAL_ENTER_MODEL_STEEP override); everything else — including
+    the legacy no-view enter — keeps the enter_scene slot."""
+    if projection in STEEP_ENTER_PROJECTIONS:
+        return os.environ.get("FAL_ENTER_MODEL_STEEP") or STEEP_ENTER_DEFAULT
+    return resolve_model("enter_scene")
