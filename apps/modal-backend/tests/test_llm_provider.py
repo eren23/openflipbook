@@ -1125,3 +1125,46 @@ async def test_propose_neighbors_end_to_end(monkeypatch: pytest.MonkeyPatch) -> 
     assert len(out) == 1
     assert out[0].subject == "Factory"
     assert out[0].scale == "container"
+
+
+# --- the fill register (mask-scoped edits, E1/F3) ------------------------------
+
+
+async def test_polish_fill_appends_scale_anchor_and_medium_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Fill paints the WHOLE mask — the deterministic scale anchor is what
+    # keeps a "small ferry" from coming out region-sized (the Ankh-Morpork
+    # lesson), and the medium lock rides after it.
+    fake = _FakeClient([_fake_response(content="a small wooden ferry on the river")])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    out = await llm.polish_fill_description(
+        "add a small ferry", style_anchor="aged parchment"
+    )
+    assert out.startswith("a small wooden ferry on the river")
+    assert "Drawn to scale with the surrounding scene" in out
+    assert out.index("Drawn to scale") < out.index("aged parchment")
+    assert out.endswith("In the existing art medium: aged parchment.")
+
+
+async def test_polish_fill_degrades_with_both_locks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeClient([RuntimeError("llm down")])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    out = await llm.polish_fill_description(
+        "add a small ferry", style_anchor="aged parchment"
+    )
+    assert out.startswith("add a small ferry")
+    assert "Drawn to scale with the surrounding scene" in out
+    assert "aged parchment" in out
+
+
+async def test_polish_fill_scale_anchor_without_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeClient([_fake_response(content="a quiet pond")])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    out = await llm.polish_fill_description("add a pond")
+    assert "Drawn to scale with the surrounding scene" in out
+    assert "art medium" not in out
