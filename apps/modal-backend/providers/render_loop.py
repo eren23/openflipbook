@@ -45,6 +45,10 @@ class LoopConfig:
     # The richness floor (only when a detail judge is wired): a retry that
     # fixes the camera but seals the place's interior must not be accepted.
     accept_detail: float = 6.0
+    # The medium floor (only when a medium judge is wired): the text medium
+    # lock is advisory to loose-ref models (nano treats refs as inspiration —
+    # the Ankh-Morpork demo drift), so the ART MEDIUM gets a runtime gate too.
+    accept_medium: float = 6.0
     # No retry when the previous attempt took longer than this (<=0 disables).
     retry_budget_s: float = 240.0
 
@@ -65,6 +69,7 @@ def loop_config_from_env() -> LoopConfig:
         accept_conformance=_f("VIEW_LOOP_ACCEPT_CONFORMANCE", 7.0),
         accept_same_place=_f("VIEW_LOOP_ACCEPT_SAME_PLACE", 6.0),
         accept_detail=_f("VIEW_LOOP_ACCEPT_DETAIL", 6.0),
+        accept_medium=_f("VIEW_LOOP_ACCEPT_MEDIUM", 6.0),
         retry_budget_s=_f("VIEW_LOOP_RETRY_BUDGET_S", 240.0),
     )
 
@@ -77,6 +82,7 @@ class Attempt:
     conformance: JudgeResult | None  # None = judge unavailable (degraded)
     same_place: JudgeResult | None  # None = no region bytes, or degraded
     detail: JudgeResult | None  # None = no detail judge wired
+    medium: JudgeResult | None  # None = no medium judge wired / no reference
     accepted: bool
     latency_s: float
 
@@ -107,6 +113,7 @@ def _is_accepted(
     conformance: JudgeResult | None,
     same_place: JudgeResult | None,
     detail: JudgeResult | None,
+    medium: JudgeResult | None,
     config: LoopConfig,
 ) -> bool:
     if conformance is None:
@@ -114,6 +121,8 @@ def _is_accepted(
     if conformance.score < config.accept_conformance:
         return False
     if same_place is not None and same_place.score < config.accept_same_place:
+        return False
+    if medium is not None and medium.score < config.accept_medium:
         return False
     return not (detail is not None and detail.score < config.accept_detail)
 
@@ -127,6 +136,7 @@ async def iter_attempts[ImageT: Rendered](
     judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]],
     config: LoopConfig,
     judge_detail: Callable[[bytes], Awaitable[JudgeResult]] | None = None,
+    judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
     feedback: Callable[..., str] = retry_feedback_clause,
     abort: Callable[[str], Awaitable[None]] | None = None,
@@ -161,12 +171,15 @@ async def iter_attempts[ImageT: Rendered](
         conformance: JudgeResult | None = None
         same_place: JudgeResult | None = None
         detail: JudgeResult | None = None
+        medium: JudgeResult | None = None
         try:
             conformance = await judge_conformance(image.jpeg_bytes, projection)
             if region_bytes is not None:
                 same_place = await judge_same_place(region_bytes, image.jpeg_bytes)
             if judge_detail is not None:
                 detail = await judge_detail(image.jpeg_bytes)
+            if judge_medium is not None and region_bytes is not None:
+                medium = await judge_medium(region_bytes, image.jpeg_bytes)
         except Exception as exc:
             log(
                 "warn",
@@ -175,10 +188,12 @@ async def iter_attempts[ImageT: Rendered](
                 error=f"{type(exc).__name__}: {exc}",
             )
             # No critic signal = the old blind coin-flip — don't spend more.
-            yield Attempt(index, image, suffix, conformance, same_place, detail, False, latency)
+            yield Attempt(
+                index, image, suffix, conformance, same_place, detail, medium, False, latency
+            )
             return
 
-        accepted = _is_accepted(conformance, same_place, detail, config)
+        accepted = _is_accepted(conformance, same_place, detail, medium, config)
         log(
             "info",
             "view.loop",
@@ -187,10 +202,13 @@ async def iter_attempts[ImageT: Rendered](
             conformance=_score(conformance),
             same_place=_score(same_place),
             detail=_score(detail),
+            medium=_score(medium),
             accepted=accepted,
             latency_s=round(latency, 1),
         )
-        yield Attempt(index, image, suffix, conformance, same_place, detail, accepted, latency)
+        yield Attempt(
+            index, image, suffix, conformance, same_place, detail, medium, accepted, latency
+        )
         if accepted:
             return
         if config.retry_budget_s > 0 and latency > config.retry_budget_s:
@@ -215,6 +233,11 @@ async def iter_attempts[ImageT: Rendered](
                 if detail is not None and detail.score < config.accept_detail
                 else None
             ),
+            medium_rationale=(
+                medium.rationale
+                if medium is not None and medium.score < config.accept_medium
+                else None
+            ),
             family=family,
         )
 
@@ -230,9 +253,15 @@ def conclude(attempts: list[Attempt]) -> LoopResult:
             return LoopResult(image=a.image, attempts=attempts, accepted=True)
     best = attempts[0]
     for a in attempts[1:]:
-        if (_score(a.conformance), _score(a.same_place), _score(a.detail)) > (
+        if (
+            _score(a.conformance),
+            _score(a.same_place),
+            _score(a.medium),
+            _score(a.detail),
+        ) > (
             _score(best.conformance),
             _score(best.same_place),
+            _score(best.medium),
             _score(best.detail),
         ):
             best = a
@@ -248,6 +277,7 @@ async def run_view_loop[ImageT: Rendered](
     judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]],
     config: LoopConfig | None = None,
     judge_detail: Callable[[bytes], Awaitable[JudgeResult]] | None = None,
+    judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
 ) -> LoopResult:
     """Drain the loop for non-streaming callers (the bench)."""
@@ -260,6 +290,7 @@ async def run_view_loop[ImageT: Rendered](
         judge_same_place=judge_same_place,
         config=config or loop_config_from_env(),
         judge_detail=judge_detail,
+        judge_medium=judge_medium,
         family=family,
     ):
         attempts.append(attempt)

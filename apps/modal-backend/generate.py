@@ -1631,16 +1631,15 @@ async def _event_stream(
             # dispatch: explicit per-request model > the steep-aware router
             # pick (enter_model_slug, resolved above with the view).
             enter_style_ref = _condition_url_for_role(body, "style")
-            # The render loop (VIEW_LOOP, default ON): steep transforms are
-            # the measured ~50% one-shot path — judge each attempt, fold the
-            # critic's rationale into a single retry, keep the best. Aerial
-            # registers + legacy enters keep the zero-overhead one-shot path.
-            view_loop = (
-                enter_view is not None
-                and str(enter_view.get("projection") or "")
-                in model_router.STEEP_ENTER_PROJECTIONS
-                and env_flag("VIEW_LOOP", "true")
-            )
+            # The render loop (VIEW_LOOP, default ON): EVERY deliberate-camera
+            # enter is judged — same-place + medium floors always, conformance
+            # per projection. The loop used to arm on steep projections only
+            # (eye_level/top_down, the measured ~50% one-shot path); the
+            # Ankh-Morpork demo showed an OBLIQUE enter drifting medium and
+            # identity with nothing to catch it — the text medium lock is
+            # advisory to loose-ref models, so the gate has to be a judge.
+            # Legacy (no deliberate view) enters keep the one-shot path.
+            view_loop = enter_view is not None and env_flag("VIEW_LOOP", "true")
             log(
                 "info",
                 "tap.enter_edit",
@@ -1689,6 +1688,9 @@ async def _event_stream(
                     judge_same_place=judge.score_continuation,
                     config=loop_cfg,
                     judge_detail=_judge_detail,
+                    # The medium gate: the entered view must look drawn by the
+                    # same hand as the tapped region (style_pair vs the crop).
+                    judge_medium=judge.score_style_pair,
                     family=enter_family,
                     abort=_abort_if_disconnected,
                 ):
