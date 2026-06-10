@@ -238,18 +238,154 @@ def _condition_url_for_role(body: GenerateBody, role: str) -> str | None:
     return None
 
 
-def _layout_clause_for(body: GenerateBody) -> str:
+def _layout_clause_for(body: GenerateBody, *, view_grammar: bool = False) -> str:
     """The geometry layout-constraint clause for this request, or "" when the
-    geometry-gen flag is off or no expected layout was sent."""
+    geometry-gen flag is off or no expected layout was sent. Under the view
+    grammar the research/09 extensions activate: depth layers (free — depths
+    already ride expected_layout) + relative heights from world_context
+    entries with REAL heights (the extraction seed constant 4.0 is excluded —
+    the A1 audit's information-loss fix, V1 must-fix 9)."""
     if not _world_geometry_gen_on() or not body.expected_layout:
         return ""
     from providers import geometry_prompt
 
     # model_dump() erases the static type, but a ProjectedEntity Pydantic model
     # dumps to exactly the ProjectedEntity TypedDict shape the prompt consumes.
-    return geometry_prompt.layout_constraints(
-        cast("list[ProjectedEntityDict]", [e.model_dump() for e in body.expected_layout])
+    expected = cast(
+        "list[ProjectedEntityDict]", [e.model_dump() for e in body.expected_layout]
     )
+    if not view_grammar:
+        return geometry_prompt.layout_constraints(expected)
+    return geometry_prompt.layout_constraints(
+        expected, depth_layers=True, heights=_heights_for_view(body)
+    )
+
+
+def _heights_for_view(body: GenerateBody) -> list[tuple[str, float, str]] | None:
+    """Relative-height pairs (label, ratio, anchor) from world_context entries
+    with REAL heights. The extraction seed gives EVERY entity height=4 (A1
+    audit), so 4.0 is treated as no-data; needs >=2 real values to compare.
+    Anchor = the shortest real-height entity (one shared anchor, research/09)."""
+    real: list[tuple[str, float]] = []
+    for e in body.world_context:
+        d = e.model_dump()
+        h = d.get("height")
+        name = str(d.get("name") or "").strip()
+        if name and isinstance(h, (int, float)) and h > 0 and float(h) != 4.0:
+            real.append((name, float(h)))
+    if len(real) < 2:
+        return None
+    real.sort(key=lambda t: t[1])
+    anchor_name, anchor_h = real[0]
+    return [(n, h / anchor_h, anchor_name) for n, h in real[1:]]
+
+
+def _view_grammar_on() -> bool:
+    """The view grammar (a deliberate camera per render). Default ON; =false
+    is a strict kill-switch — every render byte-identical to pre-grammar."""
+    return env_flag("VIEW_GRAMMAR", "true")
+
+
+def _focus_world_entry(body: GenerateBody, subject: str | None) -> dict | None:
+    """The world_context entry for the tapped place: focus_id match first,
+    else name/alias equality against the resolved subject (pre-hint)."""
+    sv = body.scene_view
+    focus_id = sv.focus_id if sv else None
+    subj = (subject or "").strip().lower()
+    for e in body.world_context:
+        d = e.model_dump()
+        if focus_id and d.get("id") == focus_id:
+            return d
+        names = [str(d.get("name") or "").strip().lower()] + [
+            str(a).strip().lower() for a in (d.get("aliases") or [])
+        ]
+        if subj and subj in names:
+            return d
+    return None
+
+
+def _view_spec_for(
+    body: GenerateBody,
+    render_mode: str,
+    *,
+    world_mode: bool,
+    has_region: bool,
+    subject: str | None,
+    subject_context: str | None,
+    place_form: str | None,
+) -> dict | None:
+    """Resolve the deliberate camera: user/persisted pin > policy > None.
+    VIEW_GRAMMAR=false -> None unconditionally (the strict kill-switch:
+    byte-identical legacy renders, V1 must-fix 3)."""
+    if not _view_grammar_on():
+        return None
+    sv = body.scene_view
+    if sv and sv.view is not None:
+        return sv.view.model_dump(exclude_none=True)
+    from providers.prompt_library import policy as view_policy
+
+    focus = _focus_world_entry(body, subject)
+    fp: tuple[float, float] | None = None
+    if focus and isinstance(focus.get("footprint"), dict):
+        f = focus["footprint"]
+        if f.get("w") and f.get("d"):
+            fp = (float(f["w"]), float(f["d"]))
+    return cast(
+        "dict | None",
+        view_policy.default_view(
+            render_mode=render_mode or None,
+            world_mode=world_mode,
+            level=sv.level if sv else None,
+            scale_tier=sv.scale_tier if sv else None,
+            has_observer=bool(sv and sv.observer is not None),
+            has_region=has_region,
+            place_form=place_form,
+            subject=subject,
+            subject_context=subject_context,
+            focus_kind=str(focus.get("kind") or "") if focus else None,
+            focus_footprint=fp,
+        ),
+    )
+
+
+def _camera_clause_for(body: GenerateBody, view: dict | None) -> str:
+    """The deliberate-camera clause for composed (fresh-path) prompts."""
+    if view is None:
+        return ""
+    from providers import image as image_provider
+    from providers.prompt_library import camera as camera_lib
+    from providers.prompt_library.types import ViewSpec as ViewSpecDict
+
+    sv = body.scene_view
+    obs = sv.observer.model_dump() if sv and sv.observer else None
+    medium = (body.session_style_anchor or "").strip() or None
+    family = camera_lib.model_family(
+        image_provider._resolve_model(body.image_tier, body.image_model)
+    )
+    from providers.geometry import ObserverPose as ObserverPoseDict
+
+    return camera_lib.camera_clause(
+        cast("ViewSpecDict", view),
+        cast("ObserverPoseDict | None", obs),
+        medium=medium,
+        family=family,
+    )
+
+
+def _layout_register_mismatch(body: GenerateBody, view: dict | None) -> bool:
+    """expected_layout bins are projected for a SPECIFIC camera (observer
+    present -> the synthesized eye-level perspective; absent -> top-down).
+    When the deliberate view names a DIFFERENT register, the bins are
+    wrong-camera noise — suppress the clause AND grounding rather than steer
+    and repair against the wrong camera (V1 must-fix 5; the A2 probe showed
+    bins swing wildly with pose)."""
+    if view is None or not body.expected_layout:
+        return False
+    proj = str(view.get("projection") or "")
+    sv = body.scene_view
+    if sv is not None and sv.observer is not None:
+        return proj != "eye_level"
+    return proj != "top_down"
 
 
 def _topdown_clause_for(body: GenerateBody) -> str:
@@ -571,6 +707,22 @@ async def _event_stream(
             )
             yield _sse({"type": "status", "stage": "rendering"}, trace_id)
             await _abort_if_disconnected("pre-ascend")
+            # View grammar on the OUTWARD hop (V1 must-fix 7, split by path):
+            # the pixel-preserving paths (outpaint margin / edit instruction)
+            # keep the SOURCE's persisted view — coherence with the pixels they
+            # extend; the fresh container is a NEW map and gets the policy's
+            # deliberate top-down camera.
+            src_view: dict | None = None
+            if _view_grammar_on() and body.scene_view and body.scene_view.view:
+                src_view = body.scene_view.view.model_dump(exclude_none=True)
+            from providers.prompt_library import camera as camera_lib
+            from providers.prompt_library import instructions as instructions_lib
+            from providers.prompt_library import policy as view_policy
+            from providers.prompt_library.types import ViewSpec as ViewSpecDict
+
+            outward_rider = instructions_lib.outward_clause(
+                cast("ViewSpecDict | None", src_view)
+            )
             try:
                 if use_outpaint:
                     medium = style_lock or "the same hand-drawn art style as the centre"
@@ -579,6 +731,8 @@ async def _event_stream(
                         f"{to_tier.replace('_', ' ')}, drawn in the SAME style as the "
                         "centre — one continuous view, NOT a photograph, no photorealism"
                     )
+                    if outward_rider:
+                        margin += ". " + outward_rider
                     img = await image_edit_provider.expand_image_zoomout(
                         body.image, 3.0, pw, ph, prompt=margin
                     )
@@ -601,15 +755,33 @@ async def _event_stream(
                         # of free-styling. Default ON (kill-switch =false) — the inert
                         # ref path exists only as the revert.
                         medium = style_lock or "the same hand-drawn art style as the centre"
-                        img = await image_edit_provider.edit_image(
-                            body.image,
+                        ascend_instr = (
                             f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
                             f"keeping this exact view as the centre. {medium}; one continuous "
-                            "view in that style, NOT a photograph, no photorealism.",
+                            "view in that style, NOT a photograph, no photorealism."
+                        )
+                        if outward_rider:
+                            ascend_instr += " " + outward_rider
+                        img = await image_edit_provider.edit_image(
+                            body.image, ascend_instr
                         )
                     else:
+                        # Fresh container = a NEW map: state the deliberate
+                        # top-down camera (None on astro rungs → legacy bytes).
+                        ascend_prompt = plan.prompt
+                        if _view_grammar_on():
+                            asc_view = view_policy.default_view(
+                                render_mode="scale_parent",
+                                world_mode=True,
+                                scale_tier=to_tier,
+                            )
+                            cam = camera_lib.camera_clause(
+                                asc_view, medium=style_lock or None
+                            )
+                            if cam:
+                                ascend_prompt += "\n\n" + cam
                         img = await image_provider.generate_image(
-                            plan.prompt, body.aspect_ratio, reference_urls=[body.image]
+                            ascend_prompt, body.aspect_ratio, reference_urls=[body.image]
                         )
                     page_title = plan.page_title or f"The surrounding {to_tier.replace('_', ' ')}".title()
                     final_prompt = plan.prompt
@@ -851,6 +1023,11 @@ async def _event_stream(
         # World Mode spatial anchor — what's around the tapped spot + directions,
         # threaded into the planner so the entered place keeps its neighbours.
         surroundings_for_plan: str | None = None
+        # View-grammar signals: the classifier's locale-proof place FORM
+        # (interior/complex/landscape/generic) and the resolved subject BEFORE
+        # the user-hint fold (the policy matches names against it).
+        place_form_resolved: str | None = None
+        view_subject: str | None = None
         if body.mode == "tap" and body.click and body.image:
             # Trust-but-verify on client-supplied prefetch hints. The web
             # client computes these via the same VLM the backend would call,
@@ -942,7 +1119,12 @@ async def _event_stream(
                     subject_context = resolution.subject_context
                 if resolution.surroundings:
                     surroundings_for_plan = resolution.surroundings
+                if resolution.place_form:
+                    place_form_resolved = resolution.place_form
 
+            # The view policy matches names against the subject BEFORE the
+            # hint fold (a hint suffix would break world_context name matches).
+            view_subject = effective_query
             # Fold the user's free-form note into the planner query so the next
             # page reflects their angle even when the prefetched-subject path
             # short-circuited the VLM. Em dash separator keeps the subject
@@ -999,31 +1181,11 @@ async def _event_stream(
         # keep their labels.
         if plan.facts and render_mode != "place_scene":
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
-        # Geometric world: append the engine's deterministic placement clause so
-        # the model aims entities at their projected positions. Flag-gated → "".
-        layout_clause = _layout_clause_for(body)
-        if layout_clause:
-            composed_prompt += "\n\n" + layout_clause
-            log("info", "geo.layout_steered", entities=len(body.expected_layout))
-        # Top-down map lever (WORLD_TOPDOWN_MAPS) — a flat overhead map makes the
-        # seeded geometry exact. Flag-gated, map renders only → "" otherwise.
-        topdown_clause = _topdown_clause_for(body)
-        if topdown_clause:
-            composed_prompt += "\n\n" + topdown_clause
-
-        await _abort_if_disconnected("pre-image-gen")
-        yield _sse(
-            {
-                "type": "status",
-                "stage": "generating_image",
-                "page_title": plan.page_title,
-            },
-            trace_id,
-        )
-
         # World Mode sub-map: pixel-continue the click region with a continuation
         # model (Kontext) so the closer map keeps the parent's streets/buildings
         # in place instead of re-planning a fresh image. Needs the region crop.
+        # (Hoisted above the prompt assembly: the view grammar needs the
+        # render's shape — region presence + op — before clauses compose.)
         region_ref: str | None = None
         if body.condition_image_urls:
             roles = body.condition_roles or []
@@ -1038,6 +1200,76 @@ async def _event_stream(
         # edit endpoint; everything else is a fresh gen.
         image_op = model_router.select_operation(render_mode, region_ref is not None)
         use_continuation = image_op == "zoom_continue"
+
+        # The deliberate camera (view grammar): user/persisted pin > policy >
+        # None (legacy bytes). Resolved once; consumed by the layout clause,
+        # the camera clause, and the enter/zoom instruction builders.
+        view_spec = _view_spec_for(
+            body,
+            render_mode,
+            world_mode=effective_world_mode,
+            has_region=region_ref is not None,
+            subject=view_subject,
+            subject_context=subject_context,
+            place_form=place_form_resolved,
+        )
+        if view_spec is not None:
+            log(
+                "info",
+                "view.applied",
+                projection=view_spec.get("projection"),
+                source=view_spec.get("source"),
+                op=image_op,
+            )
+        layout_suppressed = _layout_register_mismatch(body, view_spec)
+        if layout_suppressed:
+            log(
+                "warn",
+                "view.layout_register_mismatch",
+                projection=view_spec.get("projection") if view_spec else None,
+            )
+
+        # Geometric world: append the engine's deterministic placement clause so
+        # the model aims entities at their projected positions. Flag-gated → "".
+        # Suppressed when the bins were projected for a DIFFERENT camera than
+        # the deliberate view (steering against wrong-camera bins is worse than
+        # not steering); extended (depth layers + real heights) under the grammar.
+        layout_clause = (
+            ""
+            if layout_suppressed
+            else _layout_clause_for(body, view_grammar=view_spec is not None)
+        )
+        if layout_clause:
+            composed_prompt += "\n\n" + layout_clause
+            log("info", "geo.layout_steered", entities=len(body.expected_layout))
+        # The camera clause — the A3-proven appended-last slot. NOT on
+        # place_scene composed prompts: the enter INSTRUCTION carries the
+        # camera there, and the kill-switch fresh path keeps its legacy
+        # exterior→interior preamble uncontradicted (V1 should-fix 11). When
+        # the grammar produced a clause it SUBSUMES the WORLD_TOPDOWN_MAPS
+        # lever (no double-speak); the legacy clause only fires when the
+        # grammar stayed silent.
+        camera_text = (
+            "" if render_mode == "place_scene" else _camera_clause_for(body, view_spec)
+        )
+        if camera_text:
+            composed_prompt += "\n\n" + camera_text
+        else:
+            # Top-down map lever (WORLD_TOPDOWN_MAPS) — flag-gated, map renders
+            # only → "" otherwise.
+            topdown_clause = _topdown_clause_for(body)
+            if topdown_clause:
+                composed_prompt += "\n\n" + topdown_clause
+
+        await _abort_if_disconnected("pre-image-gen")
+        yield _sse(
+            {
+                "type": "status",
+                "stage": "generating_image",
+                "page_title": plan.page_title,
+            },
+            trace_id,
+        )
         # Enter-via-edit (ENTER_EDIT_REF, default ON — a kill-switch, not an
         # opt-in): the edit endpoint is the only path where the source ref
         # actually bites (research/01: text-to-image accepts-but-IGNORES refs,
@@ -1056,12 +1288,32 @@ async def _event_stream(
         # geometry placement clause — so it ELABORATES the place in finer detail
         # instead of a dumb pixel-zoom. The crop is the reference; this enhances
         # it through the world model and geometry.
+        from providers.prompt_library import camera as camera_lib
+
         zoom_instruction = image_edit_provider.build_zoom_instruction(
-            plan.page_title, plan.facts, layout_clause
+            plan.page_title,
+            plan.facts,
+            layout_clause,
+            style_anchor=style_anchor,
+            view=view_spec if use_continuation else None,
+            family=camera_lib.model_family(
+                body.image_model or model_router.resolve_model("zoom_continue")
+            ),
         )
         # The enter edit is a view CHANGE on the SAME place: the region crop
         # carries the look, this text carries the move inside + everything the
-        # system knows (identity, neighbours-by-bearing, medium, geometry).
+        # system knows (identity, neighbours-by-bearing, medium, geometry) —
+        # and, under the view grammar, the DELIBERATE camera (eye level /
+        # oblique establishing / isometric / closer plan) instead of the old
+        # hardcoded "ground level".
+        enter_view = view_spec if image_op == "enter_scene" else None
+        enter_model_slug = body.image_model or model_router.resolve_model("enter_scene")
+        enter_family = camera_lib.model_family(enter_model_slug)
+        if enter_view is not None and enter_family == "kontext":
+            # Kontext can't change projection (3.33/10 same-place on view
+            # change) — the builder emits its degraded scene-level fallback;
+            # deployers who pinned FAL_ENTER_MODEL=kontext should revert.
+            log("warn", "view.kontext_enter_fallback", model=enter_model_slug)
         enter_instruction = image_edit_provider.build_enter_instruction(
             plan.page_title,
             plan.facts,
@@ -1069,6 +1321,9 @@ async def _event_stream(
             subject_context=subject_context,
             surroundings=surroundings_for_plan,
             layout_clause=layout_clause,
+            view=enter_view,
+            family=enter_family,
+            style_ref=bool(_condition_url_for_role(body, "style")),
         )
 
         # 3. Image gen — with progressive fast-tier draft.
@@ -1209,8 +1464,11 @@ async def _event_stream(
         # expected layout and — when VLM_GROUNDING_REPAIR is also on — attempt one
         # bounded corrective edit, keeping the best-scoring image. Best-effort +
         # flag-gated, so off (the default) is byte-identical to before.
+        # Skipped on a layout-register mismatch: verifying (and REPAIRING)
+        # against bins projected for a different camera would actively fight
+        # the deliberate view (V1 must-fix 5).
         grounding_summary: dict | None = None
-        if _vlm_grounding_on() and body.expected_layout:
+        if _vlm_grounding_on() and body.expected_layout and not layout_suppressed:
             await _abort_if_disconnected("pre-grounding")
             yield _sse(
                 {

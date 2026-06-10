@@ -380,11 +380,11 @@ def test_policy_scene_cascade() -> None:
     # the classifier's locale-proof read beats the English tables (V1 f6)
     tr = policy.default_view(
         **base,
-        place_kind="interior",
+        place_form="interior",
         subject="Karanlık Meyhane",  # noqa: RUF001 — deliberately Turkish (the locale case)
     )
     assert tr is not None and tr["projection"] == "eye_level"
-    tr2 = policy.default_view(**base, place_kind="complex", subject="Büyük Kale")
+    tr2 = policy.default_view(**base, place_form="complex", subject="Büyük Kale")
     assert tr2 is not None and tr2["projection"] == "oblique"
     # unmatched non-English at tier "place" falls SAFE (eye), not aerial
     unk = policy.default_view(**base, subject="Meyhane", scale_tier="place")

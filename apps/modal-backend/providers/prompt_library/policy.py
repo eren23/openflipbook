@@ -102,7 +102,7 @@ def default_view(
     has_observer: bool = False,
     has_region: bool = False,
     enter_as: str | None = None,
-    place_kind: str | None = None,
+    place_form: str | None = None,
     subject: str | None = None,
     subject_context: str | None = None,
     focus_kind: str | None = None,
@@ -124,7 +124,7 @@ def default_view(
         return _scene_view(
             level,
             scale_tier,
-            place_kind,
+            place_form,
             subject,
             subject_context,
             focus_kind,
@@ -149,7 +149,7 @@ def default_view(
 def _scene_view(
     level: str | None,
     scale_tier: str | None,
-    place_kind: str | None,
+    place_form: str | None,
     subject: str | None,
     subject_context: str | None,
     focus_kind: str | None,
@@ -162,7 +162,7 @@ def _scene_view(
     if (focus_kind or "").lower() in _NON_PLACE_KINDS:
         return eye_level_scene()
     # S3'/S4' — the classifier's locale-proof read (V1 finding 6) beats words.
-    pk = (place_kind or "").strip().lower()
+    pk = (place_form or "").strip().lower()
     if pk == "interior":
         return eye_level_scene()
     if pk in ("complex", "landscape"):
