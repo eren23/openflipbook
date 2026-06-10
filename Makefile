@@ -86,6 +86,13 @@ eval-outward-drift:
 # PAID (fal gens + Gemini judge); self-contained, no session needed.
 eval-enter-drift:
 	cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
+# VIEW-conformance bench: render the enter five ways (legacy + the four
+# deliberate projections) → judge "is it ACTUALLY that projection?" + the
+# same-place floor; plus a positioning probe (layout clause + top_down camera
+# clause → detector → grounding.diff on correct-register bins). The view
+# grammar's gate. PAID (~$2.5; fal gens + Gemini judge); no session needed.
+eval-view:
+	cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
