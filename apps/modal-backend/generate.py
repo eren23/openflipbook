@@ -1458,8 +1458,11 @@ async def _event_stream(
                     abort=_abort_if_disconnected,
                 ):
                     loop_attempts.append(loop_att)
+                    # Stream only verdict-REJECTED attempts (a correction is
+                    # coming); a degraded attempt (no critic) is the final.
                     if (
                         not loop_att.accepted
+                        and loop_att.conformance is not None
                         and loop_att.index + 1 < loop_cfg.max_attempts
                     ):
                         # Stream the rejected attempt — the user watches the

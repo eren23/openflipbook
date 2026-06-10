@@ -342,8 +342,10 @@ def _mock_judges(
         ]
     )
     same = AsyncMock(return_value=JudgeResult(score=same_score, rationale="", raw=""))
+    detail = AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw=""))
     monkeypatch.setattr(judge_mod, "score_view_conformance", conf)
     monkeypatch.setattr(judge_mod, "score_continuation", same)
+    monkeypatch.setattr(judge_mod, "score_feature_articulation", detail)
     return conf, same
 
 
