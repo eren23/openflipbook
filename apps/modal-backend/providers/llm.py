@@ -1570,20 +1570,29 @@ async def polish_fill_description(
     smoke) paint what you describe, they don't follow commands. "add a red
     balloon here" -> "a single bright red hot-air balloon floating over the
     sea". Removals describe the background that should remain. The medium
-    lock is appended deterministically (fill takes no style ref image).
+    lock AND a scale anchor are appended deterministically (fill takes no
+    style ref image, and it paints the WHOLE mask — without the anchor a
+    "small ferry" comes out region-sized, the Ankh-Morpork lesson).
 
     Unlike polish_edit_instruction there is no long-instruction skip: a
     command stays a command however long it is — the register conversion IS
-    the point. LLM failure degrades to the raw instruction + medium lock.
+    the point. LLM failure degrades to the raw instruction + the locks.
     """
     instruction = instruction.strip()
     if not instruction:
         return instruction
 
     def _locked(text: str) -> str:
+        # Fill's mask IS its canvas: anchor size to the surroundings or the
+        # subject inflates to fill the selection edge-to-edge.
+        anchored = (
+            f"{text} Drawn to scale with the surrounding scene — nearby "
+            "buildings, figures and objects set the size reference; the "
+            "subject does not fill the region edge-to-edge."
+        )
         if style_anchor:
-            return f"{text} In the existing art medium: {style_anchor}."
-        return text
+            return f"{anchored} In the existing art medium: {style_anchor}."
+        return anchored
 
     client = _client()
     system = (

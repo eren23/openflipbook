@@ -1339,10 +1339,12 @@ export default function PlayPage() {
         });
       }
     } else if (contextMenu.clickPct && EDIT_REGION_ENABLED) {
+      // Fill paints the whole mask, so the default region IS the default
+      // object size — keep it modest (the palace-sized ferry lesson).
       const region = cropBox(
         contextMenu.clickPct.x_pct,
         contextMenu.clickPct.y_pct,
-        0.25
+        0.18
       );
       items.push({
         label: "Add something here…",
