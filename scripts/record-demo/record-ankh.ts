@@ -34,7 +34,10 @@ const MP4_OUT = path.join(HERE, "ankh-demo.mp4");
 
 const BASE = process.env.DEMO_BASE_URL ?? "http://localhost:3000";
 const VIEWPORT = { width: 1280, height: 800 };
-const GEN_TIMEOUT = Number(process.env.DEMO_GEN_TIMEOUT_MS ?? 180_000);
+// Judged renders retry (render + critics + one retry), and the mask-edit
+// path RE-UPLOADS the full-res source + mask to fal storage every time — on
+// a slow link that upload alone ran 3.5 min in testing. 8 minutes per beat.
+const GEN_TIMEOUT = Number(process.env.DEMO_GEN_TIMEOUT_MS ?? 480_000);
 
 const QUERY =
   "A detailed top-down fantasy city map of Ankh-Morpork: the Unseen University " +
@@ -75,34 +78,31 @@ async function mustHappen(page: Page, what: string, fn: () => Promise<unknown>):
   }
 }
 
-async function waitStable(page: Page, timeout: number): Promise<string> {
-  await img(page).waitFor({ state: "visible", timeout });
-  let last = "";
-  let since = 0;
+/** Wait for a generation to COMPLETE: the image src differs from `prev` and
+ * the generating banner is gone (the authoritative end — judged loops stream
+ * rejected attempts as progress frames, so src stability alone lies), then a
+ * short settle. Pass prev="" for the first render. */
+async function waitGenerated(page: Page, prev: string, timeout: number): Promise<string> {
+  await img(page).waitFor({ state: "visible", timeout }).catch(() => {});
   const end = Date.now() + timeout;
+  let lastSrc = "";
+  let stableSince = 0;
   while (Date.now() < end) {
     const src = (await img(page).getAttribute("src")) ?? "";
-    if (src && src === last) {
-      if (Date.now() - since >= 2500) return src;
+    const generating = await page.getByTestId("generating-banner").count();
+    if (src && src !== prev && generating === 0) {
+      if (src === lastSrc) {
+        if (Date.now() - stableSince >= 1500) return src;
+      } else {
+        lastSrc = src;
+        stableSince = Date.now();
+      }
     } else {
-      last = src;
-      since = Date.now();
+      lastSrc = "";
     }
     await page.waitForTimeout(500);
   }
-  throw new Error("image never stabilized");
-}
-
-async function waitChanged(page: Page, prev: string, timeout: number): Promise<string> {
-  await page.waitForFunction(
-    (p) => {
-      const el = document.querySelector('img[alt^="Generated illustration"]');
-      return !!el && el.getAttribute("src") !== p;
-    },
-    prev,
-    { timeout },
-  );
-  return waitStable(page, timeout);
+  throw new Error("generation never completed (banner still up or src unchanged)");
 }
 
 /** Viewport point for a landmark: the geometry overlay's box when a label
@@ -214,13 +214,42 @@ async function main(): Promise<void> {
   // back-navigation walked onto auto-created pages).
   log("describing Ankh-Morpork");
   const tb = page.getByRole("textbox").first();
-  await tb.click();
-  await tb.fill(QUERY);
-  await page.waitForTimeout(600);
-  await page.getByRole("button", { name: "Go" }).click();
+  const go = page.getByRole("button", { name: "Go" }).first();
+  // Submit, and CONFIRM generation actually started (the banner appears).
+  // A lazy-compiling dev server or a bursty network can swallow the first
+  // click after a fresh boot — re-fill + re-click until the banner shows.
+  const submitQuery = async (): Promise<boolean> => {
+    await tb.click();
+    await tb.fill(QUERY);
+    await page.waitForTimeout(400);
+    // Go is disabled until the controlled input's onChange lands in React
+    // state — wait for it rather than racing hydration.
+    await go.waitFor({ state: "visible", timeout: 10_000 });
+    for (let i = 0; i < 30; i++) {
+      if (await go.isEnabled()) break;
+      await page.waitForTimeout(500);
+    }
+    await go.click();
+    // Generation started iff the page enters its generating state. NOTE the
+    // first render has no banner (that's an OVERLAY over an existing image) —
+    // it shows the planner status in the empty-state placeholder. Match the
+    // status TEXT, which is present in both cases.
+    return page
+      .getByText(/Resolving|Exploring|Planning page|Drawing|Generating/i)
+      .first()
+      .waitFor({ state: "visible", timeout: 25_000 })
+      .then(() => true)
+      .catch(() => false);
+  };
   let mapSrc = "";
   await mustHappen(page, "map-render", async () => {
-    mapSrc = await waitStable(page, GEN_TIMEOUT);
+    let started = await submitQuery();
+    if (!started) {
+      log("WARN: generation did not start on first submit — retrying");
+      started = await submitQuery();
+    }
+    if (!started) throw new Error("generation never started after the query submit");
+    mapSrc = await waitGenerated(page, "", GEN_TIMEOUT);
   });
   await page.waitForTimeout(2500);
   await shot(page, "map");
@@ -277,26 +306,39 @@ async function main(): Promise<void> {
       .waitFor({ state: "visible", timeout: 5_000 });
     await page.waitForTimeout(500);
     // A low-mid stretch of the CONTENT — the river band in these renders.
-    const from = await contentPoint(page, 0.38, 0.55);
-    const to = await contentPoint(page, 0.64, 0.75);
-    await page.mouse.move(from.x, from.y);
-    await page.mouse.down();
-    for (let i = 1; i <= 8; i++) {
-      await page.mouse.move(
-        from.x + ((to.x - from.x) * i) / 8,
-        from.y + ((to.y - from.y) * i) / 8,
-      );
-      await page.waitForTimeout(60);
+    // The drag must VERIFIABLY take (take 5 submitted maskless after a drag
+    // silently failed to register): check the marquee, retry once.
+    const dragRegion = async () => {
+      const from = await contentPoint(page, 0.38, 0.55);
+      const to = await contentPoint(page, 0.64, 0.75);
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      for (let i = 1; i <= 8; i++) {
+        await page.mouse.move(
+          from.x + ((to.x - from.x) * i) / 8,
+          from.y + ((to.y - from.y) * i) / 8,
+        );
+        await page.waitForTimeout(60);
+      }
+      await page.mouse.up();
+      await page.waitForTimeout(1000);
+      return (await page.getByTestId("region-marquee").count()) > 0;
+    };
+    let selected = await dragRegion();
+    if (!selected) {
+      log("WARN: drag did not register a selection — retrying once");
+      selected = await dragRegion();
     }
-    await page.mouse.up();
-    await page.waitForTimeout(1200);
+    if (!selected) {
+      throw new Error("selection never registered — refusing a maskless submit");
+    }
     await shot(page, "region-selected");
     log("typing the ferry instruction");
     const editBox = page.getByPlaceholder(/describe how to change/i).first();
     await editBox.fill(FERRY_INSTRUCTION);
     await page.waitForTimeout(800);
     await page.getByRole("button", { name: "Apply" }).first().click();
-    mapSrc = await waitChanged(page, mapSrc, GEN_TIMEOUT);
+    mapSrc = await waitGenerated(page, mapSrc, GEN_TIMEOUT);
     await page.waitForTimeout(5000); // linger on the verdict chip
     await shot(page, "ferry-verdict");
   } catch (e) {
@@ -304,13 +346,21 @@ async function main(): Promise<void> {
     await page.keyboard.press("Escape").catch(() => {});
   }
 
-  // ── 6. Enter the Unseen University (CORE) ───────────────────────────────────
+  // ── 6. Enter the Unseen University (CORE, one network retry) ────────────────
   const uni = await landmarkPoint(page, /universit|tower/i, await contentPoint(page, 0.16, 0.35));
   log(`go in: ${uni.matched ?? "fallback spot (no matching geo-box)"}`);
   await tapAt(page, uni);
   let insideSrc = "";
   await mustHappen(page, "enter-render", async () => {
-    insideSrc = await waitChanged(page, mapSrc, GEN_TIMEOUT);
+    try {
+      insideSrc = await waitGenerated(page, mapSrc, GEN_TIMEOUT);
+    } catch (e) {
+      // Hotspot-grade networks drop fal calls in bursts ("network error"
+      // banner) — one re-tap is honest resilience, not flake-hiding.
+      log(`enter failed once (${e instanceof Error ? e.message : e}) — re-tapping`);
+      await tapAt(page, uni);
+      insideSrc = await waitGenerated(page, mapSrc, GEN_TIMEOUT);
+    }
   });
   await page.waitForTimeout(4000);
   await shot(page, "inside-university");
@@ -320,7 +370,7 @@ async function main(): Promise<void> {
     const deeper = await landmarkPoint(page, /drum|tavern|palace|bridge|hall|court/i, await contentPoint(page, 0.55, 0.55));
     log(`go deeper: ${deeper.matched ?? "fallback spot"}`);
     await tapAt(page, deeper);
-    await waitChanged(page, insideSrc, GEN_TIMEOUT);
+    await waitGenerated(page, insideSrc, GEN_TIMEOUT);
     await page.waitForTimeout(4000);
     await shot(page, "deeper");
   } catch (e) {
