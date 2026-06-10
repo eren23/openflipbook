@@ -30,4 +30,12 @@ describe("nodeKind", () => {
     expect(k.levelLabel).toBe("page");
     expect(k.levelColor).toBe("#9ca3af"); // neutral frame for pre-geo nodes
   });
+
+  it("an edit reads as a revision, never as inside", () => {
+    // The Ankh-Morpork atlas bug: the edited map rendered as a child
+    // "inside" the root — two near-identical maps stacked as parent/child.
+    const k = nodeKind({ level: "map", relation: "edit", isRoot: false });
+    expect(k.relGlyph).toBe("✎");
+    expect(k.relLabel).toBe("edited");
+  });
 });

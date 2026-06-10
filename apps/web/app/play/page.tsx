@@ -160,7 +160,7 @@ interface PersistBody {
   final_prompt: string;
   click_in_parent?: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
-  relation?: "descend" | "expand";
+  relation?: "descend" | "expand" | "edit";
   scale?: "component" | "peer" | "container";
   scale_tier?: ScaleTier;
   scene_view?: SceneView | null;
@@ -720,6 +720,9 @@ export default function PlayPage() {
                   prompt_author_model: evt.prompt_author_model,
                   aspect_ratio: body.aspect_ratio,
                   final_prompt: evt.final_prompt,
+                  // An edit is a REVISION of the current page, not a place
+                  // inside it — the graph chrome renders it as "✎ edited".
+                  ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
                   click_in_parent:
                     body.mode === "tap" && body.click
                       ? {

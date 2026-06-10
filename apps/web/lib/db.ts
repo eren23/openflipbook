@@ -116,7 +116,7 @@ export interface NodeDoc extends Document {
   // M3 scale-space: how this node relates to its parent ("descend" = tap-in /
   // default, "expand" = bloomed neighbour, "ascend" = OUTWARD container) + its
   // size vs the parent's focal subject. Optional + defaulted for back-compat.
-  relation?: "descend" | "expand" | "ascend" | null;
+  relation?: "descend" | "expand" | "ascend" | "edit" | null;
   scale?: "component" | "peer" | "container" | null;
   // B2 scale ladder: the coarse absolute rung this node's frame sits at.
   // Optional + null for pre-B2 rows.
@@ -142,7 +142,7 @@ export interface NodeInsert {
   final_prompt: string | null;
   click_in_parent?: ClickInParent | null;
   sources?: NodeSource[] | null;
-  relation?: "descend" | "expand" | "ascend" | null;
+  relation?: "descend" | "expand" | "ascend" | "edit" | null;
   scale?: "component" | "peer" | "container" | null;
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
@@ -161,7 +161,7 @@ export interface NodeRow {
   final_prompt: string | null;
   click_in_parent: ClickInParent | null;
   sources: NodeSource[];
-  relation: "descend" | "expand" | "ascend";
+  relation: "descend" | "expand" | "ascend" | "edit";
   scale: "component" | "peer" | "container";
   scale_tier: ScaleTier | null;
   // The observer pose + view level this node was rendered from. Null on

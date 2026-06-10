@@ -436,7 +436,7 @@ export default function AtlasView({
           <div
             className="flex items-center gap-2 pl-1 opacity-60"
             data-testid="atlas-legend"
-            title="Tile frame colour = view level · ↓ inside (tap-in) · ⤢ expanded (neighbour)"
+            title="Tile frame colour = view level · ↓ inside (tap-in) · ⤢ expanded (neighbour) · ✎ edited (revision)"
           >
             {NODE_KIND_LEGEND.map((lv) => (
               <span key={lv.label} className="flex items-center gap-0.5">
@@ -519,9 +519,11 @@ export default function AtlasView({
                 const delay = reduced ? 0 : childDepth * STAGGER_MS;
                 // Breadth (expand) edges read in teal with a hollow anchor —
                 // no tap happened, the world bloomed outward. Depth (descend)
-                // edges keep the ink line + red tap dot.
-                const isExpand =
-                  (byId.get(c.toNodeId)?.relation ?? "descend") === "expand";
+                // edges keep the ink line + red tap dot. Revision (edit)
+                // edges read in violet tight dots — the same page, changed.
+                const relC = byId.get(c.toNodeId)?.relation ?? "descend";
+                const isExpand = relC === "expand";
+                const isEdit = relC === "edit";
                 // Fade an edge with the node it points at, so it reveals/hides
                 // in lockstep with the LOD band.
                 const lod = lodOn
@@ -534,20 +536,27 @@ export default function AtlasView({
                 return (
                   <g
                     key={c.fromNodeId + "->" + c.toNodeId}
-                    data-relation={isExpand ? "expand" : "descend"}
+                    data-relation={relC}
                     opacity={lod}
                   >
                     <path
                       d={arcPath(c.from, c.to)}
                       fill="none"
-                      stroke={isExpand ? "rgba(13,148,136,0.65)" : "rgba(15,15,15,0.7)"}
+                      stroke={
+                        isEdit
+                          ? "rgba(124,58,237,0.65)"
+                          : isExpand
+                            ? "rgba(13,148,136,0.65)"
+                            : "rgba(15,15,15,0.7)"
+                      }
                       strokeWidth={8}
                       strokeLinecap="round"
                       // A "descend" edge is the zoom path you want to FOLLOW
                       // (City -> place -> sub-part) — draw it as a clear dashed
                       // line, not the near-invisible 2/24 dotting that made the
-                      // nested maps read as detached. "expand" stays subtle.
-                      strokeDasharray={isExpand ? "3 16" : "16 9"}
+                      // nested maps read as detached. "expand" stays subtle;
+                      // "edit" (a revision) reads as violet tight dots.
+                      strokeDasharray={isEdit ? "2 10" : isExpand ? "3 16" : "16 9"}
                       markerEnd={
                         isExpand
                           ? "url(#ofb-atlas-arrow-expand)"
@@ -560,20 +569,22 @@ export default function AtlasView({
                           : { animationDelay: `${delay}ms, ${delay}ms` }
                       }
                     />
-                    <circle
-                      cx={c.from.x}
-                      cy={c.from.y}
-                      r={14}
-                      fill={isExpand ? "none" : "rgba(239,68,68,0.85)"}
-                      stroke={isExpand ? "rgba(13,148,136,0.85)" : "white"}
-                      strokeWidth={4}
-                      className={reduced ? undefined : "ofb-edge-draw"}
-                      style={
-                        reduced
-                          ? undefined
-                          : { animationDelay: `${delay}ms` }
-                      }
-                    />
+                    {!isEdit && (
+                      <circle
+                        cx={c.from.x}
+                        cy={c.from.y}
+                        r={14}
+                        fill={isExpand ? "none" : "rgba(239,68,68,0.85)"}
+                        stroke={isExpand ? "rgba(13,148,136,0.85)" : "white"}
+                        strokeWidth={4}
+                        className={reduced ? undefined : "ofb-edge-draw"}
+                        style={
+                          reduced
+                            ? undefined
+                            : { animationDelay: `${delay}ms` }
+                        }
+                      />
+                    )}
                   </g>
                 );
               })}
@@ -605,7 +616,7 @@ export default function AtlasView({
                 key={p.nodeId}
                 data-tile="1"
                 data-node-id={p.nodeId}
-                data-relation={isExpand ? "expand" : "descend"}
+                data-relation={p.relation ?? "descend"}
                 data-scale-level={scaleLevel}
                 className={
                   "absolute overflow-visible " +
@@ -753,7 +764,13 @@ export default function AtlasView({
                     <div className="text-xs uppercase tracking-wide opacity-50">
                       depth {depth}
                       {p.parentId
-                        ? ` · ${isExpand ? "expanded from" : "child of"} ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
+                        ? ` · ${
+                            (p.relation ?? "descend") === "edit"
+                              ? "edited from"
+                              : isExpand
+                                ? "expanded from"
+                                : "child of"
+                          } ${truncate(byId.get(p.parentId)?.title ?? "?", 40)}`
                         : " · root"}
                       {p.scale && p.scale !== "peer" ? ` · ${p.scale}` : ""}
                     </div>
