@@ -11,6 +11,7 @@ import base64
 
 import fal_client
 import httpx
+import openai
 import pytest
 
 from providers import image
@@ -407,3 +408,153 @@ async def test_generate_image_stays_on_fal_by_default(
     assert out.jpeg_bytes == b"jpeg"
     assert out.model == image.TIER_MODELS["balanced"]
     assert out.provider_request_id == "r1"
+
+
+# ---------- OpenRouter image slugs (openrouter: prefix) -------------------
+
+
+class _FakeORResponse:
+    id = "gen-123"
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def model_dump(self) -> dict:
+        return self._payload
+
+
+def _fake_or_client(payload: dict, captured: dict) -> object:
+    from types import SimpleNamespace
+
+    async def create(**kwargs: object) -> _FakeORResponse:
+        captured.update(kwargs)
+        return _FakeORResponse(payload)
+
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+
+def _or_payload(url: str) -> dict:
+    return {"choices": [{"message": {"images": [{"image_url": {"url": url}}]}}]}
+
+
+def test_args_for_gpt_image_uses_image_size_and_never_refs() -> None:
+    # fal-hosted gpt-image-2: image_size presets, refs must never leak
+    # (verify-fal-models.py: no image_urls on its text-to-image schema).
+    args = image._args_for("openai/gpt-image-2", "p", "16:9", ["u1"])
+    assert args["image_size"] == "landscape_16_9"
+    assert "aspect_ratio" not in args
+    assert "image_urls" not in args
+
+
+def test_pro_tier_defaults_to_riverflow_on_openrouter() -> None:
+    # The bakeoff pick is the LIVE default, not a recommendation in a doc.
+    assert image._resolve_model("pro", None) == "openrouter:sourceful/riverflow-v2.5-pro"
+    assert image.TIER_MODELS["pro"].startswith(image.OPENROUTER_IMAGE_PREFIX)
+
+
+async def test_generate_image_routes_openrouter_prefix_without_fal_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An openrouter: slug must dispatch off the fal path entirely — no FAL_KEY
+    # demanded (conftest scrubs it) — and strip the prefix for the wire call.
+    sentinel = image.GeneratedImage(
+        jpeg_bytes=b"x",
+        mime_type="image/png",
+        model="openrouter:sourceful/riverflow-v2.5-pro",
+        provider_request_id=None,
+    )
+    seen: dict[str, str] = {}
+
+    async def fake_or(slug: str, prompt: str, aspect: str) -> image.GeneratedImage:
+        seen["slug"] = slug
+        seen["aspect"] = aspect
+        return sentinel
+
+    monkeypatch.setattr(image, "_openrouter_image", fake_or)
+    out = await image.generate_image("a map", "16:9", tier="pro")
+    assert out is sentinel
+    assert seen["slug"] == "sourceful/riverflow-v2.5-pro"  # prefix stripped
+    assert seen["aspect"] == "16:9"
+
+
+async def test_openrouter_image_parses_data_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    b64 = base64.b64encode(b"PNGDATA").decode("ascii")
+    captured: dict = {}
+    fake = _fake_or_client(_or_payload(f"data:image/png;base64,{b64}"), captured)
+    monkeypatch.setattr(image, "_OPENROUTER_CLIENT", fake)
+
+    out = await image._openrouter_image("sourceful/riverflow-v2.5-pro", "a map", "16:9")
+
+    assert out.jpeg_bytes == b"PNGDATA"
+    assert out.mime_type == "image/png"
+    assert out.model == "openrouter:sourceful/riverflow-v2.5-pro"
+    assert out.provider_request_id == "gen-123"
+    # The proven bakeoff request shape: image modality + aspect via image_config.
+    assert captured["model"] == "sourceful/riverflow-v2.5-pro"
+    assert captured["extra_body"]["modalities"] == ["image"]
+    assert captured["extra_body"]["image_config"]["aspect_ratio"] == "16:9"
+
+
+async def test_openrouter_image_fetches_http_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+    fake = _fake_or_client(_or_payload("http://cdn/img.jpg"), captured)
+    monkeypatch.setattr(image, "_OPENROUTER_CLIENT", fake)
+
+    async def fake_fetch(url: str) -> tuple[bytes, str]:
+        assert url == "http://cdn/img.jpg"
+        return b"JPEGDATA", "image/jpeg"
+
+    monkeypatch.setattr(image, "_fetch_url_bytes", fake_fetch)
+    out = await image._openrouter_image("recraft/recraft-v4.1-pro", "p", "1:1")
+    assert out.jpeg_bytes == b"JPEGDATA"
+    assert out.mime_type == "image/jpeg"
+
+
+async def test_openrouter_image_no_image_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+    fake = _fake_or_client(
+        {"choices": [{"message": {"content": "cannot draw that"}}]}, captured
+    )
+    monkeypatch.setattr(image, "_OPENROUTER_CLIENT", fake)
+    with pytest.raises(RuntimeError, match="no image"):
+        await image._openrouter_image("sourceful/riverflow-v2.5-fast", "p", "1:1")
+
+
+def test_openrouter_client_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(image, "_OPENROUTER_CLIENT", None)
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+        image._openrouter_client()
+
+
+def _openai_status_error(status: int) -> openai.APIStatusError:
+    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    resp = httpx.Response(status, request=req)
+    return openai.APIStatusError("boom", response=resp, body=None)
+
+
+def test_retryable_openai_rate_limit() -> None:
+    assert image._is_retryable(_openai_status_error(429)) is True
+
+
+@pytest.mark.parametrize("code", [500, 502, 503])
+def test_retryable_openai_5xx(code: int) -> None:
+    assert image._is_retryable(_openai_status_error(code)) is True
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404, 422])
+def test_not_retryable_openai_4xx_other(code: int) -> None:
+    assert image._is_retryable(_openai_status_error(code)) is False
+
+
+def test_retryable_openai_connection_error() -> None:
+    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    err = openai.APIConnectionError(request=req)
+    assert image._is_retryable(err) is True
