@@ -6,6 +6,7 @@ import type {
   MapCrop,
   ObserverPose,
   ViewLevel,
+  ViewSpec,
   WorldEntityGeo,
 } from "@openflipbook/config";
 
@@ -16,7 +17,31 @@ export interface ClickDetailResult {
   level: ViewLevel;
   mode: "scene" | "submap";
   note: string;
+  // The projection pill: undefined = auto (the backend view policy decides).
+  // A press pins the camera (source: "user") and beats the policy.
+  view?: ViewSpec;
 }
+
+// auto = emit nothing (policy decides). The pinned specs mirror the policy's
+// canonical cameras; isometric is deliberately pill-only (never auto).
+const PROJECTION_PILLS: { key: string; label: string; view?: ViewSpec }[] = [
+  { key: "auto", label: "auto" },
+  {
+    key: "top_down",
+    label: "2D plan",
+    view: { projection: "top_down", pitch_deg: -90, camera_height: "aerial", source: "user" },
+  },
+  {
+    key: "isometric",
+    label: "2.5D iso",
+    view: { projection: "isometric", pitch_deg: -35, source: "user" },
+  },
+  {
+    key: "eye_level",
+    label: "3D eye",
+    view: { projection: "eye_level", pitch_deg: 0, camera_height: "eye", source: "user" },
+  },
+];
 
 interface Props {
   xPx: number;
@@ -60,6 +85,7 @@ export default function ClickDetailPopover({
   const [level, setLevel] = useState<ViewLevel>(initial.level);
   const [mode, setMode] = useState<"scene" | "submap">(initial.mode);
   const [note, setNote] = useState("");
+  const [projection, setProjection] = useState<string>("auto");
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Dismiss on Escape or a click outside. onCancel resolves the pending
@@ -142,6 +168,33 @@ export default function ClickDetailPopover({
         ))}
       </div>
 
+      {/* The view grammar's projection pills — scene-only (a submap is a
+          Kontext pixel-continue; it cannot change projection). */}
+      {mode === "scene" && (
+        <div className="flex gap-1 px-1 pb-1.5" data-testid="projection-pills">
+          {PROJECTION_PILLS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setProjection(p.key)}
+              aria-pressed={p.key === projection}
+              className={`rounded px-1.5 py-0.5 text-[11px] ${
+                p.key === projection
+                  ? "bg-violet-600 text-white"
+                  : "bg-stone-200 text-stone-600"
+              }`}
+              title={
+                p.key === "auto"
+                  ? "let the view policy pick the camera"
+                  : `pin the camera: ${p.label}`
+              }
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="px-1">
         <ObserverGazeEditor
           entities={entities}
@@ -210,7 +263,20 @@ export default function ClickDetailPopover({
           type="button"
           data-testid="detail-confirm"
           className="rounded bg-sky-600 px-3 py-1 text-xs font-medium text-white"
-          onClick={() => onConfirm({ observer, level, mode, note })}
+          onClick={() => {
+            // auto / submap => no view key: the backend policy decides.
+            const pinned =
+              mode === "scene"
+                ? PROJECTION_PILLS.find((p) => p.key === projection)?.view
+                : undefined;
+            onConfirm({
+              observer,
+              level,
+              mode,
+              note,
+              ...(pinned ? { view: pinned } : {}),
+            });
+          }}
         >
           {mode === "scene" ? "enter" : "map it"}
         </button>
