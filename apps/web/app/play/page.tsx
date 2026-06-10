@@ -84,6 +84,7 @@ import {
   type EditRegionBox,
 } from "@/lib/edit-mask";
 import { useContainRect } from "@/hooks/useContainRect";
+import { formatEditVerdict } from "@/lib/edit-verdict";
 import { ImageFailedOverlay } from "@/components/PlayPage/ImageFailedOverlay";
 import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -489,7 +490,12 @@ export default function PlayPage() {
     height: number;
   } | null>(null);
   const editDragStartRef = useRef<{ x: number; y: number } | null>(null);
-  const [editToast, setEditToast] = useState<string | null>(null);
+  // The verdict chip (E3): persists while the edited page is current —
+  // cleared by a new generation, navigation, or its own dismiss/revert.
+  const [editVerdictChip, setEditVerdictChip] = useState<{
+    text: string;
+    revertTo: string | null;
+  } | null>(null);
   const containRect = useContainRect(imgRef);
   const editRegionDisplayRect = useMemo(
     () =>
@@ -520,11 +526,6 @@ export default function PlayPage() {
       borderRadius: 9999,
     };
   }, [editRegionDisplayRect, containRect]);
-  useEffect(() => {
-    if (!editToast) return;
-    const timer = window.setTimeout(() => setEditToast(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [editToast]);
   useEffect(() => {
     if (!editRegion) return;
     const onKey = (e: KeyboardEvent) => {
@@ -590,6 +591,7 @@ export default function PlayPage() {
       abortRef.current = ac;
       setPhase("generating");
       setError(null);
+      setEditVerdictChip(null);
       setStatusMsg(
         body.mode === "tap" ? "Resolving what you tapped…" : "Planning page…"
       );
@@ -683,14 +685,14 @@ export default function PlayPage() {
               // Flip the morph gate so the decode-then-reveal effect runs
               // ONLY on the final image, not on streamed progress partials.
               setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
-              // Judged mask-scoped edit: surface what the critics saw.
+              // Judged edit: surface what the critics saw, with a one-click
+              // path back to the pre-edit node (undo, made felt).
               if (evt.edit_verdict) {
-                const v = evt.edit_verdict;
-                setEditToast(
-                  v.accepted
-                    ? `edit verified ${v.alignment?.toFixed(1) ?? "—"}/10 · medium ${v.medium?.toFixed(1) ?? "—"}/10 · ${v.attempts} attempt${v.attempts === 1 ? "" : "s"}`
-                    : `edit kept best of ${v.attempts} attempt${v.attempts === 1 ? "" : "s"} — verification gates not all met`
-                );
+                setEditVerdictChip({
+                  text: formatEditVerdict(evt.edit_verdict),
+                  revertTo:
+                    body.mode === "edit" ? body.current_node_id || null : null,
+                });
               }
               void persistNode(
                 {
@@ -1250,12 +1252,14 @@ export default function PlayPage() {
   };
 
   const goBack = useCallback(() => {
+    setEditVerdictChip(null);
     setHistory((prev) =>
       prev.trailIdx <= 0 ? prev : navigateToTrailIdx(prev, prev.trailIdx - 1)
     );
   }, []);
 
   const goForward = useCallback(() => {
+    setEditVerdictChip(null);
     setHistory((prev) =>
       prev.trailIdx >= prev.trail.length - 1
         ? prev
@@ -1264,6 +1268,7 @@ export default function PlayPage() {
   }, []);
 
   const selectFromMap = useCallback((nodeId: string) => {
+    setEditVerdictChip(null);
     setHistory((prev) => {
       const target = prev.items.find((p) => p.nodeId === nodeId);
       if (!target) return prev;
@@ -2622,9 +2627,31 @@ export default function PlayPage() {
                 />
               )}
 
-              {editToast && (
-                <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-xs text-white">
-                  {editToast}
+              {editVerdictChip && (
+                <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-xs text-white">
+                  <span>{editVerdictChip.text}</span>
+                  {editVerdictChip.revertTo && (
+                    <button
+                      type="button"
+                      className="rounded-full bg-white/15 px-2 py-0.5 hover:bg-white/25"
+                      title="Go back to the page as it was before this edit"
+                      onClick={() => {
+                        const id = editVerdictChip.revertTo;
+                        setEditVerdictChip(null);
+                        if (id) selectFromMap(id);
+                      }}
+                    >
+                      ↩ revert
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Dismiss edit verdict"
+                    className="opacity-60 hover:opacity-100"
+                    onClick={() => setEditVerdictChip(null)}
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
 

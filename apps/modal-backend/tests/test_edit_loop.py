@@ -170,6 +170,45 @@ async def test_medium_floor_gates_acceptance() -> None:
     assert "photoreal patch on an engraving" in render.suffixes[1]
 
 
+async def test_no_mask_skips_the_outside_gate() -> None:
+    # Whole-image judged edit (E3): even a frame that changed EVERYWHERE is
+    # acceptable when the judges pass — there was no confinement promise.
+    render = _Render([_outside_edit()])
+    attempts = []
+    async for a in edit_loop.iter_edit_attempts(
+        render,
+        source_bytes=_jpg(_base()),
+        mask_png=None,
+        region_box=None,
+        judge_alignment=_judge(9.0),  # type: ignore[arg-type]
+        judge_medium=_judge(9.0),  # type: ignore[arg-type]
+        instruction="a red panel",
+        config=_CFG,
+    ):
+        attempts.append(a)
+    assert len(attempts) == 1 and attempts[0].accepted
+    assert attempts[0].outside_change is None
+
+
+async def test_no_mask_still_gates_on_the_judges() -> None:
+    render = _Render([_inside_edit(), _inside_edit()])
+    attempts = []
+    async for a in edit_loop.iter_edit_attempts(
+        render,
+        source_bytes=_jpg(_base()),
+        mask_png=None,
+        region_box=None,
+        judge_alignment=_judge(3.0, 9.0, rationale="missed the ask"),  # type: ignore[arg-type]
+        judge_medium=_judge(9.0),  # type: ignore[arg-type]
+        instruction="a red panel",
+        config=_CFG,
+    ):
+        attempts.append(a)
+    assert [a.accepted for a in attempts] == [False, True]
+    assert "missed the ask" in render.suffixes[1]
+    assert "beyond the selected region" not in render.suffixes[1]
+
+
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EDIT_LOOP_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("EDIT_LOOP_ACCEPT_ALIGNMENT", "8.5")
