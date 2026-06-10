@@ -17,9 +17,11 @@ import {
   annotateClickPoint,
   annotateStroke,
   normalizeClickOnImage,
+  objectContainRect,
   summarizeStroke,
   type NormalizedClick,
 } from "@/lib/image-click";
+import { entityAtPoint, padBox, type EntityHit } from "@/lib/entity-hit";
 import {
   getWSUrl,
   startLTXStream,
@@ -43,7 +45,7 @@ import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { type Ascended, useAscend } from "@/hooks/useAscend";
-import { buildConditionRefs, orderedRefs } from "@/lib/image-condition";
+import { buildConditionRefs, cropBox, orderedRefs } from "@/lib/image-condition";
 import { enterAsToRenderMode, findRevisitTarget } from "@/lib/world-mode";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
@@ -72,7 +74,7 @@ import Breadcrumb from "@/components/PlayPage/Breadcrumb";
 import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
-import { ContextMenu } from "@/components/PlayPage/ContextMenu";
+import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { HintPrompt } from "@/components/PlayPage/HintPrompt";
 import { EditForm } from "@/components/PlayPage/EditForm";
@@ -403,9 +405,20 @@ export default function PlayPage() {
   // reads the draft as in-progress, not done.
   const [progressiveDraft, setProgressiveDraft] = useState(false);
   const [beaconsHidden, setBeaconsHidden] = useState(false);
+  // Right-click target resolution (E2): the menu is geo-aware — `hit` is the
+  // codex entity under the cursor (per-node bbox containment), `clickPct` the
+  // normalized image point (null when the click landed outside the content,
+  // e.g. on the letterbox). Both null → just the page-level menu items.
   const [contextMenu, setContextMenu] = useState<{
     xPx: number;
     yPx: number;
+    clickPct: NormalizedClick | null;
+    hit: EntityHit | null;
+  } | null>(null);
+  // Seeds the codex's geo editor ("move/resize this…" routes there).
+  const [geoEditPrefill, setGeoEditPrefill] = useState<{
+    text: string;
+    nonce: number;
   } | null>(null);
   const { bindTrace } = useTraceEmitter();
   const { state: worldState, mutate: mutateWorldEntity } =
@@ -1154,25 +1167,26 @@ export default function PlayPage() {
     promptForHint,
   ]);
 
-  const submitEdit = useCallback(
-    async (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      const instruction = editInstruction.trim();
+  // The edit primitive: the EditForm submits through it, and the context
+  // menu's one-click actions (fix/redraw, remove) call it directly with a
+  // canned instruction + the target's padded bbox.
+  const runEdit = useCallback(
+    async (instruction: string, region: EditRegionBox | null) => {
       if (!instruction || !page?.imageDataUrl) return;
       // Select-area edit: a committed selection rides along as a white=edit
       // mask PNG at natural dims + the region box (judge crop scope). Mask
       // build failure falls back to today's whole-image edit.
       let maskFields: Partial<GenerateRequestBody> = {};
       const imgEl = imgRef.current;
-      if (EDIT_REGION_ENABLED && editRegion && imgEl?.naturalWidth) {
+      if (EDIT_REGION_ENABLED && region && imgEl?.naturalWidth) {
         try {
           maskFields = {
             edit_mask: await buildMaskPng(
               imgEl.naturalWidth,
               imgEl.naturalHeight,
-              editRegion
+              region
             ),
-            edit_region: editRegion,
+            edit_region: region,
           };
         } catch {
           /* whole-image fallback */
@@ -1217,8 +1231,116 @@ export default function PlayPage() {
       setEditMode(false);
       setEditRegion(null);
     },
-    [editInstruction, page, generate, imageTier, outputLocale, styleAnchor, history, editRegion]
+    [page, generate, imageTier, outputLocale, styleAnchor, history]
   );
+
+  const submitEdit = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      await runEdit(editInstruction.trim(), editRegion);
+    },
+    [runEdit, editInstruction, editRegion]
+  );
+
+  // The context menu's "Enter {entity}": a synthetic click on the image at
+  // the entity's bbox centre, so the EXISTING tap flow runs verbatim —
+  // revisit check, world-mode routing, condition refs, morph — instead of a
+  // drifting re-implementation.
+  const dispatchTapAt = useCallback((xPct: number, yPct: number) => {
+    const img = imgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const content = objectContainRect(
+      rect.width,
+      rect.height,
+      img.naturalWidth,
+      img.naturalHeight
+    );
+    if (!content) return;
+    img.dispatchEvent(
+      new MouseEvent("click", {
+        clientX: rect.left + content.offsetX + xPct * content.width,
+        clientY: rect.top + content.offsetY + yPct * content.height,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  }, []);
+
+  // The geo-aware section of the right-click menu (E2): target-aware actions
+  // routed to the primitives that already exist — runEdit (E1 mask path),
+  // the tap flow, the codex's NL geometry editor. Pure derivation from the
+  // resolved target; the ContextMenu component stays dumb.
+  const contextExtraItems = useMemo<ContextMenuItem[]>(() => {
+    if (!contextMenu || phase === "generating") return [];
+    const items: ContextMenuItem[] = [];
+    const close = () => setContextMenu(null);
+    if (contextMenu.hit) {
+      const { entity, bbox } = contextMenu.hit;
+      items.push({
+        label: `Enter ${entity.name}`,
+        onClick: () => {
+          close();
+          dispatchTapAt(bbox.x_pct + bbox.w_pct / 2, bbox.y_pct + bbox.h_pct / 2);
+        },
+      });
+      if (EDIT_REGION_ENABLED) {
+        items.push({
+          label: `Fix / redraw ${entity.name}`,
+          onClick: () => {
+            close();
+            void runEdit(
+              `redraw the ${entity.name} cleanly, repairing any glitches or artifacts`,
+              padBox(bbox)
+            );
+          },
+        });
+        items.push({
+          label: `Remove ${entity.name}`,
+          danger: true,
+          onClick: () => {
+            close();
+            void runEdit(`remove the ${entity.name}`, padBox(bbox));
+          },
+        });
+      }
+      if (geoMap.entities.length > 0) {
+        items.push({
+          label: `Move / resize ${entity.name}…`,
+          onClick: () => {
+            close();
+            setGeoEditPrefill({ text: `move the ${entity.name} `, nonce: Date.now() });
+            setCodexOpen(true);
+          },
+        });
+      }
+    } else if (contextMenu.clickPct && EDIT_REGION_ENABLED) {
+      const region = cropBox(
+        contextMenu.clickPct.x_pct,
+        contextMenu.clickPct.y_pct,
+        0.25
+      );
+      items.push({
+        label: "Add something here…",
+        onClick: () => {
+          close();
+          setEditMode(true);
+          setEditRegion(region);
+          setEditInstruction("add ");
+        },
+      });
+      items.push({
+        label: "Edit this area",
+        onClick: () => {
+          close();
+          setEditMode(true);
+          setEditRegion(region);
+          setEditInstruction("");
+        },
+      });
+    }
+    return items;
+  }, [contextMenu, phase, dispatchTapAt, runEdit, geoMap.entities.length]);
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
@@ -2519,8 +2641,21 @@ export default function PlayPage() {
             if (!page?.imageDataUrl) return;
             e.preventDefault();
             // ContextMenu renders inside a fixed-positioned overlay, so it
-            // anchors to the viewport — pass clientX/Y directly.
-            setContextMenu({ xPx: e.clientX, yPx: e.clientY });
+            // anchors to the viewport — pass clientX/Y directly. Resolve what
+            // is under the cursor while we're here: the menu is geo-aware.
+            const imgEl = imgRef.current;
+            const clickPct = imgEl
+              ? normalizeClickOnImage(e.nativeEvent, imgEl)
+              : null;
+            const hit = clickPct
+              ? entityAtPoint(
+                  worldState.entities,
+                  page?.nodeId ?? null,
+                  clickPct.x_pct,
+                  clickPct.y_pct
+                )
+              : null;
+            setContextMenu({ xPx: e.clientX, yPx: e.clientY, clickPct, hit });
           }}
         >
           {page.sources && page.sources.length > 0 && (
@@ -2999,6 +3134,7 @@ export default function PlayPage() {
         overrideEnabled={worldState.overrideEnabled}
         onMutate={mutateWorldEntity}
         geoEditSessionId={sessionId}
+        geoEditPrefill={geoEditPrefill}
       />
 
       {/* Hide the coach while the Around tray is open — both are pinned to
@@ -3044,6 +3180,7 @@ export default function PlayPage() {
         <ContextMenu
           x={contextMenu.xPx}
           y={contextMenu.yPx}
+          extraItems={contextExtraItems}
           beaconsHidden={beaconsHidden}
           canCopy={!!page?.nodeId}
           canPrune={
