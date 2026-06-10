@@ -80,6 +80,8 @@ _SCRUB = (
     "REPAIR_BENCH_RUN",
     "EDIT_BENCH_RUN",
     "EDIT_REGION_BENCH_RUN",
+    "EDIT_REGION_BENCH_MODELS",
+    "EDIT_REGION_BENCH_LOOP",
     # Mask-scoped judged edits (E1; default OFF until the bench baselines it).
     "EDIT_REGION",
     "EDIT_LOOP_MAX_ATTEMPTS",

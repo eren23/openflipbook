@@ -102,6 +102,12 @@ eval-view-loop:
 # flux-pro/v1/fill slot, scored by pixel-diff only. PAID (~$0.5, no VLM).
 eval-edit-mask-smoke:
 	cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.mask_smoke
+# E5: the mask-scoped edit bench — the asked change LANDS (alignment judge on
+# the inside crop), the edit CONFINES (outside pixel-diff, free, per-case),
+# the MEDIUM holds (style judge). EDIT_REGION_BENCH_MODELS adds A/B arms;
+# EDIT_REGION_BENCH_LOOP=1 measures the production edit loop. PAID (~$1).
+eval-edit-region:
+	cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.runner
 # The before/after regression sweep: every PAID eval that has a committed
 # baseline band (tests/eval_baselines.json), run back to back. Each prints
 # PASS / REGRESSION / IMPROVED vs its band — run it before AND after a risky
@@ -113,6 +119,7 @@ eval-baselines:
 	-cd apps/modal-backend && STYLE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.style_runner
 	-cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
 	-cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
+	-cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.runner
 # Free coverage report (backend lines + the web view-path files).
 coverage:
 	cd apps/modal-backend && .venv/bin/python -m pytest -q -m "not paid" --cov=providers --cov=generate --cov-report=term | tail -30

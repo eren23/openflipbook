@@ -28,6 +28,13 @@
       "regression_band": 2.5,
       "n_min": 2,
       "source": "make eval-view 2026-06-10 (calibrated judge, single-shot bench mode): oblique 10.0, isometric 9.0 (the policy's auto registers); top_down/eye_level 2.5-6 single-shot (nano's aerial attractor). PRODUCTION (steep router + VIEW_LOOP, make eval-view-loop, same date): 9.75 mean \u2014 top_down 10.0, oblique 10.0, isometric 9.0, eye_level 10.0; view_trustworthy TRUE; same_place 9.0-10 every arm; 3/4 steep arms accepted at attempt 1, the 4th self-corrected at attempt 2. This baseline tracks the DEFAULT (single-shot) bench so the loop's lift stays measurable."
+    },
+    "edit_region": {
+      "metric": "alignment_mean",
+      "baseline": 10.0,
+      "regression_band": 2.0,
+      "n_min": 2,
+      "source": "make eval-edit-region first run 2026-06-10 (flux fill, single-shot, production fill register): alignment 10.0 + medium 10.0 on both cases, outside-change 0.0000 per case (the compositor's promise, gated per-case not by mean). Tracks the production arm only; extra A/B arms via EDIT_REGION_BENCH_MODELS report but never gate. Band 2.0 absorbs single judge-noise samples."
     }
   }
 }
