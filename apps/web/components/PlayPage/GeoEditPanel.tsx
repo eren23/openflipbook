@@ -12,6 +12,14 @@ interface Props {
   // Seed the instruction box from outside (the context menu's "move/resize
   // this…"); the nonce makes repeat prefills with identical text still land.
   prefill?: { text: string; nonce: number } | null | undefined;
+  // E4 apply-to-image: offered after a successful apply — the coordinates
+  // moved, this lets the PIXELS follow (parent turns the plan into a page
+  // edit). `entitiesAtApply` is the pre-apply snapshot, so a removed
+  // entity's label is still resolvable after the map refetches. Omitted →
+  // no affordance (the panel stays usable standalone).
+  onApplyToImage?:
+    | ((plan: EntityEditPlan, entitiesAtApply: WorldEntityGeo[]) => void)
+    | undefined;
 }
 
 type Phase = "idle" | "busy" | "confirm";
@@ -20,9 +28,20 @@ type Phase = "idle" | "busy" | "confirm";
 // chip, takes a natural-language edit, previews the structured plan + its
 // blast-radius ("restages N scenes"), then applies on confirm. Presentational —
 // the network lives in onSubmit. Rendered only behind the world-override flag.
-export default function GeoEditPanel({ entities, onSubmit, prefill }: Props) {
+export default function GeoEditPanel({
+  entities,
+  onSubmit,
+  prefill,
+  onApplyToImage,
+}: Props) {
   const [instruction, setInstruction] = useState("");
   const [plan, setPlan] = useState<EntityEditPlan | null>(null);
+  // The last plan that LANDED on the map + the entity snapshot it applied
+  // against — the apply-to-image offer's subject.
+  const [appliedPlan, setAppliedPlan] = useState<{
+    plan: EntityEditPlan;
+    entities: WorldEntityGeo[];
+  } | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +49,7 @@ export default function GeoEditPanel({ entities, onSubmit, prefill }: Props) {
     if (!prefill) return;
     setInstruction(prefill.text);
     setPlan(null);
+    setAppliedPlan(null);
     setError(null);
     setPhase("idle");
   }, [prefill]);
@@ -59,6 +79,7 @@ export default function GeoEditPanel({ entities, onSubmit, prefill }: Props) {
     setError(null);
     try {
       await onSubmit(instruction.trim(), false);
+      setAppliedPlan(plan ? { plan, entities: [...entities] } : null);
       setPlan(null);
       setInstruction("");
       setPhase("idle");
@@ -170,6 +191,33 @@ export default function GeoEditPanel({ entities, onSubmit, prefill }: Props) {
             </div>
           </div>
         )
+      )}
+
+      {appliedPlan && onApplyToImage && phase === "idle" && !plan && (
+        <div
+          className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-stone-700"
+          data-testid="apply-to-image"
+        >
+          <span>✓ map updated — the page's pixels haven't moved yet.</span>
+          <button
+            type="button"
+            className="rounded bg-emerald-600 px-2 py-1 text-white"
+            onClick={() => {
+              const p = appliedPlan;
+              setAppliedPlan(null);
+              onApplyToImage(p.plan, p.entities);
+            }}
+          >
+            Apply to image
+          </button>
+          <button
+            type="button"
+            className="rounded px-1.5 py-1 text-stone-500"
+            onClick={() => setAppliedPlan(null)}
+          >
+            Skip
+          </button>
+        </div>
       )}
 
       {error && (
