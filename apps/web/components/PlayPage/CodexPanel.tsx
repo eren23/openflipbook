@@ -30,6 +30,9 @@ interface Props {
   // NL-editable map section. Omitted → the section is absent (no behaviour
   // change), so this stays additive + opt-in.
   geoEditSessionId?: string;
+  // Seed the geo editor's instruction box (the context menu's "move/resize
+  // this…" routes here). Forwarded verbatim to GeoEditSection.
+  geoEditPrefill?: { text: string; nonce: number } | null | undefined;
 }
 
 interface UndoToastState {
@@ -80,6 +83,7 @@ export function CodexPanel({
   overrideEnabled,
   onMutate,
   geoEditSessionId,
+  geoEditPrefill,
 }: Props) {
   const [tab, setTab] = useState<TabKind>("all");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -262,7 +266,7 @@ export function CodexPanel({
               <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-60">
                 Map · geometry
               </h3>
-              <GeoEditSection sessionId={geoEditSessionId} />
+              <GeoEditSection sessionId={geoEditSessionId} prefill={geoEditPrefill} />
             </section>
           )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { EntityEditPlan, WorldEntityGeo } from "@openflipbook/config";
 
@@ -9,6 +9,9 @@ interface Props {
   // Resolve an instruction to a plan. dryRun=true previews (no write); dryRun=false
   // applies. Wired to POST /api/world/:id/edit-entities by the container.
   onSubmit: (instruction: string, dryRun: boolean) => Promise<EntityEditPlan>;
+  // Seed the instruction box from outside (the context menu's "move/resize
+  // this…"); the nonce makes repeat prefills with identical text still land.
+  prefill?: { text: string; nonce: number } | null | undefined;
 }
 
 type Phase = "idle" | "busy" | "confirm";
@@ -17,11 +20,19 @@ type Phase = "idle" | "busy" | "confirm";
 // chip, takes a natural-language edit, previews the structured plan + its
 // blast-radius ("restages N scenes"), then applies on confirm. Presentational —
 // the network lives in onSubmit. Rendered only behind the world-override flag.
-export default function GeoEditPanel({ entities, onSubmit }: Props) {
+export default function GeoEditPanel({ entities, onSubmit, prefill }: Props) {
   const [instruction, setInstruction] = useState("");
   const [plan, setPlan] = useState<EntityEditPlan | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInstruction(prefill.text);
+    setPlan(null);
+    setError(null);
+    setPhase("idle");
+  }, [prefill]);
 
   const preview = async () => {
     const instr = instruction.trim();

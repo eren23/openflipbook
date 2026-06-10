@@ -11,13 +11,14 @@ import GeoEditPanel from "./GeoEditPanel";
 
 interface Props {
   sessionId: string;
+  prefill?: { text: string; nonce: number } | null | undefined;
 }
 
 // Self-contained container for the geometric-world editor: hydrates the session
 // map, wires the NL-edit route (preview via dry_run, then apply), refetches the
 // chips after a write. Drop in behind WORLD_OVERRIDE_ENABLED + GEOMETRIC_WORLD;
 // inert (empty map) when the geo flag is off, so it's safe to mount either way.
-export default function GeoEditSection({ sessionId }: Props) {
+export default function GeoEditSection({ sessionId, prefill }: Props) {
   const { entities, refetch } = useWorldMap(sessionId);
 
   const onSubmit = useCallback(
@@ -41,5 +42,5 @@ export default function GeoEditSection({ sessionId }: Props) {
     [sessionId, refetch],
   );
 
-  return <GeoEditPanel entities={entities} onSubmit={onSubmit} />;
+  return <GeoEditPanel entities={entities} onSubmit={onSubmit} prefill={prefill} />;
 }
