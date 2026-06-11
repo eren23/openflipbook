@@ -11,14 +11,17 @@ import type {
   ViewProjection,
   WorldEntityGeo,
   WorldMapSnapshot,
+  WorldVec2,
 } from "@openflipbook/config";
 import { tierStep } from "@openflipbook/config";
 
 import { getDb } from "./db";
+import { envFlag } from "./env-flag";
 import { optimisticReplace } from "./optimistic-update";
 import {
   estimateGeoFromBBox,
   localExtent,
+  mapPolygonToCrop,
   resolveAbsolutePos,
   siblingsOf,
   type FrameNode,
@@ -356,6 +359,12 @@ export interface ExtractedGeoItem {
   visual?: string;
   state?: EntityState;
   confidence?: number;
+  // B2 segmenter (optional): the entity's border polygon in normalized IMAGE
+  // space (0..1, as the segmenter returns it) + the inferred ABSOLUTE height
+  // in meters. Persisted only when WORLD_SEGMENT_BORDERS is on; borders only
+  // on top-down map frames, where the image→frame mapping is linear.
+  border?: WorldVec2[];
+  height_m?: number;
 }
 
 /** Map an extraction pass (entities that have a bbox on this scene) into derived
@@ -376,6 +385,8 @@ export async function deriveGeoFromExtraction(
   scaleTier?: ScaleTier,
 ): Promise<WorldMapSnapshot> {
   const nowIso = new Date().toISOString();
+  // B2 segmenter persistence — storage only, nothing renders these yet.
+  const bordersOn = envFlag("WORLD_SEGMENT_BORDERS");
   const geos: WorldEntityGeo[] = items.map((item) => {
     const est = estimateGeoFromBBox(item.bbox, view, aspect, projection, pitchDeg);
     return {
@@ -388,6 +399,17 @@ export async function deriveGeoFromExtraction(
       height: est.height,
       footprint: est.footprint,
       ...(scaleTier ? { scale_tier: scaleTier } : {}),
+      ...(bordersOn &&
+      item.border &&
+      item.border.length >= 3 &&
+      projection === "top_down" &&
+      view.level === "map" &&
+      view.map_crop
+        ? { border: mapPolygonToCrop(item.border, view.map_crop) }
+        : {}),
+      ...(bordersOn && item.height_m && item.height_m > 0
+        ? { height_m: item.height_m }
+        : {}),
       visual: item.visual ?? "",
       state: item.state ?? {},
       // Derived placements are discounted so a later user/extracted write wins.

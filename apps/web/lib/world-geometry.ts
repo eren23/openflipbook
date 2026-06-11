@@ -159,6 +159,19 @@ export function projectTopDown(
   return out;
 }
 
+/** Map a normalized image-space polygon (0..1, as the segmenter traces it)
+ *  into the frame the entities are seeded in — the same linear map a bbox
+ *  centre takes on a top-down map frame (estimateGeoFromBBox). Pure. */
+export function mapPolygonToCrop(
+  polygon: WorldVec2[],
+  crop: MapCrop,
+): WorldVec2[] {
+  return polygon.map((v) => ({
+    x: crop.x + v.x * crop.w,
+    y: crop.y + v.y * crop.h,
+  }));
+}
+
 export function cropEntities<T extends ProjectInput>(
   entities: T[],
   crop: MapCrop,

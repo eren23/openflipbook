@@ -586,6 +586,14 @@ export interface WorldEntityGeo {
   // (a confirmed detection), or "derived" (back-projected from a bbox â a guess).
   source: "extracted" | "user" | "derived";
   updated_at: string;
+  // VLM-segmented border polygon (B2 segmenter), in the SAME frame as `pos`
+  // (the parent's local frame). 3..24 vertices; absent = only the rectangular
+  // footprint is known. Persisted behind WORLD_SEGMENT_BORDERS.
+  border?: WorldVec2[];
+  // Inferred ABSOLUTE height in meters - from the segmenter's anchored
+  // relative ladder, NOT from map pixels (map symbology is not metric).
+  // Distinct from `height` (relative world units). Absent = not inferred.
+  height_m?: number;
 }
 
 // Where the camera stands for a scene. Null observer â a top-down map view.

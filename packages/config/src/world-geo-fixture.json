@@ -2,7 +2,7 @@
   "_comment": "Single source of truth for the geometric-world wire shapes. The P0 schema-parity gate (apps/web/lib/world-geo-schema.test.ts + apps/modal-backend/tests/test_geo_schema.py) asserts both the TS interfaces and the Pydantic mirrors match these key sets. Edit here when a shape changes; both gates will fail until both sides follow.",
   "keys": {
     "WorldVec2": ["x", "y"],
-    "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "scale", "scale_tier", "heading", "visual", "state", "confidence", "source", "updated_at"],
+    "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "scale", "scale_tier", "heading", "visual", "state", "confidence", "source", "updated_at", "border", "height_m"],
     "ObserverPose": ["pos", "eye_height", "gaze", "pitch", "fov"],
     "MapCrop": ["x", "y", "w", "h"],
     "ViewSpec": ["projection", "pitch_deg", "azimuth_deg", "camera_height", "fov_deg", "source"],
@@ -29,7 +29,14 @@
       "state": { "lit": true },
       "confidence": 0.9,
       "source": "user",
-      "updated_at": "2026-06-06T00:00:00Z"
+      "updated_at": "2026-06-06T00:00:00Z",
+      "border": [
+        { "x": 8, "y": 18 },
+        { "x": 12, "y": 18 },
+        { "x": 12, "y": 22 },
+        { "x": 8, "y": 22 }
+      ],
+      "height_m": 30
     },
     "ObserverPose": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
     "MapCrop": { "x": 0, "y": 0, "w": 100, "h": 60 },
