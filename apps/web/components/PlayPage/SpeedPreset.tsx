@@ -18,6 +18,9 @@ interface Props {
   setImageTier: (t: ImageTier) => void;
   knobs: LoopKnobs;
   setKnobs: (k: LoopKnobs) => void;
+  /** Running backend spend estimate for this session ($); null/absent until
+   * the first final frame lands. */
+  sessionSpend?: number | null | undefined;
 }
 
 // The 3-stop speed/quality preset + the live cost chip — the projected spend
@@ -31,6 +34,7 @@ export function SpeedPreset({
   setImageTier,
   knobs,
   setKnobs,
+  sessionSpend,
 }: Props) {
   const [open, setOpen] = useState(false);
   const active = presetFor(imageTier, knobs);
@@ -108,9 +112,19 @@ export function SpeedPreset({
       <span
         data-testid="cost-chip"
         className="whitespace-nowrap opacity-60"
-        title={`Projected spend per action — tap ${tap} · edit ${edit} · new page ${fresh}. Ranges span retries; see docs/COSTS.md.`}
+        title={`Projected spend per action — tap ${tap} · edit ${edit} · new page ${fresh}. Ranges span retries; see docs/COSTS.md.${
+          typeof sessionSpend === "number"
+            ? ` Session so far ≈ $${sessionSpend.toFixed(2)} (backend estimate).`
+            : ""
+        }`}
       >
         ≈ {tap}/tap
+        {typeof sessionSpend === "number" && (
+          <span data-testid="session-spend">
+            {" "}
+            · session ≈ ${sessionSpend.toFixed(2)}
+          </span>
+        )}
       </span>
       {open && (
         <div className="absolute left-0 top-full z-20 mt-2 w-60 rounded-xl border border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 shadow-md">

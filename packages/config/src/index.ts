@@ -311,6 +311,10 @@ export interface GenerateFinalEvent {
   grounding?: GroundingSummary;
   // Judged mask-scoped edit verdict â present only on the EDIT_REGION path.
   edit_verdict?: EditVerdict;
+  // Running estimated spend ($) for this session — coarse, mirrors
+  // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
+  // backends.
+  session_spend_estimate?: number;
   trace_id?: string;
 }
 
