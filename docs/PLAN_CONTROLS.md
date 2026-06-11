@@ -1,5 +1,16 @@
 # PLAN — speed/budget/model controls in the UI, with live cost projection
 
+> **Status: shipped** (June 2026). All four steps landed, plus the concurrent
+> judges (step 4 was promoted from optional — it was the demo's wall-clock
+> pain). Names settled as **fast / balanced / quality**; the chip shows real
+> dollar ranges (`lib/cost-estimate.ts`, vitest-pinned to `docs/COSTS.md`);
+> the 3-stop preset sits inline next to the tier toggle with the granular
+> knobs (attempts, verify) behind the ⚙ popover. One deviation from the text
+> below: `max_attempts` clamps to a hard server cap of 4 rather than the env
+> ceiling (the env default of 2 would have made Quality's 3 attempts
+> unreachable), and the preset store is global localStorage, not per-session
+> (it drives the global image tier — per-session would desync).
+
 ## Context
 
 The Ankh-Morpork re-shoot made the problem visible: the default path is
