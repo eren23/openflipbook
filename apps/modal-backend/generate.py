@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import json
 import os
+import threading as _threading
 import time as _time_mod
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -584,6 +585,9 @@ def _gate_json(message: str, trace_id: str) -> JSONResponse:
 
 _RECENT_GENERATE_TTL_S = 30.0
 _RECENT_GENERATES: OrderedDict[str, float] = OrderedDict()
+# Same posture as providers/spend.py: module state stays correct if anyone
+# ever runs this app with threaded workers.
+_RECENT_GENERATES_LOCK = _threading.Lock()
 
 
 def _note_duplicate_generate(body: GenerateBody) -> bool:
@@ -604,15 +608,20 @@ def _note_duplicate_generate(body: GenerateBody) -> bool:
             bucket,
             (body.query or "")[:200],
             (body.edit_instruction or "")[:200],
+            # A re-run at a different tier/model is a deliberate choice, not
+            # a stutter — keep it out of the duplicate bucket.
+            body.image_tier or "",
+            body.image_model or "",
         ]
     )
     key = hashlib.sha1(raw.encode()).hexdigest()
     now = _time_mod.monotonic()
-    seen = _RECENT_GENERATES.get(key)
-    _RECENT_GENERATES[key] = now
-    _RECENT_GENERATES.move_to_end(key)
-    while len(_RECENT_GENERATES) > 256:
-        _RECENT_GENERATES.popitem(last=False)
+    with _RECENT_GENERATES_LOCK:
+        seen = _RECENT_GENERATES.get(key)
+        _RECENT_GENERATES[key] = now
+        _RECENT_GENERATES.move_to_end(key)
+        while len(_RECENT_GENERATES) > 256:
+            _RECENT_GENERATES.popitem(last=False)
     return seen is not None and (now - seen) < _RECENT_GENERATE_TTL_S
 
 

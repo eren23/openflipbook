@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { readServerEnv, requireR2 } from "./env";
 
 let cachedClient: S3Client | null = null;
@@ -80,4 +80,44 @@ export function decodeDataUrl(dataUrl: string): {
   const contentType = match[1]!;
   const b64 = match[2]!;
   return { contentType, bytes: Buffer.from(b64, "base64") };
+}
+
+/** The storage key when `url` lives under our public base, else null.
+ * Pure — the testable half of inlineStoredImage. */
+export function storedKeyFromUrl(
+  url: string,
+  publicBaseUrl: string
+): string | null {
+  const base = publicBaseUrl.replace(/\/$/, "");
+  if (!base || !url.startsWith(`${base}/`)) return null;
+  const key = url.slice(base.length + 1).split(/[?#]/, 1)[0] ?? "";
+  return key.length > 0 ? decodeURIComponent(key) : null;
+}
+
+/**
+ * Inline one of OUR stored images into a data URL. Self-host reality check:
+ * the docker stack's public base is a localhost minio URL — the browser can
+ * load it, but OpenRouter/Google refuse to fetch private/localhost URLs, so
+ * an unprefetched tap on a reopened node 400s at the VLM ("Cannot fetch
+ * from private/localhost URLs"). The web server CAN reach the store (its S3
+ * client speaks to the container endpoint), so the proxies inline the bytes
+ * before forwarding. Best-effort: foreign URLs / fetch failures -> null and
+ * the caller forwards the original URL (today's behaviour).
+ */
+export async function inlineStoredImage(url: string): Promise<string | null> {
+  try {
+    const { s3, bucket, publicBaseUrl } = r2Client();
+    const key = storedKeyFromUrl(url, publicBaseUrl);
+    if (!key) return null;
+    const got = await s3.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key })
+    );
+    if (!got.Body) return null;
+    const bytes = Buffer.from(await got.Body.transformToByteArray());
+    if (bytes.length === 0) return null;
+    const contentType = got.ContentType || "image/jpeg";
+    return `data:${contentType};base64,${bytes.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
