@@ -1781,6 +1781,17 @@ async def _event_stream(
                 except Exception:
                     draft_result = None
                 if draft_result is not None:
+                    # Name the phase honestly: what lands next is a fast-tier
+                    # DRAFT the main render will replace — the banner and the
+                    # waterfall both label it so the swap isn't a mystery.
+                    yield _sse(
+                        {
+                            "type": "status",
+                            "stage": "draft",
+                            "image_model": draft_result.model,
+                        },
+                        trace_id,
+                    )
                     # Encode in a thread so the event loop stays free for
                     # main_task progress. Sync b64encode of a 1-3MB JPEG
                     # otherwise stalls the loop for ~5-15ms — small per call,

@@ -2,17 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { on, type HudEventName } from "@/lib/trace";
-
-type StageKey =
-  | "request"
-  | "click_resolving"
-  | "click_resolved"
-  | "planning"
-  | "generating_image"
-  | "verifying"
-  | "final"
-  | "decode"
-  | "morph";
+import {
+  buildSegments,
+  marksForEndReportedStage,
+  type WaterfallMark as Mark,
+  type WaterfallStage as StageKey,
+} from "@/lib/waterfall-segments";
 
 interface StageInfo {
   label: string;
@@ -25,17 +20,13 @@ const STAGE_INFO: Record<StageKey, StageInfo> = {
   click_resolved: { label: "tap → subject", color: "rgba(59,130,246,0.85)" },
   planning: { label: "planner", color: "rgba(34,197,94,0.85)" },
   generating_image: { label: "image gen", color: "rgba(234,88,12,0.85)" },
+  draft: { label: "draft preview", color: "rgba(245,158,11,0.85)" },
   verifying: { label: "vlm: verify", color: "rgba(20,184,166,0.85)" },
   final: { label: "final", color: "rgba(239,68,68,0.9)" },
   decode: { label: "decode", color: "rgba(168,85,247,0.85)" },
+  idle: { label: "idle (tab hidden?)", color: "rgba(120,120,120,0.35)" },
   morph: { label: "reveal", color: "rgba(217,70,239,0.85)" },
 };
-
-interface Mark {
-  stage: StageKey;
-  t: number;
-  hint?: string;
-}
 
 interface RunState {
   traceId: string | null;
@@ -120,27 +111,38 @@ export default function WaterfallHUD() {
     });
 
     sub("image:decode", (p: unknown) => {
-      const v = p as { ms?: number };
+      // End-reported: the event arrives when the browser decode RESOLVES,
+      // carrying its measured ms + its start time. A backgrounded tab defers
+      // the decode by minutes — that gap renders as `idle`, never as a
+      // 100s+ "decode" bar (the 184813ms incident).
+      const v = p as { ms?: number; t0?: number };
       const ms = typeof v?.ms === "number" ? v.ms : 0;
       setRun((prev) => {
         const lastT = prev.marks[prev.marks.length - 1]?.t ?? 0;
+        const start = typeof v?.t0 === "number" ? v.t0 : lastT;
         return {
           ...prev,
-          marks: [...prev.marks, { stage: "decode", t: lastT + ms }],
-          active: "decode",
+          marks: marksForEndReportedStage(prev.marks, "decode", start, ms),
+          active: null,
         };
       });
     });
 
     sub("morph:end", (p: unknown) => {
-      const v = p as { duration_ms?: number };
-      const ms = typeof v?.duration_ms === "number" ? v.duration_ms : 0;
+      // The reveal runs from the decode's end to this event's arrival; the
+      // legacy duration_ms (measured since CLICK) is ignored for the bar.
+      const v = p as { t?: number; duration_ms?: number };
       setRun((prev) => {
-        const lastT = prev.marks[prev.marks.length - 1]?.t ?? 0;
+        const last = prev.marks[prev.marks.length - 1];
+        const lastEnd = last == null ? 0 : (last.end ?? last.t);
+        const endT = typeof v?.t === "number" ? v.t : lastEnd;
         return {
           ...prev,
-          marks: [...prev.marks, { stage: "morph", t: lastT + ms }],
-          endedAt: lastT + ms,
+          marks: [
+            ...prev.marks,
+            { stage: "morph", t: lastEnd, end: Math.max(endT, lastEnd) },
+          ],
+          endedAt: Math.max(endT, lastEnd),
           active: null,
         };
       });
@@ -173,21 +175,10 @@ export default function WaterfallHUD() {
   if (!hasShown) return null;
 
   const { startedAt, marks, active, traceId } = run;
-  const segments: Array<{ stage: StageKey; start: number; end: number }> = [];
-  if (startedAt != null) {
-    for (let i = 0; i < marks.length; i++) {
-      const m = marks[i]!;
-      const next = marks[i + 1];
-      const start = m.t - startedAt;
-      const end =
-        next != null
-          ? next.t - startedAt
-          : active != null && active === m.stage
-            ? Math.max(start + 1, performanceNow() - startedAt)
-            : start + 1;
-      segments.push({ stage: m.stage, start, end });
-    }
-  }
+  const segments =
+    startedAt != null
+      ? buildSegments(marks, startedAt, active, performanceNow())
+      : [];
   const totalMs =
     segments.length > 0 ? Math.max(1, segments[segments.length - 1]!.end) : 1;
 

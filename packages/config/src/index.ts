@@ -325,6 +325,9 @@ export type GenerateStage =
   | "click_resolved"
   | "planning"
   | "generating_image"
+  // A fast-tier draft frame is about to land as `progress`; the main render
+  // is still running and will replace it (PROGRESSIVE_DRAFT).
+  | "draft"
   | "verifying";
 
 export interface GenerateStatusEvent {

@@ -666,11 +666,22 @@ export default function PlayPage() {
               } else if (evt.stage === "planning") {
                 setStatusMsg("Planning page…");
               } else if (evt.stage === "generating_image") {
+                // The pro model has no fast draft to show (OpenRouter path)
+                // and routinely takes minutes — say so instead of leaving a
+                // silent spinner (the 3-minute-riverflow mystery). Read the
+                // tier off the REQUEST body: this callback is deliberately
+                // dependency-free, so component state here would be stale.
+                const proNote =
+                  body.image_tier === "pro"
+                    ? " (pro model — usually 2–3 min)"
+                    : "";
                 setStatusMsg(
                   evt.page_title
-                    ? `Drawing "${evt.page_title}"…`
-                    : "Drawing image…"
+                    ? `Drawing "${evt.page_title}"…${proNote}`
+                    : `Drawing image…${proNote}`
                 );
+              } else if (evt.stage === "draft") {
+                setStatusMsg("Draft preview — the full render is refining…");
               }
             } else if (evt.type === "progress") {
               lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
@@ -2829,7 +2840,10 @@ export default function PlayPage() {
                     }
                     setMorphFx((prev) => {
                       if (!prev || prev.phase !== "reveal") return prev;
-                      hudEmit("morph:end", { duration_ms: nowMs() - prev.startedAt });
+                      hudEmit("morph:end", {
+                        duration_ms: nowMs() - prev.startedAt,
+                        t: nowMs(),
+                      });
                       return null;
                     });
                   }}
