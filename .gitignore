@@ -69,3 +69,7 @@ scripts/perfbudget/report.json
 # Ground-truth corpus images (fetched by scripts/fetch_corpus.py; text-only
 # descriptions + the sha-pinned manifest are what git tracks).
 apps/modal-backend/tests/map_corpus/images/
+
+# Matrix-bench disk cache (cell images + records + judge replies — re-runs
+# must be free, but the binaries never belong in git).
+apps/modal-backend/tests/**/cache/
