@@ -5,6 +5,7 @@ import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { inlineStoredImage } from "@/lib/r2";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type {
@@ -72,6 +73,13 @@ export async function POST(req: Request, { params }: Params) {
       { error: "missing required fields: node_id, image_data_url" },
       { status: 400 }
     );
+  }
+  // A replayed/late extraction can arrive with the node's STORE URL — on the
+  // docker stack a localhost minio URL the VLM providers refuse. Inline our
+  // own stored bytes (best-effort; see lib/r2.inlineStoredImage).
+  if (!body.image_data_url.startsWith("data:")) {
+    const inlined = await inlineStoredImage(body.image_data_url);
+    if (inlined) body.image_data_url = inlined;
   }
 
   let priorEntities: Awaited<

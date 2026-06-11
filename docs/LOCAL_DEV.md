@@ -98,3 +98,15 @@ The app runs, but:
 
 So for a quick "does it generate pretty pictures" smoke test, only FAL_KEY +
 OPENROUTER_API_KEY are strictly required.
+
+## No keys? Mock mode
+
+```sh
+MOCK_PROVIDERS=1 docker compose up -d --build
+```
+
+The whole app runs with deterministic mock providers — taps, enters, edits,
+judges, extraction — zero API keys, zero spend. Images are drawn parchment
+cards labeled with the operation + prompt (so flows are visually traceable),
+and the LLM/judge replies are schema-valid canned JSON. This is what CI's
+`e2e-mock` job boots on every PR, so a fresh clone always works.

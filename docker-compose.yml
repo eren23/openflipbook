@@ -85,6 +85,9 @@ services:
       # to A/B against the old text-only generation:
       #   IMAGE_CONDITIONING=false docker compose up -d backend
       IMAGE_CONDITIONING: ${IMAGE_CONDITIONING:-true}
+      # Zero-key demo mode: deterministic mock providers (no fal/OpenRouter
+      # calls, no keys needed). MOCK_PROVIDERS=1 docker compose up -d
+      MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
       # World Mode: a tap ENTERS the tapped place (an immersive scene / a closer
       # sub-map) instead of explaining a topic, and places persist + reopen.
       # Default off — turn on per-session from the UI once enabled here:
@@ -115,7 +118,14 @@ services:
       dockerfile: apps/web/Dockerfile
     container_name: openflipbook-web
     restart: unless-stopped
+    # Same posture as the backend: the root .env (single-file demo) carries
+    # the world/geo feature flags — the web's server routes gate geometry
+    # seeding (GEOMETRIC_WORLD) and scale-nav on them, so without this the
+    # docker stack silently ran with seeding off while local dev had it on.
+    # apps/web/.env.local overrides; the compose-network values below win last.
     env_file:
+      - path: .env
+        required: false
       - path: apps/web/.env.local
         required: false
     dns:

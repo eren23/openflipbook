@@ -243,6 +243,12 @@ def _client() -> AsyncOpenAI:
     times per /sse/generate today; the underlying httpx pool also restarts
     each time, so warm keepalives never benefit. Reuse one instance.
     """
+    from providers import mock
+
+    if mock.on():
+        # MOCK_PROVIDERS: ONE seam covers every text/VLM/judge call (the
+        # judges borrow this client too) — zero keys, zero network.
+        return mock.mock_llm_client()  # type: ignore[return-value]
     global _OPENAI_CLIENT
     if _OPENAI_CLIENT is None:
         provider, base_url, api_key, headers = _resolve_provider()

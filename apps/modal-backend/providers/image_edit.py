@@ -79,7 +79,11 @@ async def edit_image(
     style_ref_url: str | None = None,
 ) -> GeneratedImage:
     from obs import span
+    from providers import mock
 
+    if mock.on():
+        m = mock.mock_image(instruction, op="edit")
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = _resolve_edit_model(tier, model_override)
     image_url = await to_fal_url(image_data_url)
@@ -185,7 +189,11 @@ async def continue_image(
     style and layout — a closer continuation rather than a fresh generation.
     Default FLUX Kontext (bakeoff winner); FAL_CONTINUE_MODEL override."""
     from obs import span
+    from providers import mock
 
+    if mock.on():
+        m = mock.mock_image(instruction, op="zoom")
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = (
         model_override
