@@ -2582,6 +2582,15 @@ async def status() -> dict:
     return await status_payload(APP_NAME)
 
 
+@fastapi_app.get("/models")
+async def models() -> dict:
+    """The image-model registry (slug + capabilities) for pickers — the dev
+    model dropdown reads this through the web's /api/models proxy."""
+    from providers import model_router
+
+    return {"models": model_router.registry()}
+
+
 @fastapi_app.get("/trace/recent")
 async def trace_recent(limit: int = 50) -> dict:
     """Return the in-memory ring buffer of recent completed traces.

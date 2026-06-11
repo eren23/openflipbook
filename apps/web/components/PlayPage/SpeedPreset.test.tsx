@@ -81,3 +81,14 @@ describe("session spend chip", () => {
     expect(screen.queryByTestId("session-spend")).toBeNull();
   });
 });
+
+describe("dev model dropdown", () => {
+  it("absent without NEXT_PUBLIC_DEV_PROVIDERS (the default build)", () => {
+    const { setKnobs } = setup({ setDevModel: () => {} });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Advanced loop controls" }),
+    );
+    expect(screen.queryByLabelText("Dev image model override")).toBeNull();
+    void setKnobs;
+  });
+});

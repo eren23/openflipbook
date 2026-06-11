@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ImageTier } from "@openflipbook/config";
 
 import { formatCostRange, projectCost } from "@/lib/cost-estimate";
@@ -21,6 +21,18 @@ interface Props {
   /** Running backend spend estimate for this session ($); null/absent until
    * the first final frame lands. */
   sessionSpend?: number | null | undefined;
+  /** Dev-only explicit model override (NEXT_PUBLIC_DEV_PROVIDERS=1): rides
+   * the wire's image_model field per request. null = the tier decides. */
+  devModel?: string | null | undefined;
+  setDevModel?: ((m: string | null) => void) | undefined;
+}
+
+const DEV_PROVIDERS = process.env.NEXT_PUBLIC_DEV_PROVIDERS === "1";
+
+interface RegistryModel {
+  slug: string;
+  label: string;
+  est_cost: number;
 }
 
 // The 3-stop speed/quality preset + the live cost chip — the projected spend
@@ -35,8 +47,26 @@ export function SpeedPreset({
   knobs,
   setKnobs,
   sessionSpend,
+  devModel,
+  setDevModel,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<RegistryModel[] | null>(null);
+  useEffect(() => {
+    if (!open || !DEV_PROVIDERS || models !== null) return;
+    let cancelled = false;
+    void fetch("/api/models")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { models?: RegistryModel[] } | null) => {
+        if (!cancelled) setModels(j?.models ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, models]);
   const active = presetFor(imageTier, knobs);
   const bundle = { tier: imageTier, ...knobs };
   const tap = formatCostRange(projectCost(bundle, "tap"));
@@ -147,6 +177,25 @@ export function SpeedPreset({
               {knobButton(!knobs.verify, () => setKnobs({ ...knobs, verify: false }), "off")}
             </div>
           </div>
+          {DEV_PROVIDERS && setDevModel && (
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="opacity-60">model</span>
+              <select
+                aria-label="Dev image model override"
+                value={devModel ?? ""}
+                disabled={busy}
+                onChange={(e) => setDevModel(e.target.value || null)}
+                className="max-w-[9.5rem] rounded-full border border-[var(--color-edge)] bg-transparent px-2 py-1 text-xs disabled:opacity-40"
+              >
+                <option value="">tier decides</option>
+                {(models ?? []).map((m) => (
+                  <option key={m.slug} value={m.slug}>
+                    {m.label} (${m.est_cost.toFixed(2)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <p className="mt-2 border-t border-[var(--color-edge)] pt-2 opacity-60">
             tap {tap} · edit {edit} · new page {fresh}
           </p>

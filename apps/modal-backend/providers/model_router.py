@@ -131,3 +131,83 @@ def select_enter_model(projection: str | None) -> str | None:
     if projection in STEEP_ENTER_PROJECTIONS:
         return os.environ.get("FAL_ENTER_MODEL_STEEP") or STEEP_ENTER_DEFAULT
     return resolve_model("enter_scene")
+
+
+# ── Capability registry + fallback chains (Wave 4) ───────────────────────────
+# Data, not behavior: what each slug can do, what it costs, how it fails over.
+# Longest-prefix matching (same posture as providers/spend.py's price table);
+# costs mirror docs/COSTS.md — spend.py owns the billing copy of these numbers.
+
+from dataclasses import dataclass  # noqa: E402
+
+
+@dataclass(frozen=True)
+class ModelCaps:
+    label: str  # short human name for pickers
+    supports_edit: bool  # honours an image input as an EDIT target
+    supports_refs: bool  # honours reference images on fresh generation
+    legible_text: bool  # renders crisp in-image labels (the map-text gotcha)
+    est_cost: float  # $/image, ≈ docs/COSTS.md
+    est_latency_s: float  # typical wall-clock per image
+
+
+CAPABILITIES: tuple[tuple[str, ModelCaps], ...] = (
+    ("fal-ai/nano-banana-pro", ModelCaps("nano-banana-pro", True, True, True, 0.15, 25)),
+    ("fal-ai/nano-banana-2", ModelCaps("nano-banana-2", True, True, True, 0.08, 18)),
+    ("fal-ai/nano-banana", ModelCaps("nano-banana", True, True, False, 0.039, 10)),
+    ("fal-ai/flux-pro/kontext", ModelCaps("flux kontext", True, False, True, 0.04, 20)),
+    ("fal-ai/flux-pro/v1/fill", ModelCaps("flux fill (inpaint)", True, False, True, 0.10, 25)),
+    ("fal-ai/bria", ModelCaps("bria expand", True, False, True, 0.04, 15)),
+    ("openrouter:sourceful/riverflow-v2.5-pro", ModelCaps("riverflow pro", False, False, True, 0.24, 150)),
+    ("openai/gpt-image-2", ModelCaps("gpt-image-2", True, False, True, 0.17, 90)),
+)
+
+
+def capabilities_for(slug: str) -> ModelCaps | None:
+    s = (slug or "").lower()
+    best: ModelCaps | None = None
+    best_len = -1
+    for prefix, caps in CAPABILITIES:
+        if s.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = caps, len(prefix)
+    return best
+
+
+def registry() -> list[dict[str, object]]:
+    """The picker payload: every known slug with its caps. Served by
+    GET /models for the dev model dropdown."""
+    return [
+        {
+            "slug": prefix,
+            "label": caps.label,
+            "supports_edit": caps.supports_edit,
+            "supports_refs": caps.supports_refs,
+            "legible_text": caps.legible_text,
+            "est_cost": caps.est_cost,
+            "est_latency_s": caps.est_latency_s,
+        }
+        for prefix, caps in CAPABILITIES
+    ]
+
+
+# Fresh-generation failover order (PROVIDER_FALLBACK=1): when a slug's call
+# fails terminally, the next one takes the prompt. Chains step DOWN in cost —
+# a degraded page beats an error frame, and the final's image_model says
+# honestly which model actually rendered. Fresh-gen only by design: edit /
+# continue ops carry semantics (refs, masks) a substitute may not honour.
+FALLBACK_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("openrouter:sourceful/riverflow-v2.5-pro", ("fal-ai/nano-banana-pro", "fal-ai/nano-banana")),
+    ("fal-ai/nano-banana-pro", ("fal-ai/nano-banana-2", "fal-ai/nano-banana")),
+    ("fal-ai/nano-banana-2", ("fal-ai/nano-banana",)),
+    ("fal-ai/nano-banana", ("fal-ai/nano-banana-2",)),
+)
+
+
+def fallback_chain(slug: str) -> tuple[str, ...]:
+    s = (slug or "").lower()
+    best: tuple[str, ...] = ()
+    best_len = -1
+    for prefix, chain in FALLBACK_CHAINS:
+        if s.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = chain, len(prefix)
+    return tuple(c for c in best if c != slug)
