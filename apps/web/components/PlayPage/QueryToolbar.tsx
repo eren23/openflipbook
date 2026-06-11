@@ -26,6 +26,7 @@ interface Props {
   setImageTier: (t: ImageTier) => void;
   loopKnobs: LoopKnobs;
   setLoopKnobs: (k: LoopKnobs) => void;
+  sessionSpend?: number | null | undefined;
   worldMode: boolean;
   setWorldMode: (on: boolean) => void;
   autonomy: Autonomy;
@@ -48,6 +49,7 @@ export function QueryToolbar({
   setImageTier,
   loopKnobs,
   setLoopKnobs,
+  sessionSpend,
   worldMode,
   setWorldMode,
   autonomy,
@@ -147,6 +149,7 @@ export function QueryToolbar({
           setImageTier={setImageTier}
           knobs={loopKnobs}
           setKnobs={setLoopKnobs}
+          sessionSpend={sessionSpend}
         />
         <div
           role="group"

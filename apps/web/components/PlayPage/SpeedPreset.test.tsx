@@ -67,3 +67,17 @@ describe("SpeedPreset", () => {
     expect(setKnobs).toHaveBeenCalledWith({ maxAttempts: 3, verify: true });
   });
 });
+
+describe("session spend chip", () => {
+  it("shows the backend's running estimate when present", () => {
+    setup({ sessionSpend: 0.48 });
+    expect(screen.getByTestId("session-spend").textContent).toContain(
+      "session ≈ $0.48",
+    );
+  });
+
+  it("absent until the first final frame lands", () => {
+    setup();
+    expect(screen.queryByTestId("session-spend")).toBeNull();
+  });
+});

@@ -16,8 +16,11 @@ from __future__ import annotations
 import asyncio as _asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import os
+import time as _time_mod
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -579,6 +582,40 @@ def _gate_json(message: str, trace_id: str) -> JSONResponse:
     )
 
 
+_RECENT_GENERATE_TTL_S = 30.0
+_RECENT_GENERATES: OrderedDict[str, float] = OrderedDict()
+
+
+def _note_duplicate_generate(body: GenerateBody) -> bool:
+    """True when an identical generate (same session/node/mode/query and
+    click bucket) arrived within the TTL. The web's in-flight guard should
+    make this impossible — so it's worth a loud log line when it isn't —
+    but a deliberate user retry is legitimate, hence log-only, never a
+    block."""
+    click = body.click
+    bucket = (
+        f"{round(click.x_pct * 20)}:{round(click.y_pct * 20)}" if click else "-"
+    )
+    raw = "|".join(
+        [
+            body.session_id,
+            body.current_node_id,
+            body.mode,
+            bucket,
+            (body.query or "")[:200],
+            (body.edit_instruction or "")[:200],
+        ]
+    )
+    key = hashlib.sha1(raw.encode()).hexdigest()
+    now = _time_mod.monotonic()
+    seen = _RECENT_GENERATES.get(key)
+    _RECENT_GENERATES[key] = now
+    _RECENT_GENERATES.move_to_end(key)
+    while len(_RECENT_GENERATES) > 256:
+        _RECENT_GENERATES.popitem(last=False)
+    return seen is not None and (now - seen) < _RECENT_GENERATE_TTL_S
+
+
 async def _event_stream(
     body: GenerateBody,
     trace_id: str,
@@ -589,11 +626,41 @@ async def _event_stream(
     from obs import bind_trace, log, record_error
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
-    from providers import llm, model_router
+    from providers import llm, model_router, spend
 
     bind_trace(trace_id)
     started = _time.perf_counter()
     log("info", "sse.generate.start", mode=body.mode, locale=body.output_locale)
+
+    # Observability for client-guard regressions: the web's in-flight ref
+    # should make identical back-to-back generates impossible — if one shows
+    # up anyway, say so loudly (log-only; never blocks a legitimate retry).
+    if _note_duplicate_generate(body):
+        log("warn", "sse.generate.duplicate", mode=body.mode)
+
+    # The daily spend gate (MAX_DAILY_SPEND, providers/spend.py): refuse with
+    # a clean error frame BEFORE any model call once today's estimate crosses
+    # the cap. Absent/0 -> uncapped, byte-identical to before.
+    if spend.cap_exceeded():
+        log(
+            "warn",
+            "sse.generate.spend_capped",
+            daily=round(spend.daily_total(), 2),
+            cap=spend.daily_cap(),
+        )
+        yield _sse(
+            {
+                "type": "error",
+                "message": (
+                    "Daily spend cap reached (≈$"
+                    f"{spend.daily_total():.2f} of MAX_DAILY_SPEND=$"
+                    f"{spend.daily_cap():.2f}). Raise or unset MAX_DAILY_SPEND "
+                    "to continue."
+                ),
+            },
+            trace_id,
+        )
+        return
 
     async def _abort_if_disconnected(stage: str) -> None:
         """Raise CancelledError when the client has dropped the SSE socket.
@@ -785,6 +852,12 @@ async def _event_stream(
                     "session_id": body.session_id,
                     "final_prompt": described,
                     "image_op": "inpaint",
+                    "session_spend_estimate": spend.record_generation(
+                        body.session_id,
+                        inp_result.model,
+                        # every loop attempt billed an inpaint; unjudged = one
+                        images=len(edit_attempts) if verdict is not None else 1,
+                    ),
                 }
                 if verdict is not None:
                     final_frame["edit_verdict"] = verdict
@@ -877,6 +950,11 @@ async def _event_stream(
                             "prompt_author_model": llm._text_model(online=False),
                             "session_id": body.session_id,
                             "final_prompt": polished,
+                            "session_spend_estimate": spend.record_generation(
+                                body.session_id,
+                                judged_image.model,
+                                images=len(judged_attempts),
+                            ),
                             "edit_verdict": {
                                 "alignment": (
                                     judged_best.alignment.score
@@ -915,6 +993,9 @@ async def _event_stream(
                     "prompt_author_model": llm._text_model(online=False),
                     "session_id": body.session_id,
                     "final_prompt": polished,
+                    "session_spend_estimate": spend.record_generation(
+                        body.session_id, edit_result.model
+                    ),
                 },
                 trace_id,
             )
@@ -1452,6 +1533,10 @@ async def _event_stream(
         # edit endpoint; everything else is a fresh gen.
         image_op = model_router.select_operation(render_mode, region_ref is not None)
         use_continuation = image_op == "zoom_continue"
+        # Spend accounting (providers/spend.py): how many images this
+        # generation billed — judged loops overwrite with their attempt count,
+        # the draft records itself at emission.
+        billed_images = 1
 
         # The deliberate camera (view grammar): user/persisted pin > policy >
         # None (legacy bytes). Resolved once; consumed by the layout clause,
@@ -1739,6 +1824,7 @@ async def _event_stream(
                             trace_id,
                         )
                 result = render_loop.conclude(loop_attempts).image
+                billed_images = max(1, len(loop_attempts))
             else:
                 main_task = _asyncio.create_task(
                     image_edit_provider.edit_image(
@@ -1781,6 +1867,10 @@ async def _event_stream(
                 except Exception:
                     draft_result = None
                 if draft_result is not None:
+                    # The draft is a real fal call — bill it as it lands.
+                    spend.record(
+                        body.session_id, spend.estimate_image(draft_result.model)
+                    )
                     # Name the phase honestly: what lands next is a fast-tier
                     # DRAFT the main render will replace — the banner and the
                     # waterfall both label it so the swap isn't a mystery.
@@ -1870,6 +1960,9 @@ async def _event_stream(
                 else composed_prompt
             ),
             "sources": sources_payload,
+            "session_spend_estimate": spend.record_generation(
+                body.session_id, result.model, images=billed_images
+            ),
         }
         # Which non-fresh op actually rendered the image — additive, absent on
         # the fresh path (unchanged wire shape). Lets the demo trace / A-B

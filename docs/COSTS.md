@@ -112,3 +112,17 @@ flux-pro/v1/fill $0.05/MP, flux-pro/kontext $0.04, nano-banana $0.039),
 OpenRouter (gemini-3-flash-preview $0.50/$3, gemini-3.1-flash-lite $0.25/$1.50),
 repo `prompt_tokens` logs + Makefile eval cost anchors (eval-view ~$2.5,
 eval-edit-region ~$1, mask-smoke ~$0.5).
+
+## The live meter (`providers/spend.py`)
+
+The backend now keeps a running **estimate** of spend using the prices above:
+each generation records its image calls by model slug + a flat ~$0.02 for the
+VLM stack. The session total rides every `final` frame
+(`session_spend_estimate`) and shows next to the toolbar's cost chip;
+`MAX_DAILY_SPEND` (dollars) turns the daily total into a hard gate — streams
+refuse with a clear error once today's estimate crosses it.
+
+Honest limitations: totals are **in-process** (per container, reset on
+restart, not shared across replicas) and **estimates** (the slug price table
+above, not provider invoices). Right-sized for a self-hosted cap; don't bill
+anyone off it.

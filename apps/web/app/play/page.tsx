@@ -494,6 +494,9 @@ export default function PlayPage() {
   // overwriting that initial paint with the default values on mount.
   const [imageTier, setImageTier] = useImageTier();
   const [loopKnobs, setLoopKnobs] = useLoopKnobs();
+  // Running spend estimate for THIS session, read off final frames (the
+  // backend meter, providers/spend.py). Null until the first final lands.
+  const [sessionSpend, setSessionSpend] = useState<number | null>(null);
   // The speed preset's wire half — spread into every generate() body next to
   // image_tier. Balanced knobs produce {} (byte-identity with today).
   const loopWire = useMemo(() => wireFields(loopKnobs), [loopKnobs]);
@@ -709,6 +712,9 @@ export default function PlayPage() {
                 trace_id: traceId,
                 t: nowMs(),
               });
+              if (typeof evt.session_spend_estimate === "number") {
+                setSessionSpend(evt.session_spend_estimate);
+              }
               setProgressiveDraft(false);
               setPage({
                 nodeId: null,
@@ -2604,6 +2610,7 @@ export default function PlayPage() {
         setImageTier={setImageTier}
         loopKnobs={loopKnobs}
         setLoopKnobs={setLoopKnobs}
+        sessionSpend={sessionSpend}
         worldMode={worldEnabled}
         setWorldMode={setWorldEnabled}
         autonomy={worldAutonomy}
