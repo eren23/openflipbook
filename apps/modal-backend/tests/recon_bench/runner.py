@@ -26,7 +26,10 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from providers.geometry import ProjectedEntity, ProjectInput
 
 from tests.map_corpus import description_sha, image_path, load_descriptions
 from tests.matrix_bench._budget import JUDGE_CALL_FLAT
@@ -68,7 +71,9 @@ def _norm(label: str) -> str:
     return " ".join(label.lower().split())
 
 
-def _expected_layout(desc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[tuple[str, float, str]] | None]:
+def _expected_layout(
+    desc: dict[str, Any],
+) -> tuple[list[ProjectedEntity], list[tuple[str, float, str]] | None]:
     """Ground-truth entities → ProjectedEntity bins (for the layout clause)
     + relative-height tuples (label, ratio, anchor) for its HEIGHTS block."""
     from providers.geometry import project_top_down
@@ -83,9 +88,9 @@ def _expected_layout(desc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[t
         }
         for e in desc["entities"]
     ]
-    expected = project_top_down(ents, FRAME_W, FRAME_H)
-    real = sorted(
-        ((e["label"], float(e["height_m"])) for e in desc["entities"] if e.get("height_m")),
+    expected = project_top_down(cast("list[ProjectInput]", ents), FRAME_W, FRAME_H)
+    real: list[tuple[str, float]] = sorted(
+        ((str(e["label"]), float(e["height_m"])) for e in desc["entities"] if e.get("height_m")),
         key=lambda t: t[1],
     )
     heights = None
@@ -95,7 +100,9 @@ def _expected_layout(desc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[t
     return expected, heights
 
 
-def _graph_layout(desc: dict[str, Any], loop: asyncio.AbstractEventLoop) -> list[dict[str, Any]]:
+def _graph_layout(
+    desc: dict[str, Any], loop: asyncio.AbstractEventLoop
+) -> list[ProjectedEntity]:
     """The product path: prose → scene graph → solved geos → bins."""
     from providers.geometry import project_top_down
     from providers.layout_solver import solve_layout
@@ -113,7 +120,7 @@ def _graph_layout(desc: dict[str, Any], loop: asyncio.AbstractEventLoop) -> list
         }
         for i, g in enumerate(solved.geos)
     ]
-    return project_top_down(ents, FRAME_W, FRAME_H)
+    return project_top_down(cast("list[ProjectInput]", ents), FRAME_W, FRAME_H)
 
 
 def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
@@ -328,6 +335,10 @@ def main() -> int:
                         print(f"  {v.status}: {v.detail}")
             except KeyError:
                 print("  (no committed baseline yet — commit one from this run)")
+    if live:
+        from tests.matrix_bench import report as report_mod
+
+        print(report_mod.format_summary(report_mod.attach_summary(_REPORT)))
     json.dumps(report)  # smoke: the report is JSON-serializable
     return 0 if report.get("stopped_reason") is None else 1
 

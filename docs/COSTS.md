@@ -130,3 +130,13 @@ anyone off it.
 One more cap honesty note: the gate is checked at stream start, so requests
 already in flight when the cap trips still complete — worst case overshoot is
 one generation per concurrent stream. Right-sized for a personal cap.
+
+## Matrix bench spend
+
+The eval matrix is designed to spend close to nothing: dry-run cost preview
+before every sweep, disk-cached cells (re-runs and prompt evolution re-bill
+only changed cells), a hard `MATRIX_BUDGET_USD` cap charged BEFORE each call
+(default $3), and per-operation breakdown (image / judges / extract) in every
+report. Typical numbers: `make eval-recon` first run ≈ $0.40, cached re-run
+$0.00; the default 3-model × 2-prompt sweep ≈ $1.90 first run; one evolved
+prompt variant ≈ $0.20-0.60 per iteration depending on models swept.
