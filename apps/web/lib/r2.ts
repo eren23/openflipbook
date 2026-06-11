@@ -121,3 +121,20 @@ export async function inlineStoredImage(url: string): Promise<string | null> {
     return null;
   }
 }
+
+/** Raw stored bytes by key (the nodes collection stores image_key directly).
+ * Best-effort: null on any failure. */
+export async function getStoredBytes(
+  key: string
+): Promise<{ bytes: Buffer; contentType: string } | null> {
+  try {
+    const { s3, bucket } = r2Client();
+    const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!got.Body) return null;
+    const bytes = Buffer.from(await got.Body.transformToByteArray());
+    if (bytes.length === 0) return null;
+    return { bytes, contentType: got.ContentType || "image/jpeg" };
+  } catch {
+    return null;
+  }
+}

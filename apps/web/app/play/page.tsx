@@ -1410,8 +1410,22 @@ export default function PlayPage() {
         },
       });
     }
+    // Export the root→here path as a shareable artifact (Wave 6). Server
+    // route walks the chain; these just open the download.
+    if (page?.nodeId) {
+      const exportId = page.nodeId;
+      for (const fmt of ["pdf", "zip", "gif"] as const) {
+        items.push({
+          label: `Export path (${fmt.toUpperCase()})`,
+          onClick: () => {
+            close();
+            window.open(`/api/export/${exportId}?fmt=${fmt}`, "_blank");
+          },
+        });
+      }
+    }
     return items;
-  }, [contextMenu, phase, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
+  }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
