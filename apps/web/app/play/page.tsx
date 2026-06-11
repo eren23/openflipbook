@@ -95,7 +95,12 @@ import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { geoTapRequest, MAP_IMAGE_FRAME, type GeoTapOverride } from "@/lib/geo-tap";
+import {
+  geoTapRequest,
+  MAP_IMAGE_FRAME,
+  wideRegionCut,
+  type GeoTapOverride,
+} from "@/lib/geo-tap";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -2075,6 +2080,18 @@ export default function PlayPage() {
               page.sceneView,
             )
           : null;
+      // World OFF + a wide mapped region (the river): a fresh re-composition
+      // relocates landmarks, so zoom-cut the map instead (see wideRegionCut).
+      const wideCut =
+        !worldEnabled && geoEntities.length > 0
+          ? wideRegionCut(
+              { entities: geoEntities, bounds: geoBounds },
+              page.nodeId ?? "",
+              { x_pct: click.x_pct, y_pct: click.y_pct },
+              16 / 9,
+              page.sceneView,
+            )
+          : null;
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -2163,6 +2180,25 @@ export default function PlayPage() {
               // the VLM-invented surroundings above (geoTap is spread last → wins).
               ...(geoTap.surroundings
                 ? { prefetched_surroundings: geoTap.surroundings }
+                : {}),
+            }
+          : {}),
+        // The world-off zoom-cut: same submap continuation a world-mode submap
+        // tap rides (Kontext on the region crop), so the river page is a CUT of
+        // the map, not a re-imagined city. Spread last so the subject wins.
+        ...(wideCut
+          ? {
+              render_mode: "place_submap",
+              prefetched_subject: wideCut.focus_label,
+              ...(viewNeutralAppearance(wideCut.focus_visual)
+                ? {
+                    prefetched_subject_context: viewNeutralAppearance(
+                      wideCut.focus_visual,
+                    ),
+                  }
+                : {}),
+              ...(wideCut.surroundings
+                ? { prefetched_surroundings: wideCut.surroundings }
                 : {}),
             }
           : {}),

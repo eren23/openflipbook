@@ -1325,6 +1325,12 @@ def _format_world_context_clause(
         # scale across pages (a place rendered large once shouldn't come back
         # tiny). Best-effort; absent → no hint.
         line += _world_size_hint(entry)
+        # The spatial half of continuity: where the world map pins this entity
+        # ("the north-west of the map"). Without it the model relocates
+        # landmarks to fit the composition — the palace-on-the-riverbank drift.
+        location = str(entry.get("location_hint", "") or "").strip()
+        if location:
+            line += f"; fixed position: {location}"
         lines.append(line)
     if not lines:
         return ""
@@ -1338,7 +1344,17 @@ def _format_world_context_clause(
         "Keep each entity at a CONSISTENT RELATIVE SCALE across pages — where a "
         "size is given below (footprint/height in world units), respect those "
         "proportions so a place drawn large once is not shrunk later. "
-        "If an entity is NOT relevant to this page, simply omit it; do not "
+        + (
+            # Additive: the position rule only enters the prompt when at least
+            # one entity actually carries a hint (no hints -> byte-identical).
+            "Where a `fixed position` is given, the entity LIVES at that "
+            "position of the established world — keep it there relative to "
+            "the other landmarks; do NOT relocate it to suit this page's "
+            "composition. "
+            if any("fixed position:" in line for line in lines)
+            else ""
+        )
+        + "If an entity is NOT relevant to this page, simply omit it; do not "
         "force entities into the scene.\n\n"
         "CAUSALITY (CRITICAL): each entity's `state=` flags below describe "
         "the CURRENT condition of the entity from prior pages. The "

@@ -90,6 +90,11 @@ class WorldContextEntity(BaseModel):
     # Mirrors the TS `footprint?: {w,d}` / `height?` (schema-parity gated).
     footprint: dict[str, float] | None = None
     height: float | None = None
+    # Compass phrase from the entity's top-level map geo ("the north-west of
+    # the map") — the spatial half of continuity. Rendered as a fixed-position
+    # instruction so landmarks stop relocating between pages (the palace-on-
+    # the-riverbank drift). Omitted → appearance-only continuity, as today.
+    location_hint: str | None = None
 
 
 # Geometric world model — Pydantic mirrors of the packages/config TS shapes.

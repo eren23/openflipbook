@@ -247,3 +247,26 @@ async def test_explainer_tap_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     edit.assert_not_awaited()
     gen.assert_awaited_once()
     assert gen.await_args.kwargs["reference_urls"] == ["data:r", "data:p", "data:s"]
+
+
+async def test_world_off_submap_request_still_zoom_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The wideRegionCut contract: a classic (world OFF) tap that the client
+    # routed as place_submap rides the same Kontext cut as a world-mode submap
+    # tap — the river page is a faithful crop-zoom, not a re-imagined city.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/flux-pro/kontext", "r3")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    gen = _mock_fresh(monkeypatch)
+
+    await _collect(
+        _event_stream(_tap_body(render_mode="place_submap", world_mode=False), "t1")
+    )
+
+    cont.assert_awaited_once()
+    edit.assert_not_awaited()
+    gen.assert_not_awaited()

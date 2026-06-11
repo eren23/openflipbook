@@ -7,7 +7,7 @@ export type GenerateMode = "query" | "tap" | "edit" | "expand" | "ascend";
 // scale-level: component = -1, peer = 0, container = +1.
 export type ScaleKind = "component" | "peer" | "container";
 
-// ── Scale ladder (B2, SCALE_LADDER_NAV) ──────────────────────────────────────
+// ââ Scale ladder (B2, SCALE_LADDER_NAV) ââââââââââââââââââââââââââââââââââââââ
 // An explicit, ordered, metric-anchored zoom axis: a node's COARSE absolute
 // "where on the zoom axis am I". Distinct from ScaleKind (relative:
 // component/peer/container) and from WorldEntityGeo.scale (fine metric: the size
@@ -19,7 +19,7 @@ export const SCALE_LADDER = [
 ] as const;
 export type ScaleTier = (typeof SCALE_LADDER)[number];
 
-// Order-of-magnitude metric anchor (metres) per rung — the bridge that makes the
+// Order-of-magnitude metric anchor (metres) per rung â the bridge that makes the
 // ladder metric-conserving. ~27 orders of magnitude end to end, so callers
 // store/compare in LOG space. `world` and `planet` share an anchor by design (a
 // "world" is a planet-surface framing); tierStep still separates them by index.
@@ -42,7 +42,7 @@ export function tierStep(from: ScaleTier, to: ScaleTier): number {
 export function tierMetricMultiplier(from: ScaleTier, to: ScaleTier): number {
   return SCALE_TIER_METERS[to] / SCALE_TIER_METERS[from];
 }
-// INV-2: the metric span must move monotonically with the rung step — going
+// INV-2: the metric span must move monotonically with the rung step â going
 // DEEPER (step > 0) shrinks it (multiplier <= 1), OUTWARD (step < 0) grows it
 // (multiplier >= 1); ==1 is allowed only between the deliberately-equal
 // world/planet rungs. A transition that violates this is a mis-classified rung
@@ -54,8 +54,8 @@ export function tierTransitionValid(from: ScaleTier, to: ScaleTier): boolean {
   return step > 0 ? m <= 1 : m >= 1;
 }
 // One rung FINER (toward `object`, DEEPER); clamps at `object`. The inverse of the
-// Python `model_router.coarser_tier` used by OUTWARD — together they make a tap a
-// `tierStep` of +1 and an OUTWARD −1 on the SAME ladder.
+// Python `model_router.coarser_tier` used by OUTWARD â together they make a tap a
+// `tierStep` of +1 and an OUTWARD â1 on the SAME ladder.
 export function finerTier(t: ScaleTier): ScaleTier {
   const i = tierIndex(t);
   return SCALE_LADDER[Math.min(i + 1, SCALE_LADDER.length - 1)] ?? t;
@@ -64,7 +64,7 @@ export function finerTier(t: ScaleTier): ScaleTier {
 // How a node relates to its parent: "descend" = went IN (a tap child, the
 // default), "expand" = bloomed OUT (a neighbour from mode:"expand"), "ascend" =
 // zoomed OUT to a synthesized container (the OUTWARD reparent, SCALE_OUTWARD),
-// "edit" = a REVISION of the parent (mode:"edit") — the same page changed, not
+// "edit" = a REVISION of the parent (mode:"edit") â the same page changed, not
 // a place inside it, so the graph chrome must not read it as a tap-in.
 export type NodeRelation = "descend" | "expand" | "ascend" | "edit";
 
@@ -74,7 +74,7 @@ export type VideoTier = "fast" | "balanced" | "pro";
 
 // World Mode (opt-in). `autonomy` "auto" generates straight away; "semi" first
 // surfaces the resolver's clarifying questions. `RenderMode` is how a tapped
-// subject is drawn — an immersive place you've stepped into, a closer
+// subject is drawn â an immersive place you've stepped into, a closer
 // cartographic map of a sub-area, or today's labelled explainer diagram.
 export type Autonomy = "auto" | "semi";
 export type RenderMode = "place_scene" | "place_submap" | "explainer";
@@ -109,7 +109,7 @@ export interface GenerateRequestBody {
   // it's a no-op until enabled). `edit_mask` is an opaque PNG data URL at the
   // page's natural dims, WHITE = edit / black = keep (flux fill's native
   // convention); `edit_region` is the drag selection that produced it,
-  // normalized to natural-image space — the mask drives the model, the box
+  // normalized to natural-image space â the mask drives the model, the box
   // scopes the judge's inside crop. Absent -> the legacy whole-image edit.
   edit_mask?: string;
   edit_region?: { x: number; y: number; w: number; h: number };
@@ -144,16 +144,16 @@ export interface GenerateRequestBody {
   // so recurring characters / places preserve their look across pages without
   // the user having to re-describe them.
   world_context?: WorldContextEntity[];
-  // Image conditioning — an ordered stack of reference images (data URLs) the
+  // Image conditioning â an ordered stack of reference images (data URLs) the
   // generator blends so the page belongs to the same world: region crop (the
-  // spot you came from) → whole parent → global style anchor. `condition_roles`
+  // spot you came from) â whole parent â global style anchor. `condition_roles`
   // labels each url in order so the backend can phrase the conditioning prompt.
-  // Built client-side (lib/image-condition.ts). Omit → today's text-only gen.
+  // Built client-side (lib/image-condition.ts). Omit â today's text-only gen.
   condition_image_urls?: string[];
   condition_roles?: string[];
   // World Mode (opt-in; the backend also gates it behind the WORLD_MODE env so
   // it's a no-op in prod until enabled). When on, a tap ENTERS the tapped place
-  // — a scene you stand in or a closer sub-map — instead of explaining a topic,
+  // â a scene you stand in or a closer sub-map â instead of explaining a topic,
   // and the place persists + reopens. `render_mode` explicitly overrides the
   // per-place framing the resolver would otherwise pick from `enter_as`.
   world_mode?: boolean;
@@ -162,7 +162,7 @@ export interface GenerateRequestBody {
   // B2 logical AROUND (mode:"expand", SCALE_AROUND_LOGICAL). The same-scale
   // neighbours the client already knows from geometry (excluded) + the focus's
   // rung, so the bloom proposes NEW peers at that scale. Ignored unless the flag
-  // is on; absent → today's unconstrained bloom.
+  // is on; absent â today's unconstrained bloom.
   known_neighbors?: string[];
   around_tier?: ScaleTier;
   // Geometric world (GEOMETRIC_WORLD). The scene's observer pose + level, and the
@@ -189,10 +189,16 @@ export interface WorldContextEntity {
   // Optional geometric size (world units) carried from the entity's
   // WorldEntityGeo when the web proxy resolves the slice. Lets the planner
   // hint a consistent relative scale for recurring entities across pages so a
-  // building rendered large once doesn't come back tiny next time. Omitted →
+  // building rendered large once doesn't come back tiny next time. Omitted â
   // today's behaviour (appearance text only).
   footprint?: { w: number; d: number };
   height?: number;
+  // Compass phrase from the entity's top-level map geo ("the north-west of
+  // the map", "spanning the map east–west across its middle") — the spatial
+  // half of continuity. The clause builder renders it as a fixed-position
+  // instruction so landmarks stop relocating between pages. Omitted →
+  // appearance-only continuity, exactly today's behaviour.
+  location_hint?: string;
 }
 
 export interface ResolveClickRequestBody {
@@ -211,7 +217,7 @@ export interface ResolveClickRequestBody {
 }
 
 // VLM's best-estimate centroid of the resolved subject (0..1 in image
-// frame). Powers the "we think you tapped this — yes/try again" overlay.
+// frame). Powers the "we think you tapped this â yes/try again" overlay.
 export interface ResolveClickPoint {
   x: number;
   y: number;
@@ -299,11 +305,11 @@ export interface GenerateFinalEvent {
   // or the model returned none. Already domain-deduped, capped at ~3.
   sources?: Citation[];
   // Which non-fresh image operation rendered this page ("zoom_continue",
-  // "enter_scene"). Absent on the fresh path — additive, backwards-compat.
+  // "enter_scene"). Absent on the fresh path â additive, backwards-compat.
   image_op?: string;
-  // Geometric grounding summary — present only when VLM_GROUNDING was on.
+  // Geometric grounding summary â present only when VLM_GROUNDING was on.
   grounding?: GroundingSummary;
-  // Judged mask-scoped edit verdict — present only on the EDIT_REGION path.
+  // Judged mask-scoped edit verdict â present only on the EDIT_REGION path.
   edit_verdict?: EditVerdict;
   trace_id?: string;
 }
@@ -357,7 +363,7 @@ export interface GenerateNeighborEvent {
   trace_id?: string;
 }
 
-// Terminal event of an expand bloom — the tray stops showing pending slots.
+// Terminal event of an expand bloom â the tray stops showing pending slots.
 export interface GenerateExpandDoneEvent {
   type: "expand_done";
   count: number;
@@ -465,7 +471,7 @@ export const DEFAULTS = {
 export type EntityKind = "person" | "place" | "item" | "creature";
 
 // Free-form key/value bag for causality (door=open, lantern=lit, mira_present=true).
-// Kept loose on purpose — the extractor emits whatever verbs/state words fit
+// Kept loose on purpose â the extractor emits whatever verbs/state words fit
 // the scene; the codex surface renders them as plain key:value chips.
 export type EntityState = Record<string, string | number | boolean>;
 
@@ -500,7 +506,7 @@ export interface Entity {
   // Atlas tile ids (== node ids in the current world-layout) the entity has
   // appeared on. Used for the atlas-pin overlay.
   appears_on_node_ids: string[];
-  // Sparse map of `node_id` → bounding box for the entity's appearance on
+  // Sparse map of `node_id` â bounding box for the entity's appearance on
   // that node. Populated by the extractor when it can localize the entity
   // in the image; omitted otherwise. Hover chips read this when rendering
   // the current page; atlas pins can use it to place markers within a
@@ -516,13 +522,13 @@ export interface Entity {
   updated_at: string;
 }
 
-// ── Geometric world model ────────────────────────────────────────────────────
+// ââ Geometric world model ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // A persistent 2D coordinate world: entities sit at numeric map positions with a
 // height + footprint; an observer has a pose; a rendered scene is a VIEW of the
 // in-frame entities from that pose (there is no single correct view). All
 // additive + dormant until GEOMETRIC_WORLD is enabled. The geometry engine
-// (apps/web/lib/world-geometry.ts ↔ apps/modal-backend/providers/geometry.py)
-// projects (map + observer) → the per-frame layout below.
+// (apps/web/lib/world-geometry.ts â apps/modal-backend/providers/geometry.py)
+// projects (map + observer) â the per-frame layout below.
 
 // A point in world units (arbitrary scale; origin top-left, +x east, +y south).
 export interface WorldVec2 {
@@ -535,7 +541,7 @@ export interface WorldVec2 {
 // Nested frames (the sub-entity consistency model): a place you can ENTER (the
 // Unseen University) is its own little world. Its sub-entities (Tower of Art,
 // Library, Great Hall) carry `parent_id` = that place's geo id, and their `pos`
-// is LOCAL to the parent's frame — so the University's internal layout is fixed
+// is LOCAL to the parent's frame â so the University's internal layout is fixed
 // ONCE and stays consistent across every view of it, and editing one ripples to
 // its siblings. Top-level city entities have `parent_id: null` (pos == world).
 export interface WorldEntityGeo {
@@ -554,14 +560,14 @@ export interface WorldEntityGeo {
   // default) = sits on the ground; >0 lifts it (a bird aloft, a clifftop castle,
   // a wall-mounted lantern). The projector reads `elevation ?? 0`.
   elevation?: number;
-  footprint: { w: number; d: number }; // ground extent: width (x) × depth (y)
+  footprint: { w: number; d: number }; // ground extent: width (x) Ã depth (y)
   // Per-frame scale: the size of ONE unit of THIS place's INTERIOR frame, in its
   // parent's units (default 1). Set when the place is first entered (its
-  // footprint extent ÷ the interior's local extent) so a child's local `pos`
-  // resolves to a true absolute position INSIDE this place. Metric — distinct
+  // footprint extent Ã· the interior's local extent) so a child's local `pos`
+  // resolves to a true absolute position INSIDE this place. Metric â distinct
   // from the categorical Entity.scale LOD bucket.
   scale?: number;
-  // Coarse absolute rung on SCALE_LADDER (city / place / room …) — which order of
+  // Coarse absolute rung on SCALE_LADDER (city / place / room â¦) â which order of
   // magnitude this entity's frame sits at, independent of the fine metric `scale`.
   // Optional; seeded by the view estimator, used by B2 scale navigation.
   scale_tier?: ScaleTier;
@@ -570,12 +576,12 @@ export interface WorldEntityGeo {
   state: EntityState;
   confidence: number; // 0..1
   // How this geometry was set: "user" (hand-placed, authoritative), "extracted"
-  // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
+  // (a confirmed detection), or "derived" (back-projected from a bbox â a guess).
   source: "extracted" | "user" | "derived";
   updated_at: string;
 }
 
-// Where the camera stands for a scene. Null observer ⇒ a top-down map view.
+// Where the camera stands for a scene. Null observer â a top-down map view.
 export interface ObserverPose {
   pos: WorldVec2;
   eye_height: number;
@@ -595,20 +601,20 @@ export interface MapCrop {
   h: number;
 }
 
-// What level a scene renders at — there is no single correct view.
+// What level a scene renders at â there is no single correct view.
 export type ViewLevel = "map" | "building" | "street" | "eye";
 
 // Render-INTENT camera vocabulary (the view grammar). Distinct from
 // ViewProjection below, which is the estimator's PERCEPTION read-out of an
 // already-generated image (estimator "perspective" maps to "eye_level" here).
 // A deliberate projection per render: flat 2D plan, 2.5D oblique bird's-eye,
-// true isometric, or 3D eye-level — plus optional numeric camera params.
+// true isometric, or 3D eye-level â plus optional numeric camera params.
 export type ViewSpecProjection = "top_down" | "oblique" | "isometric" | "eye_level";
 export interface ViewSpec {
   projection: ViewSpecProjection;
-  pitch_deg?: number; // camera tilt: -90 straight down … 0 horizon
+  pitch_deg?: number; // camera tilt: -90 straight down â¦ 0 horizon
   azimuth_deg?: number; // compass bearing of the gaze, 0 = north
-  // Qualitative register ("eye" ≈ 1.7 world units) or a metric height.
+  // Qualitative register ("eye" â 1.7 world units) or a metric height.
   camera_height?: "ground" | "eye" | "rooftop" | "aerial" | number;
   fov_deg?: number;
   // Who decided this view: the per-place policy, an explicit user pick
@@ -628,10 +634,10 @@ export interface SceneView {
   // stays consistent across re-entries. Null for a top-level map view.
   focus_id?: string | null;
   // Coarse absolute rung on SCALE_LADDER for this view (DEEPER stamps childTier,
-  // OUTWARD stamps parentTier) — so both directions share one ladder. Optional.
+  // OUTWARD stamps parentTier) â so both directions share one ladder. Optional.
   scale_tier?: ScaleTier;
   // The deliberate camera for this render (the view grammar). Absent/null on
-  // legacy nodes ⇒ the pre-grammar hardcoded behavior, byte-identical.
+  // legacy nodes â the pre-grammar hardcoded behavior, byte-identical.
   view?: ViewSpec | null;
 }
 
@@ -645,8 +651,8 @@ export interface ProjectedEntity {
   w_pct: number; // apparent size
   h_pct: number;
   depth: number; // distance from observer; lower = nearer (drawn on top)
-  // Coarse bins — what prompts + the VLM judge actually consume (honest: bins,
-  // not pixels). h_pos ∈ far-left..far-right, v_pos ∈ top|mid|bottom, size bin.
+  // Coarse bins â what prompts + the VLM judge actually consume (honest: bins,
+  // not pixels). h_pos â far-left..far-right, v_pos â top|mid|bottom, size bin.
   h_pos: string;
   v_pos: string;
   size: string;
@@ -654,14 +660,14 @@ export interface ProjectedEntity {
 
 // What the camera estimator reads out of a generated image, so the geometry
 // layer doesn't assume top-down. `projection` decides how a detection
-// box back-projects: top_down → the box is a footprint; oblique/perspective →
+// box back-projects: top_down â the box is a footprint; oblique/perspective â
 // its vertical extent reads as apparent height.
 export type ViewProjection = "top_down" | "oblique" | "perspective";
 export interface ViewEstimate {
   level: ViewLevel;
   projection: ViewProjection;
   pitch_deg: number;
-  // Coarse SCALE_LADDER rung the estimator read (or the ViewLevel→tier fallback).
+  // Coarse SCALE_LADDER rung the estimator read (or the ViewLevelâtier fallback).
   // Optional; mirrored in the Python ViewEstimate TypedDict (view_estimator.py).
   scale_tier?: ScaleTier;
   // The estimator's own 0..1 confidence. Gates the C12 node PATCH backend-side
@@ -678,7 +684,7 @@ export interface WorldMapSnapshot {
   updated_at: string;
 }
 
-// Backend → web wire format for one extraction pass. The web layer takes
+// Backend â web wire format for one extraction pass. The web layer takes
 // this, allocates ids for `added`, merges into the WorldStateDoc, emits
 // SSE events to subscribed frontends. State changes ride inside
 // `updated[].changes.state` rather than a separate channel; kept simple
@@ -702,7 +708,7 @@ export interface EntityUpdate {
   changes: Partial<Pick<Entity, "name" | "appearance" | "facts" | "state" | "aliases">>;
   confidence: number;
   // Re-localized box on THIS node: a recurring entity is detected again so it
-  // keeps an appearance_bbox per node — without it, geometry/overlay drop the
+  // keeps an appearance_bbox per node â without it, geometry/overlay drop the
   // entity on every re-appearance. Omitted when localization fails.
   bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
 }
@@ -719,7 +725,7 @@ export interface ExtractEntitiesRequestBody {
   caption: string;
   // Lightweight summary of the world's current entities so the VLM can
   // diff. Web side selects the most relevant slice (recent + name-overlap
-  // candidates) before sending — full registry on every call wastes tokens.
+  // candidates) before sending â full registry on every call wastes tokens.
   prior_entities: Array<Pick<Entity, "id" | "kind" | "name" | "aliases" | "appearance">>;
   trace_id?: string;
 }
@@ -729,7 +735,7 @@ export interface ExtractEntitiesResponse {
   trace_id?: string;
 }
 
-// Snapshot returned by GET /api/world/:sessionId — used to hydrate the
+// Snapshot returned by GET /api/world/:sessionId â used to hydrate the
 // codex panel and the atlas overlay on permalink load.
 export interface WorldStateSnapshot {
   session_id: string;
@@ -748,10 +754,10 @@ export type WorldEntityMutation =
   | { op: "pin"; id: string; pinned: boolean }
   | { op: "set_appearance"; id: string; appearance: string; reference_image_url?: string | null };
 
-// ── Geometry edits: NL-editable map ──────────────────────────────────────────
+// ââ Geometry edits: NL-editable map ââââââââââââââââââââââââââââââââââââââââââ
 // A structured edit to the geometric world map (WorldEntityGeo by id). These are
 // what `edit_entities_nl` turns a natural-language instruction into ("move the
-// lighthouse north" → {op:"move", target, dx, dy}). `target` is a WorldEntityGeo
+// lighthouse north" â {op:"move", target, dx, dy}). `target` is a WorldEntityGeo
 // id; deltas are op-specific and in world units. Applied by lib/world-map.ts.
 export type EntityGeoEdit =
   | { op: "move"; target: string; dx: number; dy: number }
@@ -766,9 +772,9 @@ export type EntityGeoEdit =
       footprint?: { w: number; d: number };
     };
 
-// The result of an NL edit: the structured ops plus the blast-radius — the node
+// The result of an NL edit: the structured ops plus the blast-radius â the node
 // ids whose saved render references an edited entity and so are now stale (the
-// codex can offer "editing this restages N scenes — restage now?").
+// codex can offer "editing this restages N scenes â restage now?").
 export interface EntityEditPlan {
   edits: EntityGeoEdit[];
   blast_radius: string[];
@@ -784,7 +790,7 @@ export interface EditEntitiesRequestBody {
       "id" | "entity_id" | "label" | "pos" | "height" | "footprint" | "visual"
     >
   >;
-  // geo-id → node ids that show it; lets the backend compute blast-radius
+  // geo-id â node ids that show it; lets the backend compute blast-radius
   // without the full codex registry (web side builds it from appears_on_node_ids).
   references?: Record<string, string[]>;
   scene_view?: SceneView | null;
@@ -796,9 +802,9 @@ export interface EditEntitiesResponse {
   trace_id?: string;
 }
 
-// ── Describe a place -> logical object world (WORLD_FROM_DESCRIPTION) ─────────
+// ââ Describe a place -> logical object world (WORLD_FROM_DESCRIPTION) âââââââââ
 // Turn a natural-language place description into all its objects on the shared 2D
-// plane. The planner emits STRUCTURE (entities + relations), NEVER coordinates —
+// plane. The planner emits STRUCTURE (entities + relations), NEVER coordinates â
 // the deterministic solver (providers/layout_solver.py) turns relations into
 // WorldEntityGeo positions. All additive + flag-gated; no existing type changes.
 

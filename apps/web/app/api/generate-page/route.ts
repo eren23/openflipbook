@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { GenerateRequestBody } from "@openflipbook/config";
+import { locationPhrase } from "@/lib/location-phrase";
 import { resolveEntitiesForPrompt } from "@/lib/world";
 import { getWorldMap } from "@/lib/world-map";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
@@ -59,12 +60,25 @@ export async function POST(req: Request) {
                 { footprint: g.footprint, height: g.height },
               ])
           );
+          // Spatial half of continuity: a compass phrase from the TOP-LEVEL
+          // geos only (a nested geo's pos is in its parent's local frame —
+          // a phrase from it would claim the wrong place on the city map).
+          const hintById = new Map(
+            geo.entities
+              .filter((g) => g.entity_id && !g.parent_id)
+              .map((g) => [
+                g.entity_id as string,
+                locationPhrase(g, geo.bounds),
+              ])
+          );
           for (const wc of world_context) {
             const s = sizeById.get(wc.id);
             if (s) {
               wc.footprint = s.footprint;
               wc.height = s.height;
             }
+            const hint = hintById.get(wc.id);
+            if (hint) wc.location_hint = hint;
           }
         } catch {
           // size enrichment is best-effort; never block generation
