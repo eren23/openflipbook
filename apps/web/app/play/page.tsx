@@ -46,6 +46,7 @@ import {
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useLoopKnobs, wireFields } from "@/hooks/useSpeedPreset";
+import { useSharedSession } from "@/hooks/useSharedSession";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { type Ascended, useAscend } from "@/hooks/useAscend";
 import { buildConditionRefs, cropBox, orderedRefs } from "@/lib/image-condition";
@@ -500,6 +501,18 @@ export default function PlayPage() {
   // Dev-only explicit model override (NEXT_PUBLIC_DEV_PROVIDERS): rides the
   // wire's image_model on every generate body. null = the tier decides.
   const [devModel, setDevModel] = useState<string | null>(null);
+  // Read-along shared sessions (Wave 8): live viewer count + a click-to-open
+  // chip when a co-viewer adds a page this tab hasn't seen.
+  const knownNodeIds = useMemo(
+    () =>
+      new Set(
+        history.items
+          .map((p) => p.nodeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [history.items],
+  );
+  const shared = useSharedSession(sessionId, knownNodeIds);
   // The speed preset's wire half — spread into every generate() body next to
   // image_tier. Balanced knobs produce {} (byte-identity with today).
   const loopWire = useMemo(() => wireFields(loopKnobs), [loopKnobs]);
@@ -2771,7 +2784,27 @@ export default function PlayPage() {
             {history.items.length > history.trail.length
               ? ` · ${history.items.length} pages explored`
               : ""}
+            {shared.viewers !== null && shared.viewers > 1 && (
+              <span title="people viewing this session right now">
+                {" "}
+                · 👁 {shared.viewers}
+              </span>
+            )}
           </span>
+          {shared.incoming && (
+            <button
+              type="button"
+              onClick={() => {
+                const id = shared.incoming?.id;
+                shared.clearIncoming();
+                if (id) selectFromMap(id);
+              }}
+              className="rounded-full border border-emerald-600/40 bg-emerald-50 px-3 py-1 text-xs text-emerald-900 hover:bg-emerald-100"
+              title="A co-viewer added this page — click to open it"
+            >
+              ✦ new: {shared.incoming.title.slice(0, 32)} →
+            </button>
+          )}
           </div>
         </div>
       )}

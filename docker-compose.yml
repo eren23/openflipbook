@@ -15,7 +15,14 @@ services:
     image: mongo:7
     container_name: openflipbook-mongo
     restart: unless-stopped
-    command: ["--bind_ip_all", "--quiet"]
+    # Single-node replica set (Wave 8): change streams power the shared-
+    # session read-along, and Mongo only serves them from a replica set.
+    # Existing standalone data volumes convert in place — mongo-init runs a
+    # one-time rs.initiate() pinned to the compose hostname. Clients OUTSIDE
+    # the compose network (local `pnpm dev` against localhost:27017) need
+    # `?directConnection=true` on their MONGODB_URI, since the set advertises
+    # `mongo:27017`.
+    command: ["--replSet", "rs0", "--bind_ip_all", "--quiet"]
     ports:
       - "27017:27017"
     volumes:
@@ -25,6 +32,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  mongo-init:
+    image: mongo:7
+    container_name: openflipbook-mongo-init
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # Idempotent: initiates the set on first boot, no-ops once initiated.
+    command: >
+      mongosh --host mongo --quiet --eval
+      "try { rs.status() } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}) }"
 
   # S3-compatible blob store — the local stand-in for Cloudflare R2. The web
   # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
@@ -138,7 +157,7 @@ services:
       # Backend URL is fixed inside the compose network.
       MODAL_API_URL: http://backend:8787
       # Metadata → local Mongo by default.
-      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/?directConnection=true}
       MONGODB_DB: ${MONGODB_DB:-openflipbook}
       # Blobs → local Minio by default. R2_ENDPOINT makes the S3 client target
       # Minio (path-style); the public base URL is what the browser fetches.
@@ -154,6 +173,8 @@ services:
         condition: service_healthy
       mongo:
         condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
       minio-setup:
         condition: service_completed_successfully
 

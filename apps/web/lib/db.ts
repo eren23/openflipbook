@@ -59,7 +59,14 @@ async function ensureIndexes(db: Db): Promise<void> {
   // lookups that link a map entity back to its Codex Entity. Created up front so
   // we don't migrate a populated collection later.
   const worldMap = db.collection("world_map");
+  // Shared-session presence heartbeats expire on their own (TTL); the live
+  // viewer count uses a tighter window on top.
+  const presenceCol = db.collection("session_presence");
   await Promise.all([
+    presenceCol.createIndex(
+      { last_seen: 1 },
+      { name: "presence_ttl_idx", expireAfterSeconds: 120 }
+    ),
     nodes.createIndex(
       { session_id: 1, created_at: -1 },
       { name: "session_created_idx" }
@@ -485,4 +492,66 @@ export async function listPublishedSessions(
     poster_key: d.poster_key,
     published_at: d.published_at.toISOString(),
   }));
+}
+
+// ── Shared sessions (Wave 8): presence + change-stream watch ────────────────
+
+export interface PresenceDoc extends Document {
+  _id: string; // `${session_id}:${viewer_id}`
+  session_id: string;
+  last_seen: Date;
+}
+
+async function presence(): Promise<Collection<PresenceDoc>> {
+  return (await getDb()).collection<PresenceDoc>("session_presence");
+}
+
+const PRESENCE_WINDOW_MS = 45_000;
+
+/** Heartbeat: upsert this viewer's last_seen and return the live count.
+ * Docs expire via the TTL index; the count uses a tighter live window. */
+export async function touchPresence(
+  sessionId: string,
+  viewerId: string
+): Promise<number> {
+  const col = await presence();
+  await col.updateOne(
+    { _id: `${sessionId}:${viewerId}` },
+    { $set: { session_id: sessionId, last_seen: new Date() } },
+    { upsert: true }
+  );
+  return countPresence(sessionId);
+}
+
+export async function countPresence(sessionId: string): Promise<number> {
+  const col = await presence();
+  return col.countDocuments({
+    session_id: sessionId,
+    last_seen: { $gt: new Date(Date.now() - PRESENCE_WINDOW_MS) },
+  });
+}
+
+export interface SessionNodeEvent {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  created_at: string;
+}
+
+/** A change-stream over this session's node inserts — the read-along feed.
+ * Requires a replica set (the compose stack runs single-node rs0); callers
+ * catch the unsupported error and degrade. */
+export async function watchSessionNodes(sessionId: string) {
+  const db = await getDb();
+  return db.collection<NodeDoc>("nodes").watch(
+    [
+      {
+        $match: {
+          operationType: "insert",
+          "fullDocument.session_id": sessionId,
+        },
+      },
+    ],
+    { fullDocument: "updateLookup" }
+  );
 }
