@@ -2652,6 +2652,21 @@ async def models() -> dict:
     return {"models": model_router.registry()}
 
 
+class ModerateTextBody(BaseModel):
+    text: str
+
+
+@fastapi_app.post("/moderate-text")
+async def moderate_text(body: ModerateTextBody) -> dict:
+    """Thin wrapper over providers/moderation.flagged for web-side flows
+    (gallery publish). MODERATE_PROMPTS off -> instantly allowed; fail-open
+    inside the module, same as the generate-path check."""
+    from providers import moderation
+
+    blocked, reason = await moderation.flagged(body.text)
+    return {"allowed": not blocked, "reason": reason}
+
+
 @fastapi_app.get("/trace/recent")
 async def trace_recent(limit: int = 50) -> dict:
     """Return the in-memory ring buffer of recent completed traces.

@@ -412,3 +412,77 @@ export async function getNodeChain(
   }
   return chain.reverse();
 }
+
+// ── Public gallery (Wave 7) ──────────────────────────────────────────────────
+
+export interface PublishedSessionDoc extends Document {
+  _id: string; // session id
+  node_id: string; // the page that fronts the gallery card
+  title: string;
+  query: string;
+  poster_key: string; // store key of the poster image
+  published_at: Date;
+}
+
+export interface PublishedSessionRow {
+  session_id: string;
+  node_id: string;
+  title: string;
+  query: string;
+  poster_key: string;
+  published_at: string;
+}
+
+async function publishedSessions(): Promise<Collection<PublishedSessionDoc>> {
+  return (await getDb()).collection<PublishedSessionDoc>("published_sessions");
+}
+
+/** Idempotent publish: a session appears in the gallery at most once; a
+ * re-publish just refreshes its poster/title/timestamp. */
+export async function publishSession(entry: {
+  session_id: string;
+  node_id: string;
+  title: string;
+  query: string;
+  poster_key: string;
+}): Promise<void> {
+  const col = await publishedSessions();
+  await col.updateOne(
+    { _id: entry.session_id },
+    {
+      $set: {
+        node_id: entry.node_id,
+        title: entry.title,
+        query: entry.query,
+        poster_key: entry.poster_key,
+        published_at: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+export async function unpublishSession(sessionId: string): Promise<boolean> {
+  const col = await publishedSessions();
+  const res = await col.deleteOne({ _id: sessionId });
+  return res.deletedCount > 0;
+}
+
+export async function listPublishedSessions(
+  limit = 60
+): Promise<PublishedSessionRow[]> {
+  const col = await publishedSessions();
+  const docs = await col
+    .find({})
+    .sort({ published_at: -1 })
+    .limit(Math.max(1, Math.min(200, limit)))
+    .toArray();
+  return docs.map((d) => ({
+    session_id: d._id,
+    node_id: d.node_id,
+    title: d.title,
+    query: d.query,
+    poster_key: d.poster_key,
+    published_at: d.published_at.toISOString(),
+  }));
+}

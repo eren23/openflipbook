@@ -1423,6 +1423,41 @@ export default function PlayPage() {
           },
         });
       }
+      // Opt-in gallery (Wave 7): this page fronts the published session.
+      const publishSessionId = page.sessionId;
+      items.push({
+        label: "Publish session to gallery",
+        onClick: () => {
+          close();
+          void fetch("/api/gallery/publish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: publishSessionId,
+              node_id: exportId,
+            }),
+          }).then(async (r) => {
+            if (r.ok) {
+              window.open("/gallery", "_blank");
+            } else {
+              const j = (await r.json().catch(() => null)) as {
+                error?: string;
+              } | null;
+              window.alert(j?.error ?? "publish failed");
+            }
+          });
+        },
+      });
+      items.push({
+        label: "Unpublish session",
+        onClick: () => {
+          close();
+          void fetch(
+            `/api/gallery/publish?session_id=${encodeURIComponent(publishSessionId)}`,
+            { method: "DELETE" },
+          );
+        },
+      });
     }
     return items;
   }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
