@@ -172,3 +172,20 @@ async def test_blocked_prompt_yields_clean_error_frame(
         for e in events
     )
     gen.assert_not_awaited()
+
+
+def test_moderate_text_endpoint_allows_when_off() -> None:
+    client = TestClient(fastapi_app)
+    res = client.post("/moderate-text", json={"text": "a quiet harbor"})
+    assert res.status_code == 200
+    assert res.json() == {"allowed": True, "reason": ""}
+
+
+def test_moderate_text_endpoint_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MODERATE_PROMPTS", "1")
+    monkeypatch.setattr(
+        llm_mod, "_client", lambda: _fake_client({"allowed": False, "reason": "nope"})
+    )
+    client = TestClient(fastapi_app)
+    res = client.post("/moderate-text", json={"text": "bad"})
+    assert res.json() == {"allowed": False, "reason": "nope"}
