@@ -22,6 +22,7 @@ rejected attempt as a progress frame between iterations.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import time
@@ -109,6 +110,28 @@ def _score(j: JudgeResult | None) -> float:
     return j.score if j is not None else -1.0
 
 
+async def _no_judge() -> None:
+    """Placeholder for a judge axis that isn't applicable this attempt —
+    keeps the gathered result shape positional."""
+    return None
+
+
+async def judge_concurrently(
+    *coros: Awaitable[JudgeResult | None],
+) -> tuple[list[JudgeResult | None], Exception | None]:
+    """Run independent judge calls concurrently — each is a 2-5s VLM
+    round-trip, and run back-to-back they dominated an attempt's wall-clock.
+    Returns (results, first_failure) with failed slots as None; cancellation
+    propagates exactly as it would from a bare await."""
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+    for r in gathered:
+        if isinstance(r, BaseException) and not isinstance(r, Exception):
+            raise r
+    results = [None if isinstance(r, BaseException) else r for r in gathered]
+    failure = next((r for r in gathered if isinstance(r, Exception)), None)
+    return results, failure
+
+
 def _is_accepted(
     conformance: JudgeResult | None,
     same_place: JudgeResult | None,
@@ -168,24 +191,30 @@ async def iter_attempts[ImageT: Rendered](
                 return
         latency = clock() - started
 
-        conformance: JudgeResult | None = None
-        same_place: JudgeResult | None = None
-        detail: JudgeResult | None = None
-        medium: JudgeResult | None = None
-        try:
-            conformance = await judge_conformance(image.jpeg_bytes, projection)
-            if region_bytes is not None:
-                same_place = await judge_same_place(region_bytes, image.jpeg_bytes)
-            if judge_detail is not None:
-                detail = await judge_detail(image.jpeg_bytes)
-            if judge_medium is not None and region_bytes is not None:
-                medium = await judge_medium(region_bytes, image.jpeg_bytes)
-        except Exception as exc:
+        # The four axes are independent verdicts on the same image — judged
+        # concurrently (the Ankh-Morpork re-shoot: sequential judging alone
+        # cost 10-20s per attempt).
+        judged, failure = await judge_concurrently(
+            judge_conformance(image.jpeg_bytes, projection),
+            (
+                judge_same_place(region_bytes, image.jpeg_bytes)
+                if region_bytes is not None
+                else _no_judge()
+            ),
+            judge_detail(image.jpeg_bytes) if judge_detail is not None else _no_judge(),
+            (
+                judge_medium(region_bytes, image.jpeg_bytes)
+                if judge_medium is not None and region_bytes is not None
+                else _no_judge()
+            ),
+        )
+        conformance, same_place, detail, medium = judged
+        if failure is not None:
             log(
                 "warn",
                 "view.loop.judge_failed",
                 attempt=index,
-                error=f"{type(exc).__name__}: {exc}",
+                error=f"{type(failure).__name__}: {failure}",
             )
             # No critic signal = the old blind coin-flip — don't spend more.
             yield Attempt(

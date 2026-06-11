@@ -227,3 +227,24 @@ def test_inside_crop_cuts_the_selection() -> None:
     assert (w, h) == (48, 36)  # 0.375*128, 0.5*72
     full = edit_loop.inside_crop_bytes(_jpg(_base()), None)
     assert Image.open(io.BytesIO(full)).size == (_W, _H)
+
+
+async def test_edit_judges_run_concurrently() -> None:
+    # Alignment + medium are independent verdicts and must overlap (the same
+    # latency fix as the render loop). Alignment blocks until medium STARTS —
+    # sequential execution times out instead of accepting.
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def alignment(_instr: str, _img: bytes) -> JudgeResult:
+        await asyncio.wait_for(started.wait(), timeout=2.0)
+        return JudgeResult(9.0, "", "")
+
+    async def medium(_src: bytes, _out: bytes) -> JudgeResult:
+        started.set()
+        return JudgeResult(9.0, "", "")
+
+    render = _Render([_inside_edit()])
+    attempts = await _drain(render, alignment=alignment, medium=medium)
+    assert len(attempts) == 1 and attempts[0].accepted

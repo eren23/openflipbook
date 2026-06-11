@@ -271,6 +271,46 @@ async def test_medium_axis_rejects_and_feeds_back() -> None:
     assert "same hand" in suffix
 
 
+async def test_judges_run_concurrently() -> None:
+    # The demo latency fix: the four verdicts are independent VLM calls and
+    # must overlap. Conformance blocks until same_place STARTS — sequential
+    # execution times out (degraded, unaccepted) instead of passing.
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def conf(_img: bytes, _proj: str) -> JudgeResult:
+        await asyncio.wait_for(started.wait(), timeout=2.0)
+        return _j(9.0)
+
+    async def same(_region: bytes, _img: bytes) -> JudgeResult:
+        started.set()
+        return _j(9.0)
+
+    attempts = await _drain(
+        render=AsyncMock(return_value=_Img(b"a")), projection="top_down",
+        region_bytes=b"r", judge_conformance=conf, judge_same_place=same,
+        config=_cfg(),
+    )
+    assert len(attempts) == 1 and attempts[0].accepted
+
+
+async def test_sibling_judge_failure_still_degrades() -> None:
+    # A failure in ANY concurrent judge keeps the no-critic rule: one attempt,
+    # never accepted, the surviving verdicts retained.
+    render = AsyncMock(return_value=_Img(b"a"))
+    conf = AsyncMock(return_value=_j(9.0))
+    same = AsyncMock(side_effect=RuntimeError("429"))
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=conf, judge_same_place=same, config=_cfg(),
+    )
+    assert len(attempts) == 1 and not attempts[0].accepted
+    assert attempts[0].conformance is not None  # the survivor kept
+    assert attempts[0].same_place is None  # the failed slot degraded
+    render.assert_awaited_once()
+
+
 async def test_medium_judge_needs_region_bytes() -> None:
     # No reference crop -> nothing to compare the medium against; the axis
     # stays None and never gates.
