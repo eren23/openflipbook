@@ -163,6 +163,30 @@ async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
     return await _ask_judge(system, user_text, [_image_block(image)])
 
 
+async def score_map_plausibility(
+    image: bytes, genre: str, description: str
+) -> JudgeResult:
+    """Is this a COHERENT, physically plausible map of its genre? The recon
+    bench's sanity judge — geometry scores can be high on a map that is
+    locally right but globally nonsense (collaged panels, rivers that stop
+    dead, three projections at once)."""
+    system = (
+        "You are a strict cartographic plausibility judge. Score on a 0-10 "
+        "scale how much the image reads as ONE coherent, physically "
+        "plausible map of the stated genre: a single consistent scale and "
+        "projection, connected features (roads, rivers and coasts continue "
+        "rather than stopping dead), no impossible geometry, no collaged "
+        "panels, lettering (if any) sparse and legible. Ignore artistic "
+        "quality — judge coherence only."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        f"Genre: {genre}. The map is meant to depict: {description[:400]}\n\n"
+        "Score the map's plausibility on a 0-10 scale."
+    )
+    return await _ask_judge(system, user_text, [_image_block(image)])
+
+
 async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
     """Does the render actually use the INTENDED projection? (the view grammar's
     conformance judge). Per-projection criteria spelled out so the judge can

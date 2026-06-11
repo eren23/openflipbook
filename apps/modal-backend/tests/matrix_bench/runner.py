@@ -164,56 +164,67 @@ def run_matrix(
             log(f"STOP: {report['stopped_reason']}")
             break
 
-        scenario = by_id[cell.scenario_id]
-        template = load_prompt(cell.variant, prompts_dir)
-        timing: dict[str, float] = {}
-        cost: dict[str, float] = {}
+        # One flaky provider call must not torch the rest of the sweep (paid
+        # cells already cached stay cached; this cell records its failure and
+        # re-runs next time — its charge stays spent, honestly).
+        try:
+            scenario = by_id[cell.scenario_id]
+            template = load_prompt(cell.variant, prompts_dir)
+            timing: dict[str, float] = {}
+            cost: dict[str, float] = {}
 
-        t0 = time.monotonic()
-        gen = gen_fn(cell, scenario.payload, template)
-        timing["gen"] = time.monotonic() - t0
-        jpeg: bytes = gen["jpeg"]
-        from providers import spend
-
-        cost["image"] = spend.estimate_image(gen.get("model") or cell.model)
-
-        outputs: dict[str, Any] = {"model": gen.get("model") or cell.model}
-        if extract_fn is not None:
             t0 = time.monotonic()
-            extracted, ex_cost = extract_fn(cell, scenario.payload, jpeg)
-            timing["extract"] = time.monotonic() - t0
-            cost["extract"] = ex_cost
-            outputs.update(extracted)
+            gen = gen_fn(cell, scenario.payload, template)
+            timing["gen"] = time.monotonic() - t0
+            jpeg: bytes = gen["jpeg"]
+            from providers import spend
 
-        judge_scores: dict[str, float] = {}
-        t0 = time.monotonic()
-        judge_cost = 0.0
-        for name in sweep["judges"]:
-            score, j_cost = judge_fns[name](cell, scenario.payload, jpeg)
-            judge_scores[name] = score
-            judge_cost += j_cost
-        timing["judges"] = time.monotonic() - t0
-        cost["judges"] = judge_cost
+            cost["image"] = spend.estimate_image(gen.get("model") or cell.model)
 
-        scores = (
-            score_fn(cell, scenario.payload, outputs, judge_scores)
-            if score_fn is not None
-            else dict(judge_scores)
-        )
+            outputs: dict[str, Any] = {"model": gen.get("model") or cell.model}
+            if extract_fn is not None:
+                t0 = time.monotonic()
+                extracted, ex_cost = extract_fn(cell, scenario.payload, jpeg)
+                timing["extract"] = time.monotonic() - t0
+                cost["extract"] = ex_cost
+                outputs.update(extracted)
 
-        record = new_record(
-            cell,
-            cell_id=key,
-            run_at=run_at,
-            prompt_sha=psha,
-            desc_sha=scenario.desc_sha,
-            inputs=dict(gen.get("inputs", {})),
-            outputs=outputs,
-            timing_s=timing,
-            cost_usd=cost,
-            scores=scores,
-            cache={"image": "miss", "judges": "miss"},
-        )
+            judge_scores: dict[str, float] = {}
+            t0 = time.monotonic()
+            judge_cost = 0.0
+            for name in sweep["judges"]:
+                score, j_cost = judge_fns[name](cell, scenario.payload, jpeg)
+                judge_scores[name] = score
+                judge_cost += j_cost
+            timing["judges"] = time.monotonic() - t0
+            cost["judges"] = judge_cost
+
+            scores = (
+                score_fn(cell, scenario.payload, outputs, judge_scores)
+                if score_fn is not None
+                else dict(judge_scores)
+            )
+
+            record = new_record(
+                cell,
+                cell_id=key,
+                run_at=run_at,
+                prompt_sha=psha,
+                desc_sha=scenario.desc_sha,
+                inputs=dict(gen.get("inputs", {})),
+                outputs=outputs,
+                timing_s=timing,
+                cost_usd=cost,
+                scores=scores,
+                cache={"image": "miss", "judges": "miss"},
+            )
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            log(f"FAILED {cell.label}: {err}")
+            report["cells"].append(
+                {"cell_key": key, "label": cell.label, "status": "failed", "error": err}
+            )
+            continue
         cache.store(key, record, jpeg)
         report["cells"].append(record)
         log(f"ran {cell.label}: scores={scores} (${record['cost_usd']['total']:.3f})")

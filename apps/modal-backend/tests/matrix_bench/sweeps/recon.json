@@ -1,0 +1,20 @@
+{
+  "name": "recon",
+  "scenarios": ["corpus:*"],
+  "arms": ["graph", "direct"],
+  "models": ["fal-ai/nano-banana"],
+  "variants": ["recon_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["style_pair", "map_plausibility", "prompt_alignment"],
+  "composite_weights": {
+    "presence": 0.2,
+    "pos_aligned": 0.2,
+    "pos_raw": 0.05,
+    "size": 0.1,
+    "height_order": 0.1,
+    "style_pair": 0.15,
+    "map_plausibility": 0.1,
+    "prompt_alignment": 0.1
+  },
+  "budget_usd": 1.5
+}
