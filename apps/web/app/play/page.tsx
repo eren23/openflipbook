@@ -45,6 +45,7 @@ import {
 } from "@/lib/trace";
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
+import { useLoopKnobs, wireFields } from "@/hooks/useSpeedPreset";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { type Ascended, useAscend } from "@/hooks/useAscend";
 import { buildConditionRefs, cropBox, orderedRefs } from "@/lib/image-condition";
@@ -487,6 +488,10 @@ export default function PlayPage() {
   // hydration; the per-effect firstRun guards keep these effects from
   // overwriting that initial paint with the default values on mount.
   const [imageTier, setImageTier] = useImageTier();
+  const [loopKnobs, setLoopKnobs] = useLoopKnobs();
+  // The speed preset's wire half — spread into every generate() body next to
+  // image_tier. Balanced knobs produce {} (byte-identity with today).
+  const loopWire = useMemo(() => wireFields(loopKnobs), [loopKnobs]);
   const [videoTier, setVideoTier] = useVideoTier();
   const [outputLocale, setOutputLocale] = usePersistedLocale();
   const [theme, setTheme] = usePersistedTheme();
@@ -888,6 +893,7 @@ export default function PlayPage() {
       parent_query: page.query,
       parent_title: page.title,
       image_tier: imageTier,
+      ...loopWire,
       output_locale: resolveOutputLocale(outputLocale),
       ...(condition.urls.length
         ? {
@@ -906,6 +912,7 @@ export default function PlayPage() {
     bloom,
     startBloom,
     imageTier,
+    loopWire,
     outputLocale,
     styleAnchor,
     history,
@@ -1035,11 +1042,12 @@ export default function PlayPage() {
         current_node_id: page?.nodeId ?? "",
         mode: "query",
         image_tier: imageTier,
+        ...loopWire,
         output_locale: resolveOutputLocale(outputLocale),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     },
-    [input, sessionId, page, generate, imageTier, outputLocale, styleAnchor]
+    [input, sessionId, page, generate, imageTier, loopWire, outputLocale, styleAnchor]
   );
 
   // B1 — "Describe a place": turn the input description into a logical object
@@ -1133,6 +1141,7 @@ export default function PlayPage() {
         current_node_id: page?.nodeId ?? "",
         mode: "query",
         image_tier: imageTier,
+        ...loopWire,
         output_locale: resolveOutputLocale(outputLocale),
         world_mode: true,
         render_mode: "place_submap",
@@ -1167,6 +1176,7 @@ export default function PlayPage() {
     page,
     generate,
     imageTier,
+    loopWire,
     outputLocale,
     styleAnchor,
     promptForHint,
@@ -1222,6 +1232,7 @@ export default function PlayPage() {
         parent_query: page.query,
         parent_title: page.title,
         image_tier: imageTier,
+        ...loopWire,
         output_locale: resolveOutputLocale(outputLocale),
         ...(editCondition.urls.length
           ? {
@@ -1236,7 +1247,7 @@ export default function PlayPage() {
       setEditMode(false);
       setEditRegion(null);
     },
-    [page, generate, imageTier, outputLocale, styleAnchor, history]
+    [page, generate, imageTier, loopWire, outputLocale, styleAnchor, history]
   );
 
   const submitEdit = useCallback(
@@ -2076,6 +2087,7 @@ export default function PlayPage() {
         parent_title: page.title,
         click,
         image_tier: imageTier,
+        ...loopWire,
         output_locale: resolveOutputLocale(outputLocale),
         ...(condition.urls.length
           ? {
@@ -2371,6 +2383,7 @@ export default function PlayPage() {
         click,
         click_hint: strokeHint,
         image_tier: imageTier,
+        ...loopWire,
         output_locale: resolveOutputLocale(outputLocale),
         ...(strokeCondition.urls.length
           ? {
@@ -2412,7 +2425,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
+  }, [page, phase, generate, imageTier, loopWire, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -2438,10 +2451,11 @@ export default function PlayPage() {
       current_node_id: "",
       mode: "query",
       image_tier: imageTier,
+      ...loopWire,
       output_locale: resolveOutputLocale(outputLocale),
       ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
     });
-  }, [generate, sessionId, imageTier, outputLocale, styleAnchor]);
+  }, [generate, sessionId, imageTier, loopWire, outputLocale, styleAnchor]);
 
   const animateAbortRef = useRef<AbortController | null>(null);
   const disconnectStream = useCallback(() => {
@@ -2541,6 +2555,8 @@ export default function PlayPage() {
         setTheme={setTheme}
         imageTier={imageTier}
         setImageTier={setImageTier}
+        loopKnobs={loopKnobs}
+        setLoopKnobs={setLoopKnobs}
         worldMode={worldEnabled}
         setWorldMode={setWorldEnabled}
         autonomy={worldAutonomy}
