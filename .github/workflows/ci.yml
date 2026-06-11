@@ -111,6 +111,34 @@ jobs:
           source .venv/bin/activate
           pytest
 
+  e2e-mock:
+    # Zero-key boot proof, every PR: the whole compose stack comes up under
+    # MOCK_PROVIDERS=1 (no secrets at all) and serves a full generate stream.
+    # This is the contributor's first-clone experience, continuously tested.
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the mocked stack
+        env:
+          MOCK_PROVIDERS: "1"
+        run: docker compose up -d --build
+      - name: Wait for the web app
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/status > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "stack did not come up in 120s"
+          docker compose logs --tail 50 backend web
+          exit 1
+      - name: Mocked generate stream produces a final frame
+        run: |
+          curl -fsS -N --max-time 120 -X POST http://localhost:3000/api/generate-page \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"a small harbor town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_mock","current_node_id":""}' \
+            | grep -m1 '"type": "final"'
+
   e2e:
     # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +
     # secrets, so don't fire on every push.

@@ -2070,7 +2070,9 @@ export default function PlayPage() {
       // (which breaks all downstream nesting). Fetch fresh when empty.
       let geoEntities = geoMap.entities;
       let geoBounds = geoMap.bounds;
-      if (worldEnabled && geoEntities.length === 0) {
+      // World OFF also needs the geos now: wideRegionCut hit-tests them to
+      // route river-style taps to the zoom-cut. Cheap, and only when empty.
+      if (geoEntities.length === 0) {
         const fresh = (await fetch(
           `/api/world/${encodeURIComponent(sessionId)}/map`,
         )

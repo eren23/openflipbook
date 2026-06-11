@@ -273,7 +273,11 @@ async def generate_image(
     reference_urls: list[str] | None = None,
 ) -> GeneratedImage:
     from obs import span
+    from providers import mock
 
+    if mock.on():
+        m = mock.mock_image(prompt, op="fresh", aspect_ratio=aspect_ratio)
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     if _image_provider() != "fal":
         # Reference conditioning is fal/nano-banana only — other providers stay
         # text-only (refs ignored).

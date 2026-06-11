@@ -54,7 +54,11 @@ async def inpaint_image(
     what `instruction` describes. Default the `inpaint` slot (flux fill;
     FAL_INPAINT_MODEL override)."""
     from obs import span
+    from providers import mock
 
+    if mock.on():
+        m = mock.mock_image(instruction, op="inpaint")
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = model_override or resolve_model("inpaint") or INPAINT_MODEL_DEFAULT
     image_url = await to_fal_url(image_data_url)
