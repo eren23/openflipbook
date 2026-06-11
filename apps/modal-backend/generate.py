@@ -175,6 +175,12 @@ class GenerateBody(BaseModel):
     click_hint: str | None = None
     image_tier: str | None = None
     image_model: str | None = None
+    # Per-request loop control (the speed preset). Absent -> today's env
+    # defaults, byte-identical. verify=False skips the judged loops for this
+    # request (the proven one-shot paths, user-chosen); max_attempts clamps
+    # to the loops' hard cap server-side.
+    max_attempts: int | None = None
+    verify: bool | None = None
     edit_instruction: str | None = None
     # Mask-scoped edit (EDIT_REGION, default off): an opaque PNG data URL at
     # the page's natural dims, WHITE = edit / black = keep, plus the selection
@@ -698,18 +704,24 @@ async def _event_stream(
                     else None
                 )
                 verdict: dict[str, Any] | None = None
-                if source_bytes is None or mask_bytes is None:
-                    # Remote refs / undecodable inputs: no critic signal, so a
-                    # single un-judged shot (the loop's no-critic rule) — the
-                    # result is still mask-scoped by the model.
-                    log(
-                        "warn",
-                        "edit.loop.unjudged",
-                        reason="source_or_mask_not_data_url",
-                    )
+                if (
+                    body.verify is False
+                    or source_bytes is None
+                    or mask_bytes is None
+                ):
+                    # Remote refs / undecodable inputs (or the user opted out
+                    # of verification): a single un-judged shot (the loop's
+                    # no-critic rule) — the result is still mask-scoped by
+                    # the model.
+                    if body.verify is not False:
+                        log(
+                            "warn",
+                            "edit.loop.unjudged",
+                            reason="source_or_mask_not_data_url",
+                        )
                     inp_result = await _render_inpaint("")
                 else:
-                    edit_cfg = edit_loop.edit_loop_config_from_env()
+                    edit_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
                     edit_attempts: list[Any] = []
                     # The alignment judge checks the inside crop against the
                     # fill DESCRIPTION (the region's expected final content) —
@@ -792,7 +804,7 @@ async def _event_stream(
             # the polished instruction + the medium critic vs the source, one
             # rationale-folding retry, verdict on the final frame. Undecodable
             # source (remote ref) falls through to the legacy un-judged call.
-            if env_flag("EDIT_JUDGE"):
+            if env_flag("EDIT_JUDGE") and body.verify is not False:
                 from providers import edit_loop, judge
                 from providers.render_loop import data_url_bytes
 
@@ -809,7 +821,7 @@ async def _event_stream(
                             style_ref_url=edit_style_ref,
                         )
 
-                    judge_cfg = edit_loop.edit_loop_config_from_env()
+                    judge_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
                     judged_attempts: list[Any] = []
                     async for judged_att in edit_loop.iter_edit_attempts(
                         _render_judged_edit,
@@ -1639,7 +1651,11 @@ async def _event_stream(
             # identity with nothing to catch it — the text medium lock is
             # advisory to loose-ref models, so the gate has to be a judge.
             # Legacy (no deliberate view) enters keep the one-shot path.
-            view_loop = enter_view is not None and env_flag("VIEW_LOOP", "true")
+            view_loop = (
+                enter_view is not None
+                and env_flag("VIEW_LOOP", "true")
+                and body.verify is not False
+            )
             log(
                 "info",
                 "tap.enter_edit",
@@ -1678,7 +1694,7 @@ async def _event_stream(
                         img_bytes, detail_title, detail_features
                     )
 
-                loop_cfg = render_loop.loop_config_from_env()
+                loop_cfg = render_loop.loop_config_from_env(body.max_attempts)
                 loop_attempts: list[Any] = []
                 async for loop_att in render_loop.iter_attempts(
                     _render_enter,

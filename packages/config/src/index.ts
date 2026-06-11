@@ -98,6 +98,12 @@ export interface GenerateRequestBody {
   click_hint?: string;
   image_tier?: ImageTier;
   image_model?: string;
+  // Per-request loop control (the speed preset). Absent -> the backend's env
+  // defaults, byte-identical to today. `verify: false` skips the judged
+  // render/edit loops for this request (a fast, un-judged single shot);
+  // `max_attempts` clamps server-side to the loops' hard cap.
+  max_attempts?: number;
+  verify?: boolean;
   edit_instruction?: string;
   // Mask-scoped edit (EDIT_REGION; the backend gates it behind the env flag so
   // it's a no-op until enabled). `edit_mask` is an opaque PNG data URL at the

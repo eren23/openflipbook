@@ -248,3 +248,11 @@ async def test_edit_judges_run_concurrently() -> None:
     render = _Render([_inside_edit()])
     attempts = await _drain(render, alignment=alignment, medium=medium)
     assert len(attempts) == 1 and attempts[0].accepted
+
+
+def test_edit_config_per_request_attempts_clamped() -> None:
+    # Mirrors render_loop: the per-request ask wins inside [1, cap].
+    assert edit_loop.edit_loop_config_from_env(max_attempts=1).max_attempts == 1
+    assert edit_loop.edit_loop_config_from_env(max_attempts=99).max_attempts == 4
+    assert edit_loop.edit_loop_config_from_env(max_attempts=0).max_attempts == 1
+    assert edit_loop.edit_loop_config_from_env().max_attempts == 2

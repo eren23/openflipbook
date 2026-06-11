@@ -206,6 +206,16 @@ def test_loop_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg2.retry_budget_s == 0.0
 
 
+def test_loop_config_per_request_attempts_clamped() -> None:
+    # The speed preset's per-request ask beats the env default, inside
+    # [1, MAX_ATTEMPTS_CAP] — never an unbounded spend.
+    assert loop_config_from_env(max_attempts=1).max_attempts == 1
+    assert loop_config_from_env(max_attempts=3).max_attempts == 3
+    assert loop_config_from_env(max_attempts=99).max_attempts == 4
+    assert loop_config_from_env(max_attempts=0).max_attempts == 1
+    assert loop_config_from_env(max_attempts=None).max_attempts == 2  # env default
+
+
 async def test_run_view_loop_drains_and_concludes() -> None:
     render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
     result = await run_view_loop(

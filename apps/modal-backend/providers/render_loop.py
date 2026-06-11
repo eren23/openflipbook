@@ -54,7 +54,13 @@ class LoopConfig:
     retry_budget_s: float = 240.0
 
 
-def loop_config_from_env() -> LoopConfig:
+# The per-request attempts ceiling: a client may ask for fewer attempts than
+# the env default (the Fast preset's one-shot) or a couple more (Quality),
+# never an unbounded spend.
+MAX_ATTEMPTS_CAP = 4
+
+
+def loop_config_from_env(max_attempts: int | None = None) -> LoopConfig:
     def _f(name: str, default: float) -> float:
         try:
             return float(os.environ.get(name, ""))
@@ -65,6 +71,8 @@ def loop_config_from_env() -> LoopConfig:
         attempts = int(os.environ.get("VIEW_LOOP_MAX_ATTEMPTS", ""))
     except ValueError:
         attempts = 2
+    if max_attempts is not None:
+        attempts = min(MAX_ATTEMPTS_CAP, max_attempts)
     return LoopConfig(
         max_attempts=max(1, attempts),
         accept_conformance=_f("VIEW_LOOP_ACCEPT_CONFORMANCE", 7.0),

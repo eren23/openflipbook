@@ -188,3 +188,29 @@ async def test_flag_on_with_mask_runs_the_judged_inpaint(
     assert verdict["alignment"] == 9.0
     assert verdict["medium"] == 9.0
     assert verdict["outside_change"] == 0.0
+
+
+async def test_mask_edit_verify_false_single_unjudged_inpaint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # verify:false on the mask path: still mask-scoped (the inpaint runs),
+    # but ONE un-judged shot — no critics, no verdict on the final frame.
+    monkeypatch.setenv("EDIT_REGION", "1")
+    _mock_polish(monkeypatch)
+    edit = _mock_legacy_edit(monkeypatch)
+    align = AsyncMock(return_value=JudgeResult(9.0, "", ""))
+    medium = AsyncMock(return_value=JudgeResult(9.0, "", ""))
+    monkeypatch.setattr(judge_mod, "score_prompt_alignment", align)
+    monkeypatch.setattr(judge_mod, "score_style_pair", medium)
+    body = _edit_body(edit_mask=_mask_data_url(), edit_region=_BOX, verify=False)
+    inpaint = _mock_inpaint(monkeypatch, body.image or "")
+
+    events = await _collect(_event_stream(body, "t1"))
+
+    assert edit.await_count == 0
+    assert inpaint.await_count == 1
+    align.assert_not_awaited()
+    medium.assert_not_awaited()
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "inpaint"
+    assert "edit_verdict" not in final
