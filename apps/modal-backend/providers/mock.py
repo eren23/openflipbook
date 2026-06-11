@@ -119,6 +119,8 @@ def _route(system: str, user: str) -> str:
     s = system.lower()
     seed = _h(system[:120], user[:200])
     subject = _SUBJECTS[seed % len(_SUBJECTS)]
+    if "content reviewer" in s:
+        return json.dumps({"allowed": True, "reason": ""})
     if "score" in s and ("judge" in s or "rate" in s or "0-10" in s or "10" in s):
         return json.dumps({"score": 8.5, "rationale": "mock judge: accepted"})
     if "tapped" in s or "crosshair" in s or "click" in s:

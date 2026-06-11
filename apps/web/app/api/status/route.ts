@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ export async function GET() {
     const upstream = await fetch(joinModalUrl(modalUrl, "/status"), {
       method: "GET",
       cache: "no-store",
+      headers: modalAuthHeaders(),
       signal: AbortSignal.timeout(4000),
     });
     const text = await upstream.text();

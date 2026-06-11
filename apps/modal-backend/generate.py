@@ -61,6 +61,43 @@ secrets = [
 app = modal.App(APP_NAME, image=image)
 fastapi_app = FastAPI(title="Endless Canvas — generate")
 
+# ── Public-deploy safety (Wave 5; all default OFF) ───────────────────────────
+SHARED_TOKEN_HEADER = "x-openflipbook-token"
+
+
+@fastapi_app.middleware("http")
+async def _shared_token_gate(request: Request, call_next: Any) -> Any:
+    """SHARED_TOKEN (env, unset = open): when set, every endpoint except
+    /health requires the matching header. The web's server-side proxies
+    inject it (lib/modal.modalAuthHeaders); browsers never hold the token."""
+    token = os.environ.get("SHARED_TOKEN")
+    if (
+        token
+        and request.url.path != "/health"
+        and request.headers.get(SHARED_TOKEN_HEADER) != token
+    ):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+def _client_ip(req: Request) -> str:
+    forwarded = req.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return req.client.host if req.client else "unknown"
+
+
+def _rate_limited(req: Request) -> JSONResponse | None:
+    """RATE_LIMIT_RPM (env, 0/unset = off): per-IP token bucket on the
+    spendy endpoints. Returns the 429 to send, or None to proceed."""
+    from providers import ratelimit
+
+    if ratelimit.allow(_client_ip(req)):
+        return None
+    return JSONResponse(
+        {"error": "rate limited — slow down (RATE_LIMIT_RPM)"}, status_code=429
+    )
+
 
 class Click(BaseModel):
     x_pct: float = Field(ge=0.0, le=1.0)
@@ -1523,6 +1560,19 @@ async def _event_stream(
         # keep their labels.
         if plan.facts and render_mode != "place_scene":
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+        # MODERATE_PROMPTS (default off): one cheap LLM check on the composed
+        # prompt before any image dollars are spent — a public deployment's
+        # opt-in. Fail-open inside (providers/moderation.py); a block is a
+        # clean error frame, not a 500.
+        from providers import moderation
+
+        blocked, block_reason = await moderation.flagged(composed_prompt)
+        if blocked:
+            yield _sse(
+                {"type": "error", "message": f"Blocked by moderation: {block_reason}"},
+                trace_id,
+            )
+            return
         # World Mode sub-map: pixel-continue the click region with a continuation
         # model (Kontext) so the closer map keeps the parent's streets/buildings
         # in place instead of re-planning a fresh image. Needs the region crop.
@@ -2021,6 +2071,9 @@ async def _event_stream(
 async def sse_generate(req: Request):
     from obs import TRACE_HEADER, bind_trace
 
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
     raw = await req.json()
     try:
         body = GenerateBody.model_validate(raw)
@@ -2059,6 +2112,10 @@ async def animate(req: Request, body: AnimateBody):
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
     from providers import video as video_provider
+
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     img_size_kb = len(body.image_data_url) // 1024
@@ -2138,6 +2195,10 @@ async def resolve_click(req: Request, body: ResolveClickBody):
     """
     from obs import TRACE_HEADER, bind_trace, record_error
     from providers import llm as llm_provider
+
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     try:
