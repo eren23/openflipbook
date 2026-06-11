@@ -2,6 +2,7 @@ import type {
   MapCrop,
   ObserverPose,
   ProjectedEntity,
+  ScaleTier,
   SceneView,
   ViewLevel,
   ViewSpec,
@@ -9,7 +10,7 @@ import type {
 } from "@openflipbook/config";
 import { finerTier } from "@openflipbook/config";
 
-import { routeClick, type ClickPoint } from "./click-route";
+import { routeClick, routeToFocus, type ClickPoint } from "./click-route";
 import {
   childrenOf,
   cropEntities,
@@ -157,47 +158,87 @@ export function geoTapRequest(
   // than the frame you tapped from (a tap = tierStep +1). Stamp it on the entered
   // scene_view so a node's rung is consistent however it was reached. Optional —
   // only when the source frame carries a rung (PR A seeds it).
-  const parentTier = currentView?.scale_tier ?? byId.get(route.focus_id ?? "")?.scale_tier ?? null;
-  const childTier = parentTier ? finerTier(parentTier) : undefined;
+  const childTier = childTierFor(currentView, byId, route.focus_id ?? null);
 
   // Tap on empty map area that still holds a cluster → stay in MAP mode + crop
   // the region (a sub-map), instead of entering a single place.
   if (route.kind === "submap") {
-    return {
-      kind: "submap",
-      scene_view: {
-        node_id: nodeId,
-        level: "map",
-        observer: null,
-        map_crop: route.crop,
-        focus_id: route.focus_id,
-        ...(childTier ? { scale_tier: childTier } : {}),
-        ...(override?.view ? { view: override.view } : {}),
-      },
-      expected_layout: [],
-      layout_entities: cropEntities(candidates.entities, route.crop),
-      focus_id: route.focus_id,
-      focus_label: route.focus_id ? byId.get(route.focus_id)?.label ?? null : null,
-      focus_visual: route.focus_id ? byId.get(route.focus_id)?.visual ?? null : null,
-      surroundings: route.focus_id ? describeSurroundings(route.focus_id, map.entities) : "",
-    };
+    return buildSubmapTap(
+      map.entities,
+      candidates.entities,
+      nodeId,
+      route.crop,
+      route.focus_id,
+      childTier,
+      override?.view,
+    );
   }
 
   // route.kind === "scene": enter the place.
   // The popover's adjusted pose/level (if any) win over the synthesized ones.
-  const observer = override?.observer ?? route.observer;
-  const level = override?.level ?? route.level;
+  return buildSceneTap(
+    map.entities,
+    nodeId,
+    route.focus_id,
+    override?.observer ?? route.observer,
+    override?.level ?? route.level,
+    aspect,
+    childTier,
+    override?.view,
+  );
+}
 
-  // An entered scene shows the place's INTERIOR, never the city around it.
-  //   - Re-enter: we have the saved interior — its sub-entities seeded into the
-  //     child frame on a prior visit — so steer by THOSE (resolved local →
-  //     absolute) and the inside stays consistent across visits.
-  //   - First enter: we know nothing inside yet, so steer by NOTHING and let the
-  //     model render the place freely. Projecting the city's *other* landmarks
-  //     here is what wrongly draws e.g. the Brass Bridge inside the University
-  //     ("parts outside my image shown in my image"). The child frame still
-  //     seeds from this scene's extraction (keyed on focus_id below).
-  const kids = childrenOf(map.entities, route.focus_id);
+function buildSubmapTap(
+  allEntities: WorldEntityGeo[],
+  candidates: WorldEntityGeo[],
+  nodeId: string,
+  crop: MapCrop,
+  focusId: string | null,
+  childTier: ScaleTier | undefined,
+  view?: ViewSpec,
+): GeoTap {
+  const byId = new Map(allEntities.map((e) => [e.id, e]));
+  return {
+    kind: "submap",
+    scene_view: {
+      node_id: nodeId,
+      level: "map",
+      observer: null,
+      map_crop: crop,
+      focus_id: focusId,
+      ...(childTier ? { scale_tier: childTier } : {}),
+      ...(view ? { view } : {}),
+    },
+    expected_layout: [],
+    layout_entities: cropEntities(candidates, crop),
+    focus_id: focusId,
+    focus_label: focusId ? byId.get(focusId)?.label ?? null : null,
+    focus_visual: focusId ? byId.get(focusId)?.visual ?? null : null,
+    surroundings: focusId ? describeSurroundings(focusId, allEntities) : "",
+  };
+}
+
+// An entered scene shows the place's INTERIOR, never the city around it.
+//   - Re-enter: we have the saved interior — its sub-entities seeded into the
+//     child frame on a prior visit — so steer by THOSE (resolved local →
+//     absolute) and the inside stays consistent across visits.
+//   - First enter: we know nothing inside yet, so steer by NOTHING and let the
+//     model render the place freely. Projecting the city's *other* landmarks
+//     here is what wrongly draws e.g. the Brass Bridge inside the University
+//     ("parts outside my image shown in my image"). The child frame still
+//     seeds from this scene's extraction (keyed on focus_id below).
+function buildSceneTap(
+  allEntities: WorldEntityGeo[],
+  nodeId: string,
+  focusId: string,
+  observer: ObserverPose,
+  level: ViewLevel,
+  aspect: number,
+  childTier: ScaleTier | undefined,
+  view?: ViewSpec,
+): GeoTap {
+  const byId = new Map(allEntities.map((e) => [e.id, e]));
+  const kids = childrenOf(allEntities, focusId);
   const layoutEntities =
     kids.length > 0
       ? kids.map((k) => ({ ...k, pos: resolveAbsolutePos(k.id, byId) ?? k.pos }))
@@ -211,18 +252,103 @@ export function geoTapRequest(
       map_crop: null,
       // The place you entered: its geo id anchors the child frame the entered
       // scene's sub-entities seed into.
-      focus_id: route.focus_id,
+      focus_id: focusId,
       ...(childTier ? { scale_tier: childTier } : {}),
       // The projection pill (user-pinned camera) — beats the backend policy.
-      ...(override?.view ? { view: override.view } : {}),
+      ...(view ? { view } : {}),
     },
     expected_layout: projectScene(layoutEntities, observer, aspect),
     layout_entities: layoutEntities,
-    focus_id: route.focus_id,
-    focus_label: byId.get(route.focus_id)?.label ?? null,
-    focus_visual: byId.get(route.focus_id)?.visual ?? null,
-    surroundings: describeSurroundings(route.focus_id, map.entities),
+    focus_id: focusId,
+    focus_label: byId.get(focusId)?.label ?? null,
+    focus_visual: byId.get(focusId)?.visual ?? null,
+    surroundings: describeSurroundings(focusId, allEntities),
   };
+}
+
+/** One rung FINER than the frame the tap happened in (see geoTapRequest). */
+function childTierFor(
+  currentView: SceneView | null | undefined,
+  byId: Map<string, WorldEntityGeo>,
+  focusId: string | null,
+): ScaleTier | undefined {
+  const parentTier =
+    currentView?.scale_tier ?? byId.get(focusId ?? "")?.scale_tier ?? null;
+  return parentTier ? finerTier(parentTier) : undefined;
+}
+
+/**
+ * W1 degrade net. The geometric route fell through on a map frame (the tap
+ * landed on baked-in lettering or unmapped parchment), and the classic
+ * fallback would re-compose the scene on the FRESH path — which ignores
+ * image refs and is exactly what produced brand-new unrelated pages
+ * ("a new city near the river"). Answer instead with the same place_submap
+ * zoom-cut a world-mode submap tap rides (Kontext continuation of the
+ * region crop): worst case a boring crop, never a reinvention.
+ */
+export function degradedSubmapTap(
+  map: { entities: WorldEntityGeo[]; bounds: MapCrop },
+  nodeId: string,
+  click: ClickPoint,
+  aspect: number,
+  currentView?: SceneView | null,
+): GeoTap | null {
+  if (map.entities.length === 0) return null;
+  // Map frames only — inside an entered place the classic tap stands (its
+  // frame isn't the map the cut would continue).
+  if (currentView && currentView.level !== "map") return null;
+  const mapView: SceneView = {
+    node_id: nodeId,
+    level: "map",
+    observer: null,
+    map_crop: MAP_IMAGE_FRAME,
+  };
+  const route = routeClick(map, mapView, click, aspect, {
+    minSubmapEntities: 0,
+  });
+  // A place hit would have routed via geoTapRequest already; anything else
+  // on a map frame is a submap window around the tap.
+  if (route.kind !== "submap") return null;
+  const byId = new Map(map.entities.map((e) => [e.id, e]));
+  return buildSubmapTap(
+    map.entities,
+    map.entities,
+    nodeId,
+    route.crop,
+    route.focus_id,
+    childTierFor(currentView, byId, route.focus_id),
+  );
+}
+
+/**
+ * W2 label-click routing. The tap was resolved by NAME — the VLM read the
+ * map's baked-in lettering and it matches a mapped place — so enter THAT
+ * entity exactly as a geometric hit on its footprint would, observer pose
+ * and all. The caller does the matching (entity-label-match.ts).
+ */
+export function geoTapForEntity(
+  map: { entities: WorldEntityGeo[]; bounds: MapCrop },
+  nodeId: string,
+  entity: WorldEntityGeo,
+  aspect: number,
+  currentView?: SceneView | null,
+): GeoTap {
+  const byId = new Map(map.entities.map((e) => [e.id, e]));
+  // Stand at the frame centre looking at the place — the same default a
+  // footprint hit synthesizes when the viewer has no prior pose.
+  const route = routeToFocus(entity, {
+    x: MAP_IMAGE_FRAME.x + MAP_IMAGE_FRAME.w / 2,
+    y: MAP_IMAGE_FRAME.y + MAP_IMAGE_FRAME.h / 2,
+  });
+  return buildSceneTap(
+    map.entities,
+    nodeId,
+    route.focus_id,
+    route.observer,
+    route.level,
+    aspect,
+    childTierFor(currentView, byId, entity.id),
+  );
 }
 
 export interface WideRegionCut {

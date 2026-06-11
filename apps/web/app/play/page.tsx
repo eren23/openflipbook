@@ -97,11 +97,15 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import {
+  degradedSubmapTap,
+  geoTapForEntity,
   geoTapRequest,
   MAP_IMAGE_FRAME,
   wideRegionCut,
+  type GeoTap,
   type GeoTapOverride,
 } from "@/lib/geo-tap";
+import { matchEntityLabel } from "@/lib/entity-label-match";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -119,6 +123,15 @@ type Phase = "idle" | "generating" | "ready" | "error";
 // after the user drew a box is the worst surprise). Backend twin: EDIT_REGION.
 const EDIT_REGION_ENABLED = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_EDIT_REGION ?? "").toLowerCase()
+);
+
+// W1 kill-switch (default ON): a world-mode tap that the geometric router
+// can't anchor (lettering / unmapped parchment) degrades to a faithful
+// place_submap zoom-cut instead of falling to the fresh path, which ignores
+// image refs and invents an unrelated scene. =false restores the old fall-
+// through exactly (same semantics as ENTER_EDIT_REF's kill-switch).
+const WORLD_TAP_DEGRADE_ENABLED = !["0", "false", "no"].includes(
+  (process.env.NEXT_PUBLIC_WORLD_TAP_DEGRADE ?? "").toLowerCase()
 );
 
 interface Page {
@@ -2170,6 +2183,43 @@ export default function PlayPage() {
               page.sceneView,
             )
           : null;
+      // W1/W2 fallback chain: the geometric route fell through on a map frame
+      // (the tap landed on baked-in lettering or unmapped parchment). Without
+      // this, the request rides the classic FRESH path — which ignores image
+      // refs — and that is the "brand-new unrelated city near the river" bug.
+      //   ① label match: the VLM's subject names a mapped place (the tap hit
+      //     the map's LETTERING) → enter that entity, footprint-hit semantics.
+      //   ② degrade (kill-switch): zoom-continue the clicked region — a
+      //     faithful Kontext cut of the map, never a reinvention.
+      let fallbackTap: GeoTap | null = null;
+      if (
+        worldEnabled &&
+        !geoTap &&
+        geoEntities.length > 0 &&
+        (!page.sceneView || page.sceneView.level === "map")
+      ) {
+        const matched = worldResolved?.subject
+          ? matchEntityLabel(worldResolved.subject, geoEntities)
+          : null;
+        if (matched) {
+          fallbackTap = geoTapForEntity(
+            { entities: geoEntities, bounds: geoBounds },
+            page.nodeId ?? "",
+            matched,
+            16 / 9,
+            page.sceneView,
+          );
+        } else if (WORLD_TAP_DEGRADE_ENABLED) {
+          fallbackTap = degradedSubmapTap(
+            { entities: geoEntities, bounds: geoBounds },
+            page.nodeId ?? "",
+            { x_pct: click.x_pct, y_pct: click.y_pct },
+            16 / 9,
+            page.sceneView,
+          );
+        }
+      }
+      const worldTap = geoTap ?? fallbackTap;
       // World OFF + a wide mapped region (the river): a fresh re-composition
       // relocates landmarks, so zoom-cut the map instead (see wideRegionCut).
       const wideCut =
@@ -2236,41 +2286,41 @@ export default function PlayPage() {
                 : {}),
             }
           : {}),
-        ...(geoTap
+        ...(worldTap
           ? {
-              scene_view: geoTap.scene_view,
-              expected_layout: geoTap.expected_layout,
+              scene_view: worldTap.scene_view,
+              expected_layout: worldTap.expected_layout,
               // Enter the aligned-zoom path: a submap stays in map mode and
               // zoom-continues (Kontext) rather than a loose fresh gen, so the
               // sub-map is a true zoom of the tapped region. A scene first-enter
               // keeps the (reprojecting) fresh path until B2 wires the guarded
               // scene→scene continuation. Spread last so it wins.
               render_mode:
-                geoTap.kind === "submap" ? "place_submap" : "place_scene",
+                worldTap.kind === "submap" ? "place_submap" : "place_scene",
               // The geometric tap KNOWS which entity you hit (by coordinates) —
               // make it the subject so tapping the Tower of Art enters the Tower,
               // overriding the looser VLM read that picked its container. Spread
               // last so it wins over the cached / world-resolved subjects above.
-              ...(geoTap.focus_label
-                ? { prefetched_subject: geoTap.focus_label }
+              ...(worldTap.focus_label
+                ? { prefetched_subject: worldTap.focus_label }
                 : {}),
               // Anchor the entity's IDENTITY across zoom levels: feed its
               // appearance as the authoritative subject context, view-neutral so
               // it carries the materials/architecture (ancient stone, concentric
               // rings) without forcing the angle it was captured at.
-              ...(viewNeutralAppearance(geoTap.focus_visual)
+              ...(viewNeutralAppearance(worldTap.focus_visual)
                 ? {
                     prefetched_subject_context: viewNeutralAppearance(
-                      geoTap.focus_visual,
+                      worldTap.focus_visual,
                     ),
                   }
                 : {}),
               // FAITHFUL backdrop: the focus's frame-mates straight from the geo
               // (real bearings + appearances), so a stepped-into scene draws the
               // SAME landmarks the map shows in the right directions — overriding
-              // the VLM-invented surroundings above (geoTap is spread last → wins).
-              ...(geoTap.surroundings
-                ? { prefetched_surroundings: geoTap.surroundings }
+              // the VLM-invented surroundings above (worldTap is spread last → wins).
+              ...(worldTap.surroundings
+                ? { prefetched_surroundings: worldTap.surroundings }
                 : {}),
             }
           : {}),

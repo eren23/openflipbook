@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { MapCrop, ObserverPose, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
-import { routeClick } from "./click-route";
+import { routeClick, routeToFocus } from "./click-route";
 
 function geo(
   id: string,
@@ -112,5 +112,47 @@ describe("routeClick (P6 coordinate-driven mode detection)", () => {
     expect(
       routeClick(map, sceneView(observer), { x_pct: 0.02, y_pct: 0.02 }, ASPECT).kind,
     ).toBe("explainer");
+  });
+
+  it("minSubmapEntities: 0 → empty map area routes submap, never explainer (W1 degrade)", () => {
+    // Same setup as the no-entities explainer case above; the override flips it.
+    const map = { entities: [geo("a", 90, 90)], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.1, y_pct: 0.1 }, ASPECT, {
+      minSubmapEntities: 0,
+    });
+    expect(r.kind).toBe("submap");
+    if (r.kind === "submap") {
+      // The window is centred on the tap, not the far-away entity.
+      expect(r.crop.x + r.crop.w / 2).toBeCloseTo(10, 5);
+      expect(r.crop.y + r.crop.h / 2).toBeCloseTo(10, 5);
+    }
+  });
+});
+
+describe("routeToFocus (enter a place resolved by NAME)", () => {
+  it("synthesizes the same scene route a footprint hit would", () => {
+    const focus = geo("tower", 60, 30, { height: 18 });
+    const byHit = routeClick(
+      { entities: [focus], bounds: CROP },
+      mapView(CROP),
+      { x_pct: 0.6, y_pct: 0.3 },
+      ASPECT,
+    );
+    const byName = routeToFocus(focus, { x: 50, y: 50 });
+    expect(byName.kind).toBe("scene");
+    expect(byName.focus_id).toBe("tower");
+    expect(byName.level).toBe("building"); // tall → building
+    expect(byHit.kind).toBe("scene");
+    if (byHit.kind === "scene") {
+      // Same standoff distance from the focus (direction differs with `from`).
+      const d = (o: ObserverPose) => Math.hypot(o.pos.x - 60, o.pos.y - 30);
+      expect(d(byName.observer)).toBeCloseTo(d(byHit.observer), 5);
+    }
+  });
+
+  it("short places enter at street level", () => {
+    expect(routeToFocus(geo("hut", 10, 10, { height: 4 }), { x: 0, y: 0 }).level).toBe(
+      "street",
+    );
   });
 });
