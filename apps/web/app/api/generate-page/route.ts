@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GenerateRequestBody } from "@openflipbook/config";
 import { locationPhrase } from "@/lib/location-phrase";
+import { inlineStoredImage } from "@/lib/r2";
 import { resolveEntitiesForPrompt } from "@/lib/world";
 import { getWorldMap } from "@/lib/world-map";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
@@ -37,6 +38,18 @@ export async function POST(req: Request) {
   let upstreamBody = rawText;
   try {
     const parsed = JSON.parse(rawText) as GenerateRequestBody;
+    let mutated = false;
+    // A reopened node's page image arrives as its STORE URL; on the docker
+    // stack that's a localhost minio URL the VLM providers refuse to fetch.
+    // Inline our own stored bytes to a data URL (best-effort; see
+    // inlineStoredImage).
+    if (parsed?.image && !parsed.image.startsWith("data:")) {
+      const inlined = await inlineStoredImage(parsed.image);
+      if (inlined) {
+        parsed.image = inlined;
+        mutated = true;
+      }
+    }
     if (parsed && parsed.session_id && parsed.query && !parsed.world_context) {
       const world_context = await resolveEntitiesForPrompt({
         sessionId: parsed.session_id,
@@ -84,8 +97,10 @@ export async function POST(req: Request) {
           // size enrichment is best-effort; never block generation
         }
         upstreamBody = JSON.stringify({ ...parsed, world_context });
+        mutated = false; // serialized above, inlined image included
       }
     }
+    if (mutated) upstreamBody = JSON.stringify(parsed);
   } catch {
     // Body is presumably already the right shape (or malformed enough
     // that the backend will surface the error). Forward verbatim.

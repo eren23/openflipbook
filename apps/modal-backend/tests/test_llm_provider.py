@@ -1227,9 +1227,10 @@ def test_world_context_clause_renders_fixed_position() -> None:
     assert "fixed position" not in drum_line
 
 
-def test_world_context_clause_without_hints_is_byte_identical() -> None:
+def test_world_context_clause_without_hints_adds_no_position_text() -> None:
     # The spatial half is strictly additive: no location_hint anywhere ->
-    # the clause must not change at all (header included).
+    # nothing position-related enters the clause (per-entity lines or the
+    # header rule). The rest of the header predates this change.
     entities = [
         {
             "name": "Mira",

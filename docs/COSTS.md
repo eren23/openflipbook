@@ -126,3 +126,7 @@ Honest limitations: totals are **in-process** (per container, reset on
 restart, not shared across replicas) and **estimates** (the slug price table
 above, not provider invoices). Right-sized for a self-hosted cap; don't bill
 anyone off it.
+
+One more cap honesty note: the gate is checked at stream start, so requests
+already in flight when the cap trips still complete — worst case overshoot is
+one generation per concurrent stream. Right-sized for a personal cap.

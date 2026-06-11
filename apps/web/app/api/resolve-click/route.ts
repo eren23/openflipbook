@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { inlineStoredImage } from "@/lib/r2";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -14,7 +15,22 @@ export async function POST(req: Request) {
     );
   }
   const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
-  const body = await req.text();
+  let body = await req.text();
+  // Reopened nodes resolve clicks against their STORE URL — on the docker
+  // stack a localhost minio URL the VLM providers refuse to fetch. Inline
+  // our own stored bytes (best-effort; see lib/r2.inlineStoredImage).
+  try {
+    const parsed = JSON.parse(body) as { image_data_url?: string };
+    if (parsed?.image_data_url && !parsed.image_data_url.startsWith("data:")) {
+      const inlined = await inlineStoredImage(parsed.image_data_url);
+      if (inlined) {
+        parsed.image_data_url = inlined;
+        body = JSON.stringify(parsed);
+      }
+    }
+  } catch {
+    // malformed body -> forward verbatim, the backend surfaces the error
+  }
   let upstream: Response;
   try {
     upstream = await fetch(joinModalUrl(modalUrl, "/resolve-click"), {
