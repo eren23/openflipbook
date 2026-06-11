@@ -1,0 +1,387 @@
+{
+ "map_id": "scifi-mars-schiaparelli-1888",
+ "rev": 2,
+ "genre": "sci-fi",
+ "style": "19th-century scientific stippled ink drawing, monochrome black and white, astronomical sketch style.",
+ "scale_tier": "region",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "A circular astronomical map of Mars as observed in 1888, presented in a monochrome stippled style. The map is dominated by a large, dark, textured region in the upper-left (northwest) quadrant, labeled Libya. From this dark mass, a complex network of thin, straight, and intersecting lines\u2014the famous 'canals'\u2014radiates across the lighter surface. In the center-left, the Nilosyrtis and Astusapes lines form a distinct curved loop. To the east (right), several prominent parallel and intersecting lines are labeled Euphrates, Hiddekel, and Gehon, converging at dark circular nodes. The southern (bottom) portion features the Callirhoe line running horizontally, with several smaller dark patches and stippled regions near the edge. The entire globe is framed by a thin circular border, with lowercase 'b' markers placed at various points around the perimeter. The background is a neutral, slightly textured paper tone, and the labels are written in a classic serif italicized script.",
+ "entities": [
+  {
+   "ref": "libya-region",
+   "kind": "place",
+   "label": "Libya",
+   "visual": "Large, dark stippled area in the upper-left quadrant.",
+   "pos": {
+    "x": 18.8,
+    "y": 24.6
+   },
+   "footprint": {
+    "w": 5.0,
+    "d": 3.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     16.0,
+     27.0
+    ],
+    [
+     20.0,
+     22.8
+    ],
+    [
+     24.0,
+     22.2
+    ],
+    [
+     26.0,
+     24.6
+    ],
+    [
+     22.0,
+     28.8
+    ],
+    [
+     18.0,
+     29.4
+    ]
+   ]
+  },
+  {
+   "ref": "nilosyrtis",
+   "kind": "place",
+   "label": "Nilosyrtis",
+   "visual": "A thick, curved dark line in the center-left.",
+   "pos": {
+    "x": 39.8,
+    "y": 31.8
+   },
+   "footprint": {
+    "w": 8.0,
+    "d": 4.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     35.0,
+     31.2
+    ],
+    [
+     38.0,
+     27.0
+    ],
+    [
+     42.0,
+     28.8
+    ],
+    [
+     45.0,
+     33.0
+    ],
+    [
+     42.0,
+     35.4
+    ],
+    [
+     37.0,
+     34.8
+    ]
+   ]
+  },
+  {
+   "ref": "euphrates",
+   "kind": "place",
+   "label": "Euphrates",
+   "visual": "A long, straight vertical line in the right-center.",
+   "pos": {
+    "x": 69.5,
+    "y": 25.2
+   },
+   "footprint": {
+    "w": 6.0,
+    "d": 4.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     68.0,
+     22.8
+    ],
+    [
+     70.0,
+     21.0
+    ],
+    [
+     73.0,
+     25.2
+    ],
+    [
+     72.0,
+     28.8
+    ],
+    [
+     69.0,
+     28.2
+    ],
+    [
+     68.0,
+     25.2
+    ]
+   ]
+  },
+  {
+   "ref": "hiddekel",
+   "kind": "place",
+   "label": "Hiddekel",
+   "visual": "A straight line running parallel to the Euphrates.",
+   "pos": {
+    "x": 74.5,
+    "y": 21.9
+   },
+   "footprint": {
+    "w": 5.0,
+    "d": 4.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     72.0,
+     20.4
+    ],
+    [
+     76.0,
+     18.0
+    ],
+    [
+     78.0,
+     19.8
+    ],
+    [
+     76.0,
+     24.6
+    ],
+    [
+     73.0,
+     25.2
+    ],
+    [
+     72.0,
+     22.8
+    ]
+   ]
+  },
+  {
+   "ref": "callirhoe",
+   "kind": "place",
+   "label": "Callirhoe",
+   "visual": "A horizontal line located in the lower-center region.",
+   "pos": {
+    "x": 58.5,
+    "y": 41.7
+   },
+   "footprint": {
+    "w": 8.0,
+    "d": 2.4
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     52.0,
+     40.8
+    ],
+    [
+     58.0,
+     40.8
+    ],
+    [
+     65.0,
+     41.4
+    ],
+    [
+     65.0,
+     43.2
+    ],
+    [
+     58.0,
+     42.6
+    ],
+    [
+     52.0,
+     42.0
+    ]
+   ]
+  },
+  {
+   "ref": "protonilus",
+   "kind": "place",
+   "label": "Protonilus",
+   "visual": "A horizontal line connecting the center to the right.",
+   "pos": {
+    "x": 59.5,
+    "y": 33.3
+   },
+   "footprint": {
+    "w": 8.0,
+    "d": 2.4
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     53.0,
+     31.8
+    ],
+    [
+     58.0,
+     30.6
+    ],
+    [
+     65.0,
+     31.2
+    ],
+    [
+     65.0,
+     33.6
+    ],
+    [
+     58.0,
+     34.2
+    ],
+    [
+     53.0,
+     34.8
+    ]
+   ]
+  },
+  {
+   "ref": "thoth",
+   "kind": "place",
+   "label": "Thoth",
+   "visual": "A diagonal line in the lower-left quadrant.",
+   "pos": {
+    "x": 26.0,
+    "y": 35.1
+   },
+   "footprint": {
+    "w": 5.0,
+    "d": 3.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     23.0,
+     33.0
+    ],
+    [
+     26.0,
+     31.8
+    ],
+    [
+     29.0,
+     35.4
+    ],
+    [
+     28.0,
+     37.8
+    ],
+    [
+     25.0,
+     37.2
+    ],
+    [
+     23.0,
+     34.8
+    ]
+   ]
+  },
+  {
+   "ref": "gehon",
+   "kind": "place",
+   "label": "Gehon",
+   "visual": "A vertical line on the far right edge.",
+   "pos": {
+    "x": 80.5,
+    "y": 22.2
+   },
+   "footprint": {
+    "w": 4.0,
+    "d": 3.6
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     78.0,
+     20.4
+    ],
+    [
+     81.0,
+     19.8
+    ],
+    [
+     82.0,
+     22.8
+    ],
+    [
+     81.0,
+     25.2
+    ],
+    [
+     79.0,
+     25.2
+    ],
+    [
+     78.0,
+     22.8
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "nilosyrtis",
+   "relation": "near",
+   "object": "libya-region"
+  },
+  {
+   "subject": "hiddekel",
+   "relation": "right_of",
+   "object": "euphrates"
+  },
+  {
+   "subject": "callirhoe",
+   "relation": "near",
+   "object": "protonilus"
+  },
+  {
+   "subject": "thoth",
+   "relation": "left_of",
+   "object": "nilosyrtis"
+  },
+  {
+   "subject": "gehon",
+   "relation": "right_of",
+   "object": "hiddekel"
+  },
+  {
+   "subject": "protonilus",
+   "relation": "left_of",
+   "object": "euphrates"
+  }
+ ],
+ "review": {
+  "status": "verified",
+  "by": "claude (image-inspected); eren spot-check welcome",
+  "date": "2026-06-11"
+ }
+}

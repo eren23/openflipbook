@@ -1,0 +1,53 @@
+{
+  "_comment": "Ground-truth corpus sources. All public-domain scans served via Wikimedia Commons Special:FilePath (width-1600 renditions). Binaries are fetched to images/ (gitignored) by scripts/fetch_corpus.py; sha256 is pinned on first fetch (--pin) and verified after.",
+  "maps": [
+    {
+      "id": "fantasy-treasure-island",
+      "genre": "fantasy",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Treasure%20Island%20from%20the%20book%20by%20Robert%20Louis%20Stevenson%20LOC%2096682593.jpg?width=1600",
+      "license_note": "Public domain (R.L. Stevenson, 1883; Library of Congress scan via Wikimedia Commons)",
+      "sha256": "464a07bbab3db6088f171e04001e7c965ce179af880f10f8ad67c5e8cd2e9c92",
+      "filename": "fantasy-treasure-island.jpg"
+    },
+    {
+      "id": "urban-seattle-1904",
+      "genre": "urban",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Bird's%20Eye%20View%2C%20City%20of%20Seattle%20and%20vicinity%2C%201904%20(MAPS%2063).jpg?width=1600",
+      "license_note": "Public domain (1904 pictorial city map via Wikimedia Commons)",
+      "sha256": "d82e1b8308f2b9311011488355584aedcf56610b000ce0cc415255ad13fb4b20",
+      "filename": "urban-seattle-1904.jpg"
+    },
+    {
+      "id": "sea-boston-harbor-1877",
+      "genre": "sea",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/1877%20U.S.%20Coast%20Survey%20Map%20or%20Chart%20of%20Boston%20Bay%20and%20Harbor%20-%20Geographicus%20-%20BostonBay-uscs-1877.jpg?width=1600",
+      "license_note": "Public domain (1877 U.S. Coast Survey chart via Wikimedia Commons)",
+      "sha256": "c007c88388076a05f42a62ffd77953756b610c198e78f6e78d0976873fcc3060",
+      "filename": "sea-boston-harbor-1877.jpg"
+    },
+    {
+      "id": "forest-yellowstone-1904",
+      "genre": "forest",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Yellowstone%20National%20Park%20by%20Wellge%2C%201904.jpg?width=1600",
+      "license_note": "Public domain (Wellge 1904 panoramic park map via Wikimedia Commons)",
+      "sha256": "427f2fdf0c3734f174c94cff60b1cf6d2beb23f3882d58c9230c47d9d4ea528b",
+      "filename": "forest-yellowstone-1904.jpg"
+    },
+    {
+      "id": "scifi-mars-schiaparelli-1888",
+      "genre": "sci-fi",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Map%20of%20Mars%20by%20Schiaparelli%201888.jpg?width=1600",
+      "license_note": "Public domain (Schiaparelli 1888 Mars map via Wikimedia Commons)",
+      "sha256": "4fba502c340e1632f2ec2975b31590a1867f8ee35897827127eb2c5d9320ba39",
+      "filename": "scifi-mars-schiaparelli-1888.jpg"
+    },
+    {
+      "id": "village-medieval-manor",
+      "genre": "village",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plan%20mediaeval%20manor.jpg?width=1600",
+      "license_note": "Public domain (medieval manor plan via Wikimedia Commons)",
+      "sha256": "7d7fcdf1d38ca5a55d592986f370681aa4111021f7574690f71791bb5888c00e",
+      "filename": "village-medieval-manor.jpg"
+    }
+  ]
+}

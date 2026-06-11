@@ -65,3 +65,7 @@ scripts/perfbudget/report.json
 
 # Superpowers brainstorm companion (ephemeral mockup files).
 .superpowers/
+
+# Ground-truth corpus images (fetched by scripts/fetch_corpus.py; text-only
+# descriptions + the sha-pinned manifest are what git tracks).
+apps/modal-backend/tests/map_corpus/images/

@@ -59,6 +59,15 @@ eval-grounding:
 # zero fal). Override images: SEGMENT_SMOKE_IMAGES=/path/a.jpg,...
 eval-segment-smoke:
 	cd apps/modal-backend && SEGMENT_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.segment_smoke
+# Ground-truth map corpus: fetch the public-domain scans (free, a few MB;
+# --pin on first run records sha256s into the manifest) and VLM-draft a
+# description for human verification (PAID ~$0.015/map, Gemini only):
+#   make corpus-fetch
+#   make corpus-draft id=fantasy-treasure-island   (or id=all)
+corpus-fetch:
+	cd apps/modal-backend && .venv/bin/python scripts/fetch_corpus.py --pin
+corpus-draft:
+	cd apps/modal-backend && CORPUS_DRAFT_RUN=1 .venv/bin/python -m tests.map_corpus.draft $(or $(id),all)
 eval-repair:
 	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
 eval-edit:
