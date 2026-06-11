@@ -390,3 +390,25 @@ export async function updateNodeEstimatedView(
   );
   return res.matchedCount === 1;
 }
+
+/** The root→node path: walk parent_id up from `nodeId` (cycle-guarded,
+ * capped) and return it ROOT-FIRST — the page order a flipbook export
+ * reads in. Missing intermediate nodes truncate the walk (best-effort). */
+export async function getNodeChain(
+  nodeId: string,
+  cap = 40
+): Promise<NodeRow[]> {
+  const collection = await nodes();
+  const chain: NodeRow[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = nodeId;
+  while (cursor && !seen.has(cursor) && chain.length < cap) {
+    seen.add(cursor);
+    const doc = await collection.findOne({ _id: cursor });
+    if (!doc) break;
+    const row = toRow(doc);
+    chain.push(row);
+    cursor = row.parent_id;
+  }
+  return chain.reverse();
+}
