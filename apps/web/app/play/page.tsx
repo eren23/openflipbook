@@ -497,6 +497,9 @@ export default function PlayPage() {
   // Running spend estimate for THIS session, read off final frames (the
   // backend meter, providers/spend.py). Null until the first final lands.
   const [sessionSpend, setSessionSpend] = useState<number | null>(null);
+  // Dev-only explicit model override (NEXT_PUBLIC_DEV_PROVIDERS): rides the
+  // wire's image_model on every generate body. null = the tier decides.
+  const [devModel, setDevModel] = useState<string | null>(null);
   // The speed preset's wire half — spread into every generate() body next to
   // image_tier. Balanced knobs produce {} (byte-identity with today).
   const loopWire = useMemo(() => wireFields(loopKnobs), [loopKnobs]);
@@ -916,6 +919,7 @@ export default function PlayPage() {
       parent_title: page.title,
       image_tier: imageTier,
       ...loopWire,
+      ...(devModel ? { image_model: devModel } : {}),
       output_locale: resolveOutputLocale(outputLocale),
       ...(condition.urls.length
         ? {
@@ -935,6 +939,7 @@ export default function PlayPage() {
     startBloom,
     imageTier,
     loopWire,
+    devModel,
     outputLocale,
     styleAnchor,
     history,
@@ -1065,11 +1070,12 @@ export default function PlayPage() {
         mode: "query",
         image_tier: imageTier,
         ...loopWire,
+        ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     },
-    [input, sessionId, page, generate, imageTier, loopWire, outputLocale, styleAnchor]
+    [input, sessionId, page, generate, imageTier, loopWire, devModel, outputLocale, styleAnchor]
   );
 
   // B1 — "Describe a place": turn the input description into a logical object
@@ -1164,6 +1170,7 @@ export default function PlayPage() {
         mode: "query",
         image_tier: imageTier,
         ...loopWire,
+        ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         world_mode: true,
         render_mode: "place_submap",
@@ -1199,6 +1206,7 @@ export default function PlayPage() {
     generate,
     imageTier,
     loopWire,
+    devModel,
     outputLocale,
     styleAnchor,
     promptForHint,
@@ -1255,6 +1263,7 @@ export default function PlayPage() {
         parent_title: page.title,
         image_tier: imageTier,
         ...loopWire,
+        ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         ...(editCondition.urls.length
           ? {
@@ -1269,7 +1278,7 @@ export default function PlayPage() {
       setEditMode(false);
       setEditRegion(null);
     },
-    [page, generate, imageTier, loopWire, outputLocale, styleAnchor, history]
+    [page, generate, imageTier, loopWire, devModel, outputLocale, styleAnchor, history]
   );
 
   const submitEdit = useCallback(
@@ -2124,6 +2133,7 @@ export default function PlayPage() {
         click,
         image_tier: imageTier,
         ...loopWire,
+        ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         ...(condition.urls.length
           ? {
@@ -2439,6 +2449,7 @@ export default function PlayPage() {
         click_hint: strokeHint,
         image_tier: imageTier,
         ...loopWire,
+        ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         ...(strokeCondition.urls.length
           ? {
@@ -2480,7 +2491,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, loopWire, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
+  }, [page, phase, generate, imageTier, loopWire, devModel, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -2507,10 +2518,11 @@ export default function PlayPage() {
       mode: "query",
       image_tier: imageTier,
       ...loopWire,
+      ...(devModel ? { image_model: devModel } : {}),
       output_locale: resolveOutputLocale(outputLocale),
       ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
     });
-  }, [generate, sessionId, imageTier, loopWire, outputLocale, styleAnchor]);
+  }, [generate, sessionId, imageTier, loopWire, devModel, outputLocale, styleAnchor]);
 
   const animateAbortRef = useRef<AbortController | null>(null);
   const disconnectStream = useCallback(() => {
@@ -2613,6 +2625,8 @@ export default function PlayPage() {
         loopKnobs={loopKnobs}
         setLoopKnobs={setLoopKnobs}
         sessionSpend={sessionSpend}
+        devModel={devModel}
+        setDevModel={setDevModel}
         worldMode={worldEnabled}
         setWorldMode={setWorldEnabled}
         autonomy={worldAutonomy}

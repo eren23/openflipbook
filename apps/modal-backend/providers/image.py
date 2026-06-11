@@ -265,34 +265,17 @@ def _openai_size(aspect_ratio: str, model: str) -> str:
     return table.get(aspect_ratio, "1024x1024")
 
 
-async def generate_image(
+async def _generate_with_slug(
+    model: str,
     prompt: str,
     aspect_ratio: str,
-    tier: str | None = None,
-    model_override: str | None = None,
-    reference_urls: list[str] | None = None,
+    reference_urls: list[str] | None,
 ) -> GeneratedImage:
+    """One slug, one attempt (plus its own transient retries). The dispatch
+    body of generate_image, extracted so the failover chain can call it per
+    candidate."""
     from obs import span
-    from providers import mock
 
-    if mock.on():
-        m = mock.mock_image(prompt, op="fresh", aspect_ratio=aspect_ratio)
-        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
-    if _image_provider() != "fal":
-        # Reference conditioning is fal/nano-banana only — other providers stay
-        # text-only (refs ignored).
-        prov, base_url, api_key = _resolve_image_provider()
-        model = model_override or _image_model()
-        async with span(
-            "image.generate", model=model, prompt_len=len(prompt), provider=prov
-        ) as ctx:
-            generated = await _openai_compatible_image(
-                base_url, api_key, model, prompt, aspect_ratio
-            )
-            ctx["bytes"] = len(generated.jpeg_bytes)
-        return generated
-
-    model = _resolve_model(tier, model_override)
     if model.startswith(OPENROUTER_IMAGE_PREFIX):
         # OpenRouter image-modality slug (riverflow / recraft / …): needs only
         # OPENROUTER_API_KEY (already required for the planner), not FAL_KEY.
@@ -336,6 +319,72 @@ async def generate_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+async def generate_image(
+    prompt: str,
+    aspect_ratio: str,
+    tier: str | None = None,
+    model_override: str | None = None,
+    reference_urls: list[str] | None = None,
+) -> GeneratedImage:
+    from _env import env_flag
+    from obs import log, span
+    from providers import breaker, mock, model_router
+
+    if mock.on():
+        m = mock.mock_image(prompt, op="fresh", aspect_ratio=aspect_ratio)
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
+    if _image_provider() != "fal":
+        # Reference conditioning is fal/nano-banana only — other providers stay
+        # text-only (refs ignored). Custom IMAGE_PROVIDER deployments sit
+        # outside the failover chain (their slugs aren't in the registry).
+        prov, base_url, api_key = _resolve_image_provider()
+        model = model_override or _image_model()
+        async with span(
+            "image.generate", model=model, prompt_len=len(prompt), provider=prov
+        ) as ctx:
+            generated = await _openai_compatible_image(
+                base_url, api_key, model, prompt, aspect_ratio
+            )
+            ctx["bytes"] = len(generated.jpeg_bytes)
+        return generated
+
+    model = _resolve_model(tier, model_override)
+    if not env_flag("PROVIDER_FALLBACK"):
+        return await _generate_with_slug(model, prompt, aspect_ratio, reference_urls)
+
+    # PROVIDER_FALLBACK: the resolved slug plus its registry chain, with
+    # circuit-open slugs skipped (three consecutive failures → cooldown).
+    # A degraded page beats an error frame; the final's image_model says
+    # honestly which model actually rendered. Fresh-gen only by design.
+    candidates = [model, *model_router.fallback_chain(model)]
+    open_skipped = [c for c in candidates if not breaker.available(c)]
+    usable = [c for c in candidates if breaker.available(c)] or [model]
+    if open_skipped:
+        log("warn", "image.breaker_skip", skipped=",".join(open_skipped))
+    last_exc: Exception | None = None
+    for i, slug in enumerate(usable):
+        try:
+            generated = await _generate_with_slug(
+                slug, prompt, aspect_ratio, reference_urls
+            )
+        except Exception as exc:
+            breaker.record_failure(slug)
+            last_exc = exc
+            log(
+                "warn",
+                "image.fallback_step",
+                failed=slug,
+                error=f"{type(exc).__name__}: {exc}",
+                remaining=len(usable) - i - 1,
+            )
+            continue
+        breaker.record_success(slug)
+        if i > 0:
+            log("warn", "image.fallback_used", requested=model, used=slug)
+        return generated
+    raise last_exc if last_exc is not None else RuntimeError("no image candidates")
 
 
 def encode_data_url(jpeg_bytes: bytes, mime_type: str = "image/jpeg") -> str:

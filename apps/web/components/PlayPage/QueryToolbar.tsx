@@ -27,6 +27,8 @@ interface Props {
   loopKnobs: LoopKnobs;
   setLoopKnobs: (k: LoopKnobs) => void;
   sessionSpend?: number | null | undefined;
+  devModel?: string | null | undefined;
+  setDevModel?: ((m: string | null) => void) | undefined;
   worldMode: boolean;
   setWorldMode: (on: boolean) => void;
   autonomy: Autonomy;
@@ -50,6 +52,8 @@ export function QueryToolbar({
   loopKnobs,
   setLoopKnobs,
   sessionSpend,
+  devModel,
+  setDevModel,
   worldMode,
   setWorldMode,
   autonomy,
@@ -150,6 +154,8 @@ export function QueryToolbar({
           knobs={loopKnobs}
           setKnobs={setLoopKnobs}
           sessionSpend={sessionSpend}
+          devModel={devModel}
+          setDevModel={setDevModel}
         />
         <div
           role="group"
