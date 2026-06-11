@@ -51,6 +51,10 @@ def _parse_judgement(raw: str) -> JudgeResult:
     rationale = ""
     try:
         parsed = json.loads(cleaned[cleaned.find("{") : cleaned.rfind("}") + 1])
+        if isinstance(parsed, list):  # list-wrapped reply (see llm._coerce_json_dict)
+            parsed = next((p for p in parsed if isinstance(p, dict)), {})
+        if not isinstance(parsed, dict):
+            raise ValueError("non-object judge reply")
         rationale = str(parsed.get("rationale", ""))[:300]
         if "score" in parsed:
             score = float(parsed["score"])

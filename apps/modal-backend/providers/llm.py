@@ -2185,17 +2185,30 @@ def _coerce_bbox(raw: Any) -> dict[str, float] | None:
     return {"x_pct": x, "y_pct": y, "w_pct": w, "h_pct": h}
 
 
+def _coerce_json_dict(parsed: Any) -> dict[str, Any] | None:
+    """A reply that should be one object sometimes arrives list-wrapped
+    ([{...}]) — gemini does this occasionally even under response_format
+    json_object, and it took the whole click path down in prod. Unwrap to
+    the first dict; anything else is a miss."""
+    if isinstance(parsed, list):
+        parsed = next((p for p in parsed if isinstance(p, dict)), None)
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
+
+
 def _safe_json(raw: str) -> dict[str, Any]:
     try:
-        return cast(dict[str, Any], json.loads(raw))
+        coerced = _coerce_json_dict(json.loads(raw))
+        if coerced is not None:
+            return coerced
     except json.JSONDecodeError:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return cast(dict[str, Any], json.loads(raw[start : end + 1]))
-            except json.JSONDecodeError:
-                return {}
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return _coerce_json_dict(json.loads(raw[start : end + 1])) or {}
+        except json.JSONDecodeError:
+            return {}
     return {}
 
 
@@ -2435,6 +2448,9 @@ def parse_scene_graph(payload: Any) -> SceneGraph:
     capped at 2. Never raises — a weak completion degrades to a thinner graph."""
     from .layout_solver import EmptyRegion, PlannedEntity, PlannedRelation, SceneGraph
 
+    if isinstance(payload, list):
+        # The same list-wrapping drift _safe_json tolerates — unwrap, don't discard.
+        payload = next((p for p in payload if isinstance(p, dict)), None)
     if not isinstance(payload, dict):
         payload = {}
     kind = str(payload.get("place_kind", "place")).strip().lower()
