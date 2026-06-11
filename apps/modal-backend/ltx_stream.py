@@ -17,6 +17,19 @@ Deploy separately from `generate.py`:
 The printed WS URL goes into `apps/web/.env.local` as
 `NEXT_PUBLIC_LTX_WS_URL`. When that env var is set the web app uses this WS
 path; otherwise it falls back to the cheap `POST /animate` → fal path.
+
+**Cold starts:** with `min_containers=0` (the default below) the first
+stream after idle pays the full pipeline load (~60-90s on an H100). For a
+demo session, pre-warm with `min_containers=1` (≈ the GPU's idle rate while
+set) or Modal's memory snapshots (`enable_memory_snapshot=True` on the cls)
+which cut the reload to seconds. Turn it back to 0 after — the knob is a
+bill.
+
+**Resume:** the web client (lib/stream-client.ts) re-dials a dropped socket
+up to 3 times and asks to resume via `position`. This scaffold regenerates
+from the start; the client de-duplicates by segment `sequence`, so playback
+stays correct either way — honoring `position` server-side is the future
+bandwidth win, not a correctness need.
 """
 
 from __future__ import annotations

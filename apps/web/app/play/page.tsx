@@ -2609,6 +2609,11 @@ export default function PlayPage() {
     const wsUrl = getWSUrl();
     if (wsUrl && videoRef.current) {
       streamRef.current?.close();
+      // Dev knob: localStorage("openflipbook.ltxLoopyStrategy") overrides the
+      // anchor-loop strategy per stream ("anchor_loop" | "linear").
+      const loopyOverride = window.localStorage.getItem(
+        "openflipbook.ltxLoopyStrategy",
+      );
       streamRef.current = startLTXStream({
         wsUrl,
         video: videoRef.current,
@@ -2616,6 +2621,9 @@ export default function PlayPage() {
         startImageDataUrl: page.imageDataUrl,
         onStatus: setStreamStatus,
         onError: (msg) => setError(msg),
+        ...(loopyOverride === "anchor_loop" || loopyOverride === "linear"
+          ? { loopyStrategy: loopyOverride }
+          : {}),
       });
       setStreamStatus("connecting");
       return;
