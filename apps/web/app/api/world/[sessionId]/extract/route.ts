@@ -6,7 +6,7 @@ import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { inlineStoredImage } from "@/lib/r2";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type {
   Entity,
@@ -113,6 +113,7 @@ export async function POST(req: Request, { params }: Params) {
         headers: {
           "Content-Type": "application/json",
           [TRACE_HEADER]: traceId,
+          ...modalAuthHeaders(),
         },
         body: JSON.stringify({
           session_id: sessionId,

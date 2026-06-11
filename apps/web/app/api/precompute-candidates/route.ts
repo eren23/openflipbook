@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -30,6 +30,7 @@ export async function POST(req: Request) {
         headers: {
           "Content-Type": "application/json",
           [TRACE_HEADER]: traceId,
+          ...modalAuthHeaders(),
         },
         body,
         signal: req.signal,

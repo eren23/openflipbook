@@ -8,7 +8,7 @@ import {
 } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { EntityEditPlan, EntityGeoEdit, SceneView } from "@openflipbook/config";
 
@@ -101,7 +101,7 @@ export async function POST(req: Request, { params }: Params) {
       joinModalUrl(env.MODAL_API_URL, "/edit-entities"),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
+        headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId, ...modalAuthHeaders() },
         body: JSON.stringify({
           session_id: sessionId,
           instruction,

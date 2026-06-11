@@ -4,7 +4,7 @@ import { locationPhrase } from "@/lib/location-phrase";
 import { inlineStoredImage } from "@/lib/r2";
 import { resolveEntitiesForPrompt } from "@/lib/world";
 import { getWorldMap } from "@/lib/world-map";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -112,6 +112,7 @@ export async function POST(req: Request) {
     headers: {
       "Content-Type": "application/json",
       [TRACE_HEADER]: traceId,
+      ...modalAuthHeaders(),
     },
     body: upstreamBody,
   });

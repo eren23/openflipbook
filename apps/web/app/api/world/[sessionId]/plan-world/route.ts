@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readServerEnv } from "@/lib/env";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { PlanWorldResponse } from "@openflipbook/config";
 
@@ -39,7 +39,7 @@ export async function POST(req: Request, { params }: Params) {
   try {
     const upstream = await fetch(joinModalUrl(env.MODAL_API_URL, "/plan-world"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
+      headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId, ...modalAuthHeaders() },
       body: JSON.stringify({
         session_id: sessionId,
         description,

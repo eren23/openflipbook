@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { modalUrl as joinModalUrl } from "@/lib/modal";
+import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { inlineStoredImage } from "@/lib/r2";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   try {
     upstream = await fetch(joinModalUrl(modalUrl, "/resolve-click"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
+      headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId, ...modalAuthHeaders() },
       body,
       signal: req.signal,
     });

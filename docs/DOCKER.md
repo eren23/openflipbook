@@ -106,3 +106,23 @@ docker compose build web && docker compose up -d --no-deps web
 | `/play` 503 from generate | backend can't reach fal/OpenRouter (or Ollama) — `docker compose logs backend`. |
 | `make demo-local` slow / times out first request | models still downloading — `docker compose logs ollama-pull`. |
 | `/api/nodes` 500 | blob upload failed — check `R2_*` in the web service + `docker compose logs minio`. |
+
+## Exposing a deployment beyond localhost
+
+Three opt-in seatbelts (all default off — local stacks are unchanged):
+
+```sh
+SHARED_TOKEN=<random>     # backend refuses requests without the matching
+                          # x-openflipbook-token header; set the SAME value on
+                          # the web service — its server-side proxies inject it.
+                          # The browser never holds the token. /health stays open.
+RATE_LIMIT_RPM=30         # per-IP token bucket on the spendy endpoints
+                          # (/sse/generate, /resolve-click, /animate) -> 429s.
+MODERATE_PROMPTS=1        # one cheap LLM check on the composed image prompt
+                          # before image dollars are spent; blocks land as a
+                          # clean error frame. Fail-open on infra hiccups.
+```
+
+These are in-app seatbelts, not a perimeter: a genuinely public deployment
+should still sit behind a reverse proxy with TLS + real auth, and the web UI
+itself has no login — protect port 3000 at that layer.
