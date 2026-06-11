@@ -206,6 +206,16 @@ def test_loop_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg2.retry_budget_s == 0.0
 
 
+def test_loop_config_per_request_attempts_clamped() -> None:
+    # The speed preset's per-request ask beats the env default, inside
+    # [1, MAX_ATTEMPTS_CAP] — never an unbounded spend.
+    assert loop_config_from_env(max_attempts=1).max_attempts == 1
+    assert loop_config_from_env(max_attempts=3).max_attempts == 3
+    assert loop_config_from_env(max_attempts=99).max_attempts == 4
+    assert loop_config_from_env(max_attempts=0).max_attempts == 1
+    assert loop_config_from_env(max_attempts=None).max_attempts == 2  # env default
+
+
 async def test_run_view_loop_drains_and_concludes() -> None:
     render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
     result = await run_view_loop(
@@ -269,6 +279,46 @@ async def test_medium_axis_rejects_and_feeds_back() -> None:
     assert "ink wash became photoreal" in suffix
     assert "ART MEDIUM" in suffix
     assert "same hand" in suffix
+
+
+async def test_judges_run_concurrently() -> None:
+    # The demo latency fix: the four verdicts are independent VLM calls and
+    # must overlap. Conformance blocks until same_place STARTS — sequential
+    # execution times out (degraded, unaccepted) instead of passing.
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def conf(_img: bytes, _proj: str) -> JudgeResult:
+        await asyncio.wait_for(started.wait(), timeout=2.0)
+        return _j(9.0)
+
+    async def same(_region: bytes, _img: bytes) -> JudgeResult:
+        started.set()
+        return _j(9.0)
+
+    attempts = await _drain(
+        render=AsyncMock(return_value=_Img(b"a")), projection="top_down",
+        region_bytes=b"r", judge_conformance=conf, judge_same_place=same,
+        config=_cfg(),
+    )
+    assert len(attempts) == 1 and attempts[0].accepted
+
+
+async def test_sibling_judge_failure_still_degrades() -> None:
+    # A failure in ANY concurrent judge keeps the no-critic rule: one attempt,
+    # never accepted, the surviving verdicts retained.
+    render = AsyncMock(return_value=_Img(b"a"))
+    conf = AsyncMock(return_value=_j(9.0))
+    same = AsyncMock(side_effect=RuntimeError("429"))
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=conf, judge_same_place=same, config=_cfg(),
+    )
+    assert len(attempts) == 1 and not attempts[0].accepted
+    assert attempts[0].conformance is not None  # the survivor kept
+    assert attempts[0].same_place is None  # the failed slot degraded
+    render.assert_awaited_once()
 
 
 async def test_medium_judge_needs_region_bytes() -> None:

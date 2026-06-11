@@ -5,6 +5,8 @@ import type { Autonomy, ImageTier } from "@openflipbook/config";
 
 import { SUPPORTED_LOCALES, type SupportedLocale, type LocaleStrings } from "@/lib/i18n";
 import { THEMES, type Theme } from "@/hooks/usePersistedTheme";
+import type { LoopKnobs } from "@/hooks/useSpeedPreset";
+import { SpeedPreset } from "./SpeedPreset";
 
 const TIERS: readonly ImageTier[] = ["fast", "balanced", "pro"] as const;
 
@@ -22,6 +24,8 @@ interface Props {
   setTheme: (t: Theme) => void;
   imageTier: ImageTier;
   setImageTier: (t: ImageTier) => void;
+  loopKnobs: LoopKnobs;
+  setLoopKnobs: (k: LoopKnobs) => void;
   worldMode: boolean;
   setWorldMode: (on: boolean) => void;
   autonomy: Autonomy;
@@ -42,6 +46,8 @@ export function QueryToolbar({
   setTheme,
   imageTier,
   setImageTier,
+  loopKnobs,
+  setLoopKnobs,
   worldMode,
   setWorldMode,
   autonomy,
@@ -135,6 +141,13 @@ export function QueryToolbar({
             </button>
           ))}
         </div>
+        <SpeedPreset
+          busy={busy}
+          imageTier={imageTier}
+          setImageTier={setImageTier}
+          knobs={loopKnobs}
+          setKnobs={setLoopKnobs}
+        />
         <div
           role="group"
           aria-label="World Mode"

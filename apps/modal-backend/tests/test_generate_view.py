@@ -509,3 +509,38 @@ async def test_view_loop_judge_failure_degrades(
 
     edit.assert_awaited_once()
     assert any(e["type"] == "final" for e in events)
+
+
+async def test_view_loop_verify_false_takes_one_shot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Fast preset's request-level opt-out: verify:false rides the same
+    # proven one-shot path as the env kill-switch — per request, no judges.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    conf, same = _mock_judges(monkeypatch, [(0.0, "never called")])
+
+    events = await _collect(_event_stream(_steep_body(verify=False), "t1"))
+
+    edit.assert_awaited_once()
+    conf.assert_not_awaited()
+    same.assert_not_awaited()
+    assert any(e["type"] == "final" for e in events)
+
+
+async def test_view_loop_per_request_max_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # max_attempts:1 -> a rejected first attempt is NOT retried (the env
+    # default would); keep-best still finals the rejected image.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    conf, _ = _mock_judges(monkeypatch, [(3.0, "looks wrong")])
+
+    events = await _collect(_event_stream(_steep_body(max_attempts=1), "t1"))
+
+    edit.assert_awaited_once()
+    assert conf.await_count == 1
+    assert any(e["type"] == "final" for e in events)

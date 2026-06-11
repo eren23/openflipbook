@@ -36,7 +36,7 @@ from PIL import Image
 from providers.judge import JudgeResult
 from providers.pixel_diff import changed_fraction
 from providers.prompt_library.feedback import edit_retry_feedback_clause
-from providers.render_loop import Rendered
+from providers.render_loop import MAX_ATTEMPTS_CAP, Rendered, judge_concurrently
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class EditLoopConfig:
     retry_budget_s: float = 240.0
 
 
-def edit_loop_config_from_env() -> EditLoopConfig:
+def edit_loop_config_from_env(max_attempts: int | None = None) -> EditLoopConfig:
     def _f(name: str, default: float) -> float:
         try:
             return float(os.environ.get(name, ""))
@@ -62,6 +62,8 @@ def edit_loop_config_from_env() -> EditLoopConfig:
         attempts = int(os.environ.get("EDIT_LOOP_MAX_ATTEMPTS", ""))
     except ValueError:
         attempts = 2
+    if max_attempts is not None:
+        attempts = min(MAX_ATTEMPTS_CAP, max_attempts)
     return EditLoopConfig(
         max_attempts=max(1, attempts),
         accept_alignment=_f("EDIT_LOOP_ACCEPT_ALIGNMENT", 7.0),
@@ -200,17 +202,21 @@ async def iter_edit_attempts[ImageT: Rendered](
                 )
                 yield EditAttempt(index, image, suffix, None, None, None, False, latency)
                 return
-        try:
-            alignment = await judge_alignment(
+        # Both critics look at the same result independently — judged
+        # concurrently (see render_loop.judge_concurrently).
+        judged, failure = await judge_concurrently(
+            judge_alignment(
                 instruction, inside_crop_bytes(image.jpeg_bytes, region_box)
-            )
-            medium = await judge_medium(source_bytes, image.jpeg_bytes)
-        except Exception as exc:
+            ),
+            judge_medium(source_bytes, image.jpeg_bytes),
+        )
+        alignment, medium = judged
+        if failure is not None:
             log(
                 "warn",
                 "edit.loop.judge_failed",
                 attempt=index,
-                error=f"{type(exc).__name__}: {exc}",
+                error=f"{type(failure).__name__}: {failure}",
             )
             # No critic signal = the old blind coin-flip — don't spend more.
             yield EditAttempt(index, image, suffix, outside, alignment, medium, False, latency)

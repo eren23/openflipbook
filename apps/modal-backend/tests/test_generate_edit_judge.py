@@ -216,3 +216,21 @@ async def test_undecodable_source_degrades_to_legacy(
     assert edit.await_count == 1
     final = next(e for e in events if e["type"] == "final")
     assert "edit_verdict" not in final
+
+
+async def test_verify_false_skips_the_judged_edit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EDIT_JUDGE on but the request says verify:false -> exactly the legacy
+    # un-judged whole-image edit, no critics, no verdict.
+    monkeypatch.setenv("EDIT_JUDGE", "1")
+    _mock_polish(monkeypatch)
+    _mock_judges(monkeypatch)
+    body = _edit_body(verify=False)
+    edit = _mock_edit(monkeypatch, body.image or "")
+
+    events = await _collect(_event_stream(body, "t1"))
+
+    assert edit.await_count == 1
+    final = next(e for e in events if e["type"] == "final")
+    assert "edit_verdict" not in final

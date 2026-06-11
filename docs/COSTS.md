@@ -91,10 +91,12 @@ Dollars are fine; **wall-clock is the product problem**, and it's structural:
    it per retry attempt* — no memoization. On a hotspot that was a measured
    **3.5 min** for one ferry edit. **Biggest single win: upload once per
    request, reuse the URL across attempts.** (Real, mergeable fix.)
-2. **Judges are sequential.** An enter runs 4 judges per attempt, one after
+2. **Judges are sequential.** ~~An enter runs 4 judges per attempt, one after
    another (~2-5s each), up to 2 attempts = up to 8 VLM round-trips before the
-   image is accepted. They could run **concurrently** (they're independent),
-   or be trimmed on a fast tier.
+   image is accepted.~~ **Shipped:** `judge_concurrently()` gathers them
+   (render_loop + edit_loop) — judge wall-clock per attempt is now the
+   slowest single judge, not the sum. And the speed preset's `verify:false`
+   skips them entirely per request.
 3. **Extraction blocks the felt-ready moment.** 3 VLM calls (~15-25s) fire
    after every final before the codex/geo are populated. Already fire-and-
    forget for the image, but the next interaction's geo isn't ready until it
