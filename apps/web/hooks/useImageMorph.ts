@@ -42,7 +42,10 @@ export function useImageMorph(currentImageDataUrl: string | null | undefined) {
     const decodeStart = nowMs();
     const finish = () => {
       if (cancelled) return;
-      hudEmit("image:decode", { ms: nowMs() - decodeStart });
+      // t0 lets the HUD place the decode bar where it actually ran — a
+      // backgrounded tab defers this promise by minutes, and without the
+      // start time that stall painted as a 100s+ "decode" segment.
+      hudEmit("image:decode", { ms: nowMs() - decodeStart, t0: decodeStart });
       setMorphFx((prev) =>
         prev && prev.phase === "wait" ? { ...prev, nextImg: url, phase: "reveal" } : prev,
       );

@@ -1168,3 +1168,74 @@ async def test_polish_fill_scale_anchor_without_style(
     out = await llm.polish_fill_description("add a pond")
     assert "Drawn to scale with the surrounding scene" in out
     assert "art medium" not in out
+
+
+def test_safe_json_unwraps_list_wrapped_objects() -> None:
+    # gemini sometimes returns [{...}] despite response_format json_object —
+    # the shape drift that 502'd every tap (err.resolve_click in prod).
+    assert llm._safe_json('[{"subject": "The River Ankh"}]') == {
+        "subject": "The River Ankh"
+    }
+    assert llm._safe_json('[null, {"a": 1}]') == {"a": 1}
+    assert llm._safe_json("[]") == {}
+    assert llm._safe_json('["just", "strings"]') == {}
+    assert llm._safe_json('"a scalar"') == {}
+    assert llm._safe_json('{"already": "fine"}') == {"already": "fine"}
+    # prose-wrapped object still slices out
+    assert llm._safe_json('Sure! {"x": 2} hope that helps') == {"x": 2}
+
+
+def test_parse_scene_graph_unwraps_list_payload() -> None:
+    # bounds_hint only survives if the list-wrapped payload was unwrapped
+    # rather than discarded to {}.
+    graph = llm.parse_scene_graph(
+        [{"place_kind": "place", "bounds_hint": {"w": 12, "h": 8}}]
+    )
+    assert graph.bounds_hint == {"w": 12.0, "h": 8.0}
+
+
+def test_judge_parse_tolerates_list_wrapped_reply() -> None:
+    from providers.judge import _parse_judgement
+
+    result = _parse_judgement('[{"score": 7.5, "rationale": "fine"}]')
+    # the {-to-} slice grabs the inner object; either way no crash and the
+    # score survives
+    assert result.score == 7.5
+    assert "fine" in result.rationale
+
+
+def test_world_context_clause_renders_fixed_position() -> None:
+    out = llm._format_world_context_clause(
+        [
+            {
+                "name": "The Patrician's Palace",
+                "appearance": "grand marble palace with columns",
+                "kind": "place",
+                "location_hint": "the north of the map",
+            },
+            {
+                "name": "The Mended Drum",
+                "appearance": "a notorious low-beamed tavern",
+                "kind": "place",
+            },
+        ]
+    )
+    assert "fixed position: the north of the map" in out
+    assert "do NOT relocate" in out
+    # absent hint -> the entity line carries no position claim
+    drum_line = next(line for line in out.splitlines() if "Mended Drum" in line)
+    assert "fixed position" not in drum_line
+
+
+def test_world_context_clause_without_hints_is_byte_identical() -> None:
+    # The spatial half is strictly additive: no location_hint anywhere ->
+    # the clause must not change at all (header included).
+    entities = [
+        {
+            "name": "Mira",
+            "appearance": "a wiry engineer in a patched coat",
+            "kind": "person",
+        }
+    ]
+    out = llm._format_world_context_clause(entities)
+    assert "fixed position" not in out

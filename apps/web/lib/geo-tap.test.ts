@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
-import { describeSurroundings, geoTapRequest } from "./geo-tap";
+import { describeSurroundings, geoTapRequest, wideRegionCut } from "./geo-tap";
 
 function geo(
   id: string,
@@ -309,4 +309,69 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(auto.scene_view.view).toBeUndefined();
   });
 
+});
+
+describe("wideRegionCut (world-off coherence net)", () => {
+  const river = geo("river", "The River Ankh", 50, 30, {
+    footprint: { w: 90, d: 8 },
+    visual: "a wide silty brown river",
+  });
+  const palace = geo("palace", "The Patrician's Palace", 20, 10, {
+    height: 14,
+  });
+  const map = { entities: [river, palace], bounds: CROP };
+
+  it("a tap on a frame-spanning region answers with the zoom-cut subject", () => {
+    const cut = wideRegionCut(map, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9);
+    expect(cut).not.toBeNull();
+    expect(cut!.focus_label).toBe("The River Ankh");
+    expect(cut!.focus_visual).toBe("a wide silty brown river");
+  });
+
+  it("a narrow entity keeps the classic topical tap", () => {
+    const cut = wideRegionCut(
+      map,
+      "n1",
+      { x_pct: 20 / 100, y_pct: 10 / 60 },
+      16 / 9,
+    );
+    expect(cut).toBeNull();
+  });
+
+  it("inside an entered place the cut never fires", () => {
+    const inside: SceneView = {
+      node_id: "n2",
+      level: "street",
+      observer: {
+        pos: { x: 0, y: 0 },
+        eye_height: 1.7,
+        gaze: 0,
+        pitch: 0,
+        fov: 1.2,
+      },
+      map_crop: null,
+    };
+    const cut = wideRegionCut(
+      map,
+      "n2",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      inside,
+    );
+    expect(cut).toBeNull();
+  });
+
+  it("nested geos (a child frame's wide floor) never claim the city map", () => {
+    const nestedWide = geo("hall", "The Great Hall", 50, 30, {
+      footprint: { w: 90, d: 8 },
+      parent_id: "palace",
+    });
+    const cut = wideRegionCut(
+      { entities: [nestedWide, palace], bounds: CROP },
+      "n1",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+    );
+    expect(cut).toBeNull();
+  });
 });

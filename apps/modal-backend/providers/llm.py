@@ -1325,6 +1325,12 @@ def _format_world_context_clause(
         # scale across pages (a place rendered large once shouldn't come back
         # tiny). Best-effort; absent → no hint.
         line += _world_size_hint(entry)
+        # The spatial half of continuity: where the world map pins this entity
+        # ("the north-west of the map"). Without it the model relocates
+        # landmarks to fit the composition — the palace-on-the-riverbank drift.
+        location = str(entry.get("location_hint", "") or "").strip()
+        if location:
+            line += f"; fixed position: {location}"
         lines.append(line)
     if not lines:
         return ""
@@ -1338,7 +1344,17 @@ def _format_world_context_clause(
         "Keep each entity at a CONSISTENT RELATIVE SCALE across pages — where a "
         "size is given below (footprint/height in world units), respect those "
         "proportions so a place drawn large once is not shrunk later. "
-        "If an entity is NOT relevant to this page, simply omit it; do not "
+        + (
+            # Additive: the position rule only enters the prompt when at least
+            # one entity actually carries a hint (no hints -> byte-identical).
+            "Where a `fixed position` is given, the entity LIVES at that "
+            "position of the established world — keep it there relative to "
+            "the other landmarks; do NOT relocate it to suit this page's "
+            "composition. "
+            if any("fixed position:" in line for line in lines)
+            else ""
+        )
+        + "If an entity is NOT relevant to this page, simply omit it; do not "
         "force entities into the scene.\n\n"
         "CAUSALITY (CRITICAL): each entity's `state=` flags below describe "
         "the CURRENT condition of the entity from prior pages. The "
@@ -2185,17 +2201,30 @@ def _coerce_bbox(raw: Any) -> dict[str, float] | None:
     return {"x_pct": x, "y_pct": y, "w_pct": w, "h_pct": h}
 
 
+def _coerce_json_dict(parsed: Any) -> dict[str, Any] | None:
+    """A reply that should be one object sometimes arrives list-wrapped
+    ([{...}]) — gemini does this occasionally even under response_format
+    json_object, and it took the whole click path down in prod. Unwrap to
+    the first dict; anything else is a miss."""
+    if isinstance(parsed, list):
+        parsed = next((p for p in parsed if isinstance(p, dict)), None)
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
+
+
 def _safe_json(raw: str) -> dict[str, Any]:
     try:
-        return cast(dict[str, Any], json.loads(raw))
+        coerced = _coerce_json_dict(json.loads(raw))
+        if coerced is not None:
+            return coerced
     except json.JSONDecodeError:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return cast(dict[str, Any], json.loads(raw[start : end + 1]))
-            except json.JSONDecodeError:
-                return {}
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return _coerce_json_dict(json.loads(raw[start : end + 1])) or {}
+        except json.JSONDecodeError:
+            return {}
     return {}
 
 
@@ -2435,6 +2464,9 @@ def parse_scene_graph(payload: Any) -> SceneGraph:
     capped at 2. Never raises — a weak completion degrades to a thinner graph."""
     from .layout_solver import EmptyRegion, PlannedEntity, PlannedRelation, SceneGraph
 
+    if isinstance(payload, list):
+        # The same list-wrapping drift _safe_json tolerates — unwrap, don't discard.
+        payload = next((p for p in payload if isinstance(p, dict)), None)
     if not isinstance(payload, dict):
         payload = {}
     kind = str(payload.get("place_kind", "place")).strip().lower()

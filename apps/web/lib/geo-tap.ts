@@ -224,3 +224,43 @@ export function geoTapRequest(
     surroundings: describeSurroundings(route.focus_id, map.entities),
   };
 }
+
+export interface WideRegionCut {
+  focus_label: string;
+  focus_visual: string | null;
+  surroundings: string;
+}
+
+/** World-OFF coherence net. A classic tap on a WIDE mapped region (a river, a
+ * wall, a district spanning the frame) re-composes the whole scene on the
+ * fresh path, and with nothing pinning the geography the model relocates
+ * landmarks to fit the new composition — the palace-on-the-riverbank drift.
+ * Detect exactly that case and answer with the same place_submap zoom-cut a
+ * world-mode submap tap uses (Kontext continuation of the region crop — a
+ * faithful CUT of the map, not a reinvention). Narrow entities, nested
+ * frames, and unmapped taps all keep the classic topical tap. */
+export function wideRegionCut(
+  map: { entities: WorldEntityGeo[]; bounds: MapCrop },
+  nodeId: string,
+  click: ClickPoint,
+  aspect: number,
+  currentView?: SceneView | null,
+  minFrameFrac = 0.5,
+): WideRegionCut | null {
+  // Only at the top-level map frame — inside an entered place the classic
+  // tap stands (its frame isn't the city map the cut would continue).
+  if (currentView && currentView.level !== "map") return null;
+  const tap = geoTapRequest(map, nodeId, click, aspect, undefined, currentView ?? null);
+  if (!tap?.focus_id || !tap.focus_label) return null;
+  const focus = map.entities.find((e) => e.id === tap.focus_id);
+  if (!focus || (focus.parent_id ?? null) !== null) return null;
+  const wide =
+    focus.footprint.w >= MAP_IMAGE_FRAME.w * minFrameFrac ||
+    focus.footprint.d >= MAP_IMAGE_FRAME.h * minFrameFrac;
+  if (!wide) return null;
+  return {
+    focus_label: tap.focus_label,
+    focus_visual: tap.focus_visual,
+    surroundings: tap.surroundings,
+  };
+}

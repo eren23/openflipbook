@@ -95,7 +95,12 @@ import { DragDropOverlay } from "@/components/PlayPage/DragDropOverlay";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWorldState } from "@/hooks/useWorldState";
 import { useWorldMap } from "@/hooks/useWorldMap";
-import { geoTapRequest, MAP_IMAGE_FRAME, type GeoTapOverride } from "@/lib/geo-tap";
+import {
+  geoTapRequest,
+  MAP_IMAGE_FRAME,
+  wideRegionCut,
+  type GeoTapOverride,
+} from "@/lib/geo-tap";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -661,11 +666,22 @@ export default function PlayPage() {
               } else if (evt.stage === "planning") {
                 setStatusMsg("Planning page…");
               } else if (evt.stage === "generating_image") {
+                // The pro model has no fast draft to show (OpenRouter path)
+                // and routinely takes minutes — say so instead of leaving a
+                // silent spinner (the 3-minute-riverflow mystery). Read the
+                // tier off the REQUEST body: this callback is deliberately
+                // dependency-free, so component state here would be stale.
+                const proNote =
+                  body.image_tier === "pro"
+                    ? " (pro model — usually 2–3 min)"
+                    : "";
                 setStatusMsg(
                   evt.page_title
-                    ? `Drawing "${evt.page_title}"…`
-                    : "Drawing image…"
+                    ? `Drawing "${evt.page_title}"…${proNote}`
+                    : `Drawing image…${proNote}`
                 );
+              } else if (evt.stage === "draft") {
+                setStatusMsg("Draft preview — the full render is refining…");
               }
             } else if (evt.type === "progress") {
               lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
@@ -2075,6 +2091,18 @@ export default function PlayPage() {
               page.sceneView,
             )
           : null;
+      // World OFF + a wide mapped region (the river): a fresh re-composition
+      // relocates landmarks, so zoom-cut the map instead (see wideRegionCut).
+      const wideCut =
+        !worldEnabled && geoEntities.length > 0
+          ? wideRegionCut(
+              { entities: geoEntities, bounds: geoBounds },
+              page.nodeId ?? "",
+              { x_pct: click.x_pct, y_pct: click.y_pct },
+              16 / 9,
+              page.sceneView,
+            )
+          : null;
       void generate({
         query: page.query,
         aspect_ratio: "16:9",
@@ -2163,6 +2191,25 @@ export default function PlayPage() {
               // the VLM-invented surroundings above (geoTap is spread last → wins).
               ...(geoTap.surroundings
                 ? { prefetched_surroundings: geoTap.surroundings }
+                : {}),
+            }
+          : {}),
+        // The world-off zoom-cut: same submap continuation a world-mode submap
+        // tap rides (Kontext on the region crop), so the river page is a CUT of
+        // the map, not a re-imagined city. Spread last so the subject wins.
+        ...(wideCut
+          ? {
+              render_mode: "place_submap",
+              prefetched_subject: wideCut.focus_label,
+              ...(viewNeutralAppearance(wideCut.focus_visual)
+                ? {
+                    prefetched_subject_context: viewNeutralAppearance(
+                      wideCut.focus_visual,
+                    ),
+                  }
+                : {}),
+              ...(wideCut.surroundings
+                ? { prefetched_surroundings: wideCut.surroundings }
                 : {}),
             }
           : {}),
@@ -2793,7 +2840,10 @@ export default function PlayPage() {
                     }
                     setMorphFx((prev) => {
                       if (!prev || prev.phase !== "reveal") return prev;
-                      hudEmit("morph:end", { duration_ms: nowMs() - prev.startedAt });
+                      hudEmit("morph:end", {
+                        duration_ms: nowMs() - prev.startedAt,
+                        t: nowMs(),
+                      });
                       return null;
                     });
                   }}
