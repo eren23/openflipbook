@@ -121,6 +121,17 @@ eval-baselines:
 	-cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
 	-cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
 	-cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.runner
+# Matrix bench (the evolvable eval): scenarios × arms × models × prompt-
+# variants, disk-cached so prompt evolution re-bills only changed cells.
+# DRY-RUN IS THE DEFAULT — eval-matrix-dry prints the per-cell cost table
+# (the mandatory preview, $0). eval-matrix runs uncached cells under the
+# hard budget cap (MATRIX_BUDGET_USD, default $3; MATRIX_ALLOW_PARTIAL=1
+# runs to the cap instead of refusing). Scenarios come from the map corpus
+# once the recon bench (tests/recon_bench) lands.
+eval-matrix-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.matrix_bench.runner
+eval-matrix:
+	cd apps/modal-backend && MATRIX_BENCH_RUN=1 .venv/bin/python -m tests.matrix_bench.runner
 # Free coverage report (backend lines + the web view-path files).
 coverage:
 	cd apps/modal-backend && .venv/bin/python -m pytest -q -m "not paid" --cov=providers --cov=generate --cov-report=term | tail -30
