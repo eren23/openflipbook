@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cropBox, orderedRefs } from "./image-condition";
+import { cropBox, orderedRefs, regionUpscale } from "./image-condition";
 
 /**
  * Pure core of the image-conditioning reference stack: where the region crop
@@ -35,6 +35,22 @@ describe("cropBox", () => {
     const b = cropBox(0.5, 0.5, 2);
     expect(b.w).toBe(1);
     expect(b.x).toBe(0);
+  });
+});
+
+describe("regionUpscale (the anti-postage-stamp reference)", () => {
+  it("tiny crops hit the upscale cap", () => {
+    expect(regionUpscale(200)).toBe(3); // 1024/200 > 3 → capped
+  });
+  it("mid crops scale to the target width", () => {
+    expect(regionUpscale(512)).toBeCloseTo(2, 6); // 1024/512
+  });
+  it("big crops never shrink", () => {
+    expect(regionUpscale(1024)).toBe(1);
+    expect(regionUpscale(2000)).toBe(1);
+  });
+  it("degenerate width is a no-op", () => {
+    expect(regionUpscale(0)).toBe(1);
   });
 });
 
