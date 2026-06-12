@@ -73,3 +73,6 @@ apps/modal-backend/tests/**/cache/
 # Ground-truth corpus images (fetched by scripts/fetch_corpus.py; text-only
 # descriptions + the sha-pinned manifest are what git tracks).
 apps/modal-backend/tests/map_corpus/images/
+
+# Ladder proof runs (e2e artifacts: images + manifests + reports).
+ladder-proof-runs/

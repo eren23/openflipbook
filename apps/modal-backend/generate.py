@@ -272,6 +272,10 @@ class GenerateBody(BaseModel):
     # NO baked text — names ride a client overlay built from entity data.
     # Optional + default False: old clients omit it, prompts byte-identical.
     suppress_map_labels: bool = False
+    # The transition tap's origin (tap descent ladder): the SOURCE frame was a
+    # closeup of the entered place — the establishing shot already happened,
+    # so the enter descends to ground level instead of another aerial.
+    from_closeup: bool = False
     autonomy: str = "auto"
     render_mode: str | None = None
     # B2 logical AROUND (SCALE_AROUND_LOGICAL): the same-scale neighbours the client
@@ -505,6 +509,7 @@ def _view_spec_for(
             has_observer=bool(sv and sv.observer is not None),
             has_region=has_region,
             place_form=place_form,
+            from_closeup=bool(body.from_closeup),
             subject=subject,
             subject_context=subject_context,
             focus_kind=str(focus.get("kind") or "") if focus else None,
@@ -1833,6 +1838,10 @@ async def _event_stream(
             # place_closeup zooms into a PERSPECTIVE scene — the cartographic
             # wording would fight the reference pixels.
             register="view" if render_mode == "place_closeup" else "map",
+            # The closeup rung magnifies faithfully: no planner facts, no
+            # "elaborate" — the facts channel is how city-wide context leaked
+            # into closeups (the invented-riverside-palace failure).
+            faithful=bool(body.scene_view and body.scene_view.closeup),
         )
         # The enter edit is a view CHANGE on the SAME place: the region crop
         # carries the look, this text carries the move inside + everything the

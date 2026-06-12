@@ -2375,6 +2375,11 @@ export default function PlayPage() {
               world_mode: true,
               autonomy: worldAutonomy,
               ...(worldDomLabels ? { suppress_map_labels: true } : {}),
+              // The ladder's descent signal: entering from a closeup frame
+              // goes to ground level (the closeup WAS the establishing shot).
+              ...(page.sceneView?.closeup === true
+                ? { from_closeup: true }
+                : {}),
               ...(enterAsToRenderMode(worldResolved?.enter_as) !== "explainer"
                 ? { render_mode: enterAsToRenderMode(worldResolved?.enter_as) }
                 : {}),

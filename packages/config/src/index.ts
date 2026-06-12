@@ -170,6 +170,10 @@ export interface GenerateRequestBody {
   // baked text — names ride a client overlay built from entity data. Optional
   // + default-absent: old clients omit it, prompts stay byte-identical.
   suppress_map_labels?: boolean;
+  // Tap descent ladder: the SOURCE frame of this enter was a closeup of the
+  // place — the establishing shot already happened, so the enter goes to
+  // ground level (grounds/courtyard) instead of another aerial.
+  from_closeup?: boolean;
   // B2 logical AROUND (mode:"expand", SCALE_AROUND_LOGICAL). The same-scale
   // neighbours the client already knows from geometry (excluded) + the focus's
   // rung, so the bloom proposes NEW peers at that scale. Ignored unless the flag

@@ -103,6 +103,7 @@ def default_view(
     has_region: bool = False,
     enter_as: str | None = None,
     place_form: str | None = None,
+    from_closeup: bool = False,
     subject: str | None = None,
     subject_context: str | None = None,
     focus_kind: str | None = None,
@@ -129,6 +130,7 @@ def default_view(
             subject_context,
             focus_kind,
             focus_footprint,
+            from_closeup=from_closeup,
         )
     if rmode == "place_closeup":
         # A closeup of something inside a SCENE: the reference pixels dictate
@@ -161,7 +163,15 @@ def _scene_view(
     subject_context: str | None,
     focus_kind: str | None,
     focus_footprint: tuple[float, float] | None,
+    from_closeup: bool = False,
 ) -> ViewSpec | None:
+    # The ladder's descent rule: entering FROM a closeup always goes to
+    # GROUND LEVEL — the closeup already was the establishing shot, so a
+    # complex/landscape place lands in its grounds/courtyard instead of yet
+    # another aerial (the live failure: step_in=2.0 on every loop attempt
+    # because nothing ever descended the camera).
+    if from_closeup:
+        return eye_level_scene()
     # S1 — the only meaningful level pill (street/building are dead constants).
     if (level or "").lower() == "eye":
         return eye_level_scene()
