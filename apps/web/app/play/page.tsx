@@ -238,7 +238,7 @@ async function persistNode(
 // planner's `final_prompt` — the rich paragraph the image model rendered
 // from. The VLM needs both to reliably name entities; a title alone is
 // usually too thin ("Lantern Room" without the keeper's name in scope).
-function triggerExtraction(args: {
+async function triggerExtraction(args: {
   sessionId: string;
   nodeId: string;
   imageDataUrl: string;
@@ -249,26 +249,27 @@ function triggerExtraction(args: {
   sceneView?: SceneView | null;
   traceId: string | null;
 }): Promise<{ added: number; updated: number } | null> {
-  const t0 = nowMs();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (args.traceId) headers[TRACE_HEADER] = args.traceId;
-  return fetch(
-    `/api/world/${encodeURIComponent(args.sessionId)}/extract`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        node_id: args.nodeId,
-        image_data_url: args.imageDataUrl,
-        caption: args.caption,
-        scene_description: args.sceneDescription ?? null,
-        scene_view: args.sceneView ?? null,
-      }),
-    }
-  )
-    .then(async (res) => {
+  const attempt = async (): Promise<{ added: number; updated: number } | null> => {
+    const t0 = nowMs();
+    try {
+      const res = await fetch(
+        `/api/world/${encodeURIComponent(args.sessionId)}/extract`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            node_id: args.nodeId,
+            image_data_url: args.imageDataUrl,
+            caption: args.caption,
+            scene_description: args.sceneDescription ?? null,
+            scene_view: args.sceneView ?? null,
+          }),
+        }
+      );
       if (!res.ok) {
         hudEmit("world:extract_error", {
           status: res.status,
@@ -298,12 +299,23 @@ function triggerExtraction(args: {
         added: payload.added_ids?.length ?? 0,
         updated: payload.updated_ids?.length ?? 0,
       };
-    })
-    .catch(() => {
+    } catch {
       // Best-effort. The codex view will refetch on its own if a user
       // opens it; nothing to roll back here.
       return null;
-    });
+    }
+  };
+  const first = await attempt();
+  // The first extraction after a generation occasionally stores NOTHING
+  // (the ladder-proof harness hit it on 3 of 12 runs) and a map with zero
+  // entities dead-ends every tap until the user finds "localize now". A
+  // 0/0 merge on a freshly rendered page is near-certain flake — re-fire
+  // once; the route's diff-merge makes the second pass idempotent.
+  if (first && first.added === 0 && first.updated === 0) {
+    await new Promise((r) => setTimeout(r, 4000));
+    return attempt();
+  }
+  return first;
 }
 
 export default function PlayPage() {
@@ -2398,6 +2410,12 @@ export default function PlayPage() {
               // high-consistency op); only a true transition tap enters.
               render_mode:
                 worldTap.kind === "scene" ? "place_scene" : "place_submap",
+              // Magnified baked lettering always garbles ("The Great kee") —
+              // closeups render text-free regardless of the labels pill; the
+              // name lives in the page title / DOM labels.
+              ...(worldTap.kind === "closeup"
+                ? { suppress_map_labels: true }
+                : {}),
               // The geometric tap KNOWS which entity you hit (by coordinates) —
               // make it the subject so tapping the Tower of Art enters the Tower,
               // overriding the looser VLM read that picked its container. Spread
