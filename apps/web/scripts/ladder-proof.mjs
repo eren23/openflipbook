@@ -143,9 +143,29 @@ async function cropViaCanvas(page, srcUrl, box) {
   );
 }
 
-async function pollTargetEntity(session, matcher, timeoutMs = 150_000) {
+async function retriggerExtraction(session, node, caption) {
+  // The first post-generation extraction is occasionally empty (the same
+  // flake the product's localize-now button covers) — re-trigger it the
+  // way the client would.
+  try {
+    await fetch(`${BASE}/api/world/${encodeURIComponent(session)}/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        node_id: node.id,
+        image_data_url: node.image_url,
+        caption: caption.slice(0, 1400),
+        scene_description: caption.slice(0, 1600),
+        scene_view: null,
+      }),
+    });
+  } catch { /* best-effort */ }
+}
+
+async function pollTargetEntity(session, matcher, timeoutMs = 240_000, retrigger = null) {
   const deadline = Date.now() + timeoutMs;
   let places = [];
+  let retriggered = 0;
   while (Date.now() < deadline) {
     const m = await api(`/api/world/${encodeURIComponent(session)}/map`);
     places = (m?.entities ?? []).filter(
@@ -153,6 +173,13 @@ async function pollTargetEntity(session, matcher, timeoutMs = 150_000) {
     );
     const hit = places.find((e) => matcher.test(e.label));
     if (hit) return { entity: hit, fallback: false };
+    // Two chances to recover from an empty first extraction.
+    const elapsed = timeoutMs - (deadline - Date.now());
+    if (retrigger && places.length === 0 && elapsed > 60_000 * (retriggered + 1) && retriggered < 2) {
+      retriggered += 1;
+      log("  (extraction empty — re-triggering, attempt", retriggered + ")");
+      await retrigger();
+    }
     await sleep(4000);
   }
   if (places.length > 0) {
@@ -243,7 +270,12 @@ async function runScenario(browser, scenario) {
     log(scenario.id, "root saved", rootNode.id);
 
     // ── Hop 1: tap the target place → expect a CLOSEUP ──
-    const { entity, fallback } = await pollTargetEntity(sessionId, scenario.target);
+    const { entity, fallback } = await pollTargetEntity(
+      sessionId,
+      scenario.target,
+      240_000,
+      () => retriggerExtraction(sessionId, rootNode, scenario.query),
+    );
     manifest.target = {
       label: entity.label,
       pos: entity.pos,
