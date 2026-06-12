@@ -181,7 +181,7 @@ describe("the descent ladder (closeup rung)", () => {
       // window centred on the entity, footprint x margin as a frame fraction
       expect(r.crop.x + r.crop.w / 2).toBeCloseTo(50, 5);
       expect(r.crop.y + r.crop.h / 2).toBeCloseTo(50, 5);
-      expect(r.crop.w).toBeCloseTo(18, 3); // max(10*1.6/100, 8*1.6/100, 0.18) = 0.18 -> 18
+      expect(r.crop.w).toBeCloseTo(28, 3); // max(10*1.6/100, 8*1.6/100, 0.28) = 0.28 -> 28
     }
   });
 
@@ -241,8 +241,8 @@ describe("entityCloseupCrop", () => {
   });
   it("tiny entities get the min fraction (context for Kontext)", () => {
     const c = entityCloseupCrop(geo("well", 50, 30, { footprint: { w: 1, d: 1 } }), frame);
-    expect(c.w).toBeCloseTo(18, 5);
-    expect(c.h).toBeCloseTo(10.8, 5);
+    expect(c.w).toBeCloseTo(28, 5);
+    expect(c.h).toBeCloseTo(16.8, 5);
   });
   it("preserves the frame aspect (w/h ratio)", () => {
     const c = entityCloseupCrop(geo("uni", 40, 30, { footprint: { w: 20, d: 6 } }), frame);

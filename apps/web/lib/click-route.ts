@@ -121,7 +121,12 @@ function cropCentre(crop: MapCrop): WorldVec2 {
 // (the property the submap window and the click crop already have).
 const CLOSEUP_MARGIN = 1.6;
 // Tiny entities keep enough surroundings for Kontext to anchor against.
-const CLOSEUP_MIN_FRAC = 0.18;
+// 0.18 → 0.28 (F2, ladder-proof harbor): when the map draws a place as a
+// bare ICON on terrain, an 18%-of-frame reference carries so few real
+// pixels that the magnification invents architecture around it (the
+// lighthouse grew a walled yard). More surrounding map in the reference
+// anchors the symbol→building translation to what is actually drawn.
+const CLOSEUP_MIN_FRAC = 0.28;
 // Big landmarks still deserve a real zoom: the crop caps below the frame so
 // the closeup rung always descends. (The proof harness caught a palace whose
 // EXTRACTED footprint was 39x33 on the 100x60 frame — margin pushed the crop

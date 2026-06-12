@@ -3,8 +3,13 @@
     .venv/bin/python -m tests.ladder_judge <run_dir>
 
 For each scenario dir with {1_region_promised.jpg, 2_closeup.jpg, 3_enter.jpg}:
-  hop1 (map region → closeup): score_step_in + score_continuation
+  hop1 (map region → closeup): score_continuation PRIMARY (+ step_in recorded)
   hop2 (closeup → enter):      score_step_in
+hop1's primary is IDENTITY, not zoom: the promised region is already the
+zoomed window, so a perfect faithful magnification reads as "same framing,
+sharper" — step_in ~5-6 with continuation 10 — while a DRIFTED closeup reads
+as "zoomed in" (step_in 8, continuation 2). The two anti-correlate on
+map-register pairs; only hop2 measures descent.
 Writes scores.json per scenario and a summary into <run_dir>/scores.json.
 Secondary signal only — the eyes-on subagent verdicts are primary.
 PAID: ~5 Gemini calls per scenario (~$0.03).
@@ -65,8 +70,8 @@ async def _run(run_dir: Path) -> int:
         if row:
             rows.append(row)
             print(
-                f"{row['scenario']:8} hop1 step_in={row.get('hop1_step_in')} "
-                f"cont={row.get('hop1_continuation')} | hop2 step_in={row.get('hop2_step_in')}"
+                f"{row['scenario']:8} hop1 cont={row.get('hop1_continuation')} "
+                f"(step_in={row.get('hop1_step_in')}) | hop2 step_in={row.get('hop2_step_in')}"
             )
     (run_dir / "scores.json").write_text(json.dumps(rows, indent=1))
     print(f"wrote {run_dir / 'scores.json'}")
