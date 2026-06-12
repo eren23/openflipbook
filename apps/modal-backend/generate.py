@@ -357,6 +357,17 @@ def _heights_for_view(body: GenerateBody) -> list[tuple[str, float, str]] | None
     return [(n, h / anchor_h, anchor_name) for n, h in real[1:]]
 
 
+def _same_place_judge(judge_mod: Any) -> Any:
+    """The render loop's same-place axis. Default: the zoom-aware step-in
+    judge (a city-wide redraw of a tapped courtyard scores 10/10 on plain
+    same-place — a wider view of a place IS that place — and sailed through
+    the loop live). ENTER_STEP_IN_JUDGE=false reverts byte-for-byte to the
+    plain continuation judge."""
+    if env_flag("ENTER_STEP_IN_JUDGE", "true"):
+        return judge_mod.score_step_in
+    return judge_mod.score_continuation
+
+
 def _view_grammar_on() -> bool:
     """The view grammar (a deliberate camera per render). Default ON; =false
     is a strict kill-switch — every render byte-identical to pre-grammar."""
@@ -1965,7 +1976,7 @@ async def _event_stream(
                     projection=str((enter_view or {}).get("projection") or ""),
                     region_bytes=render_loop.data_url_bytes(enter_source),
                     judge_conformance=judge.score_view_conformance,
-                    judge_same_place=judge.score_continuation,
+                    judge_same_place=_same_place_judge(judge),
                     config=loop_cfg,
                     judge_detail=_judge_detail,
                     # The medium gate: the entered view must look drawn by the

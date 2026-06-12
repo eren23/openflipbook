@@ -151,6 +151,37 @@ async def score_continuation(region_crop: bytes, candidate: bytes) -> JudgeResul
     )
 
 
+async def score_step_in(region_crop: bytes, candidate: bytes) -> JudgeResult:
+    """Production twin of score_continuation with the ZOOM DIRECTION made
+    explicit. The live failure it exists for: an "enter" edit that redraws
+    the WHOLE CITY around the tapped courtyard scores 10/10 on plain
+    same-place (a wider view of a place IS that place) and sails through
+    the render loop. A step IN must be closer/tighter than its reference —
+    wider is a failure even when the place is right. The enter bench keeps
+    score_continuation so its committed baseline stays comparable."""
+    system = (
+        "You judge whether image 2 is a faithful STEP INTO image 1. Image 1 is "
+        "a cropped region of a map showing a specific place. Image 2 is a "
+        "generated view that is SUPPOSED to be that same place seen CLOSER or "
+        "from within — a tighter framing covering LESS area than image 1. "
+        "Score 0-10: 10 = unmistakably the same place, clearly closer or "
+        "inside; 5 = the same place at roughly the SAME framing (no step in); "
+        "0-2 = a different place, OR a WIDER view that shows more area around "
+        "the place (zoomed out — e.g. the whole city around a tapped "
+        "courtyard). Zooming OUT is a failure no matter how consistent."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        "Image 1: the tapped map region (the reference). Image 2: the entered "
+        "view. Is image 2 that same place seen CLOSER (high) — or the same "
+        "framing (5), a wider/zoomed-out view (low), or a different place "
+        "(low)? Score 0-10."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(region_crop), _image_block(candidate)]
+    )
+
+
 async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
     system = (
         "You are a prompt-alignment judge. Score on a 0-10 scale how "

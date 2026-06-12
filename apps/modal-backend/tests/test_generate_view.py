@@ -346,6 +346,9 @@ def _mock_judges(
     medium = AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw=""))
     monkeypatch.setattr(judge_mod, "score_view_conformance", conf)
     monkeypatch.setattr(judge_mod, "score_continuation", same)
+    # Production's same-place axis defaults to the zoom-aware step-in judge
+    # (ENTER_STEP_IN_JUDGE) — same mock, same axis.
+    monkeypatch.setattr(judge_mod, "score_step_in", same)
     monkeypatch.setattr(judge_mod, "score_feature_articulation", detail)
     monkeypatch.setattr(judge_mod, "score_style_pair", medium)
     return conf, same
@@ -458,6 +461,11 @@ async def test_view_loop_medium_drift_retries(
     monkeypatch.setattr(
         judge_mod,
         "score_continuation",
+        AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw="")),
+    )
+    monkeypatch.setattr(
+        judge_mod,
+        "score_step_in",
         AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw="")),
     )
     monkeypatch.setattr(
