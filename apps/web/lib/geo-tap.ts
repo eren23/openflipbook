@@ -47,6 +47,13 @@ export interface GeoTap {
   // stone, concentric rings, moss-covered) across zoom levels, even as the angle
   // changes between map and scene.
   focus_visual: string | null;
+  // Sightline-culled surroundings (scene taps only): `surroundings` becomes
+  // VIEW-relative (frame positions from the observer pose) and
+  // `surroundings_behind` names the out-of-frustum landmarks the instruction
+  // bans from the backdrop. Unset on submap/closeup taps (map register has
+  // no camera).
+  surroundings_pov?: boolean;
+  surroundings_behind?: string;
   // The focus's FRAME-MATES drawn straight from the geo (their real bearings +
   // appearance descriptors), e.g. "to the north-east, The Citadel (square-towered
   // stone bastion on a rise); to the south, The Docks (masted ships)". Fed as the
@@ -98,6 +105,75 @@ export function describeSurroundings(
       .map((m) => `to the ${m.dir}, ${m.label}${m.visual ? ` (${m.visual})` : ""}`)
       .join("; ") + "."
   );
+}
+
+/** Sightline-aware surroundings for an ENTERED scene: the observer pose's view
+ *  frustum decides what the camera can actually see. In-frustum frame-mates are
+ *  described by their place IN FRAME (left/ahead/right + a distance word, sorted
+ *  left-to-right); everything else lands in `behind` — the explicit NOT-visible
+ *  list the instruction bans from the backdrop. The live failure this kills: the
+ *  lighthouse enter faced open sea, and the bearing-worded neighbours ("to the
+ *  east, the docks") were painted into the background anyway. Pure. */
+export function describeVisibleSurroundings(
+  focusId: string,
+  entities: WorldEntityGeo[],
+  observer: ObserverPose,
+  max = 5,
+): { visible: string; behind: string } {
+  const focus = entities.find((e) => e.id === focusId);
+  if (!focus) return { visible: "", behind: "" };
+  const parent = focus.parent_id ?? null;
+  const half = (observer.fov > 0 ? observer.fov : Math.PI / 2) / 2;
+  // A touch past the frustum edge still reads as "edge of frame".
+  const EDGE_PAD = 0.15;
+  // Distance words scale with the focus itself (world units are scale-free).
+  const unit = Math.max(focus.footprint.w, focus.footprint.d, 8);
+  const seen: { label: string; visual: string; angle: number; dist: number }[] = [];
+  const hidden: { label: string; dist: number }[] = [];
+  for (const m of entities) {
+    if (m.id === focusId || (m.parent_id ?? null) !== parent || !m.label.trim()) {
+      continue;
+    }
+    const bearing = Math.atan2(m.pos.y - observer.pos.y, m.pos.x - observer.pos.x);
+    let d = bearing - observer.gaze;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    const dist = Math.hypot(m.pos.x - observer.pos.x, m.pos.y - observer.pos.y);
+    if (Math.abs(d) <= half + EDGE_PAD) {
+      seen.push({ label: m.label.trim(), visual: (m.visual ?? "").trim(), angle: d, dist });
+    } else {
+      hidden.push({ label: m.label.trim(), dist });
+    }
+  }
+  // Screen coords (y down): a positive gaze-relative angle is to the RIGHT.
+  seen.sort((a, b) => a.angle - b.angle);
+  hidden.sort((a, b) => a.dist - b.dist);
+  const side = (a: number): string =>
+    a < -half * 0.6
+      ? "at the far left of frame"
+      : a < -0.2
+        ? "ahead to the left"
+        : a > half * 0.6
+          ? "at the far right of frame"
+          : a > 0.2
+            ? "ahead to the right"
+            : "straight ahead";
+  const distWord = (d: number): string =>
+    d < unit * 3 ? "close by" : d < unit * 8 ? "in the middle distance" : "far off";
+  const visible = seen
+    .slice(0, max)
+    .map(
+      (m) =>
+        `${side(m.angle)} ${distWord(m.dist)}, ${m.label}${m.visual ? ` (${m.visual})` : ""}`,
+    )
+    .join("; ");
+  return {
+    visible: visible ? visible + "." : "",
+    behind: hidden
+      .slice(0, 6)
+      .map((h) => h.label)
+      .join("; "),
+  };
 }
 
 /**
@@ -282,6 +358,7 @@ function buildSceneTap(
     kids.length > 0
       ? kids.map((k) => ({ ...k, pos: resolveAbsolutePos(k.id, byId) ?? k.pos }))
       : [];
+  const pov = describeVisibleSurroundings(focusId, allEntities, observer);
   return {
     kind: "scene",
     scene_view: {
@@ -301,7 +378,11 @@ function buildSceneTap(
     focus_id: focusId,
     focus_label: byId.get(focusId)?.label ?? null,
     focus_visual: byId.get(focusId)?.visual ?? null,
-    surroundings: describeSurroundings(focusId, allEntities),
+    // Sightline-culled: what the observer pose can actually see, not the
+    // focus's compass neighbours — see describeVisibleSurroundings.
+    surroundings: pov.visible,
+    surroundings_pov: true,
+    surroundings_behind: pov.behind,
   };
 }
 

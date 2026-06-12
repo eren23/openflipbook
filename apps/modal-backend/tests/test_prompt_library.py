@@ -550,3 +550,64 @@ def test_faithful_zoom_is_detailed_inset() -> None:
     v = image_edit.build_zoom_instruction("The Keep", [], "", faithful=True, register="view")
     assert "from the SAME viewpoint the reference shows" in v
     assert "cartographer" not in v
+
+
+def test_pov_surroundings_sightline_cull() -> None:
+    """Sightline-culled surroundings (surroundings_pov): view-relative wording,
+    an explicit behind-the-camera ban list, and the empty-backdrop line when
+    nothing is in the frustum — the lighthouse-faces-the-sea fix. pov absent
+    keeps every legacy byte (golden parity)."""
+    base: dict = {
+        "style_anchor": "sepia ink",
+        "subject_context": None,
+        "layout_clause": "",
+    }
+    legacy = image_edit.build_enter_instruction(
+        "The Lighthouse", [], surroundings="to the east, the docks", **base
+    )
+    assert legacy == image_edit.build_enter_instruction(
+        "The Lighthouse",
+        [],
+        surroundings="to the east, the docks",
+        surroundings_pov=False,
+        **base,
+    )
+    # Visible list: view-relative framing + the ban list; no map-bearing talk.
+    pov = image_edit.build_enter_instruction(
+        "The Lighthouse",
+        [],
+        surroundings="at the far left of frame far off, the Sea Wall",
+        surroundings_pov=True,
+        surroundings_behind="The Docks; Town Houses",
+        **base,
+    )
+    assert "From this viewpoint the only mapped landmarks in sight are" in pov
+    assert (
+        "Out of frame behind the camera (NOT visible, do not draw): "
+        "The Docks; Town Houses." in pov
+    )
+    assert "map placed them" not in pov
+    # Nothing in the frustum: the backdrop is declared EMPTY.
+    empty = image_edit.build_enter_instruction(
+        "The Lighthouse",
+        [],
+        surroundings=None,
+        surroundings_pov=True,
+        surroundings_behind="The Docks",
+        **base,
+    )
+    assert "No other mapped landmark is visible from this viewpoint" in empty
+    assert "do NOT introduce distant buildings" in empty
+    # The view-grammar (nano family) path words POV the same way.
+    pov_view = image_edit.build_enter_instruction(
+        "The Lighthouse",
+        [],
+        surroundings=None,
+        surroundings_pov=True,
+        surroundings_behind="The Docks",
+        view={"projection": "eye_level"},
+        family="nano",
+        **base,
+    )
+    assert "No other mapped landmark is visible from this viewpoint" in pov_view
+    assert "The Docks" in pov_view

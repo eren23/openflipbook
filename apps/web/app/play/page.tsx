@@ -2441,6 +2441,17 @@ export default function PlayPage() {
               ...(worldTap.surroundings
                 ? { prefetched_surroundings: worldTap.surroundings }
                 : {}),
+              // Sightline-culled (scene taps): the surroundings are VIEW-relative
+              // and the out-of-frustum landmarks ride as an explicit do-not-draw
+              // list — what the camera can't see never bleeds into the backdrop.
+              ...(worldTap.surroundings_pov
+                ? {
+                    surroundings_pov: true,
+                    ...(worldTap.surroundings_behind
+                      ? { surroundings_behind: worldTap.surroundings_behind }
+                      : {}),
+                  }
+                : {}),
             }
           : {}),
         // Scene-level ladder (spread after worldTap so the image-registered

@@ -162,6 +162,8 @@ def build_enter_instruction(
     view: dict | None = None,
     family: str | None = None,
     style_ref: bool = False,
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string). With a view, the
@@ -183,6 +185,8 @@ def build_enter_instruction(
         view=cast("_ViewSpec | None", view),
         family=family,
         style_ref=style_ref,
+        surroundings_pov=surroundings_pov,
+        surroundings_behind=surroundings_behind,
     )
 
 

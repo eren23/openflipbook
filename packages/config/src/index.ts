@@ -137,6 +137,12 @@ export interface GenerateRequestBody {
   // Citadel NE") carried back so the planner keeps the entered place's
   // neighbours where the parent map had them. Mirrors GenerateBody.
   prefetched_surroundings?: string;
+  // Sightline-culled surroundings (world geometry): prefetched_surroundings is
+  // VIEW-relative (frame positions from the observer pose, not map bearings)
+  // and surroundings_behind names the mapped landmarks OUTSIDE the view
+  // frustum - banned from the backdrop. Absent -> legacy bearing wording.
+  surroundings_pov?: boolean;
+  surroundings_behind?: string;
   // Multi-turn refer (SAMA / MM-Conv): when the user rejects a resolved
   // subject and taps again nearby, the client forwards the rejected
   // phrase so the VLM picks something different next time.
