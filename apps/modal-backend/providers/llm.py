@@ -1044,13 +1044,17 @@ def _spatial_anchor_clause(render_mode: str | None, surroundings: str | None) ->
     )
 
 
-def _render_base_instruction(render_mode: str | None) -> str:
+def _render_base_instruction(
+    render_mode: str | None, *, label_free: bool = False
+) -> str:
     """The opening planner instruction, keyed by World Mode render mode.
 
     `place_scene` → an immersive scene the reader steps into (no diagram
     labels); `place_submap` → a closer cartographic map of a sub-area;
     `explainer` (default, and every classic non-world call) → today's
-    labelled visual-explainer page, verbatim.
+    labelled visual-explainer page, verbatim. `label_free` (DOM-labels mode,
+    suppress_map_labels) asks for the same page with NO baked text — names
+    ride a client overlay; default off keeps every prompt byte-identical.
     """
     rmode = (render_mode or "explainer").lower()
     if rmode == "place_scene":
@@ -1066,12 +1070,18 @@ def _render_base_instruction(render_mode: str | None) -> str:
             "the JSON."
         )
     if rmode == "place_submap":
+        named = (
+            "laid out clearly but NOT named in the image — no lettering, no "
+            "text, no cartouches; the interface overlays names separately"
+            if label_free
+            else "laid out and named"
+        )
         return (
             "You design a closer MAP of just this district/area — a zoom of the "
             "parent map into this region, in the same cartographic style. Return "
             "JSON with keys: page_title (<=8 words, the area's name), prompt "
             "(<=120 words describing an illustrated map of this sub-area — its "
-            "streets, sub-districts and landmarks laid out and named, drawn as a "
+            f"streets, sub-districts and landmarks {named}, drawn as a "
             "map and not a scene), facts (3-6 named sub-areas or landmarks shown "
             "on the map). Do not include any text outside the JSON."
         )
@@ -1086,6 +1096,17 @@ def _render_base_instruction(render_mode: str | None) -> str:
             "wider view of the SAME world and NOT a new invention), facts (3-6 "
             "named sibling areas or landmarks that share this container). Do not "
             "include any text outside the JSON."
+        )
+    if label_free:
+        return (
+            "You design a visual-explainer page for a given user query. Return "
+            "JSON with keys: page_title (<=8 words, title case), prompt (<=120 "
+            "words, a rich description of a single illustrated image suitable "
+            "for an image model — include layout hints but NO text in the "
+            "image: no labels, lettering, annotations or callouts; the "
+            "interface overlays names separately), facts (list of 3-6 short "
+            "factual details the illustration should depict). Do not include "
+            "any text outside the JSON."
         )
     return (
         "You design a visual-explainer page for a given user query. Return "
@@ -1109,6 +1130,7 @@ async def plan_page(
     world_context: list[dict[str, Any]] | None = None,
     render_mode: str | None = None,
     surroundings: str | None = None,
+    label_free: bool = False,
 ) -> PagePlan:
     """Produce a page title, image-gen prompt, and factual snippets for the query.
 
@@ -1129,7 +1151,7 @@ async def plan_page(
     # scene the reader has stepped into, or a closer cartographic sub-map.
     # `explainer` (the default) is today's behaviour, untouched.
     rmode = (render_mode or "explainer").lower()
-    system_parts = [_render_base_instruction(rmode)]
+    system_parts = [_render_base_instruction(rmode, label_free=label_free)]
     has_parent_frame = bool(
         (parent_title and parent_title.strip())
         or (parent_query and parent_query.strip())

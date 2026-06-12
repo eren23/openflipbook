@@ -10,6 +10,13 @@ from __future__ import annotations
 
 MEDIUM_GUARD = "NOT a photograph, no photorealism"
 LETTERING_GUARD = "Keep any lettering sparse and legible — no garbled text."
+# DOM-labels mode (suppress_map_labels): the image carries NO baked text at
+# all — names live in a client overlay built from entity data. Fixes both the
+# garbled-lettering problem and clicks landing on text instead of places.
+NO_LETTERING = (
+    "Do not write ANY names, lettering, text, or cartouches into the image — "
+    "the interface overlays names separately."
+)
 
 
 def medium_lock(style_anchor: str | None, *, ref_name: str = "the reference") -> str:

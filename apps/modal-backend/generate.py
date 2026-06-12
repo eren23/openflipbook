@@ -264,6 +264,10 @@ class GenerateBody(BaseModel):
     # topic. `render_mode` is an explicit framing override; otherwise the click
     # classifier's `enter_as` decides. `autonomy` is carried for symmetry.
     world_mode: bool = False
+    # DOM-labels mode (NEXT_PUBLIC_DOM_LABELS): map/explainer renders carry
+    # NO baked text — names ride a client overlay built from entity data.
+    # Optional + default False: old clients omit it, prompts byte-identical.
+    suppress_map_labels: bool = False
     autonomy: str = "auto"
     render_mode: str | None = None
     # B2 logical AROUND (SCALE_AROUND_LOGICAL): the same-scale neighbours the client
@@ -1313,8 +1317,12 @@ async def _event_stream(
                 prompt = plan.prompt
                 if expand_style_lock:
                     prompt = f"Style: {expand_style_lock}\n\n{prompt}"
-                if plan.facts:
+                if plan.facts and not body.suppress_map_labels:
                     prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+                if body.suppress_map_labels:
+                    from providers.prompt_library.style import NO_LETTERING
+
+                    prompt += f"\n\n{NO_LETTERING}"
                 if expand_cond_preamble:
                     prompt = expand_cond_preamble + prompt
                 img = await image_provider.generate_image(
@@ -1543,6 +1551,7 @@ async def _event_stream(
             world_context=world_context_payload,
             render_mode=render_mode or "explainer",
             surroundings=surroundings_for_plan,
+            label_free=body.suppress_map_labels,
         )
 
         composed_prompt = plan.prompt
@@ -1558,8 +1567,18 @@ async def _event_stream(
         # annotated diagram (floating captions), breaking the seamless step-in.
         # The scene still carries that content via plan.prompt; maps/explainers
         # keep their labels.
-        if plan.facts and render_mode != "place_scene":
+        if (
+            plan.facts
+            and render_mode != "place_scene"
+            and not body.suppress_map_labels
+        ):
             composed_prompt += "\n\nLabels to include:\n- " + "\n- ".join(plan.facts)
+        if body.suppress_map_labels and render_mode != "place_scene":
+            # DOM-labels mode: belt + suspenders at the image-prompt level too
+            # (the planner was already asked for a label-free page).
+            from providers.prompt_library.style import NO_LETTERING
+
+            composed_prompt += f"\n\n{NO_LETTERING}"
         # MODERATE_PROMPTS (default off): one cheap LLM check on the composed
         # prompt before any image dollars are spent — a public deployment's
         # opt-in. Fail-open inside (providers/moderation.py); a block is a
@@ -1695,6 +1714,7 @@ async def _event_stream(
             family=camera_lib.model_family(
                 body.image_model or model_router.resolve_model("zoom_continue")
             ),
+            label_free=body.suppress_map_labels,
         )
         # The enter edit is a view CHANGE on the SAME place: the region crop
         # carries the look, this text carries the move inside + everything the
