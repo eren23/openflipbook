@@ -270,3 +270,16 @@ async def test_world_off_submap_request_still_zoom_continues(
     cont.assert_awaited_once()
     edit.assert_not_awaited()
     gen.assert_not_awaited()
+
+
+def test_same_place_judge_defaults_to_step_in(monkeypatch) -> None:
+    """The loop's same-place axis is zoom-aware by default — a city-wide
+    redraw of a tapped courtyard must not pass as 'the same place'.
+    ENTER_STEP_IN_JUDGE=false reverts to the plain continuation judge."""
+    import generate
+    from providers import judge
+
+    monkeypatch.delenv("ENTER_STEP_IN_JUDGE", raising=False)
+    assert generate._same_place_judge(judge) is judge.score_step_in
+    monkeypatch.setenv("ENTER_STEP_IN_JUDGE", "false")
+    assert generate._same_place_judge(judge) is judge.score_continuation
