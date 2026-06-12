@@ -122,12 +122,18 @@ function cropCentre(crop: MapCrop): WorldVec2 {
 const CLOSEUP_MARGIN = 1.6;
 // Tiny entities keep enough surroundings for Kontext to anchor against.
 const CLOSEUP_MIN_FRAC = 0.18;
-// A crop this close to the whole frame is no zoom at all — skip the rung
-// (prevents the infinite-closeup loop on frame-filling places).
+// Big landmarks still deserve a real zoom: the crop caps below the frame so
+// the closeup rung always descends. (The proof harness caught a palace whose
+// EXTRACTED footprint was 39x33 on the 100x60 frame — margin pushed the crop
+// to 88% and the old >=0.85 guard skipped the rung entirely.)
+const CLOSEUP_MAX_FRAC = 0.72;
+// Skip the rung only when the FOOTPRINT ITSELF effectively fills the frame —
+// then a closeup genuinely is a no-op and the tap should enter.
 const CLOSEUP_DEGENERATE_FRAC = 0.85;
 
 /** The closeup window for a place: footprint × margin, aspect-preserving,
- *  clamped inside the frame. Pure; exported for the conditioning crop. */
+ *  capped below the frame, clamped inside it. Pure; exported for the
+ *  conditioning crop. */
 export function entityCloseupCrop(
   focus: WorldEntityGeo,
   frame: MapCrop,
@@ -140,7 +146,7 @@ export function entityCloseupCrop(
       (focus.footprint.d * margin) / frame.h,
       minFrac,
     ),
-    1,
+    CLOSEUP_MAX_FRAC,
   );
   const w = frame.w * frac;
   const h = frame.h * frac;
@@ -190,12 +196,18 @@ export function routeClick(
       const alreadyCloseup =
         view.closeup === true && view.focus_id === focus.id;
       if (!alreadyCloseup) {
-        const crop = entityCloseupCrop(focus, view.map_crop);
+        // Degenerate only when the FOOTPRINT fills the frame (a closeup of
+        // the whole frame is a no-op) — a big landmark still gets its zoom
+        // via the capped crop.
         const degenerate =
-          crop.w >= view.map_crop.w * CLOSEUP_DEGENERATE_FRAC &&
-          crop.h >= view.map_crop.h * CLOSEUP_DEGENERATE_FRAC;
+          focus.footprint.w >= view.map_crop.w * CLOSEUP_DEGENERATE_FRAC &&
+          focus.footprint.d >= view.map_crop.h * CLOSEUP_DEGENERATE_FRAC;
         if (!degenerate) {
-          return { kind: "closeup", crop, focus_id: focus.id };
+          return {
+            kind: "closeup",
+            crop: entityCloseupCrop(focus, view.map_crop),
+            focus_id: focus.id,
+          };
         }
       }
     }
