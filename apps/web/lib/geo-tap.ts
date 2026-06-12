@@ -137,18 +137,32 @@ export function geoTapRequest(
       ? currentView.focus_id ?? null
       : null;
   // The entities the tap can land on: the whole map at top level, else the
-  // current place's children (in their local frame).
+  // current place's children (in their local frame). At map level, only
+  // TOP-LEVEL entities are hit-testable — children carry coords LOCAL to
+  // their parent's frame, and hit-testing those as world coords lets a
+  // child at local (50,30) shadow a real landmark (the hover affordance
+  // already filters this way; the tap path didn't).
   const candidates = insideId
     ? { entities: childrenOf(map.entities, insideId), bounds: map.bounds }
-    : map;
+    : {
+        entities: map.entities.filter((e) => (e.parent_id ?? null) === null),
+        bounds: map.bounds,
+      };
   if (candidates.entities.length === 0) return null;
-  // Route the click through the image-world frame the entities were SEEDED in —
-  // not their tight bounding box (map.bounds), which lands taps off the footprint.
+  // Route the click through the frame the image actually DISPLAYS: a submap/
+  // closeup node shows only its crop window, so a click at image centre means
+  // the CROP's centre — not the seeded frame's. (Entity seeding and the hover
+  // affordance already map through the crop; this restores symmetry.) Top-
+  // level maps and entered interiors keep the seeded MAP_IMAGE_FRAME.
+  const routingFrame =
+    !insideId && currentView?.level === "map" && currentView.map_crop
+      ? currentView.map_crop
+      : MAP_IMAGE_FRAME;
   const mapView: SceneView = {
     node_id: nodeId,
     level: "map",
     observer: null,
-    map_crop: MAP_IMAGE_FRAME,
+    map_crop: routingFrame,
   };
   const route = routeClick(candidates, mapView, click, aspect);
   if (route.kind === "explainer") return null;
@@ -297,11 +311,13 @@ export function degradedSubmapTap(
   // Map frames only — inside an entered place the classic tap stands (its
   // frame isn't the map the cut would continue).
   if (currentView && currentView.level !== "map") return null;
+  // Same displayed-frame routing as geoTapRequest: a submap node's click
+  // coords live in its crop window, not the seeded frame.
   const mapView: SceneView = {
     node_id: nodeId,
     level: "map",
     observer: null,
-    map_crop: MAP_IMAGE_FRAME,
+    map_crop: currentView?.map_crop ?? MAP_IMAGE_FRAME,
   };
   const route = routeClick(map, mapView, click, aspect, {
     minSubmapEntities: 0,
