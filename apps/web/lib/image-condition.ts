@@ -79,13 +79,21 @@ export async function cropRegion(
   yPct: number,
   frac = 0.42,
 ): Promise<string> {
+  return cropRegionRect(src, cropBox(xPct, yPct, frac));
+}
+
+/** Crop an exact normalized box of `src` → a JPEG data URL (the general form;
+ *  the ladder passes the routing window so the reference IS the promise). */
+export async function cropRegionRect(
+  src: string,
+  box: { x: number; y: number; w: number; h: number },
+): Promise<string> {
   const img = new Image();
   // Must be set before `src`. No-op for same-origin data URLs.
   img.crossOrigin = "anonymous";
   img.decoding = "async";
   img.src = src;
   await img.decode();
-  const box = cropBox(xPct, yPct, frac);
   const sx = box.x * img.naturalWidth;
   const sy = box.y * img.naturalHeight;
   const sw = Math.max(1, box.w * img.naturalWidth);
@@ -112,15 +120,34 @@ export async function buildConditionRefs(opts: {
   styleDataUrl?: string | null;
   click?: { xPct: number; yPct: number } | null;
   regionFrac?: number;
+  // Exact region window (normalized image space) — wins over click+regionFrac.
+  // The descent ladder passes its ROUTING window here, so the conditioning
+  // crop is exactly the closeup/submap the user was promised.
+  regionBox?: { x: number; y: number; w: number; h: number } | null;
+  // The whole parent IS the region (entering from a closeup that already
+  // fills the frame): no canvas pass, and the separate parent role is
+  // dropped — it would be a byte-duplicate of the region.
+  regionWhole?: boolean;
 }): Promise<ConditionRefs> {
+  if (opts.regionWhole && opts.parentDataUrl) {
+    return orderedRefs({
+      region: opts.parentDataUrl,
+      parent: null,
+      anchor: opts.anchorDataUrl ?? null,
+      style: opts.styleDataUrl ?? null,
+    });
+  }
   let region: string | null = null;
-  if (opts.parentDataUrl && opts.click) {
+  if (opts.parentDataUrl && (opts.regionBox || opts.click)) {
     try {
-      region = await cropRegion(
+      region = await cropRegionRect(
         opts.parentDataUrl,
-        opts.click.xPct,
-        opts.click.yPct,
-        opts.regionFrac ?? 0.42,
+        opts.regionBox ??
+          cropBox(
+            opts.click!.xPct,
+            opts.click!.yPct,
+            opts.regionFrac ?? 0.42,
+          ),
       );
     } catch {
       region = null;

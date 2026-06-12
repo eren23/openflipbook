@@ -56,3 +56,16 @@ describe("orderedRefs", () => {
     expect(orderedRefs({ region: null, parent: null, anchor: null }).roles).toEqual([]);
   });
 });
+
+describe("buildConditionRefs regionWhole (transition tap)", () => {
+  it("the parent IS the region — no canvas pass, no duplicate parent role", async () => {
+    const { buildConditionRefs } = await import("./image-condition");
+    const refs = await buildConditionRefs({
+      parentDataUrl: "data:image/jpeg;base64,UEFSRU5U",
+      styleDataUrl: "data:image/jpeg;base64,U1RZTEU=",
+      regionWhole: true,
+    });
+    expect(refs.roles).toEqual(["region", "style"]);
+    expect(refs.urls[0]).toBe("data:image/jpeg;base64,UEFSRU5U");
+  });
+});
