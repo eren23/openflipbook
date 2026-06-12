@@ -78,6 +78,7 @@ import Breadcrumb from "@/components/PlayPage/Breadcrumb";
 import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
+import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { HintPrompt } from "@/components/PlayPage/HintPrompt";
@@ -106,6 +107,7 @@ import {
   type GeoTapOverride,
 } from "@/lib/geo-tap";
 import { matchEntityLabel } from "@/lib/entity-label-match";
+import { focusOnMap } from "@/lib/click-route";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -462,7 +464,11 @@ export default function PlayPage() {
   // double-click can pass the `phase === "generating"` check twice and start
   // two overlapping generates.
   const clickInFlightRef = useRef(false);
-  const [hoverPos, setHoverPos] = useState<{ xPx: number; yPx: number } | null>(
+  const [hoverPos, setHoverPos] = useState<{
+    xPx: number;
+    yPx: number;
+    enterable?: boolean;
+  } | null>(
     null
   );
   // Annotate-and-regenerate: when the user holds Shift and drags on the
@@ -2349,9 +2355,33 @@ export default function PlayPage() {
     const move = (evt: PointerEvent) => {
       if (evt.pointerType === "touch") return;
       const rect = img.getBoundingClientRect();
+      // Enter affordance (W3): the crosshair grows an "enter" ring over an
+      // enterable place — world mode, map frames only. Pure footprint
+      // hit-test against the in-closure geo map; a lagging closure just
+      // delays the ring one render, same trade the tap handler accepts.
+      let hoverEnterable = false;
+      if (
+        worldEnabled &&
+        geoMap.entities.length > 0 &&
+        (!page?.sceneView || page.sceneView.level === "map")
+      ) {
+        const pointer = normalizeClickOnImage(evt, img);
+        if (pointer) {
+          const frame = page?.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
+          hoverEnterable =
+            focusOnMap(
+              geoMap.entities.filter(
+                (e) => e.kind === "place" && (e.parent_id ?? null) === null,
+              ),
+              frame,
+              pointer,
+            ) != null;
+        }
+      }
       setHoverPos({
         xPx: evt.clientX - rect.left,
         yPx: evt.clientY - rect.top,
+        enterable: hoverEnterable,
       });
       if (editDragStartRef.current) {
         const s = editDragStartRef.current;
@@ -3054,7 +3084,11 @@ export default function PlayPage() {
                 phase !== "generating" &&
                 !editMode &&
                 streamStatus === "off" && (
-                  <HoverCrosshair xPx={hoverPos.xPx} yPx={hoverPos.yPx} />
+                  <HoverCrosshair
+                    xPx={hoverPos.xPx}
+                    yPx={hoverPos.yPx}
+                    enterable={hoverPos.enterable ?? false}
+                  />
                 )}
 
               {clickRipple && phase === "generating" && (
@@ -3108,6 +3142,16 @@ export default function PlayPage() {
                 onSelect={() => setCodexOpen(true)}
                 imgRef={imgRef}
               />
+              {worldEnabled &&
+                phase === "ready" &&
+                streamStatus === "off" &&
+                (!page?.sceneView || page.sceneView.level === "map") && (
+                  <EnterableMarkers
+                    entities={geoMap.entities}
+                    currentView={page?.sceneView ?? null}
+                    imgRef={imgRef}
+                  />
+                )}
               {geoOverlayOn && page?.nodeId && (
                 <GeometryOverlay
                   nodeId={page.nodeId}
@@ -3400,7 +3444,10 @@ export default function PlayPage() {
           bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
           It returns when the tray is closed. */}
       {phase === "ready" && !helpOpen && !bloom && (
-        <FirstRunCoach onShowHelp={() => setHelpOpen(true)} />
+        <FirstRunCoach
+          onShowHelp={() => setHelpOpen(true)}
+          worldHint={worldEnabled}
+        />
       )}
 
       {scrubberOpen && page?.imageDataUrl && history.trail.length > 1 && (

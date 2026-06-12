@@ -23,4 +23,14 @@ describe("FirstRunCoach", () => {
     fireEvent.click(screen.getByRole("button", { name: /shortcut/i }));
     expect(onShowHelp).toHaveBeenCalledTimes(1);
   });
+
+  it("world mode adds the enter-rings hint; classic mode never shows it", () => {
+    const world = render(<FirstRunCoach onShowHelp={() => {}} worldHint />);
+    expect(/rings = enterable places/i.test(document.body.textContent ?? "")).toBe(
+      true,
+    );
+    world.unmount();
+    render(<FirstRunCoach onShowHelp={() => {}} />);
+    expect(/rings/i.test(document.body.textContent ?? "")).toBe(false);
+  });
 });

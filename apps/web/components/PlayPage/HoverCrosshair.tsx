@@ -3,6 +3,9 @@
 interface Props {
   xPx: number;
   yPx: number;
+  /** The pointer rests on an enterable place (world mode, map frame) —
+   *  swap the crosshair for the enter ring + microlabel. */
+  enterable?: boolean;
 }
 
 /**
@@ -10,8 +13,28 @@ interface Props {
  * rendered illustration. Replaces the default cursor (which is hidden via
  * cursor-none on the image) so the click target is unambiguous on busy
  * backgrounds. The parent gates rendering on hoverPos != null + idle phase.
+ * Over an enterable place it becomes an emerald ring with a tiny "enter"
+ * label, matching the EnterableMarkers idle rings.
  */
-export function HoverCrosshair({ xPx, yPx }: Props) {
+export function HoverCrosshair({ xPx, yPx, enterable = false }: Props) {
+  if (enterable) {
+    return (
+      <span
+        aria-hidden
+        className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
+        style={{ left: `${xPx}px`, top: `${yPx}px`, width: "34px", height: "34px" }}
+      >
+        <svg viewBox="0 0 34 34" width="34" height="34" className="block">
+          <circle cx="17" cy="17" r="13" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="3" />
+          <circle cx="17" cy="17" r="13" fill="none" stroke="#10b981" strokeWidth="1.5" />
+          <circle cx="17" cy="17" r="1.5" fill="#10b981" />
+        </svg>
+        <span className="absolute left-1/2 top-full mt-0.5 -translate-x-1/2 rounded bg-emerald-700/90 px-1 font-mono text-[9px] lowercase tracking-wide text-white">
+          enter
+        </span>
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden

@@ -4,6 +4,8 @@ import { BloomGlyph } from "./BloomGlyph";
 
 interface Props {
   onShowHelp: () => void;
+  /** World mode is on → also teach the enter affordance (the pulsing rings). */
+  worldHint?: boolean;
 }
 
 /**
@@ -13,7 +15,7 @@ interface Props {
  * Expand do" was a mystery. Stays out of the visual centre — the rendered
  * illustration is what matters.
  */
-export function FirstRunCoach({ onShowHelp }: Props) {
+export function FirstRunCoach({ onShowHelp, worldHint = false }: Props) {
   return (
     <div
       role="status"
@@ -24,6 +26,15 @@ export function FirstRunCoach({ onShowHelp }: Props) {
         {/* The two moves, side by side, so the in/around duality is obvious. */}
         <span className="whitespace-nowrap opacity-80">Tap to go in</span>
         <span className="opacity-40">·</span>
+        {worldHint && (
+          <>
+            <span className="flex items-center gap-1.5 whitespace-nowrap opacity-80">
+              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-600/70" />
+              rings = enterable places
+            </span>
+            <span className="opacity-40">·</span>
+          </>
+        )}
         <span className="flex items-center gap-1.5 whitespace-nowrap opacity-80">
           <BloomGlyph className="h-3.5 w-3.5 text-teal-600" />
           around
