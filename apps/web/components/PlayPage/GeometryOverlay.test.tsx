@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Entity } from "@openflipbook/config";
 
@@ -73,5 +73,40 @@ describe("GeometryOverlay", () => {
     render(<GeometryOverlay nodeId="n1" entities={[ent("c", "River Ankh", {})]} />);
     expect(screen.queryAllByTestId("geo-box")).toHaveLength(0);
     expect(screen.getByText(/no localized geometry/i)).toBeTruthy();
+  });
+
+  it("the empty state is a localize button when the page wires one", () => {
+    const onLocalize = vi.fn();
+    render(
+      <GeometryOverlay
+        nodeId="n1"
+        entities={[ent("c", "River Ankh", {})]}
+        onLocalize={onLocalize}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("geo-localize"));
+    expect(onLocalize).toHaveBeenCalledTimes(1);
+  });
+
+  it("running and failed localize states render distinctly", () => {
+    const running = render(
+      <GeometryOverlay
+        nodeId="n1"
+        entities={[ent("c", "River Ankh", {})]}
+        onLocalize={() => {}}
+        localizeStatus="running"
+      />,
+    );
+    expect(screen.getByTestId("geo-localizing")).toBeTruthy();
+    running.unmount();
+    render(
+      <GeometryOverlay
+        nodeId="n1"
+        entities={[ent("c", "River Ankh", {})]}
+        onLocalize={() => {}}
+        localizeStatus="failed"
+      />,
+    );
+    expect(screen.getByText(/nothing localized — retry/i)).toBeTruthy();
   });
 });
