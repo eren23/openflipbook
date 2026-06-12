@@ -470,3 +470,85 @@ describe("geoTapForEntity (W2: enter the place the lettering names)", () => {
     expect(t.surroundings).toContain("Brass Bridge");
   });
 });
+
+describe("submap click register (the displayed frame, not the seeded frame)", () => {
+  // A submap node displays only its crop window. Before the fix, taps were
+  // routed through the full MAP_IMAGE_FRAME — a click at image centre meant
+  // frame centre (50,30), not the crop's centre.
+  const submapView = (crop: { x: number; y: number; w: number; h: number }): SceneView => ({
+    node_id: "n-sub",
+    level: "map",
+    observer: null,
+    map_crop: crop,
+  });
+
+  it("a centre click on a submap resolves the entity at the CROP centre", () => {
+    const inCrop = geo("palace", "Patrician's Palace", 55, 25); // crop centre
+    const atFrameCentre = geo("decoy", "Frame Centre Decoy", 50, 30);
+    const map = { entities: [inCrop, atFrameCentre], bounds: CROP };
+    const t = geoTapRequest(
+      map,
+      "n-sub",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      undefined,
+      submapView({ x: 40, y: 15, w: 30, h: 20 }), // centre = (55, 25)
+    );
+    expect(t).not.toBeNull();
+    expect(t!.focus_id).toBe("palace");
+  });
+
+  it("submap-of-submap windows shrink geometrically with the crop", () => {
+    // Empty-area tap inside a submap → the next window is a fraction of the
+    // CROP, not of the full frame.
+    // Two small-footprint entities NEAR the tap (inside the next window)
+    // but not under it — an empty-area tap that still warrants a submap.
+    const map = {
+      entities: [
+        geo("a", "A", 64, 31, { footprint: { w: 2, d: 2 } }),
+        geo("b", "B", 70, 35, { footprint: { w: 2, d: 2 } }),
+      ],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(
+      map,
+      "n-sub",
+      { x_pct: 0.9, y_pct: 0.9 }, // world (67, 33) in the crop below
+      16 / 9,
+      undefined,
+      submapView({ x: 40, y: 15, w: 30, h: 20 }),
+    );
+    expect(t).not.toBeNull();
+    expect(t!.kind).toBe("submap");
+    expect(t!.scene_view.map_crop!.w).toBeCloseTo(30 * 0.4, 5);
+    expect(t!.scene_view.map_crop!.h).toBeCloseTo(20 * 0.4, 5);
+  });
+
+  it("degradedSubmapTap centres its window in the displayed crop", () => {
+    const map = { entities: [geo("far", "Far Away", 5, 5)], bounds: CROP };
+    const t = degradedSubmapTap(
+      map,
+      "n-sub",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      submapView({ x: 40, y: 15, w: 30, h: 20 }),
+    );
+    expect(t).not.toBeNull();
+    const win = t!.scene_view.map_crop!;
+    expect(win.x + win.w / 2).toBeCloseTo(55, 5);
+    expect(win.y + win.h / 2).toBeCloseTo(25, 5);
+  });
+
+  it("children with frame-LOCAL coords cannot shadow top-level entities", () => {
+    // A child of the palace sits at LOCAL (50,30) — before the fix it was
+    // hit-tested as world coords and could steal a tap at frame centre.
+    const topLevel = geo("plaza", "Sator Square", 50, 30);
+    const child = geo("hall", "The Great Hall", 50, 30, {
+      parent_id: "palace",
+      footprint: { w: 30, d: 30 },
+    });
+    const map = { entities: [topLevel, child, geo("palace", "Palace", 80, 50)], bounds: CROP };
+    const t = geoTapRequest(map, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9);
+    expect(t!.focus_id).toBe("plaza");
+  });
+});
