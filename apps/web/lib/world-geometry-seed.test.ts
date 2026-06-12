@@ -4,6 +4,7 @@ import type { EntityBBox, ObserverPose, SceneView } from "@openflipbook/config";
 
 import {
   estimateGeoFromBBox,
+  mapPolygonToCrop,
   project,
   type ProjectInput,
 } from "./world-geometry";
@@ -117,5 +118,27 @@ describe("estimateGeoFromBBox (seeding bridge)", () => {
     const g = estimateGeoFromBBox(bbox, view, ASPECT);
     expect(g.pos.x).toBeCloseTo(60, 4);
     expect(g.pos.y).toBeCloseTo(20, 4);
+  });
+});
+
+describe("mapPolygonToCrop (B2 segmenter border -> frame coords)", () => {
+  it("maps 0..1 image vertices through the same linear map a bbox centre takes", () => {
+    const crop = { x: 0, y: 0, w: 100, h: 60 };
+    const out = mapPolygonToCrop(
+      [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0.5, y: 0.5 },
+      ],
+      crop,
+    );
+    expect(out).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 50, y: 30 },
+    ]);
+    // and through an offset submap crop
+    const sub = mapPolygonToCrop([{ x: 0.5, y: 0.5 }], { x: 40, y: 20, w: 30, h: 20 });
+    expect(sub).toEqual([{ x: 55, y: 30 }]);
   });
 });

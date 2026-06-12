@@ -83,6 +83,13 @@ const worldEntityGeo: WorldEntityGeo = {
   confidence: 0.9,
   source: "user",
   updated_at: "2026-06-06T00:00:00Z",
+  border: [
+    { x: 8, y: 18 },
+    { x: 12, y: 18 },
+    { x: 12, y: 22 },
+    { x: 8, y: 22 },
+  ],
+  height_m: 30,
 };
 const worldMapSnapshot: WorldMapSnapshot = {
   session_id: "s1",

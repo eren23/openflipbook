@@ -54,6 +54,11 @@ eval-layout:
 # entities, diff vs intent → the grounded confirmation signal. PAID (fal + VLM).
 eval-grounding:
 	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.grounding_runner
+# B2 segmenter smoke: VLM polygon borders + anchored absolute heights over a
+# few existing report JPGs — eyeball the output. PAID (~$0.05, Gemini only,
+# zero fal). Override images: SEGMENT_SMOKE_IMAGES=/path/a.jpg,...
+eval-segment-smoke:
+	cd apps/modal-backend && SEGMENT_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.segment_smoke
 eval-repair:
 	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
 eval-edit:

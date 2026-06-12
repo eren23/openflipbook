@@ -1,0 +1,79 @@
+"""Segmenter parse gate (free): garbage polygons dropped, vertices clamped
+and deduped, height fields coerced — the tolerant-parse contract that lets
+the VLM reply be sloppy without ever raising."""
+from __future__ import annotations
+
+from providers.segmenter import MAX_VERTICES, parse_segments
+
+
+def _seg(**over: object) -> dict[str, object]:
+    s: dict[str, object] = {
+        "label": "tower",
+        "polygon": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]],
+        "rel_height": 1.0,
+        "est_height_m": 25,
+        "score": 0.9,
+    }
+    s.update(over)
+    return s
+
+
+def test_parses_a_clean_reply() -> None:
+    out = parse_segments({"segments": [_seg()]})
+    assert len(out) == 1
+    s = out[0]
+    assert s["label"] == "tower"
+    assert s["polygon"] == [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]
+    assert s["rel_height"] == 1.0
+    assert s["est_height_m"] == 25.0
+    assert s["score"] == 0.9
+
+
+def test_accepts_xy_dict_vertices_and_border_alias() -> None:
+    out = parse_segments(
+        {"segments": [_seg(polygon=None, border=[{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}])]}
+    )
+    assert out[0]["polygon"] == [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]
+
+
+def test_drops_degenerate_and_blank_entries_never_raises() -> None:
+    out = parse_segments(
+        {
+            "segments": [
+                _seg(label="  "),  # blank label
+                _seg(polygon=[[0.1, 0.1], [0.2, 0.2]]),  # <3 vertices
+                _seg(polygon="not a list"),
+                "not a dict",
+                _seg(label="keeper"),
+            ]
+        }
+    )
+    assert [s["label"] for s in out] == ["keeper"]
+    assert parse_segments(None) == []
+    assert parse_segments({"weird": True}) == []
+
+
+def test_clamps_dedupes_and_caps_vertices() -> None:
+    ring = [[0.0, 0.0], [0.0, 0.0], [2.0, -1.0], [0.5, 0.5], [0.0, 0.0]]
+    out = parse_segments({"segments": [_seg(polygon=ring)]})
+    # consecutive dupe dropped, coords clamped to 0..1, closing vertex == first dropped
+    assert out[0]["polygon"] == [[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]]
+    big = [[i / 100, i / 100] for i in range(40)]
+    out = parse_segments({"segments": [_seg(polygon=big)]})
+    assert len(out[0]["polygon"]) == MAX_VERTICES
+
+
+def test_height_fields_coerced() -> None:
+    out = parse_segments(
+        {
+            "segments": [
+                _seg(label="a", rel_height=3.0, est_height_m="not a number"),
+                _seg(label="b", rel_height=-1, est_height_m=-5),
+                _seg(label="c", rel_height="0.5", est_height_m="12.5"),
+            ]
+        }
+    )
+    by = {s["label"]: s for s in out}
+    assert by["a"]["rel_height"] == 1.0 and by["a"]["est_height_m"] is None
+    assert by["b"]["rel_height"] == 0.0 and by["b"]["est_height_m"] is None
+    assert by["c"]["rel_height"] == 0.5 and by["c"]["est_height_m"] == 12.5
