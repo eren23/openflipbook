@@ -246,13 +246,13 @@ function triggerExtraction(args: {
   // extract route seeds this scene's sub-entities into that place's child frame.
   sceneView?: SceneView | null;
   traceId: string | null;
-}): void {
+}): Promise<{ added: number; updated: number } | null> {
   const t0 = nowMs();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (args.traceId) headers[TRACE_HEADER] = args.traceId;
-  void fetch(
+  return fetch(
     `/api/world/${encodeURIComponent(args.sessionId)}/extract`,
     {
       method: "POST",
@@ -273,7 +273,7 @@ function triggerExtraction(args: {
           trace_id: args.traceId,
           t: nowMs(),
         });
-        return;
+        return null;
       }
       const payload = (await res.json()) as {
         added_ids?: string[];
@@ -292,10 +292,15 @@ function triggerExtraction(args: {
         trace_id: args.traceId,
         t: nowMs(),
       });
+      return {
+        added: payload.added_ids?.length ?? 0,
+        updated: payload.updated_ids?.length ?? 0,
+      };
     })
     .catch(() => {
       // Best-effort. The codex view will refetch on its own if a user
       // opens it; nothing to roll back here.
+      return null;
     });
 }
 
@@ -445,6 +450,14 @@ export default function PlayPage() {
     text: string;
     nonce: number;
   } | null>(null);
+  // Manual/auto re-extraction for a box-less page (the geo overlay's
+  // "localize now"). Keyed to the node so stale status never leaks across
+  // navigation; the ref caps the AUTO attempt at one per node per mount.
+  const [localizeStatus, setLocalizeStatus] = useState<{
+    nodeId: string;
+    status: "running" | "failed";
+  } | null>(null);
+  const localizeAttemptedRef = useRef<Set<string>>(new Set());
   const { bindTrace } = useTraceEmitter();
   const { state: worldState, mutate: mutateWorldEntity } =
     useWorldState(sessionId);
@@ -459,6 +472,44 @@ export default function PlayPage() {
   useEffect(() => {
     void geoRefetch();
   }, [codexCount, geoRefetch]);
+  // Re-run extraction for the CURRENT node (one VLM call, ~$0.01).
+  // Extraction normally fires once, right after a node generates — if that
+  // pass stores nothing (transient VLM emptiness), the page would stay
+  // box-less forever. world:extracted then refreshes codex + geo map.
+  const localizeCurrentNode = useCallback(async () => {
+    const nodeId = page?.nodeId;
+    const imageDataUrl = page?.imageDataUrl;
+    if (!nodeId || !imageDataUrl) return;
+    localizeAttemptedRef.current.add(nodeId);
+    setLocalizeStatus({ nodeId, status: "running" });
+    const result = await triggerExtraction({
+      sessionId,
+      nodeId,
+      imageDataUrl,
+      caption: page?.title || page?.query || "",
+      sceneDescription: page?.query ?? null,
+      sceneView: page?.sceneView ?? null,
+      traceId: null,
+    });
+    if (result && result.added + result.updated > 0) {
+      setLocalizeStatus(null);
+    } else {
+      setLocalizeStatus({ nodeId, status: "failed" });
+    }
+  }, [page, sessionId]);
+  // Auto-localize ONCE per node: the overlay is on, the page settled, and
+  // nothing is localized here — exactly the state that used to dead-end at
+  // a static "no localized geometry" message.
+  useEffect(() => {
+    const nodeId = page?.nodeId;
+    if (!geoOverlayOn || !nodeId || phase !== "ready") return;
+    if (localizeAttemptedRef.current.has(nodeId)) return;
+    const hasBoxes = worldState.entities.some(
+      (e) => e.appearance_bboxes?.[nodeId],
+    );
+    if (hasBoxes) return;
+    void localizeCurrentNode();
+  }, [geoOverlayOn, page?.nodeId, phase, worldState.entities, localizeCurrentNode]);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -855,7 +906,7 @@ export default function PlayPage() {
                   const url = new URL(window.location.href);
                   url.pathname = `/n/${saved.id}`;
                   window.history.replaceState({}, "", url.toString());
-                  triggerExtraction({
+                  void triggerExtraction({
                     sessionId: evt.session_id,
                     nodeId: saved.id,
                     imageDataUrl: evt.image_data_url,
@@ -1046,7 +1097,7 @@ export default function PlayPage() {
             const url = new URL(window.location.href);
             url.pathname = `/n/${saved.id}`;
             window.history.replaceState({}, "", url.toString());
-            triggerExtraction({
+            void triggerExtraction({
               sessionId,
               nodeId: saved.id,
               imageDataUrl: dataUrl,
@@ -1410,7 +1461,7 @@ export default function PlayPage() {
           },
         });
       }
-      if (geoMap.entities.length > 0) {
+      if (geoMap.entities.length > 0 && worldState.overrideEnabled) {
         items.push({
           label: `Move / resize ${entity.name}…`,
           onClick: () => {
@@ -3189,6 +3240,12 @@ export default function PlayPage() {
                   nodeId={page.nodeId}
                   entities={worldState.entities}
                   imgRef={imgRef}
+                  onLocalize={() => void localizeCurrentNode()}
+                  localizeStatus={
+                    localizeStatus?.nodeId === page.nodeId
+                      ? localizeStatus.status
+                      : undefined
+                  }
                   allowedEntityIds={
                     // Inside a place → only its own children's boxes (scoped to
                     // the current frame). At the top-level map → all (null).

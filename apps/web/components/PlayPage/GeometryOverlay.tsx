@@ -16,6 +16,13 @@ interface Props {
    *  place's children — not the whole city codex leaking boxes onto the interior.
    *  Null/absent at the top-level map ⇒ draw all (the original behaviour). */
   allowedEntityIds?: Set<string> | null;
+  /** Re-run extraction for THIS node (one VLM call, ~$0.01). Wired by the
+   *  page; when present the empty state becomes a "localize now" button —
+   *  extraction only fires automatically right after a page generates, so an
+   *  old/failed node would otherwise stay box-less forever. */
+  onLocalize?: (() => void) | undefined;
+  /** The current localize attempt for this node (page-held state). */
+  localizeStatus?: "running" | "failed" | undefined;
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -34,6 +41,8 @@ export default function GeometryOverlay({
   nodeId,
   imgRef,
   allowedEntityIds,
+  onLocalize,
+  localizeStatus,
 }: Props) {
   const content = useContainRect(imgRef);
   const boxes = entities.flatMap((e) => {
@@ -99,8 +108,25 @@ export default function GeometryOverlay({
         );
       })}
       {boxes.length === 0 && (
-        <div className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
-          no localized geometry for this page
+        // bottom-RIGHT: bottom-left is the Pin-style chip's spot (the audit's
+        // overlap bug). pointer-events-auto only here — boxes stay transparent.
+        <div className="pointer-events-auto absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+          {localizeStatus === "running" ? (
+            <span data-testid="geo-localizing">localizing…</span>
+          ) : onLocalize ? (
+            <button
+              type="button"
+              data-testid="geo-localize"
+              onClick={onLocalize}
+              className="underline decoration-dotted underline-offset-2 hover:text-emerald-300"
+            >
+              {localizeStatus === "failed"
+                ? "nothing localized — retry"
+                : "no localized geometry — localize now"}
+            </button>
+          ) : (
+            <span>no localized geometry for this page</span>
+          )}
         </div>
       )}
     </div>
