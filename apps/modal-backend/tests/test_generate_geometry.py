@@ -54,6 +54,41 @@ def test_layout_clause_empty_without_expected(
     assert generate._layout_clause_for(_body([])) == ""
 
 
+def _world_body(expected: list[ProjectedEntity]) -> GenerateBody:
+    return GenerateBody(
+        query="q", session_id="s", expected_layout=expected, world_mode=True
+    )
+
+
+def test_layout_clause_defaults_on_under_world_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W1: under an ACTIVE world mode the layout clause defaults ON — it is
+    the only thing pinning the map's geography on a steered render."""
+    monkeypatch.delenv("WORLD_GEOMETRY_GEN", raising=False)
+    monkeypatch.setenv("WORLD_MODE", "true")
+    clause = generate._layout_clause_for(_world_body([_proj("Tower")]))
+    assert "SCENE LAYOUT" in clause
+
+
+def test_layout_clause_world_mode_explicit_false_kills(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORLD_GEOMETRY_GEN", "false")
+    monkeypatch.setenv("WORLD_MODE", "true")
+    assert generate._layout_clause_for(_world_body([_proj("Tower")])) == ""
+
+
+def test_layout_clause_world_request_without_env_keeps_old_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A world_mode request against a WORLD_MODE-off deploy is NOT world mode
+    — the old default (off) stands, byte-identical prompts."""
+    monkeypatch.delenv("WORLD_GEOMETRY_GEN", raising=False)
+    monkeypatch.delenv("WORLD_MODE", raising=False)
+    assert generate._layout_clause_for(_world_body([_proj("Tower")])) == ""
+
+
 def test_topdown_clause_only_for_maps_when_flag_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -44,7 +44,7 @@ const MIN_SUBMAP_ENTITIES = 2;
 const EYE_HEIGHT = 1.7;
 const DEFAULT_FOV = Math.PI / 2;
 
-function focusOnMap(
+export function focusOnMap(
   entities: WorldEntityGeo[],
   crop: MapCrop,
   click: ClickPoint,
@@ -113,11 +113,27 @@ function cropCentre(crop: MapCrop): WorldVec2 {
   return { x: crop.x + crop.w / 2, y: crop.y + crop.h / 2 };
 }
 
+/** The scene route for a known focus entity, exactly as a geometric hit on
+ *  its footprint would synthesize it. Exported so a tap resolved by NAME (the
+ *  map's lettering names a mapped place) can enter that place too. */
+export function routeToFocus(
+  focus: WorldEntityGeo,
+  from: WorldVec2,
+): Extract<ClickRoute, { kind: "scene" }> {
+  return {
+    kind: "scene",
+    level: focus.height >= BUILDING_HEIGHT ? "building" : "street",
+    observer: observerFacing(focus, from),
+    focus_id: focus.id,
+  };
+}
+
 export function routeClick(
   map: Pick<WorldMapSnapshot, "entities" | "bounds">,
   view: SceneView,
   click: ClickPoint,
   aspect: number,
+  opts?: { minSubmapEntities?: number },
 ): ClickRoute {
   const { entities } = map;
   const focus = view.observer
@@ -129,12 +145,7 @@ export function routeClick(
   // A place under the finger → enter it.
   if (focus && focus.kind === "place") {
     const from = view.observer?.pos ?? cropCentre(view.map_crop ?? map.bounds);
-    return {
-      kind: "scene",
-      level: focus.height >= BUILDING_HEIGHT ? "building" : "street",
-      observer: observerFacing(focus, from),
-      focus_id: focus.id,
-    };
+    return routeToFocus(focus, from);
   }
 
   // Empty map area that still holds a cluster → crop a submap around it.
@@ -148,7 +159,8 @@ export function routeClick(
       w: crop.w * SUBMAP_FRACTION,
       h: crop.h * SUBMAP_FRACTION,
     };
-    if (cropEntities(entities, win).length >= MIN_SUBMAP_ENTITIES) {
+    const minEntities = opts?.minSubmapEntities ?? MIN_SUBMAP_ENTITIES;
+    if (cropEntities(entities, win).length >= minEntities) {
       return { kind: "submap", crop: win, focus_id: focus?.id ?? null };
     }
   }

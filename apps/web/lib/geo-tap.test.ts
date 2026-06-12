@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
-import { describeSurroundings, geoTapRequest, wideRegionCut } from "./geo-tap";
+import {
+  degradedSubmapTap,
+  describeSurroundings,
+  geoTapForEntity,
+  geoTapRequest,
+  wideRegionCut,
+} from "./geo-tap";
 
 function geo(
   id: string,
@@ -373,5 +379,94 @@ describe("wideRegionCut (world-off coherence net)", () => {
       16 / 9,
     );
     expect(cut).toBeNull();
+  });
+});
+
+describe("degradedSubmapTap (W1: anchor the un-routable tap)", () => {
+  // One far-away place: a tap elsewhere misses every footprint AND leaves the
+  // submap window under MIN_SUBMAP_ENTITIES — geoTapRequest returns null and
+  // (without the degrade) the request would ride the fresh path.
+  const map = {
+    entities: [geo("uni", "Unseen University", 90, 50)],
+    bounds: CROP,
+  };
+
+  it("the fell-through tap becomes a faithful submap of the clicked region", () => {
+    const click = { x_pct: 0.2, y_pct: 0.3 };
+    expect(geoTapRequest(map, "n1", click, 16 / 9)).toBeNull(); // the bug path
+    const t = degradedSubmapTap(map, "n1", click, 16 / 9);
+    expect(t).not.toBeNull();
+    expect(t!.kind).toBe("submap");
+    expect(t!.scene_view.level).toBe("map");
+    expect(t!.scene_view.observer).toBeNull();
+    // The crop is centred on the TAP (in the seeded 100×60 frame).
+    const crop = t!.scene_view.map_crop!;
+    expect(crop.x + crop.w / 2).toBeCloseTo(20, 5);
+    expect(crop.y + crop.h / 2).toBeCloseTo(18, 5);
+  });
+
+  it("inside an entered place → null (its frame isn't the map to cut)", () => {
+    const inside: SceneView = {
+      node_id: "n2",
+      level: "eye",
+      observer: {
+        pos: { x: 0, y: 0 },
+        eye_height: 1.7,
+        gaze: 0,
+        pitch: 0,
+        fov: 1.2,
+      },
+      map_crop: null,
+    };
+    expect(
+      degradedSubmapTap(map, "n2", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9, inside),
+    ).toBeNull();
+  });
+
+  it("empty world → null (nothing to anchor against)", () => {
+    expect(
+      degradedSubmapTap(
+        { entities: [], bounds: CROP },
+        "n1",
+        { x_pct: 0.5, y_pct: 0.5 },
+        16 / 9,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("geoTapForEntity (W2: enter the place the lettering names)", () => {
+  it("matches the scene tap a footprint hit would produce", () => {
+    const tower = geo("tower", "Tower of Art", 60, 30, {
+      height: 18,
+      visual: "an 800-foot stone tower",
+    });
+    const map = { entities: [tower], bounds: CROP };
+    // Footprint hit at the tower's centre (frame is 100×60 → y_pct = 30/60).
+    const byHit = geoTapRequest(map, "n1", { x_pct: 0.6, y_pct: 0.5 }, 16 / 9);
+    const byName = geoTapForEntity(map, "n1", tower, 16 / 9);
+    expect(byName.kind).toBe("scene");
+    expect(byName.focus_id).toBe("tower");
+    expect(byName.focus_label).toBe("Tower of Art"); // drives the subject
+    expect(byName.focus_visual).toBe("an 800-foot stone tower");
+    expect(byName.scene_view.level).toBe(byHit!.scene_view.level);
+    expect(byName.scene_view.focus_id).toBe(byHit!.scene_view.focus_id);
+    expect(byName.scene_view.observer).not.toBeNull();
+    // First enter steers by nothing, same as the footprint hit.
+    expect(byName.expected_layout).toEqual([]);
+  });
+
+  it("carries the focus's frame-mates as surroundings", () => {
+    const tower = geo("tower", "Tower of Art", 60, 30, { height: 18 });
+    const bridge = geo("bridge", "Brass Bridge", 40, 40, {
+      visual: "an iron bridge with hippo statues",
+    });
+    const t = geoTapForEntity(
+      { entities: [tower, bridge], bounds: CROP },
+      "n1",
+      tower,
+      16 / 9,
+    );
+    expect(t.surroundings).toContain("Brass Bridge");
   });
 });

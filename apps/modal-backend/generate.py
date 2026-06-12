@@ -290,9 +290,13 @@ def _geometric_world_on() -> bool:
     return env_flag("GEOMETRIC_WORLD")
 
 
-def _world_geometry_gen_on() -> bool:
-    """Geometry steers generation (WORLD_GEOMETRY_GEN). Off → no layout clause."""
-    return env_flag("WORLD_GEOMETRY_GEN")
+def _world_geometry_gen_on(world_mode: bool = False) -> bool:
+    """Geometry steers generation (WORLD_GEOMETRY_GEN). Defaults ON under an
+    active world mode — the layout clause is the only thing pinning the map's
+    geography, and without it entered scenes relocate landmarks freely — and
+    OFF otherwise (non-world prompts stay byte-identical). An explicit
+    =false is a kill-switch everywhere."""
+    return env_flag("WORLD_GEOMETRY_GEN", "true" if world_mode else "false")
 
 
 def _condition_url_for_role(body: GenerateBody, role: str) -> str | None:
@@ -314,7 +318,7 @@ def _layout_clause_for(body: GenerateBody, *, view_grammar: bool = False) -> str
     already ride expected_layout) + relative heights from world_context
     entries with REAL heights (the extraction seed constant 4.0 is excluded —
     the A1 audit's information-loss fix, V1 must-fix 9)."""
-    if not _world_geometry_gen_on() or not body.expected_layout:
+    if not _world_geometry_gen_on(_world_mode_on(body.world_mode)) or not body.expected_layout:
         return ""
     from providers import geometry_prompt
 
@@ -353,6 +357,79 @@ def _view_grammar_on() -> bool:
     """The view grammar (a deliberate camera per render). Default ON; =false
     is a strict kill-switch — every render byte-identical to pre-grammar."""
     return env_flag("VIEW_GRAMMAR", "true")
+
+
+# Words that carry no identity — dropped before token comparison so "the
+# palace of the patrician" still meets "Patrician's Palace". Twin of the
+# client's entity-label-match.ts STOP_WORDS.
+_LABEL_STOP_WORDS = frozenset(
+    {"the", "a", "an", "of", "and", "its", "their", "in", "on", "at"}
+)
+
+
+def _normalize_label(s: str) -> str:
+    """lowercase → strip diacritics → strip punctuation → collapse spaces.
+    Apostrophes are REMOVED (not space-split) so "Patrician's" folds to
+    "patricians" rather than shedding a stray "s" token."""
+    import unicodedata
+
+    folded = unicodedata.normalize("NFKD", s.lower())
+    # U+2019 = the curly apostrophe.
+    folded = folded.replace("'", "").replace("\u2019", "")
+    stripped = "".join(c for c in folded if not unicodedata.combining(c))
+    alnum = "".join(c if c.isalnum() else " " for c in stripped)
+    return " ".join(alnum.split())
+
+
+def _label_tokens(s: str) -> list[str]:
+    return [t for t in _normalize_label(s).split() if t not in _LABEL_STOP_WORDS]
+
+
+def _match_world_entity(
+    entities: list[WorldContextEntity], subject: str | None
+) -> dict | None:
+    """W2 label-click routing, server half (covers autonomy="auto", where the
+    click resolve runs in-band). The resolved subject names a mapped PLACE —
+    the tap landed on the map's baked-in lettering rather than the footprint.
+    Exact or token-containment match over normalized name/aliases, places
+    only; the semi-autonomy client does its own (fuzzier) match in
+    entity-label-match.ts before the request."""
+    subj_norm = _normalize_label(subject or "")
+    subj_tokens = _label_tokens(subject or "")
+    if not subj_norm or not subj_tokens:
+        return None
+    subj_set = set(subj_tokens)
+    best: dict | None = None
+    best_score = 0
+    for e in entities:
+        d = e.model_dump()
+        if str(d.get("kind") or "") != "place":
+            continue
+        names = [str(d.get("name") or "")] + [
+            str(a) for a in (d.get("aliases") or [])
+        ]
+        for name in names:
+            name_norm = _normalize_label(name)
+            name_tokens = _label_tokens(name)
+            if not name_norm or not name_tokens:
+                continue
+            if name_norm == subj_norm:
+                score = 2
+            else:
+                # Either direction: a subject "patrician's palace and its
+                # gardens" contains the label; a clipped subject "the river"
+                # is contained by "The River Ankh".
+                name_set = set(name_tokens)
+                contained = all(t in subj_set for t in name_tokens) or all(
+                    t in name_set for t in subj_tokens
+                )
+                score = 1 if contained else 0
+            if score > best_score:
+                best_score = score
+                best = d
+        if best_score == 2:
+            break
+    return best
 
 
 def _focus_world_entry(body: GenerateBody, subject: str | None) -> dict | None:
@@ -1500,6 +1577,24 @@ async def _event_stream(
                     surroundings_for_plan = resolution.surroundings
                 if resolution.place_form:
                     place_form_resolved = resolution.place_form
+
+            # W2 (label-click routing): the resolved subject names a mapped
+            # PLACE — the tap landed on the map's baked-in lettering rather
+            # than the footprint — but the framing fell through to
+            # "explainer", which rides the FRESH path (ignores image refs →
+            # invents an unrelated scene). Upgrade to place_scene so the
+            # enter edit keeps the place; no geometry needed (observer
+            # absent → the view policy picks the camera).
+            if effective_world_mode and render_mode in ("", "explainer"):
+                label_hit = _match_world_entity(body.world_context, effective_query)
+                if label_hit is not None:
+                    render_mode = "place_scene"
+                    log(
+                        "info",
+                        "world.label_match",
+                        subject=effective_query,
+                        entity=label_hit.get("name") or "",
+                    )
 
             # The view policy matches names against the subject BEFORE the
             # hint fold (a hint suffix would break world_context name matches).
