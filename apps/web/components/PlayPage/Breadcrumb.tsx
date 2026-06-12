@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type { Crumb } from "@/lib/breadcrumb";
 
 interface Props {
@@ -15,15 +17,39 @@ function short(title: string): string {
 // — the leftmost is the map you started from); the current page is plain text.
 // Hidden until you've actually gone in (a single crumb is just the current page).
 export default function Breadcrumb({ crumbs, onJump }: Props) {
+  // Deep trails collapse to root › … › last two (presentation only — the
+  // data stays intact; "…" expands the full trail). A4 cheap fix.
+  const [expanded, setExpanded] = useState(false);
   if (crumbs.length < 2) return null;
+  const collapsed = !expanded && crumbs.length > 4;
+  const visible: (Crumb | "ellipsis")[] = collapsed
+    ? [crumbs[0]!, "ellipsis", ...crumbs.slice(-2)]
+    : crumbs;
   return (
     <nav
       aria-label="Location"
       data-testid="breadcrumb"
       className="flex flex-wrap items-center gap-0.5 text-xs"
     >
-      {crumbs.map((c, i) => {
-        const isLast = i === crumbs.length - 1;
+      {visible.map((c, i) => {
+        if (c === "ellipsis") {
+          return (
+            <span key="ellipsis" className="flex items-center gap-0.5">
+              <span aria-hidden className="px-0.5 opacity-40">
+                ›
+              </span>
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                title={`Show all ${crumbs.length} steps`}
+                className="rounded px-1 py-0.5 opacity-70 hover:bg-[var(--color-ink)]/10 hover:opacity-100"
+              >
+                …
+              </button>
+            </span>
+          );
+        }
+        const isLast = i === visible.length - 1;
         return (
           <span key={c.nodeId} className="flex items-center gap-0.5">
             {i > 0 && (

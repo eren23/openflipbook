@@ -2908,6 +2908,17 @@ export default function PlayPage() {
               </span>
             </button>
           )}
+          {worldEnabled && (
+            <button
+              type="button"
+              onClick={() => setWorldEnabled(false)}
+              title="World Mode is ON — a tap ENTERS the tapped place (classic explore explains it instead). Click to switch back."
+              className="pointer-events-auto absolute start-3 top-3 z-10 flex select-none items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-50/85 px-2.5 py-1 text-xs font-medium text-emerald-900 backdrop-blur transition hover:bg-emerald-100"
+            >
+              <span aria-hidden>🌍</span>
+              <span>World — tap enters places</span>
+            </button>
+          )}
           <div className="relative aspect-[16/9] w-full">
             <div className="relative h-full w-full">
               {fallbackVideoUrl && showVideo ? (
@@ -3370,7 +3381,7 @@ export default function PlayPage() {
       {/* Hide the coach while the Around tray is open — both are pinned to
           bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
           It returns when the tray is closed. */}
-      {phase === "ready" && !helpOpen && !bloom && (
+      {phase === "ready" && !helpOpen && !bloom && history.items.length <= 1 && (
         <FirstRunCoach onShowHelp={() => setHelpOpen(true)} />
       )}
 

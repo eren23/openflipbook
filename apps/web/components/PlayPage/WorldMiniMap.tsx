@@ -72,6 +72,16 @@ export default function WorldMiniMap({
   if (entities.length === 0) return null;
   const bounds = local ? localBounds(kids!) : submap ? crop! : worldBounds;
   const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
+  // Label budget: tiny SVG text collides fast, so only the biggest
+  // footprints get names — every entity keeps its dot. (A4 cheap fix.)
+  const labelIds = new Set(
+    [...entities]
+      .sort(
+        (a, b) => b.footprint.w * b.footprint.d - a.footprint.w * a.footprint.d,
+      )
+      .slice(0, 6)
+      .map((e) => e.id),
+  );
 
   const W = 208;
   const H = 148;
@@ -154,7 +164,7 @@ export default function WorldMiniMap({
                 r={nested ? 2 : 3}
                 fill={KIND_COLOR[e.kind] ?? "#64748b"}
               />
-              {!nested && (
+              {!nested && labelIds.has(e.id) && (
                 <text x={p.x + 4} y={p.y + 3} fontSize={7} fill="#334155">
                   {e.label.length > 14 ? e.label.slice(0, 13) + "…" : e.label}
                 </text>
