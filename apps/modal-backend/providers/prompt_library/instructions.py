@@ -441,11 +441,16 @@ def _faithful_zoom_instruction(
     layout_clause: str = "",
     register: str = "map",
 ) -> str:
-    """The CLOSEUP zoom (scene_view.closeup): a faithful MAGNIFICATION. The
-    elaborate-with-facts register invites invention — the live failure was a
-    20x12 crop of a stylized palace icon redrawn as a riverside compound
-    because the planner's city-wide facts rode in. No facts, no elaboration:
-    magnify what the reference shows and nothing else."""
+    """The CLOSEUP zoom (scene_view.closeup): a faithful magnification that
+    GAINS detail. Two failure modes bound this register. Elaborate-with-facts
+    invented structures (a 20x12 crop of a palace icon redrawn as a riverside
+    compound — the planner's city-wide facts rode in), so facts never ride a
+    magnification. But pure magnify-only overcorrected into a photocopier:
+    the same icon redrawn bigger and mushier, nothing gained — the rung felt
+    pointless. The contract: every structure the reference shows, exactly
+    where it is, rendered at the finer detail level a dedicated inset plate
+    of that landmark would carry. New detail belongs INSIDE existing
+    structures; nothing new appears."""
     title = page_title.strip() or "this place"
     noun = "map" if register == "map" else "view"
     viewpoint = (
@@ -453,17 +458,26 @@ def _faithful_zoom_instruction(
         if register == "map"
         else "from the SAME viewpoint the reference shows"
     )
+    plate = (
+        "A master cartographer's close-up inset of this exact map"
+        if register == "map"
+        else "A faithful close-up of this exact view at finer detail"
+    )
     text = (
         f'Zoom into "{title}" — the area at the centre of this image — and '
-        "MAGNIFY it faithfully. Draw exactly the walls, buildings, towers and "
-        "landmarks the reference already shows, in the same style, palette "
-        f"and line work, {viewpoint}; keep their exact arrangement, "
-        "proportions and relative positions. Do NOT add structures, water, "
-        "roads, or features that are not in the reference; do not reinvent "
-        "or restyle anything — only sharpen the existing detail as you "
-        f"magnify. A closer, faithful magnification of this exact {noun}, "
-        "not a new scene. Keep any lettering sparse and legible — no "
-        "garbled text."
+        f"redraw it as a DETAILED INSET of this exact {noun}: the same "
+        "place, magnified, drawn at a much finer level of detail. Keep "
+        "exactly the walls, buildings, towers and landmarks the reference "
+        "shows — the same arrangement, proportions and relative positions, "
+        f"the same style, palette and line work, {viewpoint}. Render each "
+        f"of those structures with the fine-grained detail the wider {noun} "
+        "was too small to show: individual stones and roof tiles, windows "
+        "and doorways, stairs, timbers, battlements, foliage — the "
+        "small-scale texture that belongs to what is already drawn, in the "
+        "same hand. Do NOT add new structures, water, roads, or features "
+        "that are not in the reference; do not move, mirror, restyle or "
+        f"reinterpret anything. {plate}, not a new scene. Keep any "
+        "lettering sparse and legible — no garbled text."
     )
     if layout_clause.strip():
         text += "\n\n" + layout_clause.strip()

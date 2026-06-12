@@ -82,6 +82,22 @@ export async function cropRegion(
   return cropRegionRect(src, cropBox(xPct, yPct, frac));
 }
 
+// The models redraw at ~1MP from whatever we hand them: a 0.28-fraction crop
+// of a ~1.3k-wide map is a ~370px postage stamp, and a model told to stay
+// faithful to a postage stamp paints mush (the photocopier closeup). Upscale
+// the crop canvas with smooth interpolation so the reference arrives at a
+// workable size — the information is the same; the interpolation is ours
+// instead of the provider's nearest-neighbour.
+const REGION_TARGET_WIDTH = 1024;
+const REGION_MAX_UPSCALE = 3;
+
+/** Upscale factor for a crop of source width `sw` (pure): reach
+ *  REGION_TARGET_WIDTH, never more than REGION_MAX_UPSCALE, never shrink. */
+export function regionUpscale(sw: number): number {
+  if (sw <= 0) return 1;
+  return Math.min(REGION_MAX_UPSCALE, Math.max(1, REGION_TARGET_WIDTH / sw));
+}
+
 /** Crop an exact normalized box of `src` → a JPEG data URL (the general form;
  *  the ladder passes the routing window so the reference IS the promise). */
 export async function cropRegionRect(
@@ -98,11 +114,14 @@ export async function cropRegionRect(
   const sy = box.y * img.naturalHeight;
   const sw = Math.max(1, box.w * img.naturalWidth);
   const sh = Math.max(1, box.h * img.naturalHeight);
+  const scale = regionUpscale(sw);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(sw);
-  canvas.height = Math.round(sh);
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
   const ctx = canvas.getContext("2d");
   if (!ctx) return src;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.9);
 }
