@@ -135,6 +135,14 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* are inlined at BUILD time, so runtime env_file can't
+      # carry them — they must arrive as build args or the image ships the
+      # flag-off bundle (the "why did consistency regress" footgun: world
+      # mode seeded OFF in every fresh docker session). Both follow the root
+      # .env's WORLD_MODE so the single-file demo stays single-file.
+      args:
+        NEXT_PUBLIC_WORLD_MODE: ${NEXT_PUBLIC_WORLD_MODE:-${WORLD_MODE:-false}}
+        NEXT_PUBLIC_DOM_LABELS: ${NEXT_PUBLIC_DOM_LABELS:-${WORLD_MODE:-false}}
     container_name: openflipbook-web
     restart: unless-stopped
     # Same posture as the backend: the root .env (single-file demo) carries

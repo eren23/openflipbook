@@ -12,6 +12,13 @@ RUN pnpm install --frozen-lockfile
 FROM base AS builder
 WORKDIR /repo
 ENV NEXT_TELEMETRY_DISABLED=1
+# Client flags are inlined at BUILD time (NEXT_PUBLIC_*): without these args
+# the image silently ships the flag-off bundle — demo-stack sessions seeded
+# world mode OFF while local dev (.env.local) had it on.
+ARG NEXT_PUBLIC_WORLD_MODE
+ARG NEXT_PUBLIC_DOM_LABELS
+ENV NEXT_PUBLIC_WORLD_MODE=$NEXT_PUBLIC_WORLD_MODE \
+    NEXT_PUBLIC_DOM_LABELS=$NEXT_PUBLIC_DOM_LABELS
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
