@@ -39,21 +39,37 @@ def _legacy_zoom_instruction(
     page_title: str,
     facts: list[str],
     layout_clause: str = "",
+    register: str = "map",
 ) -> str:
+    """register="map" is the original, golden-pinned string. register="view"
+    (place_closeup: zooming into a thing inside a PERSPECTIVE scene) swaps the
+    cartographic words for view-neutral ones — same skeleton, the reference
+    pixels carry the camera."""
     title = page_title.strip() or "this place"
+    noun = "map" if register == "map" else "view"
+    viewpoint = (
+        "from the SAME overhead map viewpoint"
+        if register == "map"
+        else "from the SAME viewpoint the reference shows"
+    )
+    drift = (
+        "switch to an eye-level or interior view"
+        if register == "map"
+        else "change the camera angle or projection"
+    )
     text = (
         f'Zoom into "{title}" — the area at the centre of this image — and draw a '
-        "closer, richer map of it. Keep the exact walls, buildings, towers and "
+        f"closer, richer {noun} of it. Keep the exact walls, buildings, towers and "
         "landmarks the reference already shows, in the same hand-drawn engraving "
-        "style, palette and line work, from the SAME overhead map viewpoint; do "
-        "not reinvent them, restyle them, or switch to an eye-level or interior "
-        "view. As you move closer, elaborate them with finer architectural detail"
+        f"style, palette and line work, {viewpoint}; do "
+        f"not reinvent them, restyle them, or {drift}"
+        ". As you move closer, elaborate them with finer architectural detail"
     )
     named = [f.strip() for f in facts if f and f.strip()]
     if named:
         text += ", working in the features that belong here: " + "; ".join(named[:8])
     text += (
-        ". A closer, faithful continuation of this exact map, not a new scene. "
+        f". A closer, faithful continuation of this exact {noun}, not a new scene. "
         "Keep any lettering sparse and legible — no garbled text."
     )
     if layout_clause.strip():
@@ -429,13 +445,16 @@ def build_zoom_instruction(
     view: ViewSpec | None = None,
     family: str | None = None,
     label_free: bool = False,
+    register: str = "map",
 ) -> str:
     """Zoom-continue: same place, SAME camera, finer detail. view=None ->
     today's exact string. With a view, the keep-camera fragment is spelled per
     projection in PRESERVE form — any projection is honored, none is ever a
     change (Kontext's native grammar; harmless on nano/gpt). label_free
     (DOM-labels mode) swaps the lettering guard for the full no-text
-    directive; default off keeps every instruction byte-identical."""
+    directive. register="view" (place_closeup: the source is a perspective
+    SCENE, not a map) swaps the cartographic words on the legacy skeleton;
+    defaults keep every instruction byte-identical."""
     if label_free:
         text = build_zoom_instruction(
             page_title,
@@ -444,16 +463,17 @@ def build_zoom_instruction(
             style_anchor=style_anchor,
             view=view,
             family=family,
+            register=register,
         )
         if LETTERING_GUARD in text:
             return text.replace(LETTERING_GUARD, NO_LETTERING)
         return f"{text} {NO_LETTERING}"
     if view is None:
-        return _legacy_zoom_instruction(page_title, facts, layout_clause)
+        return _legacy_zoom_instruction(page_title, facts, layout_clause, register)
     proj = str(view.get("projection") or "")
     keep = camera.keep_view_fragment(view)
     if not keep:
-        return _legacy_zoom_instruction(page_title, facts, layout_clause)
+        return _legacy_zoom_instruction(page_title, facts, layout_clause, register)
     title = page_title.strip() or "this place"
     noun = "map" if proj == "top_down" else "view"
     drift = (

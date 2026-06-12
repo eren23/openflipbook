@@ -111,6 +111,7 @@ import {
 import { matchEntityLabel } from "@/lib/entity-label-match";
 import { focusOnMap } from "@/lib/click-route";
 import { selectNeighbors } from "@/lib/scale-neighbors";
+import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
@@ -2273,6 +2274,19 @@ export default function PlayPage() {
         }
       }
       const worldTap = geoTap ?? fallbackTap;
+      // Scene-level closeup (the ladder inside entered scenes): a tap on a
+      // codex-localized entity zooms it before entering. The image-registered
+      // bbox beats the bearing-recovered geometry, so this WINS over geoTap
+      // when both resolve (spread last below).
+      const sceneCloseup =
+        worldEnabled && page.sceneView && page.sceneView.level !== "map"
+          ? sceneCloseupSpec(
+              worldState.entities,
+              page.nodeId,
+              { x_pct: click.x_pct, y_pct: click.y_pct },
+              page.sceneView,
+            )
+          : null;
       // Conditioning refs are built AFTER routing so the region crop can BE
       // the routing window (closeup/submap: the reference IS the promise; a
       // transition tap from a closeup uses the whole frame-filling image as
@@ -2280,9 +2294,13 @@ export default function PlayPage() {
       // tight). Classic taps keep the click-centered crop, byte-identical.
       let condition = { urls: [] as string[], roles: [] as string[] };
       try {
-        const regionSpec = worldTap
-          ? regionBoxFor(worldTap, page.sceneView ?? null)
-          : null;
+        const regionSpec = sceneCloseup
+          ? sceneCloseup.kind === "closeup"
+            ? { box: sceneCloseup.regionBox }
+            : ({ whole: true } as const)
+          : worldTap
+            ? regionBoxFor(worldTap, page.sceneView ?? null)
+            : null;
         condition = await buildConditionRefs({
           parentDataUrl: currentImage,
           styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
@@ -2401,6 +2419,24 @@ export default function PlayPage() {
                 ? { prefetched_surroundings: worldTap.surroundings }
                 : {}),
             }
+          : {}),
+        // Scene-level ladder (spread after worldTap so the image-registered
+        // bbox closeup wins over the bearing-recovered geometry route).
+        ...(sceneCloseup
+          ? sceneCloseup.kind === "closeup"
+            ? {
+                render_mode: "place_closeup" as const,
+                scene_view: {
+                  ...sceneCloseup.sceneView,
+                  node_id: page.nodeId ?? "",
+                },
+                expected_layout: [],
+                prefetched_subject: sceneCloseup.name,
+              }
+            : {
+                render_mode: "place_scene" as const,
+                prefetched_subject: sceneCloseup.name,
+              }
           : {}),
         // The world-off zoom-cut: same submap continuation a world-mode submap
         // tap rides (Kontext on the region crop), so the river page is a CUT of

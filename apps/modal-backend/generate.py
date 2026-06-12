@@ -1497,7 +1497,12 @@ async def _event_stream(
         # explainer. Empty string = "not yet decided / fall back to explainer".
         effective_world_mode = _world_mode_on(body.world_mode)
         render_mode = (body.render_mode or "").strip().lower()
-        if render_mode not in ("place_scene", "place_submap", "explainer"):
+        if render_mode not in (
+            "place_scene",
+            "place_submap",
+            "place_closeup",
+            "explainer",
+        ):
             render_mode = ""
         # World Mode spatial anchor — what's around the tapped spot + directions,
         # threaded into the planner so the entered place keeps its neighbours.
@@ -1825,6 +1830,9 @@ async def _event_stream(
                 body.image_model or model_router.resolve_model("zoom_continue")
             ),
             label_free=body.suppress_map_labels,
+            # place_closeup zooms into a PERSPECTIVE scene — the cartographic
+            # wording would fight the reference pixels.
+            register="view" if render_mode == "place_closeup" else "map",
         )
         # The enter edit is a view CHANGE on the SAME place: the region crop
         # carries the look, this text carries the move inside + everything the

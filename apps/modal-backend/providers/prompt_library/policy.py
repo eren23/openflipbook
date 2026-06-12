@@ -130,6 +130,10 @@ def default_view(
             focus_kind,
             focus_footprint,
         )
+    if rmode == "place_closeup":
+        # A closeup of something inside a SCENE: the reference pixels dictate
+        # the register (Kontext preserve-form) — never state a camera.
+        return None
     if rmode == "place_submap":
         # WITH a region crop this is a Kontext zoom-continue: projection is
         # dictated by the reference pixels (preserve-form rides the inherited

@@ -70,7 +70,7 @@ def select_operation(render_mode: str | None, has_region: bool) -> str:
 
     Everything else is a fresh generation. (outpaint/inpaint/upscale are invoked
     explicitly by callers — the repair loop — not chosen here.)"""
-    if render_mode == "place_submap" and has_region:
+    if render_mode in ("place_submap", "place_closeup") and has_region:
         return "zoom_continue"
     if render_mode == "place_scene":
         return "enter_scene"
