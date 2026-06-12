@@ -294,3 +294,37 @@ def test_live_refuses_unimplemented_judges(tmp_path: Path) -> None:
             prompts_dir=_prompts(tmp_path),
             log=lambda s: None,
         )
+
+
+# --- report aggregation ------------------------------------------------------
+
+
+def test_summary_tables_pareto_and_spend() -> None:
+    from tests.matrix_bench.report import format_summary, summarize
+
+    def cell(model: str, variant: str, q: float, img: float, lat: float) -> dict[str, Any]:
+        return {
+            "model": model,
+            "prompt_variant": variant,
+            "scores": {"composite": q},
+            "cost_usd": {"image": img, "judges": 0.015, "extract": 0.01,
+                         "total": img + 0.025},
+            "timing_s": {"gen": lat, "judges": 2.0},
+        }
+
+    report = {
+        "cells": [
+            cell("pro", "v1", 0.9, 0.15, 12.0),
+            cell("nano", "v1", 0.85, 0.039, 5.0),
+            cell("mid", "v1", 0.7, 0.08, 10.0),  # dominated
+            {"cell_key": "x", "label": "broken", "status": "failed", "error": "boom"},
+        ]
+    }
+    s = summarize(report)
+    by = {(c["model"], c["variant"]): c for c in s["configs"]}
+    assert by[("pro", "v1")]["pareto"] and by[("nano", "v1")]["pareto"]
+    assert not by[("mid", "v1")]["pareto"]
+    assert s["failed_cells"] == 1 and s["scored_cells"] == 3
+    assert s["spend_usd"]["image"] == pytest.approx(0.269)
+    text = format_summary(s)
+    assert "nano @ v1" in text and "tradeoffs:" in text and "1 failed" in text

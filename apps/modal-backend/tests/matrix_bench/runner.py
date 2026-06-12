@@ -277,14 +277,19 @@ def main() -> int:
 
     scenarios = corpus_scenarios(sweep["scenarios"])
     fns = recon_fns(sweep)
+    live = os.environ.get("MATRIX_BENCH_RUN") == "1"
     report = run_matrix(
         scenarios,
         sweep,
-        live=os.environ.get("MATRIX_BENCH_RUN") == "1",
+        live=live,
         allow_partial=os.environ.get("MATRIX_ALLOW_PARTIAL") == "1",
         run_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         **fns,
     )
+    if live:
+        from tests.matrix_bench import report as report_mod
+
+        print(report_mod.format_summary(report_mod.attach_summary(_REPORTS / "matrix_latest.json")))
     return 0 if report.get("stopped_reason") is None else 1
 
 

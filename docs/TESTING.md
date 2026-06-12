@@ -85,3 +85,42 @@ actually change". Benches self-skip without their `*_BENCH_RUN` env, and the
 conftest scrubs all model/flag env so host config can't flip tests. Artifacts
 land in `tests/continuity_bench/reports/` (gitignored) — eyeball them; the
 images are the ground truth the scores summarize.
+
+## The matrix bench (evolvable eval)
+
+`tests/matrix_bench/` runs **scenarios × arms × models × prompt-variants**
+with every frugality guarantee built in:
+
+- **Dry-run is the default.** `make eval-matrix-dry` (or any runner without
+  its `*_BENCH_RUN` flag) prints the per-cell table — cached? / est $ — and
+  the total to-bill figure, then exits. Nothing touches the network. Run it
+  before EVERY sweep; it is also the free CI smoke.
+- **Disk cache = free evolution.** A cell's identity is
+  `sha(scenario | description | arm | model | prompt | params)`, cached under
+  `tests/matrix_bench/cache/` (gitignored). To evolve a prompt: copy
+  `prompts/recon_base.v1.txt` → `v2`, edit, add `recon_base.v2` to the sweep's
+  `variants`, dry-run, sweep. Only the new variant's cells bill; an identical
+  re-run is 100% hits and $0.00. Same for ground-truth edits (the corpus
+  `description_sha` excludes the review block, so verifying a draft is free).
+- **Hard budget cap.** The ledger charges BEFORE every paid call; default
+  `MATRIX_BUDGET_USD=3`. An over-cap sweep is refused at pre-flight unless
+  `MATRIX_ALLOW_PARTIAL=1` (runs to the cap, reports `stopped_reason`).
+  A flaky provider call records a failed cell and the sweep continues.
+- **The reconstruction bench** (`make eval-recon`) is the first scenario
+  type: regenerate each VERIFIED `tests/map_corpus/` map from its authored
+  description (arm `graph` = the product planning path, `direct` =
+  ground-truth layout), then detect + segment + anchored heights and score:
+  presence, `pos_raw` (absolute register) vs `pos_aligned` (relative layout
+  after a fitted similarity transform), size, height order/abs, plus style /
+  plausibility / prompt-alignment judges → weighted composite. Baseline:
+  `recon_fidelity` in `eval_baselines.json`.
+- **The report** (`python -m tests.matrix_bench.report`, auto-printed after
+  live runs) aggregates configs (model × variant), marks the Pareto front on
+  (quality, −cost, −latency), prints near-best tradeoff findings ("94% of the
+  best composite at 27% of its cost, 2.4× faster") and the per-operation
+  spend breakdown.
+
+Authoring corpus ground truth: `make corpus-fetch` (pins shas), `make
+corpus-draft id=<map>` (VLM draft, ~$0.015), then open the image + JSON side
+by side, correct entities/heights/relations, flip `review.status` to
+`"verified"`, bump `rev`. The recon bench only consumes verified entries.

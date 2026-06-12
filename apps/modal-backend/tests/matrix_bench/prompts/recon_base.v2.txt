@@ -1,0 +1,14 @@
+A complete top-down illustrated map, drawn as {style}.
+
+{description}
+
+{layout_clause}
+
+Compose to the stated layout EXACTLY: treat the SCENE LAYOUT lines as a
+strict grid — each named feature sits at the named third of the sheet
+(left/center/right, top/mid/bottom), at the stated relative size. Do not
+re-center or re-balance the composition.
+
+Draw the WHOLE mapped area edge to edge — one coherent map sheet, nothing
+cut off, no collage panels. Flat overhead cartographic view, no perspective.
+Keep any lettering sparse and legible — no garbled text.
