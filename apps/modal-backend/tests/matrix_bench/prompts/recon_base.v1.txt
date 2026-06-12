@@ -1,0 +1,9 @@
+A complete top-down illustrated map, drawn as {style}.
+
+{description}
+
+{layout_clause}
+
+Draw the WHOLE mapped area edge to edge — one coherent map sheet, nothing
+cut off, no collage panels. Flat overhead cartographic view, no perspective.
+Keep any lettering sparse and legible — no garbled text.
