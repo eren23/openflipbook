@@ -50,6 +50,23 @@ export async function POST(req: Request) {
         mutated = true;
       }
     }
+    // The conditioning stack (style/parent/region refs) has the same problem:
+    // a reopened session's refs arrive as STORE URLs — on the docker stack
+    // that's a localhost minio URL fal's servers can't fetch, and the whole
+    // edit fails with invalid_request. Inline each (best-effort, per entry;
+    // a foreign/public URL passes through unchanged).
+    if (parsed?.condition_image_urls?.length) {
+      const refs = parsed.condition_image_urls;
+      const inlinedRefs = await Promise.all(
+        refs.map(async (u) =>
+          u && !u.startsWith("data:") ? ((await inlineStoredImage(u)) ?? u) : u,
+        ),
+      );
+      if (inlinedRefs.some((u, i) => u !== refs[i])) {
+        parsed.condition_image_urls = inlinedRefs;
+        mutated = true;
+      }
+    }
     if (parsed && parsed.session_id && parsed.query && !parsed.world_context) {
       const world_context = await resolveEntitiesForPrompt({
         sessionId: parsed.session_id,
