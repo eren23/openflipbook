@@ -162,3 +162,13 @@ coverage:
 # The full paid sweep (spends fal/openrouter on the tiny golden set).
 eval-paid:
 	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
+# The ladder proof: Playwright drives the REAL app (localhost:3000) through
+# map → closeup tap → enter tap across 5 place types, saves the image
+# gallery + wire manifests to ladder-proof-runs/<name>, then numeric judges
+# score both hops. The eyes-on pass (adversarial subagent verdicts on the
+# images) stays manual — no ladder change ships without it. PAID: ~$0.55
+# per scenario + ~$0.03 judging. LADDER_ONLY=city,castle narrows scenarios.
+ladder-proof:
+	cd apps/web && node scripts/ladder-proof.mjs ../../ladder-proof-runs/$${LADDER_RUN:-$$(date +%Y%m%d-%H%M%S)}
+ladder-judge:
+	cd apps/modal-backend && .venv/bin/python -m tests.ladder_judge ../../ladder-proof-runs/$(LADDER_RUN)
