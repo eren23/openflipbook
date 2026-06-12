@@ -16,9 +16,17 @@ export interface WorldModeState {
 const DOM_LABELS_DEFAULT = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_DOM_LABELS ?? "").toLowerCase(),
 );
+// Seed default for NEW sessions (build-time): a deploy that lives in world
+// mode (the demo stack) starts every session with it ON instead of silently
+// reverting to classic explainers — the "why did consistency regress"
+// footgun is that world mode is per-session and used to always seed off.
+// A session's own toggle still wins once stored.
+const WORLD_DEFAULT = ["1", "true", "yes"].includes(
+  (process.env.NEXT_PUBLIC_WORLD_MODE ?? "").toLowerCase(),
+);
 
 const DEFAULT: WorldModeState = {
-  enabled: false,
+  enabled: WORLD_DEFAULT,
   autonomy: "auto",
   domLabels: DOM_LABELS_DEFAULT,
 };
@@ -46,7 +54,8 @@ export function useWorldMode(sessionId: string) {
       }
       const parsed = JSON.parse(raw) as Partial<WorldModeState>;
       setState({
-        enabled: Boolean(parsed.enabled),
+        enabled:
+          typeof parsed.enabled === "boolean" ? parsed.enabled : WORLD_DEFAULT,
         autonomy: parsed.autonomy === "semi" ? "semi" : "auto",
         domLabels:
           typeof parsed.domLabels === "boolean"
