@@ -127,6 +127,7 @@ def build_zoom_instruction(
     family: str | None = None,
     label_free: bool = False,
     register: str = "map",
+    faithful: bool = False,
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string — pinned by
@@ -146,6 +147,7 @@ def build_zoom_instruction(
         family=family,
         label_free=label_free,
         register=register,
+        faithful=faithful,
     )
 
 

@@ -436,6 +436,40 @@ def _enter_kontext(
 
 # --- Public builders -------------------------------------------------------------
 
+def _faithful_zoom_instruction(
+    page_title: str,
+    layout_clause: str = "",
+    register: str = "map",
+) -> str:
+    """The CLOSEUP zoom (scene_view.closeup): a faithful MAGNIFICATION. The
+    elaborate-with-facts register invites invention — the live failure was a
+    20x12 crop of a stylized palace icon redrawn as a riverside compound
+    because the planner's city-wide facts rode in. No facts, no elaboration:
+    magnify what the reference shows and nothing else."""
+    title = page_title.strip() or "this place"
+    noun = "map" if register == "map" else "view"
+    viewpoint = (
+        "from the SAME overhead map viewpoint"
+        if register == "map"
+        else "from the SAME viewpoint the reference shows"
+    )
+    text = (
+        f'Zoom into "{title}" — the area at the centre of this image — and '
+        "MAGNIFY it faithfully. Draw exactly the walls, buildings, towers and "
+        "landmarks the reference already shows, in the same style, palette "
+        f"and line work, {viewpoint}; keep their exact arrangement, "
+        "proportions and relative positions. Do NOT add structures, water, "
+        "roads, or features that are not in the reference; do not reinvent "
+        "or restyle anything — only sharpen the existing detail as you "
+        f"magnify. A closer, faithful magnification of this exact {noun}, "
+        "not a new scene. Keep any lettering sparse and legible — no "
+        "garbled text."
+    )
+    if layout_clause.strip():
+        text += "\n\n" + layout_clause.strip()
+    return text.strip()
+
+
 def build_zoom_instruction(
     page_title: str,
     facts: list[str],
@@ -446,6 +480,7 @@ def build_zoom_instruction(
     family: str | None = None,
     label_free: bool = False,
     register: str = "map",
+    faithful: bool = False,
 ) -> str:
     """Zoom-continue: same place, SAME camera, finer detail. view=None ->
     today's exact string. With a view, the keep-camera fragment is spelled per
@@ -453,8 +488,9 @@ def build_zoom_instruction(
     change (Kontext's native grammar; harmless on nano/gpt). label_free
     (DOM-labels mode) swaps the lettering guard for the full no-text
     directive. register="view" (place_closeup: the source is a perspective
-    SCENE, not a map) swaps the cartographic words on the legacy skeleton;
-    defaults keep every instruction byte-identical."""
+    SCENE, not a map) swaps the cartographic words on the legacy skeleton.
+    faithful (closeup rung) switches to pure magnification — no facts, no
+    elaboration. Defaults keep every instruction byte-identical."""
     if label_free:
         text = build_zoom_instruction(
             page_title,
@@ -464,10 +500,16 @@ def build_zoom_instruction(
             view=view,
             family=family,
             register=register,
+            faithful=faithful,
         )
         if LETTERING_GUARD in text:
             return text.replace(LETTERING_GUARD, NO_LETTERING)
         return f"{text} {NO_LETTERING}"
+    if faithful:
+        # The closeup rung ignores the view-aware variants too — the
+        # reference pixels carry the camera, and facts never ride a
+        # magnification.
+        return _faithful_zoom_instruction(page_title, layout_clause, register)
     if view is None:
         return _legacy_zoom_instruction(page_title, facts, layout_clause, register)
     proj = str(view.get("projection") or "")

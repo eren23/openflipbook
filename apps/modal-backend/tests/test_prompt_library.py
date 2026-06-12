@@ -525,3 +525,23 @@ def test_register_reminder_and_retry_feedback() -> None:
     assert "SAME place as the reference" in both and "different towers" in both
     # nothing failed -> nothing said
     assert feedback.retry_feedback_clause("top_down") == ""
+
+
+def test_faithful_zoom_is_pure_magnification() -> None:
+    """The closeup rung (F1): no facts, no 'elaborate' — magnify only. The
+    live failure was planner facts (river, bridges) painted into a 20x12
+    closeup of a palace icon."""
+    s = image_edit.build_zoom_instruction(
+        "The High Palace", ["a river", "two bridges"], "", faithful=True
+    )
+    assert "MAGNIFY it faithfully" in s
+    assert "Do NOT add structures, water, roads" in s
+    # facts NEVER ride a magnification
+    assert "a river" not in s and "working in the features" not in s
+    # default stays byte-identical (golden contract)
+    assert image_edit.build_zoom_instruction("T", ["f"]) == image_edit.build_zoom_instruction(
+        "T", ["f"], faithful=False
+    )
+    # the view register variant
+    v = image_edit.build_zoom_instruction("The Keep", [], "", faithful=True, register="view")
+    assert "from the SAME viewpoint the reference shows" in v
