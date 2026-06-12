@@ -22,7 +22,7 @@ export function FirstRunCoach({ onShowHelp, worldHint = false }: Props) {
       aria-live="polite"
       className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
     >
-      <div className="pointer-events-auto flex max-w-full items-center gap-2.5 overflow-x-auto rounded-full border border-[var(--color-edge)] bg-[var(--color-canvas)]/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+      <div className="pointer-events-auto flex max-w-[92vw] flex-wrap items-center justify-center gap-2.5 rounded-full border border-[var(--color-edge)] bg-[var(--color-canvas)]/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
         {/* The two moves, side by side, so the in/around duality is obvious. */}
         <span className="whitespace-nowrap opacity-80">Tap to go in</span>
         <span className="opacity-40">·</span>
