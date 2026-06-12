@@ -68,6 +68,15 @@ corpus-fetch:
 	cd apps/modal-backend && .venv/bin/python scripts/fetch_corpus.py --pin
 corpus-draft:
 	cd apps/modal-backend && CORPUS_DRAFT_RUN=1 .venv/bin/python -m tests.map_corpus.draft $(or $(id),all)
+# Reconstruction bench: regenerate each VERIFIED corpus map from its authored
+# description (graph = product planning path, direct = ground-truth layout),
+# extract + score vs ground truth + VLM judges. Rides the matrix chassis:
+# cached, budget-capped, dry-run without the flag. PAID (~$0.40 first run,
+# cached after):  make eval-recon   (preview: make eval-recon-dry)
+eval-recon-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.recon_bench.runner
+eval-recon:
+	cd apps/modal-backend && RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
 eval-repair:
 	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
 eval-edit:

@@ -35,6 +35,13 @@
       "regression_band": 2.0,
       "n_min": 2,
       "source": "make eval-edit-region first run 2026-06-10 (flux fill, single-shot, production fill register): alignment 10.0 + medium 10.0 on both cases, outside-change 0.0000 per case (the compositor's promise, gated per-case not by mean). Tracks the production arm only; extra A/B arms via EDIT_REGION_BENCH_MODELS report but never gate. Band 2.0 absorbs single judge-noise samples."
+    },
+    "recon_fidelity": {
+      "metric": "composite_mean",
+      "baseline": 0.69,
+      "regression_band": 0.12,
+      "n_min": 4,
+      "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
     }
   }
 }
