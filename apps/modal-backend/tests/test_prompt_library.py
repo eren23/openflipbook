@@ -231,6 +231,9 @@ def test_enter_eye_level_nano_template() -> None:
     assert "exactly these landmarks: The Inner Bailey; The Watch Bell" in s
     assert "left/right relations" in s  # NE facing is north-ish: map LR holds
     assert "(map bearings, not view directions)" in s  # register fix (V1 f13)
+    # Anti-widen (the courtyard-tap-redraws-the-city failure): neighbours are
+    # context, never a reason to pull the camera back.
+    assert "do NOT widen or pull back the framing" in s
     assert "striped lighthouse" in s
     assert "Keep the exact art medium of Image 2" in s
     assert "Do not change the input aspect ratio." in s
@@ -272,6 +275,8 @@ def test_enter_gpt_and_kontext_families() -> None:
     assert "Preserve: the architecture and building shapes" in g
     assert "Constraints:" in g and g.index("Preserve:") < g.index("Constraints:")
     assert "Eye-level first-person view only" in g
+    # Anti-widen rides the gpt builder's surroundings clause too.
+    assert "do NOT widen or pull back the framing" in g
     k = _rich_enter(view={"projection": "eye_level"}, family="kontext")
     assert k.startswith("Change the view to ground level inside this exact")
     assert "while preserving its exact architecture" in k

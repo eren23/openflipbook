@@ -214,6 +214,13 @@ def _surroundings_sentence(surroundings: str | None) -> str:
     )
     if not text.endswith("."):
         text += "."
+    # Anti-widen: the live failure was the model zooming OUT to fit every
+    # named neighbour into frame (a courtyard tap re-drawing the whole city,
+    # 10/10 on plain same-place). The neighbours are context, not subjects.
+    text += (
+        " The neighbours stay distant glimpses at the edges of frame — do NOT "
+        "widen or pull back the framing to include them."
+    )
     return text
 
 
@@ -337,6 +344,12 @@ def _enter_gpt(
         )
         if not text.endswith("."):
             text += "."
+        # Anti-widen (see _surroundings_sentence): neighbours are context,
+        # not subjects — never a reason to pull the camera back.
+        text += (
+            " The neighbours stay distant glimpses at the edges of frame — do "
+            "NOT widen or pull back the framing to include them."
+        )
     text += " " + _medium_sentence(proj, style_anchor, ref_name)
     text += (
         " Constraints: "
