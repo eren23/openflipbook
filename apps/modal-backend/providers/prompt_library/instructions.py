@@ -85,6 +85,8 @@ def _legacy_enter_instruction(
     subject_context: str | None = None,
     surroundings: str | None = None,
     layout_clause: str = "",
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     title = page_title.strip() or "this place"
     anchor = f'"{title}"'
@@ -101,7 +103,9 @@ def _legacy_enter_instruction(
     if named:
         text += ", working in what belongs here: " + "; ".join(named[:8])
     text += "."
-    if surroundings and surroundings.strip():
+    if surroundings_pov:
+        text += _pov_surroundings_text(surroundings, surroundings_behind)
+    elif surroundings and surroundings.strip():
         text += (
             " Through openings and beyond the walls, keep the neighbours where "
             f"the map placed them: {surroundings.strip()}"
@@ -218,10 +222,51 @@ def _invariants_sentence(named: list[str], view: ViewSpec) -> str:
     return text + ". Keep their relative positions as seen from this viewpoint."
 
 
-def _surroundings_sentence(surroundings: str | None) -> str:
+def _pov_surroundings_text(surroundings: str | None, behind: str | None) -> str:
+    """Sightline-culled surroundings (client geometry: observer pose + view
+    frustum decided what the camera can actually see). View-relative wording;
+    everything outside the frustum is BANNED from the backdrop by name, and
+    an empty visible list is said out loud as an empty backdrop. The live
+    failure this kills: the lighthouse enter faced open sea, and the
+    map-bearing neighbours ("to the east, the docks") were painted into the
+    background anyway."""
+    s = (surroundings or "").strip()
+    b = (behind or "").strip()
+    if not s and not b:
+        return ""
+    text = ""
+    if s:
+        text += f" From this viewpoint the only mapped landmarks in sight are: {s}"
+        if not text.endswith("."):
+            text += "."
+        text += (
+            " They stay exactly where stated, distant — do NOT widen or pull "
+            "back the framing to include more."
+        )
+    else:
+        text += (
+            " No other mapped landmark is visible from this viewpoint — beyond "
+            "the subject the backdrop stays open and empty (sky, terrain or "
+            "water, as the reference implies); do NOT introduce distant "
+            "buildings, docks, piers, towers or streets."
+        )
+    if b:
+        text += f" Out of frame behind the camera (NOT visible, do not draw): {b}."
+    return text
+
+
+def _surroundings_sentence(
+    surroundings: str | None,
+    *,
+    pov: bool = False,
+    behind: str | None = None,
+) -> str:
     """Neighbours framed EXPLICITLY as map bearings — the instruction's own
     facing is view-relative, and mixing registers silently is the A2
-    contradiction this grammar exists to kill."""
+    contradiction this grammar exists to kill. pov=True (sightline-culled
+    client geometry) swaps to the view-relative wording instead."""
+    if pov:
+        return _pov_surroundings_text(surroundings, behind)
     if not (surroundings and surroundings.strip()):
         return ""
     text = (
@@ -272,6 +317,8 @@ def _enter_nano(
     layout_clause: str,
     view: ViewSpec,
     style_ref: bool,
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     anchor = f'"{title}"'
     if subject_context and subject_context.strip():
@@ -288,7 +335,9 @@ def _enter_nano(
     proj = str(view.get("projection") or "")
     text += _transform_sentence(view)
     text += " " + _invariants_sentence(named, view)
-    text += _surroundings_sentence(surroundings)
+    text += _surroundings_sentence(
+        surroundings, pov=surroundings_pov, behind=surroundings_behind
+    )
     text += " " + _medium_sentence(proj, style_anchor, ref_name)
     text += f" {ASPECT_GUARD}"
     if layout_clause.strip():
@@ -306,6 +355,8 @@ def _enter_gpt(
     layout_clause: str,
     view: ViewSpec,
     style_ref: bool,
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     proj = str(view.get("projection") or "")
     ctx = (
@@ -353,7 +404,9 @@ def _enter_gpt(
         text += ", and their left/right relations as the map implies."
     else:
         text += ", and their relative positions as seen from this viewpoint."
-    if surroundings and surroundings.strip():
+    if surroundings_pov:
+        text += _pov_surroundings_text(surroundings, surroundings_behind)
+    elif surroundings and surroundings.strip():
         text += (
             " Keep the neighbours where the map placed them (map bearings): "
             f"{surroundings.strip()}"
@@ -387,6 +440,8 @@ def _enter_kontext(
     surroundings: str | None,
     layout_clause: str,
     view: ViewSpec,
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     """FORCED fallback only — Kontext rotates the subject, not the camera
     (3.33/10 same-place on view change). Scene-level phrasing, full medium in
@@ -425,7 +480,9 @@ def _enter_kontext(
         f", and the same {medium} medium — not a photograph, no photorealism. "
         + LETTERING_GUARD
     )
-    if surroundings and surroundings.strip():
+    if surroundings_pov:
+        text += _pov_surroundings_text(surroundings, surroundings_behind)
+    elif surroundings and surroundings.strip():
         text += f" Beyond the walls keep: {surroundings.strip()}"
         if not text.endswith("."):
             text += "."
@@ -574,6 +631,8 @@ def build_enter_instruction(
     view: ViewSpec | None = None,
     family: str | None = None,
     style_ref: bool = False,
+    surroundings_pov: bool = False,
+    surroundings_behind: str | None = None,
 ) -> str:
     """Enter: a view CHANGE that keeps the place. view=None -> today's exact
     string. All four projections are honored — top_down renders the place as
@@ -586,6 +645,8 @@ def build_enter_instruction(
             subject_context=subject_context,
             surroundings=surroundings,
             layout_clause=layout_clause,
+            surroundings_pov=surroundings_pov,
+            surroundings_behind=surroundings_behind,
         )
     title = page_title.strip() or "this place"
     named = [f.strip() for f in facts if f and f.strip()]
@@ -595,18 +656,24 @@ def build_enter_instruction(
             title, named,
             style_anchor=style_anchor, subject_context=subject_context,
             surroundings=surroundings, layout_clause=layout_clause, view=view,
+            surroundings_pov=surroundings_pov,
+            surroundings_behind=surroundings_behind,
         )
     if fam == "gpt_image":
         return _enter_gpt(
             title, named,
             style_anchor=style_anchor, subject_context=subject_context,
             surroundings=surroundings, layout_clause=layout_clause, view=view,
+            surroundings_pov=surroundings_pov,
+            surroundings_behind=surroundings_behind,
             style_ref=style_ref,
         )
     return _enter_nano(
         title, named,
         style_anchor=style_anchor, subject_context=subject_context,
         surroundings=surroundings, layout_clause=layout_clause, view=view,
+        surroundings_pov=surroundings_pov,
+        surroundings_behind=surroundings_behind,
         style_ref=style_ref,
     )
 

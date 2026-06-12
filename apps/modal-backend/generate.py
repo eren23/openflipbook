@@ -246,6 +246,13 @@ class GenerateBody(BaseModel):
     # the resolver's spatial-anchor note back so the planner can keep the
     # entered place's neighbours where the parent map had them.
     prefetched_surroundings: str | None = None
+    # Sightline-culled surroundings (client geometry: the observer pose's view
+    # frustum decided what is in sight). When true, prefetched_surroundings is
+    # VIEW-relative (frame positions, not map bearings) and surroundings_behind
+    # lists the mapped landmarks that are NOT visible — banned from the
+    # backdrop by name. Absent -> legacy map-bearing wording (parity).
+    surroundings_pov: bool = False
+    surroundings_behind: str | None = None
     # Multi-turn refer (SAMA / MM-Conv pattern): when the user rejects a
     # resolved subject and taps again nearby, the client forwards the
     # rejected phrase so the VLM picks something different.
@@ -1512,6 +1519,8 @@ async def _event_stream(
         # World Mode spatial anchor — what's around the tapped spot + directions,
         # threaded into the planner so the entered place keeps its neighbours.
         surroundings_for_plan: str | None = None
+        surroundings_pov_effective = False
+        surroundings_behind_effective: str | None = None
         # View-grammar signals: the classifier's locale-proof place FORM
         # (interior/complex/landscape/generic) and the resolved subject BEFORE
         # the user-hint fold (the policy matches names against it).
@@ -1545,6 +1554,10 @@ async def _event_stream(
                 style_anchor = cleaned_style or None
                 subject_context = cleaned_subject_context or None
                 surroundings_for_plan = cleaned_surroundings or None
+                surroundings_pov_effective = bool(body.surroundings_pov)
+                surroundings_behind_effective = (
+                    _sanitize_hint(body.surroundings_behind, 240) or None
+                )
                 yield _sse(
                     {
                         "type": "status",
@@ -1872,6 +1885,8 @@ async def _event_stream(
             view=enter_view,
             family=enter_family,
             style_ref=bool(_condition_url_for_role(body, "style")),
+            surroundings_pov=surroundings_pov_effective,
+            surroundings_behind=surroundings_behind_effective,
         )
 
         # 3. Image gen — with progressive fast-tier draft.

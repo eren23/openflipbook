@@ -5,6 +5,7 @@ import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 import {
   degradedSubmapTap,
   describeSurroundings,
+  describeVisibleSurroundings,
   frameCropToImageBox,
   geoTapForEntity,
   geoTapRequest,
@@ -670,5 +671,65 @@ describe("conditioning crop alignment (the reference IS the promise)", () => {
     expect(regionBoxFor({ ...tap, focus_id: "other" }, closeupView)).toBeNull();
     // entering without a closeup context keeps the classic crop
     expect(regionBoxFor(tap, null)).toBeNull();
+  });
+});
+
+describe("describeVisibleSurroundings (the sightline cull)", () => {
+  // The lighthouse failure, reconstructed: tower on the west point, observer
+  // approaches from the south looking NORTH (gaze -PI/2, y grows down), the
+  // docks and town lie east — BEHIND the camera's frustum, where the old
+  // bearing wording still painted them into the backdrop.
+  const lighthouse = geo("lh", "The Lighthouse", 20, 30, {
+    footprint: { w: 6, d: 6 },
+  });
+  const docks = geo("dk", "The Docks", 60, 32);
+  const town = geo("tw", "Town Houses", 70, 22);
+  const seaRock = geo("sr", "Gull Rock", 15, 8, { visual: "a bare sea stack" });
+  const observer = {
+    pos: { x: 20, y: 42 },
+    eye_height: 1.7,
+    gaze: -Math.PI / 2,
+    pitch: 0,
+    fov: Math.PI / 2,
+  };
+
+  it("culls out-of-frustum landmarks into `behind`, keeps in-view ones", () => {
+    const r = describeVisibleSurroundings(
+      "lh",
+      [lighthouse, docks, town, seaRock],
+      observer,
+    );
+    expect(r.visible).toContain("Gull Rock (a bare sea stack)");
+    expect(r.visible).not.toContain("Docks");
+    expect(r.visible).not.toContain("Town Houses");
+    expect(r.behind).toContain("The Docks");
+    expect(r.behind).toContain("Town Houses");
+  });
+
+  it("nothing in the frustum → empty visible, everything in behind", () => {
+    const r = describeVisibleSurroundings("lh", [lighthouse, docks, town], observer);
+    expect(r.visible).toBe("");
+    expect(r.behind).toBe("The Docks; Town Houses");
+  });
+
+  it("orders in-view mates left to right and words the frame side", () => {
+    // Looking EAST (gaze 0): north neighbour = left of frame, south = right.
+    const east = { ...observer, pos: { x: 20, y: 30 }, gaze: 0 };
+    const north = geo("n", "North Tower", 50, 12);
+    const south = geo("s", "South Gate", 50, 48);
+    const r = describeVisibleSurroundings("lh", [lighthouse, south, north], east);
+    const iN = r.visible.indexOf("North Tower");
+    const iS = r.visible.indexOf("South Gate");
+    expect(iN).toBeGreaterThanOrEqual(0);
+    expect(iS).toBeGreaterThan(iN);
+    expect(r.visible.slice(0, iN)).toContain("left");
+    expect(r.visible.slice(iN, iS + 10)).toContain("right");
+  });
+
+  it("unknown focus → empty", () => {
+    expect(describeVisibleSurroundings("ghost", [lighthouse], observer)).toEqual({
+      visible: "",
+      behind: "",
+    });
   });
 });
