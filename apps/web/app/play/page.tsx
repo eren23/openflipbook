@@ -103,6 +103,7 @@ import {
   geoTapForEntity,
   geoTapRequest,
   MAP_IMAGE_FRAME,
+  regionBoxFor,
   wideRegionCut,
   type GeoTap,
   type GeoTapOverride,
@@ -2194,16 +2195,6 @@ export default function PlayPage() {
           : null) ??
         history.items.find((p) => p.parentId == null)?.imageDataUrl ??
         null;
-      let condition = { urls: [] as string[], roles: [] as string[] };
-      try {
-        condition = await buildConditionRefs({
-          parentDataUrl: currentImage,
-          styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
-          click: { xPct: click.x_pct, yPct: click.y_pct },
-        });
-      } catch {
-        // leave condition empty → text-only generation
-      }
       // Close the geometric loop: a tap on the seeded world map → an observer
       // pose + the projected layout, so the entered scene is steered and
       // grounded by where the entities actually are. Only when World Mode is on
@@ -2282,6 +2273,28 @@ export default function PlayPage() {
         }
       }
       const worldTap = geoTap ?? fallbackTap;
+      // Conditioning refs are built AFTER routing so the region crop can BE
+      // the routing window (closeup/submap: the reference IS the promise; a
+      // transition tap from a closeup uses the whole frame-filling image as
+      // the region — the enter starts tight and the step-in judge measures
+      // tight). Classic taps keep the click-centered crop, byte-identical.
+      let condition = { urls: [] as string[], roles: [] as string[] };
+      try {
+        const regionSpec = worldTap
+          ? regionBoxFor(worldTap, page.sceneView ?? null)
+          : null;
+        condition = await buildConditionRefs({
+          parentDataUrl: currentImage,
+          styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
+          click: { xPct: click.x_pct, yPct: click.y_pct },
+          ...(regionSpec && "box" in regionSpec
+            ? { regionBox: regionSpec.box }
+            : {}),
+          ...(regionSpec && "whole" in regionSpec ? { regionWhole: true } : {}),
+        });
+      } catch {
+        // leave condition empty → text-only generation
+      }
       // World OFF + a wide mapped region (the river): a fresh re-composition
       // relocates landmarks, so zoom-cut the map instead (see wideRegionCut).
       const wideCut =

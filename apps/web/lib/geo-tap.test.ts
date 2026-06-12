@@ -5,8 +5,10 @@ import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 import {
   degradedSubmapTap,
   describeSurroundings,
+  frameCropToImageBox,
   geoTapForEntity,
   geoTapRequest,
+  regionBoxFor,
   wideRegionCut,
 } from "./geo-tap";
 
@@ -606,5 +608,67 @@ describe("submap click register (the displayed frame, not the seeded frame)", ()
     const map = { entities: [topLevel, child, geo("palace", "Palace", 80, 50)], bounds: CROP };
     const t = geoTapRequest(map, "n1", { x_pct: 0.5, y_pct: 0.5 }, 16 / 9);
     expect(t!.focus_id).toBe("plaza");
+  });
+});
+
+describe("conditioning crop alignment (the reference IS the promise)", () => {
+  it("frameCropToImageBox maps a frame crop to displayed-image fractions", () => {
+    const frame = { x: 0, y: 0, w: 100, h: 60 };
+    expect(frameCropToImageBox({ x: 25, y: 15, w: 50, h: 30 }, frame)).toEqual({
+      x: 0.25,
+      y: 0.25,
+      w: 0.5,
+      h: 0.5,
+    });
+    // through a submap frame (nested register)
+    const sub = { x: 40, y: 15, w: 30, h: 20 };
+    expect(frameCropToImageBox({ x: 47.5, y: 20, w: 15, h: 10 }, sub)).toEqual({
+      x: 0.25,
+      y: 0.25,
+      w: 0.5,
+      h: 0.5,
+    });
+    // windows poking past the frame edge clamp
+    const edge = frameCropToImageBox({ x: 90, y: 50, w: 20, h: 20 }, frame);
+    expect(edge.x + edge.w).toBeLessThanOrEqual(1);
+    expect(edge.y + edge.h).toBeLessThanOrEqual(1);
+  });
+
+  it("regionBoxFor: closeup/submap use the routing window", () => {
+    const tap = {
+      kind: "closeup" as const,
+      focus_id: "palace",
+      scene_view: {
+        node_id: "n",
+        level: "map" as const,
+        observer: null,
+        map_crop: { x: 25, y: 15, w: 50, h: 30 },
+        focus_id: "palace",
+        closeup: true,
+      },
+    };
+    const spec = regionBoxFor(tap, null);
+    expect(spec).toEqual({ box: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } });
+  });
+
+  it("regionBoxFor: the transition tap uses the WHOLE image as the region", () => {
+    const closeupView: SceneView = {
+      node_id: "n-close",
+      level: "map",
+      observer: null,
+      map_crop: { x: 41, y: 41, w: 18, h: 18 },
+      focus_id: "palace",
+      closeup: true,
+    };
+    const tap = {
+      kind: "scene" as const,
+      focus_id: "palace",
+      scene_view: { node_id: "n", level: "building" as const, observer: null, map_crop: null },
+    };
+    expect(regionBoxFor(tap, closeupView)).toEqual({ whole: true });
+    // entering some OTHER place from this closeup keeps the classic crop
+    expect(regionBoxFor({ ...tap, focus_id: "other" }, closeupView)).toBeNull();
+    // entering without a closeup context keeps the classic crop
+    expect(regionBoxFor(tap, null)).toBeNull();
   });
 });

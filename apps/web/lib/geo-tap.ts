@@ -305,6 +305,55 @@ function buildSceneTap(
   };
 }
 
+/** A frame-coords crop expressed as a normalized box of the DISPLAYED image
+ *  (the inverse of the click register): what the canvas crop should cut.
+ *  Clamped — submap windows can poke past the frame edge. Pure. */
+export function frameCropToImageBox(
+  crop: MapCrop,
+  frame: MapCrop,
+): { x: number; y: number; w: number; h: number } {
+  const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
+  const x = clamp01((crop.x - frame.x) / frame.w);
+  const y = clamp01((crop.y - frame.y) / frame.h);
+  return {
+    x,
+    y,
+    w: Math.min(clamp01(crop.w / frame.w), 1 - x),
+    h: Math.min(clamp01(crop.h / frame.h), 1 - y),
+  };
+}
+
+/** The conditioning-region decision for a world tap (pure, unit-testable):
+ *  closeup/submap → the ROUTING window itself (the reference IS the promise);
+ *  a transition tap (entering the place whose closeup fills this frame) → the
+ *  WHOLE image as the region; anything else → null (the classic click crop). */
+export function regionBoxFor(
+  tap: Pick<GeoTap, "kind" | "focus_id" | "scene_view">,
+  currentView: SceneView | null | undefined,
+):
+  | { box: { x: number; y: number; w: number; h: number } }
+  | { whole: true }
+  | null {
+  if (
+    (tap.kind === "closeup" || tap.kind === "submap") &&
+    tap.scene_view.map_crop
+  ) {
+    const frame =
+      currentView?.level === "map" && currentView.map_crop
+        ? currentView.map_crop
+        : MAP_IMAGE_FRAME;
+    return { box: frameCropToImageBox(tap.scene_view.map_crop, frame) };
+  }
+  if (
+    tap.kind === "scene" &&
+    currentView?.closeup === true &&
+    currentView.focus_id === tap.focus_id
+  ) {
+    return { whole: true };
+  }
+  return null;
+}
+
 /** One rung FINER than the frame the tap happened in (see geoTapRequest). */
 function childTierFor(
   currentView: SceneView | null | undefined,
