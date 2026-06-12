@@ -1,45 +1,155 @@
 {
   "_comment": "Single source of truth for the geometric-world wire shapes. The P0 schema-parity gate (apps/web/lib/world-geo-schema.test.ts + apps/modal-backend/tests/test_geo_schema.py) asserts both the TS interfaces and the Pydantic mirrors match these key sets. Edit here when a shape changes; both gates will fail until both sides follow.",
   "keys": {
-    "WorldVec2": ["x", "y"],
-    "WorldEntityGeo": ["id", "entity_id", "kind", "label", "pos", "height", "elevation", "footprint", "scale", "scale_tier", "heading", "visual", "state", "confidence", "source", "updated_at", "border", "height_m"],
-    "ObserverPose": ["pos", "eye_height", "gaze", "pitch", "fov"],
-    "MapCrop": ["x", "y", "w", "h"],
-    "ViewSpec": ["projection", "pitch_deg", "azimuth_deg", "camera_height", "fov_deg", "source"],
-    "SceneView": ["node_id", "level", "observer", "map_crop", "focus_id", "scale_tier", "view"],
-    "ProjectedEntity": ["id", "label", "x_pct", "y_pct", "w_pct", "h_pct", "depth", "h_pos", "v_pos", "size"],
-    "WorldMapSnapshot": ["session_id", "entities", "bounds", "schema_version", "updated_at"]
+    "WorldVec2": [
+      "x",
+      "y"
+    ],
+    "WorldEntityGeo": [
+      "id",
+      "entity_id",
+      "kind",
+      "label",
+      "pos",
+      "height",
+      "elevation",
+      "footprint",
+      "scale",
+      "scale_tier",
+      "heading",
+      "visual",
+      "state",
+      "confidence",
+      "source",
+      "updated_at",
+      "border",
+      "height_m"
+    ],
+    "ObserverPose": [
+      "pos",
+      "eye_height",
+      "gaze",
+      "pitch",
+      "fov"
+    ],
+    "MapCrop": [
+      "x",
+      "y",
+      "w",
+      "h"
+    ],
+    "ViewSpec": [
+      "projection",
+      "pitch_deg",
+      "azimuth_deg",
+      "camera_height",
+      "fov_deg",
+      "source"
+    ],
+    "SceneView": [
+      "node_id",
+      "level",
+      "observer",
+      "map_crop",
+      "focus_id",
+      "scale_tier",
+      "view",
+      "closeup"
+    ],
+    "ProjectedEntity": [
+      "id",
+      "label",
+      "x_pct",
+      "y_pct",
+      "w_pct",
+      "h_pct",
+      "depth",
+      "h_pos",
+      "v_pos",
+      "size"
+    ],
+    "WorldMapSnapshot": [
+      "session_id",
+      "entities",
+      "bounds",
+      "schema_version",
+      "updated_at"
+    ]
   },
-  "shared_shapes": ["WorldVec2", "ObserverPose", "MapCrop", "ViewSpec", "SceneView", "ProjectedEntity"],
+  "shared_shapes": [
+    "WorldVec2",
+    "ObserverPose",
+    "MapCrop",
+    "ViewSpec",
+    "SceneView",
+    "ProjectedEntity"
+  ],
   "samples": {
-    "WorldVec2": { "x": 10, "y": 20 },
+    "WorldVec2": {
+      "x": 10,
+      "y": 20
+    },
     "WorldEntityGeo": {
       "id": "g1",
       "entity_id": "e1",
       "kind": "place",
       "label": "Lighthouse",
-      "pos": { "x": 10, "y": 20 },
+      "pos": {
+        "x": 10,
+        "y": 20
+      },
       "height": 12,
       "elevation": 0,
-      "footprint": { "w": 4, "d": 4 },
+      "footprint": {
+        "w": 4,
+        "d": 4
+      },
       "scale": 1,
       "scale_tier": "place",
       "heading": 0,
       "visual": "red-and-white striped tower",
-      "state": { "lit": true },
+      "state": {
+        "lit": true
+      },
       "confidence": 0.9,
       "source": "user",
       "updated_at": "2026-06-06T00:00:00Z",
       "border": [
-        { "x": 8, "y": 18 },
-        { "x": 12, "y": 18 },
-        { "x": 12, "y": 22 },
-        { "x": 8, "y": 22 }
+        {
+          "x": 8,
+          "y": 18
+        },
+        {
+          "x": 12,
+          "y": 18
+        },
+        {
+          "x": 12,
+          "y": 22
+        },
+        {
+          "x": 8,
+          "y": 22
+        }
       ],
       "height_m": 30
     },
-    "ObserverPose": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
-    "MapCrop": { "x": 0, "y": 0, "w": 100, "h": 60 },
+    "ObserverPose": {
+      "pos": {
+        "x": 0,
+        "y": 0
+      },
+      "eye_height": 1.7,
+      "gaze": 0,
+      "pitch": 0,
+      "fov": 1.2
+    },
+    "MapCrop": {
+      "x": 0,
+      "y": 0,
+      "w": 100,
+      "h": 60
+    },
     "ViewSpec": {
       "projection": "eye_level",
       "pitch_deg": -10,
@@ -51,7 +161,16 @@
     "SceneView": {
       "node_id": "n1",
       "level": "eye",
-      "observer": { "pos": { "x": 0, "y": 0 }, "eye_height": 1.7, "gaze": 0, "pitch": 0, "fov": 1.2 },
+      "observer": {
+        "pos": {
+          "x": 0,
+          "y": 0
+        },
+        "eye_height": 1.7,
+        "gaze": 0,
+        "pitch": 0,
+        "fov": 1.2
+      },
       "map_crop": null,
       "focus_id": "g1",
       "scale_tier": "city",
@@ -62,7 +181,8 @@
         "camera_height": "eye",
         "fov_deg": 90,
         "source": "user"
-      }
+      },
+      "closeup": false
     },
     "ProjectedEntity": {
       "id": "g1",
@@ -79,7 +199,12 @@
     "WorldMapSnapshot": {
       "session_id": "s1",
       "entities": [],
-      "bounds": { "x": 0, "y": 0, "w": 100, "h": 60 },
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 60
+      },
       "schema_version": 1,
       "updated_at": "2026-06-06T00:00:00Z"
     }

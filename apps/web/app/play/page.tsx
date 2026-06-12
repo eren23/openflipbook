@@ -2358,8 +2358,10 @@ export default function PlayPage() {
               // sub-map is a true zoom of the tapped region. A scene first-enter
               // keeps the (reprojecting) fresh path until B2 wires the guarded
               // scene→scene continuation. Spread last so it wins.
+              // closeup + submap both ride the Kontext zoom-continue (the
+              // high-consistency op); only a true transition tap enters.
               render_mode:
-                worldTap.kind === "submap" ? "place_submap" : "place_scene",
+                worldTap.kind === "scene" ? "place_scene" : "place_submap",
               // The geometric tap KNOWS which entity you hit (by coordinates) —
               // make it the subject so tapping the Tower of Art enters the Tower,
               // overriding the looser VLM read that picked its container. Spread

@@ -36,6 +36,22 @@ function geo(
 
 const CROP: MapCrop = { x: 0, y: 0, w: 100, h: 80 };
 
+// The descent ladder: a plain map tap on a place now yields a CLOSEUP; the
+// scene route fires on the TRANSITION tap (the tap on the place whose
+// closeup you are already on). These helpers build that context.
+const closeupViewOf = (
+  focusId: string,
+  crop: { x: number; y: number; w: number; h: number },
+): SceneView => ({
+  node_id: "n-close",
+  level: "map",
+  observer: null,
+  map_crop: crop,
+  focus_id: focusId,
+  closeup: true,
+});
+
+
 describe("geoTapRequest (close the geometric tap loop)", () => {
   it("tapping a place → scene_view (observer); a FIRST enter steers by nothing", () => {
     const map = {
@@ -48,7 +64,16 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
+    // The ladder: entering happens on the TRANSITION tap — from the clock's
+    // own closeup frame (centred on it; click coords live in that crop).
+    const t = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      undefined,
+      closeupViewOf("clock", { x: 51, y: 21, w: 18, h: 18 }),
+    );
     expect(t).not.toBeNull();
     expect(t!.focus_id).toBe("clock");
     expect(t!.focus_label).toBe("clock tower"); // drives the entered subject
@@ -141,7 +166,14 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 30 / 100, y_pct: 18 / 60 }, 16 / 9);
+    const t = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      undefined,
+      closeupViewOf("uu", { x: 21, y: 9, w: 18, h: 18 }),
+    );
     expect(t).not.toBeNull();
     expect(t!.scene_view.focus_id).toBe("uu");
     const ids = t!.expected_layout.map((p) => p.id);
@@ -162,18 +194,23 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
       ],
       bounds: CROP,
     };
-    const click = { x_pct: 30 / 100, y_pct: 18 / 60 };
-    const def = geoTapRequest(map, "n1", click, 16 / 9)!;
+    const click = { x_pct: 0.5, y_pct: 0.5 };
+    const transition = closeupViewOf("uu", { x: 21, y: 9, w: 18, h: 18 });
+    const def = geoTapRequest(map, "n1", click, 16 / 9, undefined, transition)!;
     const custom = {
       ...def.scene_view.observer!,
       pos: { x: 31, y: 25 },
       gaze: -Math.PI / 2,
       pitch: 0.3,
     };
-    const t = geoTapRequest(map, "n1", click, 16 / 9, {
-      observer: custom,
-      level: "eye",
-    })!;
+    const t = geoTapRequest(
+      map,
+      "n1",
+      click,
+      16 / 9,
+      { observer: custom, level: "eye" },
+      transition,
+    )!;
     // the popover's adjusted pose + level win over the synthesized ones
     expect(t.scene_view.observer).toEqual(custom);
     expect(t.scene_view.level).toBe("eye");
@@ -197,13 +234,24 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t!.layout_entities.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("tapping a place still routes to a scene (not a submap)", () => {
+  it("the ladder: plain place tap → closeup; transition tap → scene", () => {
     const map = {
       entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
       bounds: CROP,
     };
-    const t = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
-    expect(t!.kind).toBe("scene");
+    const first = geoTapRequest(map, "n1", { x_pct: 60 / 100, y_pct: 30 / 60 }, 16 / 9);
+    expect(first!.kind).toBe("closeup");
+    expect(first!.scene_view.closeup).toBe(true);
+    expect(first!.focus_id).toBe("clock");
+    const second = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      undefined,
+      closeupViewOf("clock", { x: 51, y: 21, w: 18, h: 18 }),
+    );
+    expect(second!.kind).toBe("scene");
   });
 
   it("routes a tap through the image frame, not the entities' tight bounds (live-bug regression)", () => {
@@ -222,7 +270,7 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     // tap the University's image position: 54.5% across, 21.5/60 down
     const t = geoTapRequest(map, "n1", { x_pct: 0.545, y_pct: 21.5 / 60 }, 16 / 9);
     expect(t).not.toBeNull();
-    expect(t!.kind).toBe("scene");
+    expect(t!.kind).toBe("closeup"); // the ladder's first rung
     expect(t!.focus_id).toBe("uni"); // would miss if routed via bounds
   });
 
@@ -442,8 +490,16 @@ describe("geoTapForEntity (W2: enter the place the lettering names)", () => {
       visual: "an 800-foot stone tower",
     });
     const map = { entities: [tower], bounds: CROP };
-    // Footprint hit at the tower's centre (frame is 100×60 → y_pct = 30/60).
-    const byHit = geoTapRequest(map, "n1", { x_pct: 0.6, y_pct: 0.5 }, 16 / 9);
+    // The footprint hit's SCENE form fires on the transition tap (the
+    // closeup frame of this same focus) — compare against that.
+    const byHit = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 0.5, y_pct: 0.5 },
+      16 / 9,
+      undefined,
+      closeupViewOf("tower", { x: 51, y: 21, w: 18, h: 18 }),
+    );
     const byName = geoTapForEntity(map, "n1", tower, 16 / 9);
     expect(byName.kind).toBe("scene");
     expect(byName.focus_id).toBe("tower");
