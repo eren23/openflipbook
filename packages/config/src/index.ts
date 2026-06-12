@@ -77,7 +77,14 @@ export type VideoTier = "fast" | "balanced" | "pro";
 // subject is drawn â an immersive place you've stepped into, a closer
 // cartographic map of a sub-area, or today's labelled explainer diagram.
 export type Autonomy = "auto" | "semi";
-export type RenderMode = "place_scene" | "place_submap" | "explainer";
+// place_closeup = the descent ladder's closeup rung on a NON-map frame (a
+// Kontext zoom of a thing inside a perspective scene). Backend accepts it
+// since the same release; old backends coerce unknown modes to the fresh path.
+export type RenderMode =
+  | "place_scene"
+  | "place_submap"
+  | "place_closeup"
+  | "explainer";
 // The click-resolver's read of what was tapped (drives RenderMode in world mode).
 export type EnterAs = "scene" | "submap" | "explainer";
 

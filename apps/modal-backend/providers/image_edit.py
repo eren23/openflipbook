@@ -126,6 +126,7 @@ def build_zoom_instruction(
     view: dict | None = None,
     family: str | None = None,
     label_free: bool = False,
+    register: str = "map",
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string — pinned by
@@ -144,6 +145,7 @@ def build_zoom_instruction(
         view=cast("_ViewSpec | None", view),
         family=family,
         label_free=label_free,
+        register=register,
     )
 
 
