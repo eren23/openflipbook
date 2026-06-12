@@ -33,6 +33,8 @@ interface Props {
   setWorldMode: (on: boolean) => void;
   autonomy: Autonomy;
   setAutonomy: (a: Autonomy) => void;
+  domLabels: boolean;
+  setDomLabels: (on: boolean) => void;
 }
 
 export function QueryToolbar({
@@ -58,6 +60,8 @@ export function QueryToolbar({
   setWorldMode,
   autonomy,
   setAutonomy,
+  domLabels,
+  setDomLabels,
 }: Props) {
   return (
     <>
@@ -198,6 +202,22 @@ export function QueryToolbar({
                 {a}
               </button>
             ))}
+          {worldMode && (
+            <button
+              type="button"
+              onClick={() => setDomLabels(!domLabels)}
+              aria-pressed={domLabels}
+              title="DOM labels — maps render with no baked text; place names overlay the image (crisper lettering, names never break clicks)"
+              className={
+                "px-2.5 py-1 transition-colors " +
+                (domLabels
+                  ? "bg-[var(--color-ink)] text-[var(--color-canvas)]"
+                  : "hover:bg-[var(--color-ink)]/5")
+              }
+            >
+              labels
+            </button>
+          )}
         </div>
         <button
           type="submit"

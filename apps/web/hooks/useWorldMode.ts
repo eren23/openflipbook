@@ -7,9 +7,21 @@ import type { Autonomy } from "@openflipbook/config";
 export interface WorldModeState {
   enabled: boolean;
   autonomy: Autonomy;
+  // DOM labels: maps render label-free and names overlay in the DOM
+  // (MapLabelOverlay) — fixes garbled lettering + clicks landing on text.
+  // Seeded by NEXT_PUBLIC_DOM_LABELS (build-time), per-session persisted.
+  domLabels: boolean;
 }
 
-const DEFAULT: WorldModeState = { enabled: false, autonomy: "auto" };
+const DOM_LABELS_DEFAULT = ["1", "true", "yes"].includes(
+  (process.env.NEXT_PUBLIC_DOM_LABELS ?? "").toLowerCase(),
+);
+
+const DEFAULT: WorldModeState = {
+  enabled: false,
+  autonomy: "auto",
+  domLabels: DOM_LABELS_DEFAULT,
+};
 
 function storageKey(sessionId: string): string {
   return `openflipbook.worldMode.${sessionId}`;
@@ -36,6 +48,10 @@ export function useWorldMode(sessionId: string) {
       setState({
         enabled: Boolean(parsed.enabled),
         autonomy: parsed.autonomy === "semi" ? "semi" : "auto",
+        domLabels:
+          typeof parsed.domLabels === "boolean"
+            ? parsed.domLabels
+            : DOM_LABELS_DEFAULT,
       });
     } catch {
       setState(DEFAULT);
@@ -59,11 +75,17 @@ export function useWorldMode(sessionId: string) {
     (autonomy: Autonomy) => setState((s) => ({ ...s, autonomy })),
     [],
   );
+  const setDomLabels = useCallback(
+    (domLabels: boolean) => setState((s) => ({ ...s, domLabels })),
+    [],
+  );
 
   return {
     enabled: state.enabled,
     autonomy: state.autonomy,
+    domLabels: state.domLabels,
     setEnabled,
     setAutonomy,
+    setDomLabels,
   } as const;
 }

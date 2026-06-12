@@ -159,6 +159,10 @@ export interface GenerateRequestBody {
   world_mode?: boolean;
   autonomy?: Autonomy;
   render_mode?: RenderMode;
+  // DOM-labels mode (NEXT_PUBLIC_DOM_LABELS): map/explainer renders carry NO
+  // baked text — names ride a client overlay built from entity data. Optional
+  // + default-absent: old clients omit it, prompts stay byte-identical.
+  suppress_map_labels?: boolean;
   // B2 logical AROUND (mode:"expand", SCALE_AROUND_LOGICAL). The same-scale
   // neighbours the client already knows from geometry (excluded) + the focus's
   // rung, so the bloom proposes NEW peers at that scale. Ignored unless the flag

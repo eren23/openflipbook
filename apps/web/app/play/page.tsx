@@ -79,6 +79,7 @@ import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
+import { MapLabelOverlay } from "@/components/PlayPage/MapLabelOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { HintPrompt } from "@/components/PlayPage/HintPrompt";
@@ -613,8 +614,10 @@ export default function PlayPage() {
   const {
     enabled: worldEnabled,
     autonomy: worldAutonomy,
+    domLabels: worldDomLabels,
     setEnabled: setWorldEnabled,
     setAutonomy: setWorldAutonomy,
+    setDomLabels: setWorldDomLabels,
   } = useWorldMode(sessionId);
   const [styleGalleryDismissed, dismissStyleGallery] =
     useStyleGalleryDismissed(sessionId);
@@ -1105,9 +1108,11 @@ export default function PlayPage() {
         ...(devModel ? { image_model: devModel } : {}),
         output_locale: resolveOutputLocale(outputLocale),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
+        // DOM-labels mode: the root map renders text-free; names overlay.
+        ...(worldEnabled && worldDomLabels ? { suppress_map_labels: true } : {}),
       });
     },
-    [input, sessionId, page, generate, imageTier, loopWire, devModel, outputLocale, styleAnchor]
+    [input, sessionId, page, generate, imageTier, loopWire, devModel, outputLocale, styleAnchor, worldEnabled, worldDomLabels]
   );
 
   // B1 — "Describe a place": turn the input description into a logical object
@@ -2287,6 +2292,7 @@ export default function PlayPage() {
           ? {
               world_mode: true,
               autonomy: worldAutonomy,
+              ...(worldDomLabels ? { suppress_map_labels: true } : {}),
               ...(enterAsToRenderMode(worldResolved?.enter_as) !== "explainer"
                 ? { render_mode: enterAsToRenderMode(worldResolved?.enter_as) }
                 : {}),
@@ -2781,6 +2787,8 @@ export default function PlayPage() {
         setWorldMode={setWorldEnabled}
         autonomy={worldAutonomy}
         setAutonomy={setWorldAutonomy}
+        domLabels={worldDomLabels}
+        setDomLabels={setWorldDomLabels}
       />
 
       {worldEnabled && (
@@ -3148,6 +3156,19 @@ export default function PlayPage() {
                 (!page?.sceneView || page.sceneView.level === "map") && (
                   <EnterableMarkers
                     entities={geoMap.entities}
+                    currentView={page?.sceneView ?? null}
+                    imgRef={imgRef}
+                  />
+                )}
+              {worldEnabled &&
+                worldDomLabels &&
+                phase === "ready" &&
+                streamStatus === "off" &&
+                (!page?.sceneView || page.sceneView.level === "map") && (
+                  <MapLabelOverlay
+                    nodeId={page?.nodeId ?? null}
+                    entities={worldState.entities}
+                    geoEntities={geoMap.entities}
                     currentView={page?.sceneView ?? null}
                     imgRef={imgRef}
                   />

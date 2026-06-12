@@ -125,6 +125,7 @@ def build_zoom_instruction(
     style_anchor: str | None = None,
     view: dict | None = None,
     family: str | None = None,
+    label_free: bool = False,
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string — pinned by
@@ -142,6 +143,7 @@ def build_zoom_instruction(
         style_anchor=style_anchor,
         view=cast("_ViewSpec | None", view),
         family=family,
+        label_free=label_free,
     )
 
 

@@ -16,7 +16,11 @@ One transform per prompt; the full invariant block restates on every call.
 from __future__ import annotations
 
 from providers.prompt_library import camera
-from providers.prompt_library.style import LETTERING_GUARD, medium_lock
+from providers.prompt_library.style import (
+    LETTERING_GUARD,
+    NO_LETTERING,
+    medium_lock,
+)
 from providers.prompt_library.types import ViewSpec
 
 # Gemini-family edits drift aspect without this (research/10 §4.6). Text guard
@@ -411,11 +415,26 @@ def build_zoom_instruction(
     style_anchor: str | None = None,
     view: ViewSpec | None = None,
     family: str | None = None,
+    label_free: bool = False,
 ) -> str:
     """Zoom-continue: same place, SAME camera, finer detail. view=None ->
     today's exact string. With a view, the keep-camera fragment is spelled per
     projection in PRESERVE form — any projection is honored, none is ever a
-    change (Kontext's native grammar; harmless on nano/gpt)."""
+    change (Kontext's native grammar; harmless on nano/gpt). label_free
+    (DOM-labels mode) swaps the lettering guard for the full no-text
+    directive; default off keeps every instruction byte-identical."""
+    if label_free:
+        text = build_zoom_instruction(
+            page_title,
+            facts,
+            layout_clause,
+            style_anchor=style_anchor,
+            view=view,
+            family=family,
+        )
+        if LETTERING_GUARD in text:
+            return text.replace(LETTERING_GUARD, NO_LETTERING)
+        return f"{text} {NO_LETTERING}"
     if view is None:
         return _legacy_zoom_instruction(page_title, facts, layout_clause)
     proj = str(view.get("projection") or "")
