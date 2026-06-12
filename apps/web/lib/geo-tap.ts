@@ -28,8 +28,10 @@ export const MAP_IMAGE_FRAME: MapCrop = { x: 0, y: 0, w: 100, h: 60 };
 
 export interface GeoTap {
   // "scene" = enter a place (perspective, has an observer). "submap" = stay in
-  // map mode + crop a region (top-down, no observer).
-  kind: "scene" | "submap";
+  // map mode + crop a region (top-down, no observer). "closeup" = the descent
+  // ladder's first rung: a TIGHT zoom on one place (rides the same Kontext
+  // continuation as a submap; scene_view.closeup marks the frame).
+  kind: "scene" | "submap" | "closeup";
   scene_view: SceneView;
   expected_layout: ProjectedEntity[];
   // The scene's contents (the focus's children, resolved to absolute world
@@ -163,6 +165,11 @@ export function geoTapRequest(
     level: "map",
     observer: null,
     map_crop: routingFrame,
+    // The ladder's transition detection: routeClick enters (instead of
+    // closeup-ing again) only when the tap hits the place this frame is
+    // already a closeup OF. Plain submaps carry focus_id without closeup.
+    ...(currentView?.focus_id ? { focus_id: currentView.focus_id } : {}),
+    ...(currentView?.closeup ? { closeup: true } : {}),
   };
   const route = routeClick(candidates, mapView, click, aspect);
   if (route.kind === "explainer") return null;
@@ -173,6 +180,22 @@ export function geoTapRequest(
   // scene_view so a node's rung is consistent however it was reached. Optional —
   // only when the source frame carries a rung (PR A seeds it).
   const childTier = childTierFor(currentView, byId, route.focus_id ?? null);
+
+  // The descent ladder's first rung: a tight Kontext zoom on the tapped
+  // place. Rides the submap machinery (same scene_view shape, same
+  // place_submap wire mode) with the closeup flag marking the frame.
+  if (route.kind === "closeup") {
+    return buildSubmapTap(
+      map.entities,
+      candidates.entities,
+      nodeId,
+      route.crop,
+      route.focus_id,
+      childTier,
+      override?.view,
+      "closeup",
+    );
+  }
 
   // Tap on empty map area that still holds a cluster → stay in MAP mode + crop
   // the region (a sub-map), instead of entering a single place.
@@ -210,16 +233,18 @@ function buildSubmapTap(
   focusId: string | null,
   childTier: ScaleTier | undefined,
   view?: ViewSpec,
+  kind: "submap" | "closeup" = "submap",
 ): GeoTap {
   const byId = new Map(allEntities.map((e) => [e.id, e]));
   return {
-    kind: "submap",
+    kind,
     scene_view: {
       node_id: nodeId,
       level: "map",
       observer: null,
       map_crop: crop,
       focus_id: focusId,
+      ...(kind === "closeup" ? { closeup: true } : {}),
       ...(childTier ? { scale_tier: childTier } : {}),
       ...(view ? { view } : {}),
     },

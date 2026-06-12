@@ -50,6 +50,7 @@ const sceneView: SceneView = {
   level: "eye",
   observer: observerPose,
   map_crop: null,
+  closeup: false,
   focus_id: "g1",
   scale_tier: "city",
   view: viewSpec,

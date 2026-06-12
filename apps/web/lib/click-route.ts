@@ -31,6 +31,9 @@ export interface ClickPoint {
 }
 
 export type ClickRoute =
+  // The closeup rung (tap descent ladder): a TIGHT zoom on the tapped place —
+  // the high-consistency Kontext continuation, one step closer per tap.
+  | { kind: "closeup"; crop: MapCrop; focus_id: string }
   | { kind: "submap"; crop: MapCrop; focus_id: string | null }
   | { kind: "scene"; level: ViewLevel; observer: ObserverPose; focus_id: string }
   | { kind: "explainer"; focus_id: string | null };
@@ -113,6 +116,42 @@ function cropCentre(crop: MapCrop): WorldVec2 {
   return { x: crop.x + crop.w / 2, y: crop.y + crop.h / 2 };
 }
 
+// Closeup sizing: the entity's footprint with breathing room, expressed as a
+// FRACTION of the frame on both axes so the crop keeps the frame's aspect
+// (the property the submap window and the click crop already have).
+const CLOSEUP_MARGIN = 1.6;
+// Tiny entities keep enough surroundings for Kontext to anchor against.
+const CLOSEUP_MIN_FRAC = 0.18;
+// A crop this close to the whole frame is no zoom at all — skip the rung
+// (prevents the infinite-closeup loop on frame-filling places).
+const CLOSEUP_DEGENERATE_FRAC = 0.85;
+
+/** The closeup window for a place: footprint × margin, aspect-preserving,
+ *  clamped inside the frame. Pure; exported for the conditioning crop. */
+export function entityCloseupCrop(
+  focus: WorldEntityGeo,
+  frame: MapCrop,
+  margin = CLOSEUP_MARGIN,
+  minFrac = CLOSEUP_MIN_FRAC,
+): MapCrop {
+  const frac = Math.min(
+    Math.max(
+      (focus.footprint.w * margin) / frame.w,
+      (focus.footprint.d * margin) / frame.h,
+      minFrac,
+    ),
+    1,
+  );
+  const w = frame.w * frac;
+  const h = frame.h * frac;
+  return {
+    x: Math.min(Math.max(focus.pos.x - w / 2, frame.x), frame.x + frame.w - w),
+    y: Math.min(Math.max(focus.pos.y - h / 2, frame.y), frame.y + frame.h - h),
+    w,
+    h,
+  };
+}
+
 /** The scene route for a known focus entity, exactly as a geometric hit on
  *  its footprint would synthesize it. Exported so a tap resolved by NAME (the
  *  map's lettering names a mapped place) can enter that place too. */
@@ -142,8 +181,24 @@ export function routeClick(
       ? focusOnMap(entities, view.map_crop, click)
       : null;
 
-  // A place under the finger → enter it.
+  // A place under the finger → the descent ladder: first a CLOSEUP (the
+  // faithful Kontext zoom), and only the tap on the place whose closeup you
+  // are already on TRANSITIONS into it (enter). Scene frames (observer set)
+  // keep entering directly — scene-level closeups are a later rung.
   if (focus && focus.kind === "place") {
+    if (view.map_crop && !view.observer) {
+      const alreadyCloseup =
+        view.closeup === true && view.focus_id === focus.id;
+      if (!alreadyCloseup) {
+        const crop = entityCloseupCrop(focus, view.map_crop);
+        const degenerate =
+          crop.w >= view.map_crop.w * CLOSEUP_DEGENERATE_FRAC &&
+          crop.h >= view.map_crop.h * CLOSEUP_DEGENERATE_FRAC;
+        if (!degenerate) {
+          return { kind: "closeup", crop, focus_id: focus.id };
+        }
+      }
+    }
     const from = view.observer?.pos ?? cropCentre(view.map_crop ?? map.bounds);
     return routeToFocus(focus, from);
   }

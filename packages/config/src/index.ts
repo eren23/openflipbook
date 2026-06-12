@@ -648,6 +648,11 @@ export interface SceneView {
   level: ViewLevel;
   observer: ObserverPose | null;
   map_crop: MapCrop | null;
+  // Closeup rung (tap descent ladder): this frame is a TIGHT zoom on
+  // `focus_id` (the entity fills the view) — the next tap on that entity
+  // TRANSITIONS (enters) instead of zooming again. Absent on plain submaps,
+  // whose focus_id is just the nearest entity to an empty-area tap.
+  closeup?: boolean;
   // The entity you ENTERED to get here (the tapped place). Its sub-entities seed
   // into this place's child frame (parent_id = its geo) so the interior layout
   // stays consistent across re-entries. Null for a top-level map view.

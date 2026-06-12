@@ -182,6 +182,10 @@ class SceneView(BaseModel):
     level: str
     observer: ObserverPose | None = None
     map_crop: MapCrop | None = None
+    # Closeup rung (tap descent ladder): this frame is a TIGHT zoom on
+    # focus_id — the next tap on that entity transitions (enters) instead of
+    # zooming again. Mirrors the optional TS field (schema-parity gated).
+    closeup: bool | None = None
     # The entity you ENTERED to get here (the tapped place's geo id). geo-tap.ts
     # sets it and the extract route reads it to anchor the child frame; without
     # it the field was silently dropped on validation, breaking the round-trip.
