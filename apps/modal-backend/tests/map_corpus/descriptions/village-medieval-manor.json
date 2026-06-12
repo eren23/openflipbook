@@ -1,0 +1,415 @@
+{
+ "map_id": "village-medieval-manor",
+ "rev": 2,
+ "genre": "village",
+ "style": "Vintage educational lithograph with a muted palette of ochre, sage green, and tan, featuring clean black ink outlines and hatched textures.",
+ "scale_tier": "district",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "A vertical-oriented plan of a medieval manor, depicted as an irregular landmass surrounded by a white border. The central and northern regions are dominated by 'Fallow', 'Autumn Planting', and 'Spring Planting' fields, rendered as interlocking rectangular strips in alternating tan and white. A large 'Woodland' area in the northeast is filled with small tree icons on a yellow background, while a smaller woodland sits on the western edge. A green 'Common Pasture' occupies the eastern-central portion. In the lower-central area, a cluster of red-roofed buildings forms the 'Manor House', 'Parsonage', and 'Church'. Directly south of these, a small 'Village' of green-roofed houses is nestled within a green 'Meadow'. A blue 'Pond' sits east of the village, fed by a 'Stream' that flows horizontally across the southern third of the map. A main road bisects the manor from northwest to south, with a branch heading east. Small patches of stippled 'Waste' land are located in the far northwest and southeast corners.",
+ "entities": [
+  {
+   "ref": "manor-house",
+   "kind": "place",
+   "label": "Manor House",
+   "visual": "U-shaped red-roofed building in the lower-central region.",
+   "pos": {
+    "x": 43.1,
+    "y": 36.8
+   },
+   "footprint": {
+    "w": 5.8,
+    "d": 2.2
+   },
+   "height_rel": 0.8,
+   "height_m": 8.0,
+   "border": [
+    [
+     39.8,
+     36.1
+    ],
+    [
+     45.9,
+     36.1
+    ],
+    [
+     45.9,
+     37.9
+    ],
+    [
+     44.1,
+     37.9
+    ],
+    [
+     44.1,
+     36.9
+    ],
+    [
+     41.6,
+     36.9
+    ],
+    [
+     41.6,
+     37.9
+    ],
+    [
+     39.8,
+     37.9
+    ]
+   ]
+  },
+  {
+   "ref": "village",
+   "kind": "place",
+   "label": "Village",
+   "visual": "Cluster of small green-roofed houses south of the manor house.",
+   "pos": {
+    "x": 51.8,
+    "y": 41.6
+   },
+   "footprint": {
+    "w": 6.4,
+    "d": 6.2
+   },
+   "height_rel": 0.4,
+   "height_m": 4.0,
+   "border": [
+    [
+     45.5,
+     38.1
+    ],
+    [
+     56.5,
+     38.1
+    ],
+    [
+     58.5,
+     42.3
+    ],
+    [
+     54.5,
+     45.3
+    ],
+    [
+     48.5,
+     45.3
+    ],
+    [
+     45.5,
+     42.3
+    ]
+   ]
+  },
+  {
+   "ref": "church",
+   "kind": "place",
+   "label": "Church",
+   "visual": "Small building with a cross symbol, east of the parsonage.",
+   "pos": {
+    "x": 52.1,
+    "y": 35.5
+   },
+   "footprint": {
+    "w": 4.8,
+    "d": 2.5
+   },
+   "height_rel": 1.0,
+   "height_m": 10.0,
+   "border": [
+    [
+     50.1,
+     34.3
+    ],
+    [
+     53.8,
+     34.3
+    ],
+    [
+     53.8,
+     36.3
+    ],
+    [
+     50.1,
+     36.3
+    ]
+   ]
+  },
+  {
+   "ref": "pond",
+   "kind": "place",
+   "label": "Pond",
+   "visual": "Irregular light blue water body east of the village.",
+   "pos": {
+    "x": 64.0,
+    "y": 38.4
+   },
+   "footprint": {
+    "w": 9.4,
+    "d": 4.1
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     57.5,
+     36.3
+    ],
+    [
+     63.5,
+     36.3
+    ],
+    [
+     69.5,
+     38.1
+    ],
+    [
+     67.5,
+     40.5
+    ],
+    [
+     61.5,
+     40.5
+    ],
+    [
+     57.5,
+     38.7
+    ]
+   ]
+  },
+  {
+   "ref": "common-pasture",
+   "kind": "place",
+   "label": "Common Pasture",
+   "visual": "Large green area in the eastern half with internal divisions.",
+   "pos": {
+    "x": 72.8,
+    "y": 18.4
+   },
+   "footprint": {
+    "w": 38.4,
+    "d": 16.6
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     54.5,
+     15.3
+    ],
+    [
+     74.5,
+     9.9
+    ],
+    [
+     91.5,
+     12.3
+    ],
+    [
+     93.5,
+     26.1
+    ],
+    [
+     71.5,
+     26.7
+    ],
+    [
+     53.5,
+     26.1
+    ]
+   ]
+  },
+  {
+   "ref": "woodland-ne",
+   "kind": "place",
+   "label": "Woodland",
+   "visual": "Large yellow area with tree symbols in the northeast corner.",
+   "pos": {
+    "x": 71.6,
+    "y": 9.8
+   },
+   "footprint": {
+    "w": 41.2,
+    "d": 11.3
+   },
+   "height_rel": 0.6,
+   "height_m": 6.0,
+   "border": [
+    [
+     50.5,
+     9.3
+    ],
+    [
+     74.5,
+     4.5
+    ],
+    [
+     91.5,
+     4.5
+    ],
+    [
+     91.5,
+     11.7
+    ],
+    [
+     74.5,
+     9.3
+    ],
+    [
+     54.5,
+     14.7
+    ],
+    [
+     50.5,
+     14.7
+    ]
+   ]
+  },
+  {
+   "ref": "mill",
+   "kind": "place",
+   "label": "Mill",
+   "visual": "Small building located on the stream near the pond.",
+   "pos": {
+    "x": 57.4,
+    "y": 40.3
+   },
+   "footprint": {
+    "w": 2.4,
+    "d": 1.4
+   },
+   "height_rel": 0.5,
+   "height_m": 5.0,
+   "border": [
+    [
+     55.5,
+     39.3
+    ],
+    [
+     58.5,
+     39.3
+    ],
+    [
+     58.5,
+     41.1
+    ],
+    [
+     55.5,
+     41.1
+    ]
+   ]
+  },
+  {
+   "ref": "stream",
+   "kind": "item",
+   "label": "Stream",
+   "visual": "Thin blue line flowing west to east across the lower map.",
+   "pos": {
+    "x": 24.4,
+    "y": 41.5
+   },
+   "footprint": {
+    "w": 15.2,
+    "d": 2.4
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     17.5,
+     48.9
+    ],
+    [
+     25.5,
+     45.3
+    ],
+    [
+     35.5,
+     39.3
+    ],
+    [
+     42.5,
+     38.7
+    ],
+    [
+     57.5,
+     38.7
+    ],
+    [
+     75.5,
+     39.3
+    ],
+    [
+     88.5,
+     39.3
+    ],
+    [
+     88.5,
+     40.5
+    ],
+    [
+     75.5,
+     40.5
+    ],
+    [
+     57.5,
+     39.9
+    ],
+    [
+     42.5,
+     39.9
+    ],
+    [
+     35.5,
+     40.5
+    ],
+    [
+     25.5,
+     46.5
+    ],
+    [
+     18.5,
+     50.7
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "village",
+   "relation": "near",
+   "object": "stream"
+  },
+  {
+   "subject": "manor-house",
+   "relation": "left_of",
+   "object": "village"
+  },
+  {
+   "subject": "church",
+   "relation": "right_of",
+   "object": "manor-house"
+  },
+  {
+   "subject": "pond",
+   "relation": "right_of",
+   "object": "village"
+  },
+  {
+   "subject": "woodland-ne",
+   "relation": "behind",
+   "object": "common-pasture"
+  },
+  {
+   "subject": "mill",
+   "relation": "near",
+   "object": "pond"
+  }
+ ],
+ "review": {
+  "status": "verified",
+  "by": "claude (image-inspected); eren spot-check welcome",
+  "date": "2026-06-11"
+ }
+}

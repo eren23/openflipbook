@@ -1,0 +1,387 @@
+{
+ "map_id": "urban-seattle-1904",
+ "rev": 1,
+ "genre": "urban",
+ "style": "Monochromatic lithographic engraving in sepia and cream, featuring high-detail architectural hatching and stippling for a 1904 bird's-eye perspective.",
+ "scale_tier": "city",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "This 1904 bird's-eye view of Seattle is oriented looking northeast from Elliott Bay. The foreground is dominated by the bustling waterfront of Elliott Bay, filled with numerous sailing vessels and steamships. A dense grid of multi-story commercial buildings forms the city's core, concentrated in the lower center and right. To the north (left), the land narrows between Elliott Bay and Lake Union, which sits centrally in the mid-ground. Further north, Green Lake appears as a smaller oval body of water. To the east (right and background), the massive expanse of Lake Washington stretches across the horizon, separated from the city by rolling, forested hills. In the far distance, a jagged range of snow-capped mountains lines the top edge of the frame. The topography is rendered with fine lines showing the steep hills characteristic of the region. A legend of numbered landmarks is located in the bottom left corner, while the ornate title 'BIRD'S EYE VIEW CITY OF SEATTLE' anchors the bottom center.",
+ "entities": [
+  {
+   "ref": "elliott-bay",
+   "kind": "place",
+   "label": "Elliott Bay",
+   "visual": "Large body of water in foreground with many ships.",
+   "pos": {
+    "x": 31.2,
+    "y": 42.9
+   },
+   "footprint": {
+    "w": 62.4,
+    "d": 34.2
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     1.0,
+     60.0
+    ],
+    [
+     25.0,
+     60.0
+    ],
+    [
+     45.0,
+     60.0
+    ],
+    [
+     65.0,
+     60.0
+    ],
+    [
+     75.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "lake-union",
+   "kind": "place",
+   "label": "Lake Union",
+   "visual": "Irregularly shaped lake in the center-left mid-ground.",
+   "pos": {
+    "x": 31.5,
+    "y": 18.6
+   },
+   "footprint": {
+    "w": 16.0,
+    "d": 10.2
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     23.0,
+     60.0
+    ],
+    [
+     31.0,
+     60.0
+    ],
+    [
+     35.0,
+     60.0
+    ],
+    [
+     39.0,
+     60.0
+    ],
+    [
+     35.0,
+     60.0
+    ],
+    [
+     28.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "lake-washington",
+   "kind": "place",
+   "label": "Lake Washington",
+   "visual": "Expansive body of water stretching across the background.",
+   "pos": {
+    "x": 75.0,
+    "y": 12.0
+   },
+   "footprint": {
+    "w": 45.0,
+    "d": 15.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     55.0,
+     60.0
+    ],
+    [
+     75.0,
+     60.0
+    ],
+    [
+     98.0,
+     60.0
+    ],
+    [
+     85.0,
+     60.0
+    ],
+    [
+     70.0,
+     60.0
+    ],
+    [
+     58.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "green-lake",
+   "kind": "place",
+   "label": "Green Lake",
+   "visual": "Small oval lake located in the upper left quadrant.",
+   "pos": {
+    "x": 18.5,
+    "y": 8.7
+   },
+   "footprint": {
+    "w": 5.0,
+    "d": 3.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     16.0,
+     60.0
+    ],
+    [
+     18.0,
+     60.0
+    ],
+    [
+     21.0,
+     60.0
+    ],
+    [
+     20.0,
+     60.0
+    ],
+    [
+     17.0,
+     60.0
+    ],
+    [
+     15.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "downtown-core",
+   "kind": "place",
+   "label": "Downtown Seattle",
+   "visual": "Dense cluster of tall rectangular buildings near the waterfront.",
+   "pos": {
+    "x": 58.0,
+    "y": 33.0
+   },
+   "footprint": {
+    "w": 30.0,
+    "d": 21.0
+   },
+   "height_rel": 1.0,
+   "height_m": 60.0,
+   "border": [
+    [
+     45.0,
+     60.0
+    ],
+    [
+     55.0,
+     60.0
+    ],
+    [
+     65.0,
+     60.0
+    ],
+    [
+     75.0,
+     60.0
+    ],
+    [
+     70.0,
+     60.0
+    ],
+    [
+     60.0,
+     60.0
+    ],
+    [
+     50.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "cascade-mountains",
+   "kind": "place",
+   "label": "Cascade Mountains",
+   "visual": "Jagged mountain range along the top horizon line.",
+   "pos": {
+    "x": 50.0,
+    "y": 4.8
+   },
+   "footprint": {
+    "w": 95.0,
+    "d": 6.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     5.0,
+     60.0
+    ],
+    [
+     30.0,
+     60.0
+    ],
+    [
+     60.0,
+     60.0
+    ],
+    [
+     95.0,
+     60.0
+    ],
+    [
+     50.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "waterfront-piers",
+   "kind": "place",
+   "label": "Waterfront Piers",
+   "visual": "Series of rectangular docks protruding into Elliott Bay.",
+   "pos": {
+    "x": 52.0,
+    "y": 39.0
+   },
+   "footprint": {
+    "w": 45.0,
+    "d": 12.0
+   },
+   "height_rel": 0.15,
+   "height_m": 9.0,
+   "border": [
+    [
+     26.0,
+     60.0
+    ],
+    [
+     35.0,
+     60.0
+    ],
+    [
+     45.0,
+     60.0
+    ],
+    [
+     55.0,
+     60.0
+    ],
+    [
+     65.0,
+     60.0
+    ],
+    [
+     75.0,
+     60.0
+    ],
+    [
+     70.0,
+     60.0
+    ],
+    [
+     50.0,
+     60.0
+    ],
+    [
+     30.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "smith-cove",
+   "kind": "place",
+   "label": "Smith Cove",
+   "visual": "Inlet and docks on the far left edge.",
+   "pos": {
+    "x": 8.0,
+    "y": 25.2
+   },
+   "footprint": {
+    "w": 10.0,
+    "d": 6.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     2.0,
+     60.0
+    ],
+    [
+     8.0,
+     60.0
+    ],
+    [
+     12.0,
+     60.0
+    ],
+    [
+     8.0,
+     60.0
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "downtown-core",
+   "relation": "in_front_of",
+   "object": "lake-washington"
+  },
+  {
+   "subject": "lake-union",
+   "relation": "left_of",
+   "object": "lake-washington"
+  },
+  {
+   "subject": "waterfront-piers",
+   "relation": "facing",
+   "object": "elliott-bay"
+  },
+  {
+   "subject": "green-lake",
+   "relation": "behind",
+   "object": "lake-union"
+  },
+  {
+   "subject": "cascade-mountains",
+   "relation": "behind",
+   "object": "lake-washington"
+  },
+  {
+   "subject": "downtown-core",
+   "relation": "right_of",
+   "object": "lake-union"
+  }
+ ],
+ "review": {
+  "status": "vlm_draft",
+  "by": "",
+  "date": ""
+ }
+}

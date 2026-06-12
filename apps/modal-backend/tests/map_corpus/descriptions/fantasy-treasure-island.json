@@ -1,0 +1,382 @@
+{
+ "map_id": "fantasy-treasure-island",
+ "rev": 2,
+ "genre": "fantasy",
+ "style": "Vintage lithograph illustration with a muted watercolor palette of sage green, slate blue, and earthy ochre.",
+ "scale_tier": "region",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "A pictorial map of Treasure Island, oriented with North at the top. The island is shaped like a fat, upright dragon or seahorse, surrounded by a pale blue sea. In the north, Spyglass Hill rises as a prominent white-capped peak. To the west, Mizzenmast Hill and Haulbowline Head form a rugged peninsula. A smaller, separate landmass named Skeleton Island sits off the southwest coast. The interior is dotted with narrative vignettes: pirates digging in the center, the Stockade fortified with logs in the south-central region, and Ben Gunn's cave nestled near the eastern Twin Peaks. A large title cartouche featuring Long John Silver and Jim Hawkins occupies the top right corner. The bottom of the map features a wide horizontal frieze showing scenes from the Admiral Benbow Inn and the Hispaniola at Bristol Harbor. A small inset map in the lower right shows the Atlantic Ocean route from England to the West Indies. The coastline is outlined in a thick white border, contrasting with the dark grey-green landmass.",
+ "entities": [
+  {
+   "ref": "spyglass-hill",
+   "kind": "place",
+   "label": "Spyglass Hill",
+   "visual": "A tall, snow-capped mountain peak in the northern part of the island.",
+   "pos": {
+    "x": 48.0,
+    "y": 13.1
+   },
+   "footprint": {
+    "w": 5.4,
+    "d": 1.1
+   },
+   "height_rel": 1.0,
+   "height_m": 60.0,
+   "border": [
+    [
+     44.8,
+     16.1
+    ],
+    [
+     48.5,
+     12.6
+    ],
+    [
+     53.0,
+     12.6
+    ],
+    [
+     57.0,
+     14.4
+    ],
+    [
+     58.0,
+     16.8
+    ],
+    [
+     54.0,
+     18.6
+    ],
+    [
+     48.0,
+     18.6
+    ],
+    [
+     45.0,
+     17.4
+    ]
+   ]
+  },
+  {
+   "ref": "skeleton-island",
+   "kind": "place",
+   "label": "Skeleton Island",
+   "visual": "A small, rocky island located off the southwest coast of the main island.",
+   "pos": {
+    "x": 27.0,
+    "y": 34.0
+   },
+   "footprint": {
+    "w": 8.0,
+    "d": 1.1
+   },
+   "height_rel": 0.4,
+   "height_m": 24.0,
+   "border": [
+    [
+     24.0,
+     30.0
+    ],
+    [
+     30.0,
+     29.4
+    ],
+    [
+     36.0,
+     30.0
+    ],
+    [
+     36.0,
+     38.4
+    ],
+    [
+     33.0,
+     39.6
+    ],
+    [
+     26.0,
+     39.0
+    ],
+    [
+     24.0,
+     34.8
+    ]
+   ]
+  },
+  {
+   "ref": "the-stockade",
+   "kind": "place",
+   "label": "The Stockade",
+   "visual": "A log-walled fortification located in the southern central plains.",
+   "pos": {
+    "x": 48.0,
+    "y": 35.2
+   },
+   "footprint": {
+    "w": 6.0,
+    "d": 1.0
+   },
+   "height_rel": 0.05,
+   "height_m": 3.0,
+   "border": [
+    [
+     41.0,
+     36.6
+    ],
+    [
+     45.0,
+     36.6
+    ],
+    [
+     48.0,
+     37.8
+    ],
+    [
+     48.0,
+     40.2
+    ],
+    [
+     44.0,
+     40.8
+    ],
+    [
+     41.0,
+     39.6
+    ]
+   ]
+  },
+  {
+   "ref": "mizzenmast-hill",
+   "kind": "place",
+   "label": "Mizzenmast Hill",
+   "visual": "A rounded, rocky hill on the western side of the island.",
+   "pos": {
+    "x": 31.0,
+    "y": 20.3
+   },
+   "footprint": {
+    "w": 6.0,
+    "d": 1.0
+   },
+   "height_rel": 0.7,
+   "height_m": 42.0,
+   "border": [
+    [
+     26.0,
+     19.2
+    ],
+    [
+     31.0,
+     16.8
+    ],
+    [
+     36.0,
+     16.8
+    ],
+    [
+     41.0,
+     19.2
+    ],
+    [
+     41.0,
+     22.8
+    ],
+    [
+     35.0,
+     25.2
+    ],
+    [
+     28.0,
+     25.2
+    ],
+    [
+     25.0,
+     22.8
+    ]
+   ]
+  },
+  {
+   "ref": "rum-cove",
+   "kind": "place",
+   "label": "Rum Cove",
+   "visual": "A small inlet on the southeastern shore near the treasure loading site.",
+   "pos": {
+    "x": 66.6,
+    "y": 41.0
+   },
+   "footprint": {
+    "w": 4.0,
+    "d": 1.7
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     64.0,
+     38.4
+    ],
+    [
+     68.0,
+     38.4
+    ],
+    [
+     69.0,
+     40.8
+    ],
+    [
+     67.0,
+     42.6
+    ],
+    [
+     64.0,
+     42.0
+    ],
+    [
+     63.0,
+     40.2
+    ]
+   ]
+  },
+  {
+   "ref": "hispaniola-ship",
+   "kind": "item",
+   "label": "The Hispaniola",
+   "visual": "three-masted ship in the bottom-right Bristol Harbour frieze",
+   "pos": {
+    "x": 79.1,
+    "y": 48.1
+   },
+   "footprint": {
+    "w": 8.8,
+    "d": 9.2
+   },
+   "height_rel": 0.1,
+   "height_m": 6.0,
+   "border": null
+  },
+  {
+   "ref": "ben-gunns-cave",
+   "kind": "place",
+   "label": "Ben Gunn's cave",
+   "visual": "A rocky cavern entrance located near the eastern Twin Peaks.",
+   "pos": {
+    "x": 67.4,
+    "y": 32.2
+   },
+   "footprint": {
+    "w": 5.0,
+    "d": 1.2
+   },
+   "height_rel": 0.15,
+   "height_m": 9.0,
+   "border": [
+    [
+     60.0,
+     30.6
+    ],
+    [
+     64.0,
+     30.6
+    ],
+    [
+     68.0,
+     31.8
+    ],
+    [
+     68.0,
+     34.8
+    ],
+    [
+     64.0,
+     36.0
+    ],
+    [
+     60.0,
+     34.8
+    ]
+   ]
+  },
+  {
+   "ref": "north-inlet",
+   "kind": "place",
+   "label": "North Inlet",
+   "visual": "A deep bay on the northeastern side of the island.",
+   "pos": {
+    "x": 71.0,
+    "y": 28.2
+   },
+   "footprint": {
+    "w": 6.0,
+    "d": 1.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     65.0,
+     25.8
+    ],
+    [
+     71.0,
+     25.8
+    ],
+    [
+     74.0,
+     27.6
+    ],
+    [
+     74.0,
+     30.0
+    ],
+    [
+     70.0,
+     31.2
+    ],
+    [
+     65.0,
+     30.0
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "spyglass-hill",
+   "relation": "near",
+   "object": "north-inlet"
+  },
+  {
+   "subject": "skeleton-island",
+   "relation": "near",
+   "object": "mizzenmast-hill"
+  },
+  {
+   "subject": "the-stockade",
+   "relation": "in_front_of",
+   "object": "spyglass-hill"
+  },
+  {
+   "subject": "hispaniola-ship",
+   "relation": "near",
+   "object": "rum-cove"
+  },
+  {
+   "subject": "ben-gunns-cave",
+   "relation": "right_of",
+   "object": "the-stockade"
+  },
+  {
+   "subject": "rum-cove",
+   "relation": "facing",
+   "object": "ben-gunns-cave"
+  }
+ ],
+ "review": {
+  "status": "verified",
+  "by": "claude (image-inspected); eren spot-check welcome",
+  "date": "2026-06-11"
+ }
+}

@@ -1,0 +1,419 @@
+{
+ "map_id": "forest-yellowstone-1904",
+ "rev": 1,
+ "genre": "forest",
+ "style": "Vintage lithographic bird's-eye view with a naturalistic palette of earthy ochres, forest greens, and pale blue water.",
+ "scale_tier": "region",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "A panoramic bird's-eye view of Yellowstone National Park looking south from an elevated northern perspective. In the foreground, the Yellowstone River winds through deep, rocky canyons and past the Mammoth Hot Springs, which appear as a white, terraced formation on the right. To the far right foreground, the Gardiner entrance with its stone arch is visible. The midground is dominated by a vast, undulating landscape of green forests, rolling hills, and jagged mountain peaks like Mount Washburn. To the left, the Grand Canyon of the Yellowstone shows distinct yellow and orange cliffs. In the far distance, the massive, pale blue expanse of Yellowstone Lake stretches toward the horizon, flanked by the snow-capped peaks of the Teton Range and other distant mountains under a soft, cloudy sky. The composition uses atmospheric perspective to create immense depth, with fine details of geyser basins and river tributaries scattered throughout the central plateau.",
+ "entities": [
+  {
+   "ref": "yellowstone-lake",
+   "kind": "place",
+   "label": "Yellowstone Lake",
+   "visual": "Large, pale blue body of water in the far upper background.",
+   "pos": {
+    "x": 31.0,
+    "y": 60.0
+   },
+   "footprint": {
+    "w": 25.0,
+    "d": 6.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     18.0,
+     15.0
+    ],
+    [
+     25.0,
+     12.6
+    ],
+    [
+     35.0,
+     12.0
+    ],
+    [
+     45.0,
+     10.8
+    ],
+    [
+     48.0,
+     13.2
+    ],
+    [
+     40.0,
+     15.6
+    ],
+    [
+     30.0,
+     16.8
+    ],
+    [
+     20.0,
+     16.2
+    ]
+   ]
+  },
+  {
+   "ref": "mammoth-hot-springs",
+   "kind": "place",
+   "label": "Mammoth Hot Springs",
+   "visual": "White, terraced geological formation in the lower right midground.",
+   "pos": {
+    "x": 58.0,
+    "y": 36.0
+   },
+   "footprint": {
+    "w": 10.0,
+    "d": 4.8
+   },
+   "height_rel": 0.1,
+   "height_m": 150.0,
+   "border": [
+    [
+     53.0,
+     34.8
+    ],
+    [
+     58.0,
+     33.6
+    ],
+    [
+     63.0,
+     34.2
+    ],
+    [
+     65.0,
+     36.0
+    ],
+    [
+     62.0,
+     38.4
+    ],
+    [
+     55.0,
+     39.0
+    ],
+    [
+     52.0,
+     37.2
+    ]
+   ]
+  },
+  {
+   "ref": "grand-canyon-yellowstone",
+   "kind": "place",
+   "label": "Grand Canyon of the Yellowstone",
+   "visual": "Deep gorge with yellow-orange cliffs on the left side.",
+   "pos": {
+    "x": 20.0,
+    "y": 22.8
+   },
+   "footprint": {
+    "w": 15.0,
+    "d": 4.8
+   },
+   "height_rel": 0.2,
+   "height_m": 300.0,
+   "border": [
+    [
+     4.0,
+     25.2
+    ],
+    [
+     10.0,
+     24.0
+    ],
+    [
+     20.0,
+     22.8
+    ],
+    [
+     28.0,
+     21.0
+    ],
+    [
+     32.0,
+     22.8
+    ],
+    [
+     25.0,
+     25.2
+    ],
+    [
+     15.0,
+     27.0
+    ],
+    [
+     5.0,
+     28.8
+    ]
+   ]
+  },
+  {
+   "ref": "yellowstone-river",
+   "kind": "place",
+   "label": "Yellowstone River",
+   "visual": "Winding blue river flowing from the lake toward the foreground.",
+   "pos": {
+    "x": 40.0,
+    "y": 48.0
+   },
+   "footprint": {
+    "w": 60.0,
+    "d": 12.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     16.0,
+     46.8
+    ],
+    [
+     25.0,
+     49.2
+    ],
+    [
+     40.0,
+     49.8
+    ],
+    [
+     55.0,
+     51.6
+    ],
+    [
+     65.0,
+     52.8
+    ],
+    [
+     80.0,
+     52.8
+    ],
+    [
+     90.0,
+     51.0
+    ],
+    [
+     70.0,
+     50.4
+    ],
+    [
+     50.0,
+     48.0
+    ],
+    [
+     50.0,
+     39.0
+    ],
+    [
+     40.0,
+     33.0
+    ],
+    [
+     30.0,
+     27.0
+    ]
+   ]
+  },
+  {
+   "ref": "gardiner-entrance",
+   "kind": "place",
+   "label": "Gardiner Entrance",
+   "visual": "Small settlement with a red stone arch in the bottom right.",
+   "pos": {
+    "x": 75.0,
+    "y": 48.0
+   },
+   "footprint": {
+    "w": 10.0,
+    "d": 3.0
+   },
+   "height_rel": 0.05,
+   "height_m": 75.0,
+   "border": [
+    [
+     74.0,
+     45.6
+    ],
+    [
+     76.0,
+     45.6
+    ],
+    [
+     76.0,
+     47.4
+    ],
+    [
+     74.0,
+     47.4
+    ]
+   ]
+  },
+  {
+   "ref": "mount-washburn",
+   "kind": "place",
+   "label": "Mount Washburn",
+   "visual": "Prominent green and brown mountain peak in the central midground.",
+   "pos": {
+    "x": 35.0,
+    "y": 27.0
+   },
+   "footprint": {
+    "w": 10.0,
+    "d": 3.6
+   },
+   "height_rel": 0.8,
+   "height_m": 1200.0,
+   "border": [
+    [
+     30.0,
+     28.8
+    ],
+    [
+     38.0,
+     27.0
+    ],
+    [
+     45.0,
+     28.8
+    ],
+    [
+     48.0,
+     33.0
+    ],
+    [
+     40.0,
+     34.8
+    ],
+    [
+     32.0,
+     33.0
+    ]
+   ]
+  },
+  {
+   "ref": "upper-geyser-basin",
+   "kind": "place",
+   "label": "Upper Geyser Basin",
+   "visual": "Pale, smoky area in the distance near the lake.",
+   "pos": {
+    "x": 65.0,
+    "y": 12.0
+   },
+   "footprint": {
+    "w": 10.0,
+    "d": 3.0
+   },
+   "height_rel": 0.02,
+   "height_m": 30.0,
+   "border": [
+    [
+     62.0,
+     10.8
+    ],
+    [
+     70.0,
+     10.8
+    ],
+    [
+     75.0,
+     12.0
+    ],
+    [
+     72.0,
+     13.8
+    ],
+    [
+     65.0,
+     13.2
+    ]
+   ]
+  },
+  {
+   "ref": "teton-range",
+   "kind": "place",
+   "label": "Teton Range",
+   "visual": "Faint, jagged mountain peaks on the far southern horizon.",
+   "pos": {
+    "x": 10.0,
+    "y": 9.0
+   },
+   "footprint": {
+    "w": 15.0,
+    "d": 6.0
+   },
+   "height_rel": 1.0,
+   "height_m": 1500.0,
+   "border": [
+    [
+     5.0,
+     9.0
+    ],
+    [
+     15.0,
+     7.2
+    ],
+    [
+     25.0,
+     8.4
+    ],
+    [
+     30.0,
+     10.8
+    ],
+    [
+     20.0,
+     13.2
+    ],
+    [
+     10.0,
+     12.0
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "yellowstone-lake",
+   "relation": "behind",
+   "object": "mount-washburn"
+  },
+  {
+   "subject": "mammoth-hot-springs",
+   "relation": "on_top_of",
+   "object": "yellowstone-river"
+  },
+  {
+   "subject": "grand-canyon-yellowstone",
+   "relation": "left_of",
+   "object": "mount-washburn"
+  },
+  {
+   "subject": "gardiner-entrance",
+   "relation": "in_front_of",
+   "object": "mammoth-hot-springs"
+  },
+  {
+   "subject": "teton-range",
+   "relation": "behind",
+   "object": "yellowstone-lake"
+  },
+  {
+   "subject": "upper-geyser-basin",
+   "relation": "near",
+   "object": "yellowstone-lake"
+  }
+ ],
+ "review": {
+  "status": "vlm_draft",
+  "by": "",
+  "date": ""
+ }
+}
