@@ -14,7 +14,7 @@ to remove and four annotations to tighten — everything else KEEP. No TS↔Pyda
 
 | # | Concern | Verdict | Action / commit |
 |---|---------|---------|-----------------|
-| 1 | Dedup / DRY | new code strongly DRY | No AUTO. 1 report-only (`edit_loop` duplicates `render_loop`'s `_score`/`_f`; paid path). `_clamp01` in segmenter/detector = KEEP (prior 07 decision). |
+| 1 | Dedup / DRY | new code strongly DRY | 1 dedup landed on request (`843a653`): lifted the env-float parser to a shared `render_loop._env_float`, imported `_score` rather than redefining. `_clamp01` in segmenter/detector = KEEP (prior 07 decision). |
 | 2 | Shared types / TS↔Pydantic | **clean** | No drift: 40 TS == 40 Py request fields; 8 new fields (`max_attempts`, `verify`, `edit_mask`, `edit_region`, `surroundings_pov/behind`, `suppress_map_labels`, `from_closeup`) at parity. New closeup code imports config types rather than redeclaring. 3 low report-only intra-web tidies. |
 | 3 | Unused (knip + ruff F401) | 1 dead export | Removed `SessionNodeEvent` (db.ts, 0 refs anywhere). Python `ruff F401` clean. 3 known false positives (theme-init.js, ladder-proof.mjs, record-mappan.ts) excluded. `6064f48` |
 | 4 | Circular (madge) | **clean** | 218 TS files, 0 cycles. Python providers a DAG (manual import-graph check; new files are leaves). No change. |
@@ -25,11 +25,10 @@ to remove and four annotations to tighten — everything else KEEP. No TS↔Pyda
 
 ## Report-only (handed back for your call — none auto-applied)
 
-1. **`edit_loop._score` + `_f` duplicate `render_loop`** — byte-identical. It's the paid
-   render/edit path, so not auto-touched per the safe-auto bar. Safe slice: `edit_loop` already
-   imports 3 symbols from `render_loop`; importing `_score` and lifting the `_f` env-float parser
-   removes the copy. The loop skeletons themselves should stay parallel siblings (different
-   judges/configs).
+1. **`edit_loop._score` + `_f` duplicate `render_loop`** — DONE on request (`843a653`): lifted the
+   env-float parser to a shared `render_loop._env_float` and imported `_score` rather than
+   redefining it. The loop skeletons stay parallel siblings (different judges/configs); behavior
+   unchanged, `make eval` green.
 2. **generate.py `result` / `judged_image` stay `Any`** — reassigned across branches mixing
    `render_loop.conclude(...).image` (typed `Rendered`) with `GeneratedImage`-only attribute reads
    (`.mime_type`/`.model`); the `Any` is deliberate protocol-erasure (one site already carries a
