@@ -17,6 +17,15 @@ describe("FirstRunCoach", () => {
     expect(screen.getByText("E")).toBeTruthy(); // the Around hotkey is surfaced
   });
 
+  it("pre variant nudges a first query before any page exists", () => {
+    render(<FirstRunCoach onShowHelp={() => {}} variant="pre" />);
+    const text = document.body.textContent ?? "";
+    expect(/ask anything above/i.test(text)).toBe(true);
+    expect(/first page/i.test(text)).toBe(true);
+    expect(/tap anywhere/i.test(text)).toBe(true);
+    expect(/around/i.test(text)).toBe(false);
+  });
+
   it("opens help from the ? button", () => {
     const onShowHelp = vi.fn();
     render(<FirstRunCoach onShowHelp={onShowHelp} />);

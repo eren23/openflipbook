@@ -17,8 +17,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # world mode OFF while local dev (.env.local) had it on.
 ARG NEXT_PUBLIC_WORLD_MODE
 ARG NEXT_PUBLIC_DOM_LABELS
+ARG NEXT_PUBLIC_ON_RAMP_COACH
 ENV NEXT_PUBLIC_WORLD_MODE=$NEXT_PUBLIC_WORLD_MODE \
-    NEXT_PUBLIC_DOM_LABELS=$NEXT_PUBLIC_DOM_LABELS
+    NEXT_PUBLIC_DOM_LABELS=$NEXT_PUBLIC_DOM_LABELS \
+    NEXT_PUBLIC_ON_RAMP_COACH=$NEXT_PUBLIC_ON_RAMP_COACH
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./

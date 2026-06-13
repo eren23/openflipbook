@@ -138,6 +138,10 @@ const EDIT_REGION_ENABLED = ["1", "true", "yes"].includes(
 const WORLD_TAP_DEGRADE_ENABLED = !["0", "false", "no"].includes(
   (process.env.NEXT_PUBLIC_WORLD_TAP_DEGRADE ?? "").toLowerCase()
 );
+// On-ramp coach: pre-first-page hint + existing post-first-page chip (default OFF).
+const ON_RAMP_COACH_ENABLED = ["1", "true", "yes"].includes(
+  (process.env.NEXT_PUBLIC_ON_RAMP_COACH ?? "").toLowerCase(),
+);
 
 interface Page {
   nodeId: string | null;
@@ -3617,12 +3621,20 @@ export default function PlayPage() {
       {/* Hide the coach while the Around tray is open — both are pinned to
           bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
           It returns when the tray is closed. */}
-      {phase === "ready" && !helpOpen && !bloom && history.items.length <= 1 && (
-        <FirstRunCoach
-          onShowHelp={() => setHelpOpen(true)}
-          worldHint={worldEnabled}
-        />
-      )}
+      {!helpOpen &&
+        !bloom &&
+        ((ON_RAMP_COACH_ENABLED &&
+          history.items.length === 0 &&
+          phase !== "generating") ||
+          (phase === "ready" && history.items.length <= 1)) && (
+          <FirstRunCoach
+            onShowHelp={() => setHelpOpen(true)}
+            worldHint={worldEnabled}
+            variant={
+              ON_RAMP_COACH_ENABLED && history.items.length === 0 ? "pre" : "post"
+            }
+          />
+        )}
 
       {scrubberOpen && page?.imageDataUrl && history.trail.length > 1 && (
         <TimeScrubber

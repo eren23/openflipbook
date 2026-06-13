@@ -1,11 +1,23 @@
 # BYO Keys — running Endless Canvas yourself
 
-> Just want to try it locally? Skip all of this — `cp .env.example .env`, add a
-> `FAL_KEY` (+ `OPENROUTER_API_KEY`), and `make demo`. The Docker stack runs
-> Mongo + blob storage locally so you don't provision R2/Mongo/Modal. See
-> [DOCKER.md](./DOCKER.md). This page is the hosted-production path.
+## Local first (recommended)
 
-Endless Canvas has no hosted backend. To actually generate pages you need to provide:
+Three steps to a first generated page — no Modal, no R2, no hosted Mongo:
+
+```bash
+cp .env.example .env          # fill FAL_KEY + OPENROUTER_API_KEY
+make demo                     # → http://localhost:3000/play
+```
+
+The Docker stack runs Mongo + Minio locally and wires everything for you. Only the AI calls go to the cloud (OpenRouter + fal). See [`DOCKER.md`](./DOCKER.md) for the full compose reference.
+
+Want the LLM local too? `make demo-local` — only `FAL_KEY` needed (Ollama handles planner + click VLM; first run pulls multi-GB models).
+
+---
+
+## Hosted production path
+
+Endless Canvas has no hosted backend. To deploy to Modal + R2 yourself you need to provide:
 
 1. **OpenRouter API key** — planning + VLM click interpretation + web search.
 2. **fal API key** — image generation (nano-banana).
