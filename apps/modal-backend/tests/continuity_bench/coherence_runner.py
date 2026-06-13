@@ -37,7 +37,7 @@ from ._score import score_continuation
 # MAP_IMAGE_FRAME / extract seed): world (x,y) ↦ image fraction (x/100, y/60).
 _FRAME_W = 100.0
 _FRAME_H = 60.0
-# Region crop size per axis (mirror of lib/image-condition.ts cropRegion default).
+# Region crop size per axis (mirror of lib/image-condition.ts region-crop default).
 _REGION_FRAC = 0.42
 _REPORTS = Path(__file__).resolve().parent / "reports"
 

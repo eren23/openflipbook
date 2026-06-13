@@ -63,25 +63,6 @@ export function orderedRefs(refs: {
   return { urls, roles };
 }
 
-/**
- * Crop a `frac`-sized region around (xPct,yPct) of `src` (a data URL or an
- * http(s) URL) → a JPEG data URL. `crossOrigin="anonymous"` keeps the canvas
- * untainted when `src` is a persisted blob on another origin (R2/Minio), so
- * `toDataURL` doesn't throw a SecurityError — that's what made the region crop
- * (the "from corners" signal) silently drop on continued sessions. Needs the
- * blob store to send CORS headers (Minio does by default; R2 needs CORS
- * enabled). Best-effort; on any failure the caller falls back to whole-parent
- * conditioning.
- */
-export async function cropRegion(
-  src: string,
-  xPct: number,
-  yPct: number,
-  frac = 0.42,
-): Promise<string> {
-  return cropRegionRect(src, cropBox(xPct, yPct, frac));
-}
-
 // The models redraw at ~1MP from whatever we hand them: a 0.28-fraction crop
 // of a ~1.3k-wide map is a ~370px postage stamp, and a model told to stay
 // faithful to a postage stamp paints mush (the photocopier closeup). Upscale
@@ -105,7 +86,11 @@ export async function cropRegionRect(
   box: { x: number; y: number; w: number; h: number },
 ): Promise<string> {
   const img = new Image();
-  // Must be set before `src`. No-op for same-origin data URLs.
+  // `crossOrigin="anonymous"` keeps the canvas untainted when `src` is a blob on
+  // another origin (R2/Minio), so `toDataURL` doesn't throw a SecurityError — that's
+  // what made the region crop silently drop on continued sessions (needs CORS headers
+  // on the blob store: Minio sends them by default, R2 needs them enabled). Must be
+  // set before `src`; no-op for same-origin data URLs.
   img.crossOrigin = "anonymous";
   img.decoding = "async";
   img.src = src;

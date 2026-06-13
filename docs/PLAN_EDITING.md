@@ -24,7 +24,7 @@ predate everything we now know.
 | NL entity editor (codex → "move the lighthouse north") | Shipped (`/edit-entities`, GeoEditPanel, blast radius). | Edits the WORLD MODEL (coordinates) only — never the pixels. The two systems don't talk. |
 | Grounding repair (auto `add a X / move the Y`) | Shipped, flag-gated, system-driven. | Never user-triggerable; its `repair_instruction` machinery is exactly a "fix this" primitive going unused by humans. |
 | Inpaint | SMOKE-VERIFIED (2026-06-10, `tests/edit_bench/mask_smoke.py`): `fal-ai/flux-pro/v1/fill` is a true compositor — inside 0.395 changed, outside 0.0000, white=inpaint, dims kept. It is the PRIMARY. `openai/gpt-image-2/edit` accepts `mask_url` but repaints the whole canvas under every convention (outside 0.28/0.999/1.0; no-mask churn floor 0.089) — not an inpaint fallback. | Provider function + UI still to wire (E1). |
-| Region machinery | `cropRegion` (TS) / `crop_box` (py) ship for enter-conditioning. | Not exposed as a selection tool. |
+| Region machinery | `cropRegionRect` (TS) / `crop_box` (py) ship for enter-conditioning. | Not exposed as a selection tool. |
 | The new assets (reuse these, don't rebuild) | `providers/judge.py` (5 judges incl. `score_prompt_alignment` + `score_feature_articulation`), `providers/render_loop.py` (critic-guided retries, keep-best, feedback clauses), `prompt_library` (medium locks, registers), `routeClick` (geo hit-test: we KNOW what you clicked). | — |
 
 ## E1 — Select area → "fix this and that" (the headline)

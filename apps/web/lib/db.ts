@@ -531,13 +531,6 @@ export async function countPresence(sessionId: string): Promise<number> {
   });
 }
 
-export interface SessionNodeEvent {
-  id: string;
-  parent_id: string | null;
-  title: string;
-  created_at: string;
-}
-
 /** A change-stream over this session's node inserts — the read-along feed.
  * Requires a replica set (the compose stack runs single-node rs0); callers
  * catch the unsupported error and degrade. */

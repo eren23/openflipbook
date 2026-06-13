@@ -36,7 +36,13 @@ from PIL import Image
 from providers.judge import JudgeResult
 from providers.pixel_diff import changed_fraction
 from providers.prompt_library.feedback import edit_retry_feedback_clause
-from providers.render_loop import MAX_ATTEMPTS_CAP, Rendered, judge_concurrently
+from providers.render_loop import (
+    MAX_ATTEMPTS_CAP,
+    Rendered,
+    _env_float,
+    _score,
+    judge_concurrently,
+)
 
 
 @dataclass(frozen=True)
@@ -52,12 +58,6 @@ class EditLoopConfig:
 
 
 def edit_loop_config_from_env(max_attempts: int | None = None) -> EditLoopConfig:
-    def _f(name: str, default: float) -> float:
-        try:
-            return float(os.environ.get(name, ""))
-        except ValueError:
-            return default
-
     try:
         attempts = int(os.environ.get("EDIT_LOOP_MAX_ATTEMPTS", ""))
     except ValueError:
@@ -66,10 +66,10 @@ def edit_loop_config_from_env(max_attempts: int | None = None) -> EditLoopConfig
         attempts = min(MAX_ATTEMPTS_CAP, max_attempts)
     return EditLoopConfig(
         max_attempts=max(1, attempts),
-        accept_alignment=_f("EDIT_LOOP_ACCEPT_ALIGNMENT", 7.0),
-        accept_medium=_f("EDIT_LOOP_ACCEPT_MEDIUM", 6.0),
-        outside_change_max=_f("EDIT_LOOP_OUTSIDE_MAX", 0.02),
-        retry_budget_s=_f("EDIT_LOOP_RETRY_BUDGET_S", 240.0),
+        accept_alignment=_env_float("EDIT_LOOP_ACCEPT_ALIGNMENT", 7.0),
+        accept_medium=_env_float("EDIT_LOOP_ACCEPT_MEDIUM", 6.0),
+        outside_change_max=_env_float("EDIT_LOOP_OUTSIDE_MAX", 0.02),
+        retry_budget_s=_env_float("EDIT_LOOP_RETRY_BUDGET_S", 240.0),
     )
 
 
@@ -118,10 +118,6 @@ def inside_crop_bytes(
         return buf.getvalue()
     except Exception:
         return image_bytes
-
-
-def _score(j: JudgeResult | None) -> float:
-    return j.score if j is not None else -1.0
 
 
 def _outside_key(outside: float | None) -> float:
