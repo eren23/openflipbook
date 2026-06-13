@@ -14,6 +14,29 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASKS_DIR = path.join(HERE, "tasks");
 const REPORTS_DIR = path.join(HERE, "reports");
 const BASE_URL = process.env.UX_BENCH_BASE_URL ?? "http://localhost:3000";
+const VIEWPORT = { width: 1280, height: 800 };
+
+/**
+ * Resolve a VLM click into a viewport pixel point. The prompt asks for 0-100
+ * percentages of the IMAGE, but VLMs (Gemini) frequently return raw viewport
+ * PIXELS instead (e.g. 393,321). Treating those as percentages multiplied the
+ * click ~4x past the image edge — the bug that made first_world_enter fail
+ * regardless of UI. Heuristic: values in [0,100] are image-percentages; larger
+ * values are absolute viewport pixels. Always clamp inside the viewport so a
+ * click never lands off-screen (a no-op that looks like the agent is stuck).
+ */
+function resolveClickPx(
+  xv: number,
+  yv: number,
+  box: { x: number; y: number; width: number; height: number }
+): { px: number; py: number } {
+  const asPct = xv >= 0 && xv <= 100 && yv >= 0 && yv <= 100;
+  let px = asPct ? box.x + (xv / 100) * box.width : xv;
+  let py = asPct ? box.y + (yv / 100) * box.height : yv;
+  px = Math.max(0, Math.min(px, VIEWPORT.width - 1));
+  py = Math.max(0, Math.min(py, VIEWPORT.height - 1));
+  return { px, py };
+}
 
 // Best-effort .env load so OPENROUTER_API_KEY resolves without a manual export
 // (the key lives in apps/modal-backend/.env; mirrors the Python bench's loader).
@@ -104,7 +127,7 @@ async function callVlm(screenshotB64: string, goal: string, step: number): Promi
           content: [
             {
               type: "text",
-              text: `You are a blind UX tester. Goal: ${goal}\nStep ${step}. Reply JSON only: {"action":"click"|"type"|"wait"|"done","x_pct":0-100,"y_pct":0-100,"text":"...","rationale":"..."}`,
+              text: `You are a blind UX tester. Goal: ${goal}\nStep ${step}. Reply JSON only: {"action":"click"|"type"|"wait"|"done","x_pct":<number>,"y_pct":<number>,"text":"...","rationale":"..."}\nIMPORTANT: x_pct and y_pct are PERCENTAGES from 0 to 100 of the image's width and height — NOT pixels. The image's left edge is x_pct=0, right edge is x_pct=100; top is y_pct=0, bottom is y_pct=100. Example: the centre is {"x_pct":50,"y_pct":50}.`,
             },
             {
               type: "image_url",
@@ -219,7 +242,7 @@ function evaluateSuccess(task: Task, finalUrl: string, trace: StepTrace[]): bool
 
 async function runTask(task: Task, runDir: string): Promise<Record<string, unknown>> {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: VIEWPORT });
   const page = await context.newPage();
   const trace: StepTrace[] = [];
   const t0 = Date.now();
@@ -242,10 +265,8 @@ async function runTask(task: Task, runDir: string): Promise<Record<string, unkno
     if (action.action === "click" && action.x_pct != null && action.y_pct != null) {
       const box = await page.locator("img").first().boundingBox();
       if (box) {
-        await page.mouse.click(
-          box.x + (action.x_pct / 100) * box.width,
-          box.y + (action.y_pct / 100) * box.height
-        );
+        const { px, py } = resolveClickPx(action.x_pct, action.y_pct, box);
+        await page.mouse.click(px, py);
       }
     } else if (action.action === "type" && action.text) {
       await page.keyboard.type(action.text);
