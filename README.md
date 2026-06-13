@@ -17,14 +17,12 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
 
 ## Why this exists
 
-[flipbook.page](https://flipbook.page) is fun but closed. I wanted to see if the same paradigm — one image per page, tap to explore — could live on a stack you actually own: your fal key, your OpenRouter key, your R2, your Mongo, your Modal. Turns out yes. Same loop, different stack, MIT.
-
-It's also a nice excuse to swap pieces around. The image model, the planner, the click-resolving VLM, the video backend — all behind small interfaces in `apps/modal-backend/providers/`. Trade nano-banana for Flux, Qwen-VL for Gemini, LTX-2 for Wan; nothing else has to change.
+[flipbook.page](https://flipbook.page) is fun but closed. I wanted the same loop — one image per page, tap to explore — on a stack I actually own: my keys, my storage, my backend. This is that, MIT-licensed, with every piece swappable behind small provider interfaces in `apps/modal-backend/providers/`.
 
 ## TL;DR
 
-- **One image per page**, rendered by [`fal-ai/nano-banana`](https://fal.ai/models/fal-ai/nano-banana) (Gemini 2.5 Flash Image). Text inside the page is pixels, not DOM.
-- **Click → next page.** [`qwen/qwen-2.5-vl-72b-instruct`](https://openrouter.ai/qwen/qwen-2.5-vl-72b-instruct) via OpenRouter resolves the clicked region to a phrase; [`qwen/qwen-2.5-72b-instruct:online`](https://openrouter.ai/qwen/qwen-2.5-72b-instruct) plans the page with web-search grounding.
+- **One image per page**, rendered by fal (default balanced tier: [`nano-banana-pro`](https://fal.ai/models/fal-ai/nano-banana-pro)). Text inside the page is pixels, not DOM.
+- **Click → next page.** [`google/gemini-3-flash-preview`](https://openrouter.ai/google/gemini-3-flash-preview) via OpenRouter resolves the clicked region to a phrase; the same model family plans the page with web-search grounding.
 - **Seed from your own image.** Upload / drag-and-drop works as a starting point.
 - **Optional animation toggle.**
   - Default: one-shot 5s MP4 from `fal-ai/ltx-video/image-to-video`. Cheap (~$0.02/clip), no GPU on your side.
@@ -45,15 +43,15 @@ It's also a nice excuse to swap pieces around. The image model, the planner, the
              │                                           │ tap on a region
              ▼                                           ▼
     ┌───────────────────┐   plan page    ┌──────────────────────────┐
-    │  OpenRouter Qwen  │ ─────────────▶ │  fal-ai/nano-banana       │
-    │  (text + :online) │                │  renders labelled image   │
+    │  OpenRouter Gemini │ ─────────────▶ │  fal nano-banana-pro      │
+    │  3 Flash (+ search)│                │  renders labelled image   │
     └───────────────────┘                └──────────────┬───────────┘
              ▲                                          │
              │  subject phrase                          │
              │                                          ▼
     ┌────────┴──────────┐    click +    ┌──────────────────────────┐
-    │ OpenRouter Qwen 2.5 VL  image ◀── │ next page conditioning    │
-    └───────────────────┘               └──────────────────────────┘
+    │ OpenRouter Gemini 3  image ◀── │ next page conditioning    │
+    │ Flash (VLM)          │               └──────────────────────────┘
                                                        │
                                                        ▼
                                ┌────────────────────────────────────┐
@@ -70,33 +68,36 @@ It's also a nice excuse to swap pieces around. The image model, the planner, the
 
 ## Quickstart
 
+The fastest path — Docker, local Mongo + blob storage, cloud AI (two keys):
+
 ```bash
 git clone https://github.com/eren23/openflipbook
 cd openflipbook
 
-# Prereqs
-brew install pnpm modal-cli uv      # or your equivalents
-docker --version                    # for docker compose path
-
-# Python backend deps
-cd apps/modal-backend
-uv venv --python 3.12 --seed && source .venv/bin/activate
-uv pip install -r requirements.txt
-cp .env.example .env                # fill FAL_KEY + OPENROUTER_API_KEY
-cd ../..
-
-# Web env
-cp .env.example apps/web/.env.local
-# fill: MONGODB_URI, MONGODB_DB, R2_*, MODAL_API_URL (=http://backend:8787 if using compose)
-
-# Dev loop
-docker compose up -d --build        # one-command E2E: mongo + backend + web
-open http://localhost:3000/play
+cp .env.example .env          # fill FAL_KEY + OPENROUTER_API_KEY
+make demo                     # → http://localhost:3000/play
 ```
 
-Open `/status` in the browser for a live env check with green/red badges per missing variable.
+That's it. Mongo, Minio, backend, and web all come up wired together. Open [`/status`](http://localhost:3000/status) for a live env check. Full compose reference: [`docs/DOCKER.md`](docs/DOCKER.md).
 
-## What you need
+**Images-only cloud:** `make demo-local` runs the planner + click VLM on local Ollama — only `FAL_KEY` needed (first run pulls multi-GB models; CPU-slow).
+
+**Without Docker:** see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md).
+
+### Hosted setup (Modal + R2)
+
+If you want to deploy the backend to Modal and store blobs on Cloudflare R2 instead of the local stack, you'll also need Mongo/R2 credentials and a Modal token. Walkthrough: [`docs/BYO-KEYS.md`](docs/BYO-KEYS.md).
+
+## What you need (local demo)
+
+| Service | Used for | Variable |
+|---|---|---|
+| [fal](https://fal.ai/dashboard/keys) | image gen + optional animate | `FAL_KEY` |
+| [OpenRouter](https://openrouter.ai/keys) | planning + click VLM + web search | `OPENROUTER_API_KEY` |
+
+Mongo + blob storage run locally in Docker — no cloud accounts required for `make demo`.
+
+## What you need (hosted)
 
 | Service | Used for | Variable |
 |---|---|---|

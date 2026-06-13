@@ -61,7 +61,7 @@ the orchestrator (`page.tsx`) is the only place that composes them.
 - `useImageMorph` — `morphFx` state + the `Image().decode()` pre-flip effect. Caller is responsible for setting morphFx when a click fires; the hook handles `wait → reveal`.
 - `usePrefetchCache` — refs + `bucketKey` (3% grid → ~1100 cells/page) + `clearTimer` + `reset`. Owns the storage shape; the orchestrator still owns the precompute / hover-debounce effects (those need `page`, `phase`, `generate` from the orchestrator).
 - `useKeyboardShortcuts` — global keydown listener with one bool `anyOverlayOpen` and a flat handler interface. Modifier rule (skip on Cmd/Ctrl/Alt) keeps DevTools/copy/paste reachable.
-- `useFirstRunCoach` — single-shot "have we shown the coach?" flag in localStorage.
+- `FirstRunCoach` visibility — orchestrator-gated in `page.tsx` (shown until the first tap-child; optional pre-gen hint when `NEXT_PUBLIC_ON_RAMP_COACH` is on).
 
 ### `apps/web/components/PlayPage/`
 
