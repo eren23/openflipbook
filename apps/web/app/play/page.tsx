@@ -3324,6 +3324,7 @@ export default function PlayPage() {
                     entities={geoMap.entities}
                     currentView={page?.sceneView ?? null}
                     imgRef={imgRef}
+                    prominent={ENTER_COACH_ENABLED}
                   />
                 )}
               {worldEnabled &&

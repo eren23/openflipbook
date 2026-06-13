@@ -15,6 +15,10 @@ interface Props {
   currentView: SceneView | null;
   /** The rendered <img>; markers track the object-contain content rect. */
   imgRef?: RefObject<HTMLImageElement | null>;
+  /** Flag-gated (NEXT_PUBLIC_ENTER_COACH): a louder, ping-animated ring. The
+   *  default subtle ring is lost next to the bold DOM labels — the blind UX
+   *  bench saw labels but not the rings the coach copy points at. */
+  prominent?: boolean;
 }
 
 /**
@@ -25,7 +29,12 @@ interface Props {
  * and world OFF never mounts it (the parent gates), so classic exploration
  * is pixel-identical.
  */
-export function EnterableMarkers({ entities, currentView, imgRef }: Props) {
+export function EnterableMarkers({
+  entities,
+  currentView,
+  imgRef,
+  prominent = false,
+}: Props) {
   const content = useContainRect(imgRef);
   const markers = useMemo(() => {
     // Inside an entered place the frame is a scene, not the map — no rings.
@@ -59,11 +68,21 @@ export function EnterableMarkers({ entities, currentView, imgRef }: Props) {
           <span
             key={m.id}
             data-entity-id={m.id}
+            data-prominent={prominent ? "1" : undefined}
             title={m.label}
             className="absolute -translate-x-1/2 -translate-y-1/2"
             style={{ left, top }}
           >
-            <span className="block h-5 w-5 animate-pulse rounded-full border-2 border-emerald-600/60 shadow-[0_0_8px_rgba(16,185,129,0.45)]" />
+            {prominent ? (
+              // Louder affordance: an expanding ping ring + a solid glowing
+              // core so "tap a glowing place" has something that visibly glows.
+              <span className="relative flex h-7 w-7">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/50" />
+                <span className="relative inline-flex h-7 w-7 rounded-full border-2 border-emerald-500 bg-emerald-400/20 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
+              </span>
+            ) : (
+              <span className="block h-5 w-5 animate-pulse rounded-full border-2 border-emerald-600/60 shadow-[0_0_8px_rgba(16,185,129,0.45)]" />
+            )}
           </span>
         );
       })}
