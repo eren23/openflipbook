@@ -42,4 +42,13 @@ describe("FirstRunCoach", () => {
     render(<FirstRunCoach onShowHelp={() => {}} />);
     expect(/rings/i.test(document.body.textContent ?? "")).toBe(false);
   });
+
+  it("enterHintActionable phrases the world hint as an action, not a noun", () => {
+    render(<FirstRunCoach onShowHelp={() => {}} worldHint enterHintActionable />);
+    const text = document.body.textContent ?? "";
+    // The action-oriented copy the UX bench is meant to validate.
+    expect(/tap a glowing place to enter/i.test(text)).toBe(true);
+    // ...and it replaces the passive noun, not stacks with it.
+    expect(/rings = enterable places/i.test(text)).toBe(false);
+  });
 });

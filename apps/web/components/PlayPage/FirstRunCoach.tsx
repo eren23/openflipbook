@@ -8,6 +8,11 @@ interface Props {
   onShowHelp: () => void;
   /** World mode is on → also teach the enter affordance (the pulsing rings). */
   worldHint?: boolean;
+  /** Flag-gated (NEXT_PUBLIC_ENTER_COACH): phrase the world hint as an ACTION
+   *  ("tap a glowing place to enter") instead of the passive noun
+   *  ("rings = enterable places"). The blind UX bench showed first-timers saw
+   *  the noun and still didn't realise tapping a place enters it. */
+  enterHintActionable?: boolean;
   /** Pre-first-page hint vs post-first-page tap/around pairing. Default post. */
   variant?: FirstRunCoachVariant;
 }
@@ -22,6 +27,7 @@ interface Props {
 export function FirstRunCoach({
   onShowHelp,
   worldHint = false,
+  enterHintActionable = false,
   variant = "post",
 }: Props) {
   return (
@@ -50,7 +56,9 @@ export function FirstRunCoach({
               <>
                 <span className="flex items-center gap-1.5 whitespace-nowrap opacity-80">
                   <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-600/70" />
-                  rings = enterable places
+                  {enterHintActionable
+                    ? "tap a glowing place to enter"
+                    : "rings = enterable places"}
                 </span>
                 <span className="opacity-40">·</span>
               </>

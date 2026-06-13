@@ -142,6 +142,12 @@ const WORLD_TAP_DEGRADE_ENABLED = !["0", "false", "no"].includes(
 const ON_RAMP_COACH_ENABLED = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_ON_RAMP_COACH ?? "").toLowerCase(),
 );
+// Enter-coach (default OFF): phrase the world hint as an action ("tap a glowing
+// place to enter") rather than the passive "rings = enterable places" — the UX
+// bench showed first-timers saw the noun and still didn't enter. Off = today.
+const ENTER_COACH_ENABLED = ["1", "true", "yes"].includes(
+  (process.env.NEXT_PUBLIC_ENTER_COACH ?? "").toLowerCase(),
+);
 
 interface Page {
   nodeId: string | null;
@@ -3639,6 +3645,7 @@ export default function PlayPage() {
           <FirstRunCoach
             onShowHelp={() => setHelpOpen(true)}
             worldHint={worldEnabled}
+            enterHintActionable={ENTER_COACH_ENABLED}
             variant={
               coachEnabled && history.items.length === 0 ? "pre" : "post"
             }
