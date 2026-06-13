@@ -29,11 +29,15 @@ import modal
 
 if TYPE_CHECKING:
     # Type-only — the providers are imported lazily at the call sites (Modal cold
-    # start cost), but mypy needs the shapes to check the geometry boundary. The
-    # geometry TypedDict is aliased to avoid clashing with this module's Pydantic
-    # `ProjectedEntity` wire model (same shape; model_dump() yields the TypedDict).
+    # start cost), but mypy needs the shapes to check the geometry boundary and the
+    # render/edit-loop accumulators. The geometry TypedDict is aliased to avoid
+    # clashing with this module's Pydantic `ProjectedEntity` wire model (same shape;
+    # model_dump() yields the TypedDict).
     from providers.detector import Detection
+    from providers.edit_loop import EditAttempt
     from providers.geometry import ProjectedEntity as ProjectedEntityDict
+    from providers.judge import JudgeResult
+    from providers.render_loop import Attempt
     from providers.view_estimator import ViewEstimate
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -948,7 +952,7 @@ async def _event_stream(
                     inp_result = await _render_inpaint("")
                 else:
                     edit_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
-                    edit_attempts: list[Any] = []
+                    edit_attempts: list[EditAttempt] = []
                     # The alignment judge checks the inside crop against the
                     # fill DESCRIPTION (the region's expected final content) —
                     # a raw command like "remove the tower" isn't judgeable
@@ -1054,7 +1058,7 @@ async def _event_stream(
                         )
 
                     judge_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
-                    judged_attempts: list[Any] = []
+                    judged_attempts: list[EditAttempt] = []
                     async for judged_att in edit_loop.iter_edit_attempts(
                         _render_judged_edit,
                         source_bytes=judge_source,
@@ -2000,13 +2004,13 @@ async def _event_stream(
                 detail_features = [f for f in plan.facts if f and f.strip()]
                 detail_title = plan.page_title or effective_query
 
-                async def _judge_detail(img_bytes: bytes) -> Any:
+                async def _judge_detail(img_bytes: bytes) -> JudgeResult:
                     return await judge.score_feature_articulation(
                         img_bytes, detail_title, detail_features
                     )
 
                 loop_cfg = render_loop.loop_config_from_env(body.max_attempts)
-                loop_attempts: list[Any] = []
+                loop_attempts: list[Attempt] = []
                 async for loop_att in render_loop.iter_attempts(
                     _render_enter,
                     projection=str((enter_view or {}).get("projection") or ""),
