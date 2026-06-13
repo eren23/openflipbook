@@ -1,0 +1,82 @@
+---
+description: openflipbook project brief — architecture, run/test/eval, conventions, and the recurring landmines to suspect first
+alwaysApply: true
+---
+
+# openflipbook — working brief
+
+A click-to-image engine: tap anything in a generated image and it generates the next page
+(zoom in, learn about a thing, or — in world mode — *step into* a place). Optional
+"world mode" adds spatial semantics (observer pose, projected entities, a scale ladder).
+It's a personal side project — keep the voice chill and first-person in any user-facing copy.
+
+## Repo map (pnpm monorepo)
+- `apps/web` — Next.js 15 / React 19 / TS frontend. Orchestrator: `app/play/page.tsx`.
+  Hooks in `hooks/`, pure visual parts in `components/PlayPage/`, pure helpers in `lib/`,
+  API routes in `app/api/` (proxy to the Python backend over SSE).
+- `apps/modal-backend` — FastAPI on Modal (Python 3.12). Entry: `generate.py`
+  (`_event_stream` orchestrator). Pluggable providers in `providers/` (image, llm, judge,
+  render_loop, edit_loop, geometry, model_router, prompt_library/…).
+- `packages/config/src/index.ts` — shared TS types + the scale ladder. **Has mojibake bytes
+  in comments; edit it with a Python/sed script, not a naive editor.**
+- `docs/` — `ARCHITECTURE.md`, `SESSION_AUDIT.md`, `UI_AUDIT.md`, `TESTING.md`,
+  `LOCAL_DEV.md`, `BYO-KEYS.md`, `PLAN_*.md`, and **`AUDIT_BOX.md` (our open backlog)**.
+
+## Geometry parity (do not break)
+`apps/modal-backend/providers/geometry.py` (Python) and `apps/web/lib/world-geometry.ts` (TS)
+are **byte-for-byte mirrors**, gated by `packages/config/src/world-geo-fixture.json`. Change
+one → change the other → run `make eval-geometry`.
+
+## Run / test / eval
+- Frontend: `pnpm dev` · `pnpm typecheck` · `pnpm lint` · `pnpm test` (vitest) ·
+  `pnpm e2e` (playwright) · `pnpm check:circular`
+- Backend (from `apps/modal-backend`, venv active): `PORT=8787 python local_server.py` ·
+  `ruff check .` · `mypy providers obs.py generate.py` · `pytest -m "not paid" -q`
+- Free merge gate (always run before claiming done): **`make eval`** (backend pytest/ruff/mypy
+  + web vitest/tsc + geometry parity).
+- Paid eval gates are **opt-in** behind `*_BENCH_RUN=1` flags: `make eval-layout`,
+  `make eval-grounding`, `make eval-recon`, `make eval-paid`. They cost money — only with
+  explicit say-so.
+- Full local stack: `make demo` (web + backend + mongo + minio); `make demo-local` adds Ollama.
+
+## Conventions / non-negotiables
+1. **Additive only.** Existing users must keep the exact same click flow, shortcuts, and
+   visual cadence. No interstitial confirms, no "review before generating" pauses, no inserting
+   a click between an existing action and its outcome. New signals = passive hints
+   (toasts, overlays, fading indicators).
+2. **New behavior ships behind a flag, default OFF** (byte-identical with the flag off).
+   Backend flags via `_env.py:env_flag`; frontend via `lib/env-flag.ts` / `NEXT_PUBLIC_*`.
+   `NEXT_PUBLIC_*` are **build-time** — Docker must read root `.env` at build.
+3. **Backwards-compatible wire types**: default-true booleans, default-1.0 confidence,
+   optional point/bbox. Never make an existing field required.
+4. **Eval before merge.** Anything judged (style, same-place, alignment, step-in, detail) gets
+   re-proven against `tests/eval_baselines.json` before it's "done."
+5. **Don't edit the user's `.env`.** Override at runtime if needed and tell them.
+6. **Docs voice**: chill, first-person, no comparison tables, no "coming in vX" roadmaps,
+   no sponsor/funding buttons.
+
+## SUSPECT THIS FIRST (recurring landmines — check before debugging code)
+- **Hovers / blooms / clicks silently fail** → VLM is rate-limited. The `.env` VLM must be
+  `google/gemini-3-flash-preview`; the legacy qwen free tier returns silent 429s. Check
+  `docker compose logs backend | grep 429`.
+- **Garbled map text / loose spatial layout** → `FAL_IMAGE_MODEL` is pinned to base
+  `nano-banana` in `.env`, which beats tier defaults. Balanced tier should resolve to
+  `nano-banana-pro`. Don't pin the base model.
+- **Overlays/marquee invisible, OR a select-area edit submits maskless, on permalink/continue
+  load** → `apps/web/hooks/useContainRect.ts` late-mount regression (effect must poll until the
+  conditionally-rendered `<img>` exists).
+- **Entering a place still shows the parent's entities/boxes** → geometric coordinate-system
+  regression: `resolveAbsolutePos` must be affine (translation+scale), `geoTapRequest` must
+  route over children-of-focus, `GeometryOverlay` must scope to allowed entities, and it must
+  be `pointer-events:none`.
+- **⌘/Ctrl-tap popover dead on first tap after a gen, or won't dismiss** → popover fetch race
+  / missing Escape+click-outside dismiss (the only thing that frees `clickInFlightRef`).
+- **Fresh Docker session defaults world-mode OFF unexpectedly** → build-time `NEXT_PUBLIC_*`
+  not reading root `.env` (rebuild the web container).
+- **A style-ref tap "drifts"** → *not a bug*. Fresh-gen (tap/query/expand) ignores image refs;
+  the medium-lock **text** holds style. Refs only bite on edit/continue/zoom paths.
+
+## Open backlog
+See `docs/AUDIT_BOX.md` — work items in priority order. Confirm the current top item with the
+user before starting; propose a plan; implement behind a flag with tests; prove with the eval
+gate; then move to the next.

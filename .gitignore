@@ -78,3 +78,7 @@ apps/modal-backend/tests/map_corpus/images/
 
 # Ladder proof runs (e2e artifacts: images + manifests + reports).
 ladder-proof-runs/
+
+# Cursor Composer kickoff prompt — an ephemeral paste-into-chat scratch file,
+# not a durable doc (the project brief lives in .cursor/rules + docs/AUDIT_BOX).
+docs/CURSOR_KICKOFF.md
