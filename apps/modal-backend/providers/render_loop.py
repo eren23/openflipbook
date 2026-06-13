@@ -60,13 +60,16 @@ class LoopConfig:
 MAX_ATTEMPTS_CAP = 4
 
 
-def loop_config_from_env(max_attempts: int | None = None) -> LoopConfig:
-    def _f(name: str, default: float) -> float:
-        try:
-            return float(os.environ.get(name, ""))
-        except ValueError:
-            return default
+def _env_float(name: str, default: float) -> float:
+    """Parse an env var as a float; fall back to `default` if unset/garbage.
+    Shared by the render and edit loop config readers."""
+    try:
+        return float(os.environ.get(name, ""))
+    except ValueError:
+        return default
 
+
+def loop_config_from_env(max_attempts: int | None = None) -> LoopConfig:
     try:
         attempts = int(os.environ.get("VIEW_LOOP_MAX_ATTEMPTS", ""))
     except ValueError:
@@ -75,11 +78,11 @@ def loop_config_from_env(max_attempts: int | None = None) -> LoopConfig:
         attempts = min(MAX_ATTEMPTS_CAP, max_attempts)
     return LoopConfig(
         max_attempts=max(1, attempts),
-        accept_conformance=_f("VIEW_LOOP_ACCEPT_CONFORMANCE", 7.0),
-        accept_same_place=_f("VIEW_LOOP_ACCEPT_SAME_PLACE", 6.0),
-        accept_detail=_f("VIEW_LOOP_ACCEPT_DETAIL", 6.0),
-        accept_medium=_f("VIEW_LOOP_ACCEPT_MEDIUM", 6.0),
-        retry_budget_s=_f("VIEW_LOOP_RETRY_BUDGET_S", 240.0),
+        accept_conformance=_env_float("VIEW_LOOP_ACCEPT_CONFORMANCE", 7.0),
+        accept_same_place=_env_float("VIEW_LOOP_ACCEPT_SAME_PLACE", 6.0),
+        accept_detail=_env_float("VIEW_LOOP_ACCEPT_DETAIL", 6.0),
+        accept_medium=_env_float("VIEW_LOOP_ACCEPT_MEDIUM", 6.0),
+        retry_budget_s=_env_float("VIEW_LOOP_RETRY_BUDGET_S", 240.0),
     )
 
 
