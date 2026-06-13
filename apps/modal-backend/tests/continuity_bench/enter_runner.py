@@ -134,7 +134,7 @@ class CaseResult:
 
 
 def _crop_region(map_bytes: bytes, tap: tuple[float, float]) -> bytes:
-    """Pillow mirror of the client's cropRegion (frac via crop_box) — the same
+    """Pillow mirror of the client's region crop (cropBox + cropRegionRect) — the same
     region ref the frontend would send for this tap. Test-only dep (Pillow is
     not in the backend runtime)."""
     from PIL import Image
