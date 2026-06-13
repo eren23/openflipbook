@@ -1,0 +1,9 @@
+{
+  "id": "geo_toggle",
+  "blind": true,
+  "start_url": "/play?q=A%20labeled%20anatomy%20diagram%20of%20a%20steam%20engine&world=1&coach=0",
+  "goal": "Turn on the geometry overlay so entity boxes are visible on the image.",
+  "success_criteria": ["geometry overlay visible"],
+  "max_steps": 12,
+  "timeout_ms": 90000
+}

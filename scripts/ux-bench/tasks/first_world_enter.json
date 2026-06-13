@@ -1,0 +1,9 @@
+{
+  "id": "first_world_enter",
+  "blind": true,
+  "start_url": "/play?q=A%20top-down%20fantasy%20city%20map%20with%20a%20labeled%20Palace&world=1&coach=0",
+  "goal": "Enter the palace shown on the map. Do not read any documentation.",
+  "success_criteria": ["url contains /n/", "depth >= 2"],
+  "max_steps": 15,
+  "timeout_ms": 120000
+}

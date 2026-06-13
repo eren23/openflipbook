@@ -18,6 +18,8 @@ from PIL import Image, ImageDraw
 from providers import edit_loop
 from providers.judge import JudgeResult
 
+pytestmark = pytest.mark.edit
+
 _W, _H = 128, 72
 _BOX = (0.5, 0.25, 0.375, 0.5)  # x,y,w,h normalized -> px (64,18)-(112,54)
 _CFG = edit_loop.EditLoopConfig(retry_budget_s=0)  # disable wall-clock stop

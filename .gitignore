@@ -46,6 +46,8 @@ apps/web/playwright-report/
 
 # Paid-eval generated artefacts (region/without/with renders + reports).
 apps/modal-backend/tests/**/reports/
+apps/modal-backend/tests/scenario_lab/cache/
+scripts/ux-bench/reports/
 
 # Demo render outputs (regenerable; keep the recorders, not the binaries).
 # NOTE: the landing-page clip lives at apps/web/public/demo.mp4 (a different dir),

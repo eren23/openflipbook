@@ -1,0 +1,14 @@
+{
+  "name": "style",
+  "scenarios": ["scenario:*"],
+  "dimension_filter": ["style_engraving", "style_watercolor", "style_blueprint", "style_photoreal"],
+  "arms": ["edit_without_lock", "edit_with_lock"],
+  "models": [
+    "fal-ai/nano-banana-pro/edit"
+  ],
+  "variants": ["edit_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["style_pair"],
+  "composite_weights": { "style_pair": 1.0 },
+  "budget_usd": 2.0
+}

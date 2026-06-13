@@ -327,6 +327,15 @@ export default function PlayPage() {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("q") ?? "";
   });
+  // Coach visibility: the build flag is the default, but a `?coach=0|1` URL
+  // param overrides it so the UX bench (and demos) can pin the coach on or off
+  // without a rebuild. Additive — absent param keeps the build-flag default.
+  const [coachEnabled] = useState(() => {
+    if (typeof window === "undefined") return ON_RAMP_COACH_ENABLED;
+    const v = new URLSearchParams(window.location.search).get("coach");
+    if (v == null) return ON_RAMP_COACH_ENABLED;
+    return ["1", "true", "yes"].includes(v.toLowerCase());
+  });
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
@@ -3623,7 +3632,7 @@ export default function PlayPage() {
           It returns when the tray is closed. */}
       {!helpOpen &&
         !bloom &&
-        ((ON_RAMP_COACH_ENABLED &&
+        ((coachEnabled &&
           history.items.length === 0 &&
           phase !== "generating") ||
           (phase === "ready" && history.items.length <= 1)) && (
@@ -3631,7 +3640,7 @@ export default function PlayPage() {
             onShowHelp={() => setHelpOpen(true)}
             worldHint={worldEnabled}
             variant={
-              ON_RAMP_COACH_ENABLED && history.items.length === 0 ? "pre" : "post"
+              coachEnabled && history.items.length === 0 ? "pre" : "post"
             }
           />
         )}

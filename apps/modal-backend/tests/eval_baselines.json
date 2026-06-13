@@ -42,6 +42,55 @@
       "regression_band": 0.12,
       "n_min": 4,
       "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
+    },
+    "grounding": {
+      "metric": "grounding_mean",
+      "baseline": 0.55,
+      "regression_band": 0.15,
+      "n_min": 2,
+      "source": "make eval-grounding first baseline 2026-06-13 (2 layout scenes, detector+diff)"
+    },
+    "height_order": {
+      "metric": "height_order_mean",
+      "baseline": 0.75,
+      "regression_band": 0.15,
+      "n_min": 3,
+      "source": "recon_bench height_order sub-metric — tracks entity height ordering fidelity"
+    },
+    "continuity": {
+      "metric": "hop2_step_in_mean",
+      "baseline": 7.0,
+      "regression_band": 2.0,
+      "n_min": 3,
+      "source": "chain_bench over ladder-proof hops — step-in on closeup→enter"
+    },
+    "ux_task_success": {
+      "metric": "success_rate",
+      "baseline": 0.6,
+      "regression_band": 0.2,
+      "n_min": 3,
+      "source": "ux-bench blind agent tasks — fraction completing scripted success criteria"
+    },
+    "lab_layout": {
+      "metric": "composite_mean",
+      "baseline": 0.87,
+      "regression_band": 0.15,
+      "n_min": 4,
+      "source": "scenario_lab layout sweep first live run 2026-06-13 (4 scenes x fresh/fresh_layout, nano-banana-pro; composite = layout_fidelity). Per-cell: market fresh 0.42 -> fresh_layout 0.98, lighthouse 0.67 -> 0.97 (the layout clause's lift); mean across all 8 = 0.866. Band wide — VLM ranker, and fresh arms score low by design."
+    },
+    "lab_pov": {
+      "metric": "composite_mean",
+      "baseline": 0.81,
+      "regression_band": 0.2,
+      "n_min": 2,
+      "source": "scenario_lab pov sweep first live run 2026-06-13 (loft eye_level + harbor top_down, nano-banana-pro; composite = 0.5*layout_fidelity + 0.5*view_conformance). loft eye_level 1.0, harbor top_down 0.62 (fresh render reads oblique not plan -> view_conformance 0.3). view_conformance backfilled onto the layout-cached images."
+    },
+    "lab_style": {
+      "metric": "composite_mean",
+      "baseline": 9.0,
+      "regression_band": 2.0,
+      "n_min": 2,
+      "source": "scenario_lab style sweep first live run 2026-06-13 (engraving + blueprint x edit_without_lock/edit_with_lock, nano-banana-pro/edit; composite = style_pair 0-10). All 4 cells 10.0 — nano-banana-pro/edit preserves the engraving/blueprint medium with AND without the lock clause (no lift here, unlike the watercolor case in continuity_bench). blueprint is now review.status=draft so a verified-only sweep runs engraving alone (also 10.0; baseline holds). NOTE: style_pair judges MEDIUM only, not whether the requested edit landed."
     }
   }
 }

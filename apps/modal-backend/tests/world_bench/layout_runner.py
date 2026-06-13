@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import statistics
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from tests.world_bench._score import (
 )
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "layout" / "scenes.json"
+_REPORTS = Path(__file__).resolve().parent / "reports"
 
 
 def _load_env() -> None:
@@ -78,7 +81,21 @@ async def run_one(scene: dict[str, Any], aspect: str, tier: str = "fast") -> ABR
     return ABResult(scene["name"], without, with_clause)
 
 
-async def run(tier: str = "fast") -> list[ABResult]:
+def summarize(results: list[ABResult]) -> dict[str, Any]:
+    """Pure aggregation — unit-tested free via test_layout_fidelity_runner.py."""
+    if not results:
+        return {"n_cases": 0, "without_mean": 0.0, "with_clause_mean": 0.0, "mean_lift": 0.0}
+    without_mean = round(statistics.mean(r.without.score for r in results), 4)
+    with_mean = round(statistics.mean(r.with_clause.score for r in results), 4)
+    return {
+        "n_cases": len(results),
+        "without_mean": without_mean,
+        "with_clause_mean": with_mean,
+        "mean_lift": round(with_mean - without_mean, 4),
+    }
+
+
+async def run_bench(tier: str = "fast") -> tuple[list[ABResult], dict[str, Any]]:
     aspect, scenes = load_scenes()
     results: list[ABResult] = []
     for sc in scenes:
@@ -89,17 +106,51 @@ async def run(tier: str = "fast") -> list[ABResult]:
         print(
             f"{r.name:24} {r.without.score:8.2f} {r.with_clause.score:8.2f} {r.lift:+8.2f}"
         )
-    n = len(results) or 1
-    mean_with = sum(r.with_clause.score for r in results) / n
-    mean_lift = sum(r.lift for r in results) / n
+    summary = summarize(results)
     print("-" * 52)
     print(
-        f"mean with-clause fidelity: {mean_with:.3f}    "
-        f"mean lift (with - without): {mean_lift:+.3f}\n"
+        f"mean with-clause fidelity: {summary['with_clause_mean']:.3f}    "
+        f"mean lift (with - without): {summary['mean_lift']:+.3f}\n"
     )
+    report = {
+        "judge_model": os.environ.get("WORLD_BENCH_JUDGE_MODEL"),
+        "tier": tier,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cases": [
+            {
+                "name": r.name,
+                "without": r.without.score,
+                "with_clause": r.with_clause.score,
+                "lift": r.lift,
+            }
+            for r in results
+        ],
+        "summary": summary,
+    }
+    return results, report
+
+
+async def run(tier: str = "fast") -> list[ABResult]:
+    results, _ = await run_bench(tier)
     return results
 
 
-if __name__ == "__main__":
+def _cli() -> None:
     _load_env()
-    asyncio.run(run())
+    if not os.environ.get("FAL_KEY") or not os.environ.get("OPENROUTER_API_KEY"):
+        raise SystemExit("FAL_KEY + OPENROUTER_API_KEY required (apps/modal-backend/.env)")
+    _, report = asyncio.run(run_bench())
+    _REPORTS.mkdir(parents=True, exist_ok=True)
+    (_REPORTS / "layout_latest.json").write_text(json.dumps(report, indent=2))
+    summary = report["summary"]
+    from tests._baseline import compare, load_baselines
+
+    if "layout_fidelity" in load_baselines():
+        verdict = compare("layout_fidelity", summary["mean_lift"], summary["n_cases"])
+        print(f"baseline: {verdict.status} — {verdict.detail}")
+        if verdict.status == "REGRESSION":
+            raise SystemExit(f"LAYOUT REGRESSION: {verdict.detail}")
+
+
+if __name__ == "__main__":
+    _cli()

@@ -1,0 +1,25 @@
+{
+  "name": "manipulation",
+  "scenarios": ["scenario:*"],
+  "dimension_filter": ["continuity", "edit_region", "interior"],
+  "arms": [
+    "fresh",
+    "fresh_layout",
+    "zoom_continue",
+    "enter_scene",
+    "outpaint",
+    "inpaint"
+  ],
+  "models": [
+    "fal-ai/nano-banana-pro",
+    "fal-ai/flux-pro/kontext",
+    "fal-ai/nano-banana-pro/edit",
+    "fal-ai/bria/expand",
+    "fal-ai/flux-pro/v1/fill"
+  ],
+  "variants": ["scene_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["layout_fidelity", "continuity"],
+  "composite_weights": { "layout_fidelity": 0.5, "continuity": 0.5 },
+  "budget_usd": 5.0
+}

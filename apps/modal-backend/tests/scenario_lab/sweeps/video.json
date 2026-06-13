@@ -1,0 +1,15 @@
+{
+  "name": "video",
+  "scenarios": ["scenario:*"],
+  "dimension_filter": ["video", "continuity"],
+  "arms": ["animate"],
+  "models": [
+    "fal-ai/ltx-video",
+    "fal-ai/wan-i2v"
+  ],
+  "variants": ["scene_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["layout_fidelity"],
+  "composite_weights": { "layout_fidelity": 1.0 },
+  "budget_usd": 2.0
+}

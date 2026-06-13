@@ -1,0 +1,28 @@
+{
+  "id": "market-square",
+  "rev": 1,
+  "dimensions": ["layout", "detection"],
+  "requirements": {
+    "world_mode": false,
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "A hand-drawn medieval market square at midday, bustling with people.",
+  "world": {
+    "entities": [
+      { "id": "fountain", "label": "stone fountain", "pos": [50, 50], "footprint": [20, 20], "height_m": 4 },
+      { "id": "stall", "label": "merchant stall", "pos": [25, 75], "footprint": [18, 12], "height_m": 2.5 },
+      { "id": "tower", "label": "clock tower", "pos": [85, 20], "footprint": [12, 12], "height_m": 18 }
+    ]
+  },
+  "expected_layout": [
+    { "label": "stone fountain", "size": "large", "h_pos": "center", "v_pos": "mid" },
+    { "label": "merchant stall", "size": "medium", "h_pos": "left", "v_pos": "bottom" },
+    { "label": "clock tower", "size": "medium", "h_pos": "far-right", "v_pos": "top" }
+  ],
+  "arms": {
+    "fresh": { "op": "fresh", "layout_clause": false },
+    "fresh_layout": { "op": "fresh", "layout_clause": true }
+  },
+  "judges": ["layout_fidelity", "grounding_diff"],
+  "review": { "status": "verified", "notes": "Migrated from world_bench/fixtures/layout/scenes.json" }
+}

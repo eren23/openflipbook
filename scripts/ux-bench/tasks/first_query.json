@@ -1,0 +1,9 @@
+{
+  "id": "first_query",
+  "blind": true,
+  "start_url": "/play?q=how%20does%20a%20steam%20engine%20work&coach=0",
+  "goal": "Generate a page explaining how a steam engine works. Do not read documentation.",
+  "success_criteria": ["page has generated image", "breadcrumb or title visible"],
+  "max_steps": 10,
+  "timeout_ms": 120000
+}

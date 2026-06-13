@@ -1,0 +1,30 @@
+{
+  "id": "scale-yard-topdown",
+  "rev": 1,
+  "dimensions": ["dimensions", "top_down", "detection"],
+  "requirements": {
+    "world_mode": true,
+    "scale_tier": "city",
+    "render_modes": ["place_submap"],
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "A top-down illustrated map of a cathedral square: an enormous Gothic cathedral dominating the north, a row of small market carts along the south edge, and a medium stone fountain in the centre — clear relative scale, plan view",
+  "world": {
+    "frame": { "w": 100, "h": 60 },
+    "entities": [
+      { "id": "cathedral", "label": "Gothic cathedral", "pos": [50, 20], "footprint": [40, 25], "height_m": 60, "kind": "place" },
+      { "id": "fountain", "label": "stone fountain", "pos": [50, 50], "footprint": [10, 10], "height_m": 4, "kind": "object" },
+      { "id": "carts", "label": "market carts", "pos": [25, 80], "footprint": [6, 4], "height_m": 1.5, "kind": "object" }
+    ]
+  },
+  "expected_layout": [
+    { "label": "Gothic cathedral", "size": "large", "h_pos": "center", "v_pos": "top" },
+    { "label": "stone fountain", "size": "medium", "h_pos": "center", "v_pos": "mid" },
+    { "label": "market carts", "size": "small", "h_pos": "left", "v_pos": "bottom" }
+  ],
+  "arms": {
+    "fresh_layout": { "op": "fresh", "layout_clause": true }
+  },
+  "judges": ["layout_fidelity", "grounding_diff"],
+  "review": { "status": "draft", "notes": "Relative-size (width/height) fidelity seed — large/medium/small on one plan; not yet run live; promote to verified after a human eyeball" }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "harbor-town-map",
+  "rev": 1,
+  "dimensions": ["top_down", "pov_top_down", "layout", "detection", "continuity", "video"],
+  "requirements": {
+    "world_mode": true,
+    "scale_tier": "city",
+    "render_modes": ["place_submap", "place_scene"],
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "A top-down illustrated map of a small coastal harbour town: a stone Lighthouse on the rocky point, two piers with fishing boats, a fish market square, warehouses, a chandlery, the sea wall — weathered nautical chart style with clear labels",
+  "world": {
+    "frame": { "w": 100, "h": 60 },
+    "entities": [
+      { "id": "lighthouse", "label": "Lighthouse", "pos": [78, 22], "footprint": [8, 8], "height_m": 15, "kind": "place" },
+      { "id": "market", "label": "Fish Market", "pos": [45, 45], "footprint": [15, 12], "height_m": 4, "kind": "place" },
+      { "id": "pier", "label": "North Pier", "pos": [30, 70], "footprint": [20, 6], "height_m": 2, "kind": "object" }
+    ],
+    "observer": { "pos": [50, 90], "gaze": [50, 50], "fov": 70 }
+  },
+  "expected_layout": [
+    { "label": "Lighthouse", "size": "medium", "h_pos": "far-right", "v_pos": "top" },
+    { "label": "Fish Market", "size": "large", "h_pos": "center", "v_pos": "mid" },
+    { "label": "North Pier", "size": "medium", "h_pos": "left", "v_pos": "bottom" }
+  ],
+  "arms": {
+    "fresh": { "op": "fresh", "layout_clause": true },
+    "enter_scene": { "op": "enter_scene", "target": "Lighthouse" }
+  },
+  "judges": ["layout_fidelity", "grounding_diff", "enter_same_place"],
+  "review": { "status": "verified", "notes": "Top-down map seed — ladder-proof harbor scenario cousin" }
+}

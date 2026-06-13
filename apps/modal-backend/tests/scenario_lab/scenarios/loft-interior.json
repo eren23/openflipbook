@@ -1,0 +1,31 @@
+{
+  "id": "loft-interior",
+  "rev": 1,
+  "dimensions": ["interior", "pov_eye_level", "layout", "dimensions"],
+  "requirements": {
+    "world_mode": true,
+    "scale_tier": "room",
+    "render_modes": ["place_scene"],
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "A sunlit industrial loft apartment with exposed brick walls, tall factory windows, a worn leather sofa, a reclaimed wood coffee table, and a large potted fiddle-leaf fig — soft afternoon light, eye-level interior photograph",
+  "world": {
+    "entities": [
+      { "id": "sofa", "label": "leather sofa", "pos": [30, 70], "footprint": [25, 15], "height_m": 0.85 },
+      { "id": "table", "label": "coffee table", "pos": [50, 75], "footprint": [12, 8], "height_m": 0.45 },
+      { "id": "fig", "label": "fiddle-leaf fig", "pos": [80, 55], "footprint": [10, 10], "height_m": 1.8 }
+    ],
+    "observer": { "pos": [50, 90], "gaze": [50, 50], "fov": 60 }
+  },
+  "expected_layout": [
+    { "label": "leather sofa", "size": "large", "h_pos": "left", "v_pos": "bottom" },
+    { "label": "coffee table", "size": "medium", "h_pos": "center", "v_pos": "bottom" },
+    { "label": "fiddle-leaf fig", "size": "medium", "h_pos": "far-right", "v_pos": "mid" }
+  ],
+  "arms": {
+    "fresh": { "op": "fresh", "layout_clause": true },
+    "enter_scene": { "op": "enter_scene", "view": "eye_level" }
+  },
+  "judges": ["layout_fidelity", "view_conformance", "grounding_diff"],
+  "review": { "status": "verified", "notes": "Interior room-scale POV seed" }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "edit_region",
+  "blind": true,
+  "start_url": "/play?q=A%20simple%20watercolor%20landscape%20with%20a%20red%20barn&coach=0",
+  "goal": "Edit the barn to be bright blue using region edit mode.",
+  "success_criteria": ["edit submitted"],
+  "max_steps": 15,
+  "timeout_ms": 120000
+}

@@ -327,7 +327,7 @@ def main() -> int:
 
                 for name, key in (
                     ("recon_fidelity", "composite"),
-                    ("recon_height_order", "height_order"),
+                    ("height_order", "height_order"),
                 ):
                     vals = [c["scores"][key] for c in cells if key in c.get("scores", {})]
                     if vals:

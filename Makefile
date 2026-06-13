@@ -53,7 +53,7 @@ eval-layout:
 # P4 grounding-verify: generate from the layout clause, detect the expected
 # entities, diff vs intent → the grounded confirmation signal. PAID (fal + VLM).
 eval-grounding:
-	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.grounding_runner
+	cd apps/modal-backend && GROUNDING_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.grounding_runner
 # B2 segmenter smoke: VLM polygon borders + anchored absolute heights over a
 # few existing report JPGs — eyeball the output. PAID (~$0.05, Gemini only,
 # zero fal). Override images: SEGMENT_SMOKE_IMAGES=/path/a.jpg,...
@@ -78,9 +78,9 @@ eval-recon-dry:
 eval-recon:
 	cd apps/modal-backend && RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
 eval-repair:
-	cd apps/modal-backend && REPAIR_BENCH_RUN=1 .venv/bin/python -m pytest -m repair -q
+	cd apps/modal-backend && .venv/bin/python -m pytest -m repair -q
 eval-edit:
-	cd apps/modal-backend && EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m edit -q
+	cd apps/modal-backend && .venv/bin/python -m pytest -m edit -q
 # B3 sub-part coherence A/B: ENTER each place WITH vs WITHOUT region-conditioning
 # (+ the B2 faithful preamble) → judge faithfulness vs the parent map crop → the
 # lift. PAID (fal gens + judge). Needs a live session + the web app running:
@@ -139,8 +139,9 @@ eval-edit-region:
 # single bench failure so one flaky run doesn't hide the rest.
 # Free coverage twin: make coverage (no spend).
 eval-baselines:
-	-cd apps/modal-backend && LAYOUT_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.layout_runner
+	-cd apps/modal-backend && .venv/bin/python -m tests.world_bench.layout_runner
 	-cd apps/modal-backend && STYLE_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.style_runner
+	-cd apps/modal-backend && GROUNDING_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.grounding_runner
 	-cd apps/modal-backend && ENTER_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.enter_runner
 	-cd apps/modal-backend && VIEW_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.view_runner
 	-cd apps/modal-backend && EDIT_REGION_BENCH_RUN=1 .venv/bin/python -m tests.edit_bench.runner
@@ -155,13 +156,44 @@ eval-matrix-dry:
 	cd apps/modal-backend && .venv/bin/python -m tests.matrix_bench.runner
 eval-matrix:
 	cd apps/modal-backend && MATRIX_BENCH_RUN=1 .venv/bin/python -m tests.matrix_bench.runner
+
+# ── Scenario Lab (unified test bench) ───────────────────────────────────────
+# bench-dry is the mandatory $0 cost preview. bench-run spends under the cap.
+# SWEEP= picks a sweep file under tests/scenario_lab/sweeps/ (default: layout).
+SWEEP ?= layout
+.PHONY: bench-dry bench-run bench-compare bench-baselines scenario-new ux-bench-dry ux-bench chain-bench chain-bench-dry
+
+bench-dry: eval-matrix-dry
+	cd apps/modal-backend && MATRIX_SWEEP=tests/scenario_lab/sweeps/$(SWEEP).json .venv/bin/python -m tests.scenario_lab.runner
+
+bench-run:
+	cd apps/modal-backend && MATRIX_BENCH_RUN=1 MATRIX_SWEEP=tests/scenario_lab/sweeps/$(SWEEP).json .venv/bin/python -m tests.scenario_lab.runner
+
+bench-compare:
+	cd apps/modal-backend && .venv/bin/python -m tests.scenario_lab.bench_compare
+
+bench-baselines: eval-baselines
+
+scenario-new:
+	cd apps/modal-backend && .venv/bin/python -m tests.scenario_lab.scenario_new $(id)
+
+ux-bench-dry:
+	pnpm tsx scripts/ux-bench/run.ts
+
+ux-bench:
+	UX_BENCH_RUN=1 pnpm tsx scripts/ux-bench/run.ts
+
+chain-bench-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.scenario_lab.chain_runner
+
+chain-bench:
+	cd apps/modal-backend && CHAIN_BENCH_RUN=1 .venv/bin/python -m tests.scenario_lab.chain_runner
 # Free coverage report (backend lines + the web view-path files).
 coverage:
 	cd apps/modal-backend && .venv/bin/python -m pytest -q -m "not paid" --cov=providers --cov=generate --cov-report=term | tail -30
 	cd apps/web && pnpm exec vitest run --coverage --coverage.reporter=text 2>/dev/null | grep -E "geo-tap|click-route|world-geometry|image-condition|ClickDetail|All files" || true
-# The full paid sweep (spends fal/openrouter on the tiny golden set).
-eval-paid:
-	cd apps/modal-backend && LAYOUT_BENCH_RUN=1 GROUNDING_BENCH_RUN=1 REPAIR_BENCH_RUN=1 EDIT_BENCH_RUN=1 .venv/bin/python -m pytest -m paid -q
+# Alias for eval-baselines — the full paid regression sweep.
+eval-paid: eval-baselines
 # The ladder proof: Playwright drives the REAL app (localhost:3000) through
 # map → closeup tap → enter tap across 5 place types, saves the image
 # gallery + wire manifests to ladder-proof-runs/<name>, then numeric judges

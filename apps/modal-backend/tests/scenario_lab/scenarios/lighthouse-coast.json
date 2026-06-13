@@ -1,0 +1,28 @@
+{
+  "id": "lighthouse-coast",
+  "rev": 1,
+  "dimensions": ["layout", "detection"],
+  "requirements": {
+    "world_mode": false,
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "A storybook illustration of a rocky coastline at golden hour, soft watercolour.",
+  "world": {
+    "entities": [
+      { "id": "lighthouse", "label": "lighthouse", "pos": [50, 25], "footprint": [15, 20], "height_m": 25 },
+      { "id": "boat", "label": "fishing boat", "pos": [10, 80], "footprint": [12, 8], "height_m": 3 },
+      { "id": "seagull", "label": "seagull", "pos": [90, 20], "footprint": [5, 5], "height_m": 0.3 }
+    ]
+  },
+  "expected_layout": [
+    { "label": "lighthouse", "size": "large", "h_pos": "center", "v_pos": "top" },
+    { "label": "fishing boat", "size": "small", "h_pos": "far-left", "v_pos": "bottom" },
+    { "label": "seagull", "size": "tiny", "h_pos": "far-right", "v_pos": "top" }
+  ],
+  "arms": {
+    "fresh": { "op": "fresh", "layout_clause": false },
+    "fresh_layout": { "op": "fresh", "layout_clause": true }
+  },
+  "judges": ["layout_fidelity", "grounding_diff"],
+  "review": { "status": "verified", "notes": "Migrated from world_bench/fixtures/layout/scenes.json" }
+}
