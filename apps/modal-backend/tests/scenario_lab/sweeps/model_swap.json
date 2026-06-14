@@ -1,0 +1,21 @@
+{
+  "name": "model_swap",
+  "scenarios": ["scenario:*"],
+  "dimension_filter": ["model_swap", "layout", "top_down"],
+  "arms": ["fresh_layout"],
+  "models": [
+    "fal-ai/nano-banana",
+    "fal-ai/nano-banana-2",
+    "fal-ai/nano-banana-pro",
+    "fal-ai/bytedance/seedream/v4/text-to-image",
+    "openai/gpt-image-2",
+    "recraft/recraft-v4.1-utility",
+    "sourceful/riverflow-v2.5-fast",
+    "sourceful/riverflow-v2.5-pro"
+  ],
+  "variants": ["scene_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["layout_fidelity"],
+  "composite_weights": { "layout_fidelity": 1.0 },
+  "budget_usd": 5.0
+}

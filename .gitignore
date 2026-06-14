@@ -46,6 +46,8 @@ apps/web/playwright-report/
 
 # Paid-eval generated artefacts (region/without/with renders + reports).
 apps/modal-backend/tests/**/reports/
+apps/modal-backend/tests/scenario_lab/cache/
+scripts/ux-bench/reports/
 
 # Demo render outputs (regenerable; keep the recorders, not the binaries).
 # NOTE: the landing-page clip lives at apps/web/public/demo.mp4 (a different dir),
@@ -76,3 +78,7 @@ apps/modal-backend/tests/map_corpus/images/
 
 # Ladder proof runs (e2e artifacts: images + manifests + reports).
 ladder-proof-runs/
+
+# Cursor Composer kickoff prompt — an ephemeral paste-into-chat scratch file,
+# not a durable doc (the project brief lives in .cursor/rules + docs/AUDIT_BOX).
+docs/CURSOR_KICKOFF.md

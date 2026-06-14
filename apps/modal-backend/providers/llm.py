@@ -13,12 +13,20 @@ keep the `:online` suffix path.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
-from openai import AsyncOpenAI, BadRequestError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    BadRequestError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from _env import env_flag
 
@@ -645,6 +653,54 @@ def _parse_tool_json(response: Any) -> dict[str, Any]:
         return {}
 
 
+# Transient upstream failures worth a retry — NOT BadRequestError (a 400 means
+# the request itself is wrong; that's the tier-downgrade path, not a retry).
+_TRANSIENT_LLM_ERRORS = (
+    APITimeoutError,
+    APIConnectionError,
+    RateLimitError,
+    InternalServerError,
+)
+
+
+async def _create_with_retry(
+    client: Any,
+    *,
+    max_retries: int = 2,
+    base_delay: float = 1.0,
+    **kwargs: Any,
+) -> Any:
+    """chat.completions.create with exponential backoff on TRANSIENT errors.
+
+    The planner (plan_page) was killed by a single APITimeoutError on the
+    Gemini/OpenRouter web-search path; one flaky upstream request shouldn't fail
+    the whole generation. Retries timeouts / rate-limits / connection / 5xx with
+    backoff; re-raises anything else (incl. BadRequestError) immediately so the
+    tier-downgrade ladder still works.
+    """
+    last: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except _TRANSIENT_LLM_ERRORS as err:
+            last = err
+            if attempt == max_retries:
+                break
+            delay = base_delay * (2**attempt)
+            _safe_log(
+                "warn",
+                "llm.retry",
+                error=type(err).__name__,
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                delay=delay,
+                model=kwargs.get("model"),
+            )
+            await asyncio.sleep(delay)
+    assert last is not None
+    raise last
+
+
 async def _complete_json(
     *,
     model: str,
@@ -686,7 +742,8 @@ async def _complete_json(
             _with_json_hint(messages, _JSON_ONLY_HINT) if rung == "prompt" else messages
         )
         try:
-            response = await client.chat.completions.create(
+            response = await _create_with_retry(
+                client,
                 model=model,
                 messages=call_messages,
                 temperature=temperature,
@@ -697,7 +754,8 @@ async def _complete_json(
             parsed = _parse_tool_json(response) if rung == "tool" else _parse_choice_json(response)
             if rung == "prompt" and not parsed and _choice_content(response).strip():
                 # ONE repair retry — the model emitted prose, nudge harder.
-                response = await client.chat.completions.create(
+                response = await _create_with_retry(
+                    client,
                     model=model,
                     messages=_with_json_hint(messages, _JSON_REPAIR_HINT),
                     temperature=temperature,

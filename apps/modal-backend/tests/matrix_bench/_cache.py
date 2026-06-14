@@ -68,6 +68,11 @@ class CellCache:
     def image_path(self, key: str) -> Path:
         return self._dir(key) / "image.jpg"
 
+    def artifact_path(self, key: str, name: str) -> Path:
+        """Path to a side artifact (e.g. source.jpg, poster.jpg) inside a cell
+        dir. `name` is taken as a basename only — no path traversal."""
+        return self._dir(key) / Path(name).name
+
     def load(self, key: str) -> dict[str, Any] | None:
         p = self._dir(key) / "record.json"
         if not p.exists():
@@ -78,12 +83,19 @@ class CellCache:
             return None  # corrupt entry = miss; the cell simply re-runs
 
     def store(
-        self, key: str, record: dict[str, Any], jpeg: bytes | None = None
+        self,
+        key: str,
+        record: dict[str, Any],
+        jpeg: bytes | None = None,
+        artifacts: dict[str, bytes] | None = None,
     ) -> Path:
         d = self._dir(key)
         d.mkdir(parents=True, exist_ok=True)
         if jpeg is not None:
             (d / "image.jpg").write_bytes(jpeg)
+        for name, blob in (artifacts or {}).items():
+            # basename only — never let a gen_fn write outside the cell dir
+            (d / Path(name).name).write_bytes(blob)
         (d / "record.json").write_text(json.dumps(record, indent=1))
         return d
 

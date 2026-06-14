@@ -22,6 +22,14 @@ def test_compare_verdicts() -> None:
     assert compare("layout_fidelity", 0.10, 2).status == "REGRESSION"
     assert compare("layout_fidelity", 0.60, 2).status == "IMPROVED"
     assert compare("layout_fidelity", 0.33, 1).status == "LOW_N"
+    # grounding baseline 0.55 ± 0.15
+    assert compare("grounding", 0.55, 2).status == "PASS"
+    assert compare("grounding", 0.30, 2).status == "REGRESSION"
+    # height_order baseline 0.75 ± 0.15
+    assert compare("height_order", 0.75, 3).status == "PASS"
+    assert compare("height_order", 0.50, 3).status == "REGRESSION"
+    # ux_task_success baseline
+    assert compare("ux_task_success", 0.6, 3).status == "PASS"
 
 
 def test_regression_is_not_ok_others_are() -> None:

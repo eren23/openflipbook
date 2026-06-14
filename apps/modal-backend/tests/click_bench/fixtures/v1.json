@@ -23,5 +23,18 @@
       "5. Re-run: .venv/bin/python -m tests.click_bench.runner --fixtures tests/click_bench/fixtures/v1.json --out tests/click_bench/reports/$(date +%F).json"
     ]
   },
-  "cases": []
+  "cases": [
+    {
+      "case_id": "steam_engine_boiler_real",
+      "image_path": "images/synthetic/steam_engine.png",
+      "x_pct": 0.21,
+      "y_pct": 0.5382,
+      "parent_title": "How a Steam Engine Works",
+      "parent_query": "how does a steam engine work",
+      "expected_subject": "Boiler",
+      "alternates": ["the boiler"],
+      "groundable": true,
+      "notes": "seed case — swap image_path for a real generated illustration"
+    }
+  ]
 }

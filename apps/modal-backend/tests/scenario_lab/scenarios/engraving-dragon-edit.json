@@ -1,0 +1,23 @@
+{
+  "id": "engraving-dragon-edit",
+  "rev": 1,
+  "dimensions": ["style_engraving", "edit_region", "model_swap"],
+  "requirements": {
+    "world_mode": false,
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "a hand-drawn antique engraving map of a small fantasy port city, sepia ink, dense cross-hatching, woodcut linework, aged paper",
+  "style": "hand-drawn antique engraving, sepia ink, dense cross-hatching, woodcut linework",
+  "edit_instruction": "add a colossal clockwork dragon with brass gears coiled around the central tower",
+  "world": {
+    "entities": [
+      { "id": "tower", "label": "central tower", "pos": [50, 40], "footprint": [12, 12], "height_m": 20 }
+    ]
+  },
+  "arms": {
+    "edit_without_lock": { "op": "edit", "medium_lock": false },
+    "edit_with_lock": { "op": "edit", "medium_lock": true, "style_ref": true }
+  },
+  "judges": ["style_medium_lock"],
+  "review": { "status": "verified", "notes": "Style-sensitive edit seed — mirrors continuity_bench style_runner engraving_dragon case" }
+}

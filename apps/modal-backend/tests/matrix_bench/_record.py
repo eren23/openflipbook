@@ -45,6 +45,10 @@ def load_sweep(path: Path) -> dict[str, Any]:
     sweep.setdefault("params", {})
     sweep.setdefault("budget_usd", 3.0)
     sweep.setdefault("composite_weights", {})
+    if "dimension_filter" in sweep:
+        filt = sweep["dimension_filter"]
+        if not isinstance(filt, list) or not all(isinstance(v, str) for v in filt):
+            raise ValueError(f"sweep {path.name}: dimension_filter must be a list of strings")
     return sweep
 
 

@@ -175,6 +175,14 @@ def _cli() -> None:
     _REPORTS.mkdir(parents=True, exist_ok=True)
     (_REPORTS / "style_latest.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
+    summary = report["summary"]
+    from tests._baseline import compare, load_baselines
+
+    if "style_medium_lock" in load_baselines():
+        verdict = compare("style_medium_lock", summary["mean_lift"], summary["n_cases"])
+        print(f"baseline: {verdict.status} — {verdict.detail}")
+        if verdict.status == "REGRESSION":
+            raise SystemExit(f"STYLE REGRESSION: {verdict.detail}")
     if not report["summary"]["pass"]:
         raise SystemExit(
             f"STYLE REGRESSION: with-medium-lock mean "

@@ -1,0 +1,9 @@
+{
+  "id": "breadcrumb_nav",
+  "blind": true,
+  "start_url": "/play?q=A%20top-down%20village%20map&world=1&coach=0",
+  "goal": "Tap into a building, then navigate back toward the root using breadcrumbs.",
+  "success_criteria": ["returned toward root"],
+  "max_steps": 20,
+  "timeout_ms": 180000
+}

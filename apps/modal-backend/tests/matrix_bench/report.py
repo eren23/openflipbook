@@ -38,6 +38,11 @@ def summarize(report: dict[str, Any]) -> dict[str, Any]:
         for op in _SPEND_OPS
     }
     spend["total"] = round(sum(spend.values()), 4)
+    composites = [
+        float(c["scores"]["composite"])
+        for c in cells
+        if "composite" in c.get("scores", {})
+    ]
     return {
         "configs": [
             {**c, "pareto": (c["model"], c["variant"]) in front_keys}
@@ -49,6 +54,11 @@ def summarize(report: dict[str, Any]) -> dict[str, Any]:
         "failed_cells": sum(
             1 for c in report.get("cells", []) if c.get("status") == "failed"
         ),
+        # Single per-run composite for the regression gate (bench_compare).
+        "composite_mean": (
+            round(sum(composites) / len(composites), 4) if composites else None
+        ),
+        "n_composite": len(composites),
     }
 
 

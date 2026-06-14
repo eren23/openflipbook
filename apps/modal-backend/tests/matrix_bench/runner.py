@@ -155,6 +155,15 @@ def run_matrix(
 
     for cell, key, psha, cached, est in resolved:
         if cached is not None:
+            # The cell's IMAGE is cached, but a different sweep may name a judge
+            # the cached record never ran (e.g. POV's view_conformance on a
+            # `fresh` image first made by the layout sweep). Re-judge ONLY the
+            # missing judges on the reused image — no re-generation, no image
+            # spend — so a new judge is never silently skipped.
+            if live and judge_fns:
+                cached = _backfill_judges(
+                    cached, cell, key, sweep, by_id, judge_fns, score_fn, cache, log
+                )
             report["cells"].append(cached)
             continue
         try:
@@ -182,6 +191,9 @@ def run_matrix(
             cost["image"] = spend.estimate_image(gen.get("model") or cell.model)
 
             outputs: dict[str, Any] = {"model": gen.get("model") or cell.model}
+            gen_artifacts = gen.get("artifacts") or {}
+            if gen_artifacts:
+                outputs["artifacts"] = sorted(gen_artifacts)
             if extract_fn is not None:
                 t0 = time.monotonic()
                 extracted, ex_cost = extract_fn(cell, scenario.payload, jpeg)
@@ -225,13 +237,55 @@ def run_matrix(
                 {"cell_key": key, "label": cell.label, "status": "failed", "error": err}
             )
             continue
-        cache.store(key, record, jpeg)
+        cache.store(key, record, jpeg, artifacts=gen_artifacts or None)
         report["cells"].append(record)
         log(f"ran {cell.label}: scores={scores} (${record['cost_usd']['total']:.3f})")
 
     report["spent_usd"] = round(ledger.spent_usd, 4)
     _write_report(report, report_path)
     return report
+
+
+def _backfill_judges(
+    cached: dict[str, Any],
+    cell: Cell,
+    key: str,
+    sweep: dict[str, Any],
+    by_id: dict[str, Scenario],
+    judge_fns: dict[str, JudgeFn],
+    score_fn: ScoreFn | None,
+    cache: CellCache,
+    log: Callable[[str], None],
+) -> dict[str, Any]:
+    """Run any of the sweep's judges absent from a cached cell's scores against
+    the already-cached image, then re-store. Cheap (no image gen) and keeps a
+    cross-sweep cache hit honest — a sweep's new judge still gets a real score."""
+    scores = dict(cached.get("scores", {}))
+    missing = [j for j in sweep["judges"] if j not in scores and j in judge_fns]
+    if not missing:
+        return cached
+    img_path = cache.image_path(key)
+    if not img_path.exists():
+        return cached
+    jpeg = img_path.read_bytes()
+    payload = by_id[cell.scenario_id].payload
+    changed = False
+    for name in missing:
+        try:
+            score, _ = judge_fns[name](cell, payload, jpeg)
+            scores[name] = score
+            changed = True
+        except Exception as exc:
+            # one judge must not torch the run — log and move on
+            log(f"re-judge {name} skipped for {cell.label}: {type(exc).__name__}: {exc}")
+    if not changed:
+        return cached
+    if score_fn is not None:
+        scores = score_fn(cell, payload, cached.get("outputs", {}), scores)
+    cached["scores"] = scores
+    cache.store(key, cached)  # image already on disk; just refresh record.json
+    log(f"re-judged {cell.label}: +{missing} -> {scores}")
+    return cached
 
 
 def _write_report(report: dict[str, Any], path: Path | None) -> None:
@@ -259,7 +313,16 @@ def main() -> int:
     sweep_path = Path(os.environ.get("MATRIX_SWEEP", "")) if os.environ.get(
         "MATRIX_SWEEP"
     ) else SWEEPS_DIR / "default.json"
+    if not sweep_path.is_absolute():
+        sweep_path = Path.cwd() / sweep_path
     sweep = load_sweep(sweep_path)
+
+    # Delegate scenario:* sweeps to scenario_lab; corpus:* stays on recon.
+    if any(r.startswith("scenario:") for r in sweep.get("scenarios", [])):
+        from tests.scenario_lab import runner as lab_runner
+
+        return lab_runner.main()
+
     if os.environ.get("MATRIX_BUDGET_USD"):
         sweep["budget_usd"] = float(os.environ["MATRIX_BUDGET_USD"])
 

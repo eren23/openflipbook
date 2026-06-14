@@ -1,0 +1,14 @@
+{
+  "name": "pov",
+  "scenarios": ["scenario:*"],
+  "dimension_filter": ["pov_eye_level", "pov_oblique", "pov_top_down", "interior"],
+  "arms": ["fresh"],
+  "models": [
+    "fal-ai/nano-banana-pro"
+  ],
+  "variants": ["scene_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["layout_fidelity", "view_conformance"],
+  "composite_weights": { "layout_fidelity": 0.5, "view_conformance": 0.5 },
+  "budget_usd": 3.0
+}

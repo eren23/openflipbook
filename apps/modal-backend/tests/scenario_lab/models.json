@@ -1,0 +1,24 @@
+{
+  "models": [
+    { "name": "nano-banana", "provider": "fal", "slug": "fal-ai/nano-banana", "arg": "aspect" },
+    { "name": "nano-banana-2", "provider": "fal", "slug": "fal-ai/nano-banana-2", "arg": "aspect" },
+    { "name": "nano-banana-pro", "provider": "fal", "slug": "fal-ai/nano-banana-pro", "arg": "aspect" },
+    { "name": "seedream-v4", "provider": "fal", "slug": "fal-ai/bytedance/seedream/v4/text-to-image", "arg": "size" },
+    { "name": "gpt-image-2", "provider": "fal", "slug": "openai/gpt-image-2", "arg": "size" },
+    { "name": "recraft-v4.1-utility", "provider": "openrouter", "slug": "recraft/recraft-v4.1-utility", "arg": "" },
+    { "name": "recraft-v4.1-pro", "provider": "openrouter", "slug": "recraft/recraft-v4.1-pro", "arg": "" },
+    { "name": "riverflow-v2.5-fast", "provider": "openrouter", "slug": "sourceful/riverflow-v2.5-fast", "arg": "" },
+    { "name": "riverflow-v2.5-pro", "provider": "openrouter", "slug": "sourceful/riverflow-v2.5-pro", "arg": "" }
+  ],
+  "edit_models": [
+    { "name": "nano-banana-pro-edit", "slug": "fal-ai/nano-banana-pro/edit" },
+    { "name": "gpt-image-2-edit", "slug": "openai/gpt-image-2/edit" },
+    { "name": "flux-kontext", "slug": "fal-ai/flux-pro/kontext" },
+    { "name": "flux-fill", "slug": "fal-ai/flux-pro/v1/fill" },
+    { "name": "bria-expand", "slug": "fal-ai/bria/expand" }
+  ],
+  "video_models": [
+    { "name": "ltx-video", "slug": "fal-ai/ltx-video" },
+    { "name": "wan-i2v", "slug": "fal-ai/wan-i2v" }
+  ]
+}

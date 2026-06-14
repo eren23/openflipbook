@@ -1,0 +1,12 @@
+{
+  "id": "first_world_enter",
+  "blind": true,
+  "start_url": "/play?q=A%20top-down%20fantasy%20city%20map%20with%20a%20labeled%20Palace&world=1",
+  "goal": "Reach the INTERIOR of the palace (a stepped-inside / closer view, not the top-down map). In world mode, tapping a place first zooms to it; tap the SAME place again to step inside.",
+  "success_criteria": [
+    "reached the palace interior or stepped-inside view (NOT the top-down map)",
+    "url contains /n/"
+  ],
+  "max_steps": 15,
+  "timeout_ms": 120000
+}

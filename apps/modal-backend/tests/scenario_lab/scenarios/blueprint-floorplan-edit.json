@@ -1,0 +1,24 @@
+{
+  "id": "blueprint-floorplan-edit",
+  "rev": 1,
+  "dimensions": ["style_blueprint", "edit_region", "model_swap"],
+  "requirements": {
+    "world_mode": false,
+    "aspect_ratio": "16:9"
+  },
+  "prompt": "an architectural blueprint floor plan of a two-bedroom apartment, white lines on blue paper, technical drafting style, dimension annotations, room labels",
+  "style": "architectural blueprint, white drafting lines on blue ground, technical line drawing, no shading",
+  "edit_instruction": "add a kitchen island with bar stools in the open-plan kitchen",
+  "world": {
+    "entities": [
+      { "id": "kitchen", "label": "kitchen", "pos": [70, 35], "footprint": [25, 20], "height_m": 0 },
+      { "id": "living", "label": "living room", "pos": [30, 40], "footprint": [30, 25], "height_m": 0 }
+    ]
+  },
+  "arms": {
+    "edit_without_lock": { "op": "edit", "medium_lock": false },
+    "edit_with_lock": { "op": "edit", "medium_lock": true, "style_ref": true }
+  },
+  "judges": ["style_medium_lock"],
+  "review": { "status": "draft", "notes": "Blueprint medium-lock edit seed — first live run 2026-06-13 looked right (style_pair 10.0 both arms); promote to verified after a human eyeball" }
+}

@@ -11,6 +11,8 @@ from providers.grounding import (
     run_grounding_loop,
 )
 
+pytestmark = pytest.mark.repair
+
 
 def _rep(score: float, missing=("a",)) -> GroundingReport:
     return GroundingReport(
