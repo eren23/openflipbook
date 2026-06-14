@@ -57,7 +57,7 @@ export function FirstRunCoach({
                 <span className="flex items-center gap-1.5 whitespace-nowrap opacity-80">
                   <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-600/70" />
                   {enterHintActionable
-                    ? "tap a glowing place to enter"
+                    ? "tap a glowing place, tap again to enter"
                     : "rings = enterable places"}
                 </span>
                 <span className="opacity-40">·</span>
