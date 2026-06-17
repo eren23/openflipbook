@@ -75,6 +75,10 @@ apps/modal-backend/tests/**/cache/
 # Ground-truth corpus images (fetched by scripts/fetch_corpus.py; text-only
 # descriptions + the sha-pinned manifest are what git tracks).
 apps/modal-backend/tests/map_corpus/images/
+# Generated annotation artifacts: ensemble candidates awaiting human promotion
+# and the in->out overlay renders. Not source of truth; regenerated on demand.
+apps/modal-backend/tests/map_corpus/descriptions/candidates/
+apps/modal-backend/tests/map_corpus/overlays/
 
 # Ladder proof runs (e2e artifacts: images + manifests + reports).
 ladder-proof-runs/

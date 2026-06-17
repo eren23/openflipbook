@@ -85,6 +85,14 @@ corpus-annotate-preview:
 	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
 corpus-annotate:
 	cd apps/modal-backend && CORPUS_ANNOTATE_RUN=1 .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
+# Visual in->out: draw a description's entities (detector boxes + segmenter
+# borders + labels) back onto its source map. FREE (no API). Verified by
+# default; add cand=1 to render the ensemble candidate instead. Writes
+# tests/map_corpus/overlays/<id>.<source>.png.
+#   make corpus-overlay id=fantasy-treasure-island
+#   make corpus-overlay id=fantasy-treasure-island cand=1
+corpus-overlay:
+	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.overlay $(or $(id),fantasy-treasure-island) $(if $(cand),--candidate,)
 # Reconstruction bench: regenerate each VERIFIED corpus map from its authored
 # description (graph = product planning path, direct = ground-truth layout),
 # extract + score vs ground truth + VLM judges. Rides the matrix chassis:
