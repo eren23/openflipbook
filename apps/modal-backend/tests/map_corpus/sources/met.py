@@ -45,6 +45,7 @@ def met_object_to_row(obj: dict[str, Any], tier: str = "closeup") -> dict[str, A
         "source_url": image,
         "license_note": "CC0 (The Met Open Access)",
         "attribution": f'"{title}", The Metropolitan Museum of Art, CC0',
+        "sha256": None,  # pinned by scripts/fetch_corpus.py --pin on first fetch
         "filename": f"met-{oid}.jpg",
     }
 
