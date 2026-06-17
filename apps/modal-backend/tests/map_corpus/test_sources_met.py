@@ -24,7 +24,7 @@ def test_met_object_to_row_emits_a_cc0_closeup_row() -> None:
     assert row["tier"] == "closeup"
     assert row["genre"] == "ceramics"
     assert row["source_url"].endswith(".jpg")
-    assert row["filename"] == "met-45734.jpg"
+    assert row["filename"] == row["id"] + ".jpg"  # corpus invariant: filename starts with id
     assert "CC0" in row["license_note"]
     assert "Metropolitan" in row["attribution"] and "Standing Vase" in row["attribution"]
 

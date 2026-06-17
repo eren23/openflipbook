@@ -38,15 +38,16 @@ def met_object_to_row(obj: dict[str, Any], tier: str = "closeup") -> dict[str, A
     oid = obj.get("objectID")
     title = str(obj.get("title") or "untitled").strip()
     genre = _slug(str(obj.get("classification") or obj.get("department") or "object"))
+    row_id = f"met-{oid}-{_slug(title)}"[:60]
     return {
-        "id": f"met-{oid}-{_slug(title)}"[:60],
+        "id": row_id,
         "tier": tier,
         "genre": genre,
         "source_url": image,
         "license_note": "CC0 (The Met Open Access)",
         "attribution": f'"{title}", The Metropolitan Museum of Art, CC0',
         "sha256": None,  # pinned by scripts/fetch_corpus.py --pin on first fetch
-        "filename": f"met-{oid}.jpg",
+        "filename": f"{row_id}.jpg",  # corpus invariant: filename starts with id
     }
 
 

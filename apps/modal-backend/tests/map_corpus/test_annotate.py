@@ -103,9 +103,14 @@ def test_vote_majority_and_tiebreak_and_default() -> None:
 
 def test_load_manifest_defaults_tier_to_map_and_filters() -> None:
     rows = load_manifest()
-    assert rows and all(r.get("tier") == "map" for r in rows)  # existing rows -> map
-    assert load_manifest(tier="map") == rows
-    assert load_manifest(tier="interior") == []
+    assert all(r.get("tier") in {"map", "interior", "closeup"} for r in rows)
+    maps = load_manifest(tier="map")
+    assert maps and all(r["tier"] == "map" for r in maps)
+    # the hand-seeded maps carry no explicit tier -> default to "map"
+    assert any(r["id"] == "fantasy-treasure-island" for r in maps)
+    # tier filtering partitions the manifest
+    parts = sum(len(load_manifest(tier=t)) for t in ("map", "interior", "closeup"))
+    assert parts == len(rows)
 
 
 def test_describe_system_is_tier_specific() -> None:
