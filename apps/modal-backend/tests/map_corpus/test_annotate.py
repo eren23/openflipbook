@@ -17,6 +17,7 @@ from tests.map_corpus.annotate import (
     merge_entities,
     merge_relations,
     norm_label,
+    output_name,
     slug,
     vote,
 )
@@ -113,6 +114,21 @@ def test_decide_status_requires_both_gates() -> None:
     assert decide_status(7.0, 0.6, **ok) == "verified"  # boundary inclusive
     assert decide_status(5.0, 0.9, **ok) == "needs_human"  # judge too low
     assert decide_status(9.0, 0.4, **ok) == "needs_human"  # agreement too low
+
+
+# --- non-destructive output routing ------------------------------------------
+
+
+def test_output_name_protects_verified_unless_forced() -> None:
+    # a brand-new map or a prior auto-run draft is written canonically
+    assert output_name("m", None, force=False) == "m.json"
+    assert output_name("m", "vlm_draft", force=False) == "m.json"
+    assert output_name("m", "needs_human", force=False) == "m.json"
+    # a committed human-verified description is NEVER silently clobbered — the
+    # annotation lands as a candidate (a sibling subdir invisible to recon)
+    assert output_name("m", "verified", force=False) == "candidates/m.json"
+    # ...unless the operator forces it
+    assert output_name("m", "verified", force=True) == "m.json"
 
 
 # --- relation reconcile ------------------------------------------------------

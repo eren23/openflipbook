@@ -71,7 +71,9 @@ corpus-draft:
 # Ensemble annotate (the evolvable upgrade to corpus-draft): fan the describe
 # call over N VLMs, reconcile deterministically, judge, refine once on a low
 # score, and AUTO-PROMOTE to review.status=verified when the judge AND ensemble
-# agreement both clear their gates (else needs_human). PAID (~$0.03-0.10/map).
+# agreement both clear their gates (else needs_human). Non-destructive: a
+# verified description is preserved; output lands in descriptions/candidates/
+# unless CORPUS_ANNOTATE_FORCE=1. PAID (~$0.03-0.10/map).
 # Preview the ensemble + gates with no flag; CORPUS_ANNOTATE_RUN=1 to spend.
 #   make corpus-annotate-preview
 #   make corpus-annotate id=fantasy-treasure-island   (or id=all)

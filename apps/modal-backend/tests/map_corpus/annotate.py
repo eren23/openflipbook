@@ -11,6 +11,10 @@ judge AND the ensemble agreement both clear their thresholds the description is
 auto-promoted to review.status="verified"; otherwise it lands as "needs_human"
 with the disagreements attached, so a person reviews the exception, not every map.
 
+Non-destructive by default: a committed human-`verified` description is never
+silently overwritten — a fresh annotation lands in `descriptions/candidates/<id>.json`
+(invisible to recon) for review, unless CORPUS_ANNOTATE_FORCE=1.
+
 The reconcile / agreement / promote core is pure and gated by test_annotate.py;
 the paid fan-out + judge loop is the thin async wrapper at the bottom.
 """
@@ -230,6 +234,18 @@ def decide_status(
     return "needs_human"
 
 
+def output_name(map_id: str, existing_status: str | None, *, force: bool) -> str:
+    """Where to write the annotation (relative to DESCRIPTIONS), non-destructive
+    by default: a committed human-verified description is NEVER silently
+    overwritten — the fresh annotation lands as `candidates/<id>.json` (a subdir
+    invisible to load_descriptions/recon) so a person promotes it on review.
+    Anything else (no prior file, a draft, a prior auto-run) writes canonically.
+    force=True (CORPUS_ANNOTATE_FORCE) overrides the guard."""
+    if existing_status == "verified" and not force:
+        return f"candidates/{map_id}.json"
+    return f"{map_id}.json"
+
+
 def assemble_description(
     *,
     map_id: str,
@@ -360,6 +376,22 @@ def _longest(strings: list[str]) -> str:
     and prose from the ensemble's drafts."""
     cleaned = [s.strip() for s in strings if isinstance(s, str) and s.strip()]
     return max(cleaned, key=len) if cleaned else ""
+
+
+def _force_overwrite() -> bool:
+    return os.environ.get("CORPUS_ANNOTATE_FORCE", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _existing_status(map_id: str) -> str | None:
+    """review.status of the committed description for this map, or None if there
+    is no canonical file yet."""
+    path = DESCRIPTIONS / f"{map_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return str(json.loads(path.read_text()).get("review", {}).get("status")) or None
+    except Exception:
+        return None
 
 
 def _next_rev(map_id: str) -> int:
@@ -508,14 +540,20 @@ async def annotate_one(map_id: str) -> Path:
         by="ensemble-annotate",
         date=time.strftime("%Y-%m-%d", time.gmtime()),
     )
-    DESCRIPTIONS.mkdir(parents=True, exist_ok=True)
-    out = DESCRIPTIONS / f"{map_id}.json"
+    rel = output_name(map_id, _existing_status(map_id), force=_force_overwrite())
+    out = DESCRIPTIONS / rel
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(desc, indent=1) + "\n")
     print(
         f"  {map_id}: {best['status']} "
         f"(judge {annotation['judge_score']}, agreement {annotation['agreement']}, "
-        f"{len(best['geo_entities'])} entities, {best['iters']} iter) -> {out.name}"
+        f"{len(best['geo_entities'])} entities, {best['iters']} iter) -> {rel}"
     )
+    if rel.startswith("candidates/"):
+        print(
+            "  (verified original preserved — wrote a CANDIDATE; review it, then move "
+            "it into descriptions/ to promote, or set CORPUS_ANNOTATE_FORCE=1 to overwrite)"
+        )
     return out
 
 
@@ -551,6 +589,10 @@ def main() -> int:
         print(
             f"  gates: judge>={_judge_threshold()} AND agreement>="
             f"{_agreement_threshold()} -> auto-verified, else needs_human"
+        )
+        print(
+            "  non-destructive: a verified description is preserved; output lands in "
+            "descriptions/candidates/ unless CORPUS_ANNOTATE_FORCE=1"
         )
         return 0
     _load_env()
