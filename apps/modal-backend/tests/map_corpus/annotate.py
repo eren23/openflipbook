@@ -234,13 +234,19 @@ def decide_status(
     return "needs_human"
 
 
-def output_name(map_id: str, existing_status: str | None, *, force: bool) -> str:
+def output_name(
+    map_id: str, existing_status: str | None, status: str, *, force: bool
+) -> str:
     """Where to write the annotation (relative to DESCRIPTIONS), non-destructive
-    by default: a committed human-verified description is NEVER silently
-    overwritten — the fresh annotation lands as `candidates/<id>.json` (a subdir
-    invisible to load_descriptions/recon) so a person promotes it on review.
-    Anything else (no prior file, a draft, a prior auto-run) writes canonically.
-    force=True (CORPUS_ANNOTATE_FORCE) overrides the guard."""
+    by default. A fresh annotation lands as `candidates/<id>.json` (a subdir
+    invisible to load_descriptions / recon / the integrity gate) when either: the
+    run did NOT auto-verify (a `needs_human` verdict is not reviewed ground
+    truth), or a committed human-`verified` description already exists (never
+    silently clobbered). An auto-`verified` result with nothing to protect is
+    promoted to `<id>.json`. force=True (CORPUS_ANNOTATE_FORCE) overrides the
+    clobber guard."""
+    if status != "verified":
+        return f"candidates/{map_id}.json"
     if existing_status == "verified" and not force:
         return f"candidates/{map_id}.json"
     return f"{map_id}.json"
@@ -606,7 +612,9 @@ async def annotate_one(map_id: str) -> Path:
         by="ensemble-annotate",
         date=time.strftime("%Y-%m-%d", time.gmtime()),
     )
-    rel = output_name(map_id, _existing_status(map_id), force=_force_overwrite())
+    rel = output_name(
+        map_id, _existing_status(map_id), best["status"], force=_force_overwrite()
+    )
     out = DESCRIPTIONS / rel
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(desc, indent=1) + "\n")
@@ -616,9 +624,14 @@ async def annotate_one(map_id: str) -> Path:
         f"{len(best['geo_entities'])} entities, {best['iters']} iter) -> {rel}"
     )
     if rel.startswith("candidates/"):
+        why = (
+            "verdict is needs_human"
+            if best["status"] != "verified"
+            else "a verified original is preserved"
+        )
         print(
-            "  (verified original preserved — wrote a CANDIDATE; review it, then move "
-            "it into descriptions/ to promote, or set CORPUS_ANNOTATE_FORCE=1 to overwrite)"
+            f"  (wrote a CANDIDATE — {why}; review it, then move it into descriptions/ "
+            "to promote)"
         )
     return out
 

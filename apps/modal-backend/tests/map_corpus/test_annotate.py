@@ -158,16 +158,18 @@ def test_decide_status_requires_both_gates() -> None:
 # --- non-destructive output routing ------------------------------------------
 
 
-def test_output_name_protects_verified_unless_forced() -> None:
-    # a brand-new map or a prior auto-run draft is written canonically
-    assert output_name("m", None, force=False) == "m.json"
-    assert output_name("m", "vlm_draft", force=False) == "m.json"
-    assert output_name("m", "needs_human", force=False) == "m.json"
-    # a committed human-verified description is NEVER silently clobbered — the
-    # annotation lands as a candidate (a sibling subdir invisible to recon)
-    assert output_name("m", "verified", force=False) == "candidates/m.json"
+def test_output_name_routes_by_verdict_and_protects_verified() -> None:
+    # an auto-VERIFIED result with nothing to clobber is promoted canonically
+    assert output_name("m", None, "verified", force=False) == "m.json"
+    # a prior draft may be overwritten by an auto-verified result
+    assert output_name("m", "vlm_draft", "verified", force=False) == "m.json"
+    # a NON-verified verdict is never written to the reviewed-ground-truth dir —
+    # it lands as a candidate (subdir invisible to recon + the integrity gate)
+    assert output_name("m", None, "needs_human", force=False) == "candidates/m.json"
+    # a committed human-verified description is never silently clobbered...
+    assert output_name("m", "verified", "verified", force=False) == "candidates/m.json"
     # ...unless the operator forces it
-    assert output_name("m", "verified", force=True) == "m.json"
+    assert output_name("m", "verified", "verified", force=True) == "m.json"
 
 
 # --- relation reconcile ------------------------------------------------------
