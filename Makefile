@@ -68,6 +68,21 @@ corpus-fetch:
 	cd apps/modal-backend && .venv/bin/python scripts/fetch_corpus.py --pin
 corpus-draft:
 	cd apps/modal-backend && CORPUS_DRAFT_RUN=1 .venv/bin/python -m tests.map_corpus.draft $(or $(id),all)
+# Ensemble annotate (the evolvable upgrade to corpus-draft): fan the describe
+# call over N VLMs, reconcile deterministically, judge, refine once on a low
+# score, and AUTO-PROMOTE to review.status=verified when the judge AND ensemble
+# agreement both clear their gates (else needs_human). PAID (~$0.03-0.10/map).
+# Preview the ensemble + gates with no flag; CORPUS_ANNOTATE_RUN=1 to spend.
+#   make corpus-annotate-preview
+#   make corpus-annotate id=fantasy-treasure-island   (or id=all)
+# Knobs (env): CORPUS_ANNOTATE_MODELS=google/gemini-3-pro-preview,anthropic/claude-sonnet-4-6,qwen/qwen3-vl-235b-a22b-instruct
+#   (middle-ground ensemble — avoid Opus, the describe cost driver; unset = single cheap VLM)
+#   CORPUS_JUDGE_THRESHOLD (7.0)  CORPUS_AGREEMENT_THRESHOLD (0.6)
+#   CORPUS_ANNOTATE_MAX_ITERS (2)  CORPUS_MIN_VOTES (majority)
+corpus-annotate-preview:
+	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
+corpus-annotate:
+	cd apps/modal-backend && CORPUS_ANNOTATE_RUN=1 .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
 # Reconstruction bench: regenerate each VERIFIED corpus map from its authored
 # description (graph = product planning path, direct = ground-truth layout),
 # extract + score vs ground truth + VLM judges. Rides the matrix chassis:
