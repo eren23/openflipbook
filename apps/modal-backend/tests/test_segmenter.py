@@ -7,6 +7,7 @@ import pytest
 
 from providers.segmenter import (
     MAX_VERTICES,
+    detector_box_to_sam_box,
     parse_segments,
     polygon_from_mask,
     segmenter_provider,
@@ -119,3 +120,20 @@ def test_polygon_from_empty_mask_is_empty() -> None:
     from PIL import Image
 
     assert polygon_from_mask(Image.new("L", (50, 50), 0)) == []
+
+
+def test_detector_box_to_sam_box_centre_to_pixel_corners() -> None:
+    # detector boxes are centre-based normalized; SAM3 box_prompts are pixel corners
+    b = detector_box_to_sam_box(
+        {"x_pct": 0.5, "y_pct": 0.5, "w_pct": 0.2, "h_pct": 0.1}, 1000, 600
+    )
+    assert b == {"x_min": 400, "y_min": 270, "x_max": 600, "y_max": 330}
+
+
+def test_detector_box_clamps_to_image_bounds() -> None:
+    # a box hanging off the top-left edge is clamped, never negative
+    b = detector_box_to_sam_box(
+        {"x_pct": 0.05, "y_pct": 0.02, "w_pct": 0.2, "h_pct": 0.1}, 1000, 600
+    )
+    assert b["x_min"] == 0 and b["y_min"] == 0
+    assert b["x_max"] == 150 and b["y_max"] == 42

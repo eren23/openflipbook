@@ -107,8 +107,9 @@ async def draft_one(map_id: str) -> Path:
     ]
     labels = [str(e["label"]).strip() for e in raw_entities]
 
-    detections = {d["label"].lower(): d for d in await detect(image_bytes, labels)}
-    segments = await segment(image_bytes, labels)
+    detection_list = await detect(image_bytes, labels)
+    detections = {d["label"].lower(): d for d in detection_list}
+    segments = await segment(image_bytes, labels, boxes=detection_list)
     seg_by_label = {s["label"].lower(): s for s in segments}
     heights_m = heights.infer_heights_m(list(segments))
 

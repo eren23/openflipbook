@@ -495,7 +495,7 @@ async def annotate_one(map_id: str) -> Path:
         )
         labels = [e["label"] for e in consensus]
         detections = await detect(image_bytes, labels)
-        segments = await segment(image_bytes, labels)
+        segments = await segment(image_bytes, labels, boxes=detections)
         heights_m = heights_lib.infer_heights_m(list(segments))
         geo_entities = attach_geometry(consensus, detections, segments, heights_m)
 

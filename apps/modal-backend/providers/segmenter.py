@@ -60,6 +60,21 @@ def _sam_model() -> str:
     return os.environ.get("FAL_SAM_MODEL", "fal-ai/sam-3/image")
 
 
+def detector_box_to_sam_box(det: dict[str, Any], img_w: int, img_h: int) -> dict[str, int]:
+    """Convert a detector box (centre-based, normalized 0..1: x_pct, y_pct,
+    w_pct, h_pct) into a SAM3 box_prompt (pixel corners {x_min,y_min,x_max,
+    y_max}, clamped to the image). SAM3 can't ground a proper-noun label like
+    "Spyglass Hill" from text, but the VLM detector localizes it — so we hand
+    SAM3 the box and let it refine the pixel mask."""
+    x, y = float(det.get("x_pct", 0.5)), float(det.get("y_pct", 0.5))
+    w, h = float(det.get("w_pct", 0.0)), float(det.get("h_pct", 0.0))
+    x_min = min(max(0, round((x - w / 2) * img_w)), img_w)
+    y_min = min(max(0, round((y - h / 2) * img_h)), img_h)
+    x_max = min(max(0, round((x + w / 2) * img_w)), img_w)
+    y_max = min(max(0, round((y + h / 2) * img_h)), img_h)
+    return {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max}
+
+
 def polygon_from_mask(
     mask_img: Any, n_vertices: int = 20, thresh: int = 127, max_dim: int = 256
 ) -> list[list[float]]:
@@ -182,43 +197,58 @@ def parse_segments(payload: Any) -> list[SegmentEntity]:
     return out
 
 
-async def segment(image_bytes: bytes, labels: list[str]) -> list[SegmentEntity]:
+async def segment(
+    image_bytes: bytes,
+    labels: list[str],
+    boxes: list[dict[str, Any]] | None = None,
+) -> list[SegmentEntity]:
     """Segment the given labels: one closed border polygon + height ranking per
     label actually present. Routes on SEGMENTER_PROVIDER (default "vlm"); the
     return shape is identical across providers so draft/annotate/recon are
-    untouched."""
+    untouched. `boxes` (the detector's output for these labels) is used only by
+    the SAM3 path — proper-noun labels don't ground from text, so the detector's
+    box localizes the concept and SAM3 refines the mask; the VLM path ignores it."""
     if segmenter_provider() == "sam3_fal":
-        return await _segment_sam3(image_bytes, labels)
+        return await _segment_sam3(image_bytes, labels, boxes)
     return await _segment_vlm(image_bytes, labels)
 
 
-async def _segment_sam3(image_bytes: bytes, labels: list[str]) -> list[SegmentEntity]:
-    """Pixel-accurate segmentation via fal-ai/sam-3 (one promptable-concept call
-    per label). The SAM3 mask PNG is traced to the SegmentEntity polygon shape;
+async def _segment_sam3(
+    image_bytes: bytes,
+    labels: list[str],
+    boxes: list[dict[str, Any]] | None,
+) -> list[SegmentEntity]:
+    """Pixel-accurate segmentation via fal-ai/sam-3, one call per label. Each
+    label is BOX-PROMPTED with its detector box (proper-noun text prompts return
+    nothing; a box scores reliably), falling back to a text prompt when no box is
+    available. The SAM3 mask PNG is traced to the SegmentEntity polygon shape;
     rel_height is the mask's normalized bbox height ranked against the tallest
     label (a geometric proxy — SAM3 doesn't estimate built height, so
     est_height_m stays None and the VLM/authored path keeps that job). A label
-    SAM3 can't find is omitted (no mask returned), same contract as the VLM path."""
+    SAM3 can't ground is omitted, same contract as the VLM path."""
     from PIL import Image
 
     from providers.image import _fal_subscribe, _fetch_url_bytes
 
     data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('ascii')}"
     model = _sam_model()
+    img_w, img_h = Image.open(io.BytesIO(image_bytes)).size
+    box_by = {str(b.get("label", "")).lower(): b for b in (boxes or [])}
 
     async def one(label: str) -> tuple[SegmentEntity, float] | None:
+        arguments: dict[str, Any] = {
+            "image_url": data_uri,
+            "prompt": label,
+            "apply_mask": False,
+            "include_boxes": True,
+            "include_scores": True,
+            "max_masks": 1,
+        }
+        det = box_by.get(label.lower())
+        if det is not None:
+            arguments["box_prompts"] = [detector_box_to_sam_box(det, img_w, img_h)]
         try:
-            result = await _fal_subscribe(
-                model,
-                {
-                    "image_url": data_uri,
-                    "prompt": label,
-                    "apply_mask": False,
-                    "include_boxes": True,
-                    "include_scores": True,
-                    "max_masks": 1,
-                },
-            )
+            result = await _fal_subscribe(model, arguments)
         except Exception:
             return None
         masks = result.get("masks") or []
