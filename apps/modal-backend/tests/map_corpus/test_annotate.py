@@ -14,6 +14,7 @@ from tests.map_corpus.annotate import (
     assemble_description,
     attach_geometry,
     decide_status,
+    default_min_votes,
     merge_entities,
     merge_relations,
     norm_label,
@@ -96,6 +97,20 @@ def test_vote_majority_and_tiebreak_and_default() -> None:
 
 
 # --- agreement metric --------------------------------------------------------
+
+
+def test_default_min_votes_is_lenient_and_clamped_to_contributors() -> None:
+    # regression: a 2-model ensemble must NOT require unanimity (the bug that
+    # dropped every entity to minority and produced a 0-entity annotation)
+    assert default_min_votes(2, None) == 1
+    assert default_min_votes(1, None) == 1
+    # an explicit majority policy is honoured...
+    assert default_min_votes(3, 2) == 2
+    # ...but never exceeds the models that actually contributed, so a strict
+    # policy + a dropped model can never force-empty the consensus
+    assert default_min_votes(2, 3) == 2
+    assert default_min_votes(1, 2) == 1
+    assert default_min_votes(5, 0) == 1  # floor of 1
 
 
 def test_agreement_is_mean_vote_fraction() -> None:

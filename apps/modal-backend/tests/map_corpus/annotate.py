@@ -352,11 +352,21 @@ def _ensemble_models() -> list[str]:
     return [llm._vlm_model()]
 
 
-def _min_votes(n_models: int) -> int:
-    override = os.environ.get("CORPUS_MIN_VOTES")
-    if override:
-        return max(1, int(override))
-    return 1 if n_models <= 1 else n_models // 2 + 1  # simple majority
+def default_min_votes(n_effective: int, override: int | None) -> int:
+    """How many DISTINCT models must name an entity for it to reach consensus.
+    Default 1 (union — recall-first; corroboration is expressed by the agreement
+    score + the detector/judge/human gates, not by dropping singletons). An
+    explicit CORPUS_MIN_VOTES is honoured but CLAMPED to the models that actually
+    contributed, so a strict policy + a dropped model can never force-empty the
+    consensus (the 0-entity collapse this guard exists to prevent)."""
+    if override is not None:
+        return max(1, min(override, max(1, n_effective)))
+    return 1
+
+
+def _min_votes_override() -> int | None:
+    raw = os.environ.get("CORPUS_MIN_VOTES", "").strip()
+    return int(raw) if raw else None
 
 
 def _judge_threshold() -> float:
@@ -457,19 +467,29 @@ async def annotate_one(map_id: str) -> Path:
 
     models = _ensemble_models()
     n = len(models)
-    min_votes = _min_votes(n)
 
     feedback = ""
     best: dict[str, Any] | None = None
     for attempt in range(_max_iters()):
-        drafts = await asyncio.gather(
+        results = await asyncio.gather(
             *[_describe(m, image_bytes, feedback) for m in models],
             return_exceptions=True,
         )
-        draft_dicts = [d for d in drafts if isinstance(d, dict) and d.get("entities")]
+        # Instrument the fan-out boundary: a dropped/failed model must be visible,
+        # never silently swallowed (that masked a degraded ensemble as "disagreement").
+        draft_dicts: list[dict[str, Any]] = []
+        for model, r in zip(models, results, strict=True):
+            if isinstance(r, Exception):
+                print(f"    {model}: ERROR {type(r).__name__}: {str(r)[:140]}")
+            elif isinstance(r, dict) and r.get("entities"):
+                print(f"    {model}: {len(r['entities'])} entities")
+                draft_dicts.append(r)
+            else:
+                print(f"    {model}: no entities returned")
         if not draft_dicts:
             raise SystemExit(f"{map_id}: every ensemble describe call failed/empty")
 
+        min_votes = default_min_votes(len(draft_dicts), _min_votes_override())
         consensus, minority = merge_entities(
             [d.get("entities", []) for d in draft_dicts], min_votes=min_votes
         )
@@ -507,6 +527,8 @@ async def annotate_one(map_id: str) -> Path:
             "rationale": jr.rationale,
             "status": status,
             "iters": attempt + 1,
+            "contributors": len(draft_dicts),
+            "min_votes": min_votes,
         }
         if best is None or cand["judge_score"] > best["judge_score"]:
             best = cand
@@ -517,8 +539,9 @@ async def annotate_one(map_id: str) -> Path:
     assert best is not None
     annotation = {
         "ensemble": models,
+        "contributors": best["contributors"],
         "reconcile": "deterministic-merge",
-        "min_votes": min_votes,
+        "min_votes": best["min_votes"],
         "iters": best["iters"],
         "judge_score": round(float(best["judge_score"]), 2),
         "agreement": round(float(best["agreement"]), 3),
