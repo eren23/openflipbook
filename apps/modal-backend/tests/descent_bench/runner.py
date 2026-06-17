@@ -71,6 +71,14 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
 
     with_img = await _enter(f"{preamble}\n\n{base}", aspect, model, region_url)
     without_img = await _enter(base, aspect, model, None)
+    # save artifacts for visual inspection (overlays/ is gitignored)
+    from tests.map_corpus import ROOT
+
+    art = ROOT / "overlays"
+    art.mkdir(parents=True, exist_ok=True)
+    (art / f"descent-{chain['child_id']}-region.jpg").write_bytes(region)
+    (art / f"descent-{chain['child_id']}-with.jpg").write_bytes(with_img)
+    (art / f"descent-{chain['child_id']}-without.jpg").write_bytes(without_img)
     real_with = await judge.score_style_pair(child_bytes, with_img)
     real_without = await judge.score_style_pair(child_bytes, without_img)
     continuity = await judge.score_continuation(region, with_img)
