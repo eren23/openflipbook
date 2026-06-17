@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import pytest
 
+from tests.map_corpus import load_manifest
 from tests.map_corpus.annotate import (
     agreement_score,
     assemble_description,
     attach_geometry,
     decide_status,
     default_min_votes,
+    describe_system,
     merge_entities,
     merge_relations,
     norm_label,
@@ -97,6 +99,23 @@ def test_vote_majority_and_tiebreak_and_default() -> None:
 
 
 # --- agreement metric --------------------------------------------------------
+
+
+def test_load_manifest_defaults_tier_to_map_and_filters() -> None:
+    rows = load_manifest()
+    assert rows and all(r.get("tier") == "map" for r in rows)  # existing rows -> map
+    assert load_manifest(tier="map") == rows
+    assert load_manifest(tier="interior") == []
+
+
+def test_describe_system_is_tier_specific() -> None:
+    m = describe_system("map").lower()
+    i = describe_system("interior").lower()
+    c = describe_system("closeup").lower()
+    assert "cartograph" in m
+    assert "interior" in i or "room" in i
+    assert "object" in c or "close" in c
+    assert describe_system("unknown") == describe_system("map")  # safe default
 
 
 def test_default_min_votes_is_lenient_and_clamped_to_contributors() -> None:

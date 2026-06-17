@@ -290,20 +290,58 @@ def assemble_description(
 # refine once on a low score. Verified by dry-run, not unit tests (same split as
 # draft.py / recon_bench).
 
+# The describe prompt is tier-specific (a map is annotated cartographically; an
+# interior as a scene; a closeup as an object) but the RETURN SHAPE is identical
+# across tiers — same style/scale_tier/description/entities/relations — so the
+# reconcile, geometry and recon machinery is unchanged. describe_system(tier)
+# picks the variant; an unknown tier falls back to the map prompt.
+_ENTITY_TAIL = (
+    "entities: [6-10 of the most prominent {what}: {{ref: <kebab-slug>, kind: "
+    'one of ["place","item","creature","person"], label: <its name>, visual: '
+    "<=12 words}}], relations: [4-8 spatial relations between entity LABELS (use "
+    "the exact label strings, not slugs): {{subject: <label>, relation: one of "
+    '["near","behind","in_front_of","left_of","right_of","inside","on_top_of",'
+    '"facing"], object: <label>}}]}}.'
+)
+
 _DESCRIBE_SYSTEM = (
     "You are a careful cartographic annotator. Given a map image, return ONE "
     "JSON object: {style: <art medium + palette, <=25 words>, scale_tier: one "
     'of ["region","city","district","place"], description: <a precise 120-200 '
     "word prose description of the WHOLE map a painter could redraw it from — "
     "name the major features, their relative positions (north/south/etc), "
-    "relative sizes and heights>, entities: [6-10 of the most prominent named "
-    "features: {ref: <kebab-slug>, kind: one of "
-    '["place","item","creature","person"], label: <the feature\'s name>, '
-    "visual: <=12 words}], relations: [4-8 spatial relations between entity "
-    "LABELS (use the exact label strings, not slugs): {subject: <label>, "
-    'relation: one of ["near","behind","in_front_of","left_of","right_of",'
-    '"inside","on_top_of","facing"], object: <label>}]}.'
+    "relative sizes and heights>, " + _ENTITY_TAIL.format(what="named features")
 )
+
+_INTERIOR_SYSTEM = (
+    "You are a careful interior-scene annotator. Given a photo of the INSIDE of "
+    "a place (a room, hall, or building interior), return ONE JSON object: "
+    "{style: <medium + palette / photo look, <=25 words>, scale_tier: one of "
+    '["place","room"], description: <a precise 120-200 word description of the '
+    "space a set designer could rebuild it from — the layout, major furniture "
+    "and fixtures, where each sits (left/right/back/foreground), the lighting>, "
+    + _ENTITY_TAIL.format(what="objects and fixtures in the room")
+)
+
+_CLOSEUP_SYSTEM = (
+    "You are a careful object annotator. Given a CLOSEUP photo of a single "
+    "object or artifact, return ONE JSON object: {style: <medium + palette / "
+    'photo look, <=25 words>, scale_tier: one of ["room","object"], '
+    "description: <a precise 120-200 word description a sculptor/maker could "
+    "reproduce it from — its overall form, materials, parts and their "
+    "arrangement, surface detail>, "
+    + _ENTITY_TAIL.format(what="distinct parts or details of the object")
+)
+
+
+def describe_system(tier: str) -> str:
+    """The describe-prompt for a corpus tier (map | interior | closeup); an
+    unknown tier falls back to the cartographic (map) prompt."""
+    if tier == "interior":
+        return _INTERIOR_SYSTEM
+    if tier == "closeup":
+        return _CLOSEUP_SYSTEM
+    return _DESCRIBE_SYSTEM
 
 _ANNOTATION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -416,13 +454,15 @@ def _next_rev(map_id: str) -> int:
     return 1
 
 
-async def _describe(model: str, image_bytes: bytes, feedback: str = "") -> dict[str, Any]:
-    """One VLM's structured annotation of the map. `feedback` (a judge rationale)
-    is fed back on a refine pass."""
+async def _describe(
+    model: str, image_bytes: bytes, system: str, feedback: str = ""
+) -> dict[str, Any]:
+    """One VLM's structured annotation under the tier-specific `system` prompt.
+    `feedback` (a judge rationale) is fed back on a refine pass."""
     from providers import llm
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
-    user_text = "Describe this map." + (
+    user_text = "Describe this image precisely." + (
         f"\n\nA reviewer flagged the previous annotation: {feedback} Re-describe "
         "carefully — fix those issues and name any prominent feature that was missed."
         if feedback
@@ -431,7 +471,7 @@ async def _describe(model: str, image_bytes: bytes, feedback: str = "") -> dict[
     return await llm._complete_json(
         model=model,
         messages=[
-            {"role": "system", "content": _DESCRIBE_SYSTEM},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": [
@@ -459,7 +499,10 @@ async def annotate_one(map_id: str) -> Path:
     from providers.detector import detect
     from providers.segmenter import segment
 
-    genre = next((m["genre"] for m in load_manifest() if m["id"] == map_id), "")
+    row = next((m for m in load_manifest() if m["id"] == map_id), {})
+    genre = str(row.get("genre", ""))
+    tier = str(row.get("tier", "map"))
+    system = describe_system(tier)
     img = image_path(map_id)
     if not img.exists():
         raise SystemExit(f"{img} missing — run `make corpus-fetch` first")
@@ -472,7 +515,7 @@ async def annotate_one(map_id: str) -> Path:
     best: dict[str, Any] | None = None
     for attempt in range(_max_iters()):
         results = await asyncio.gather(
-            *[_describe(m, image_bytes, feedback) for m in models],
+            *[_describe(m, image_bytes, system, feedback) for m in models],
             return_exceptions=True,
         )
         # Instrument the fan-out boundary: a dropped/failed model must be visible,
