@@ -97,7 +97,9 @@
       "license_note": "CC0 (via Wikimedia Commons)",
       "attribution": "Michael D Beckwith, via Wikimedia Commons, CC0",
       "sha256": "8199a6cdde9dd5ab3b2a1f102c86c25bce772b86e4412f5877df5ca79d0207d9",
-      "filename": "wm-chester-cathedral-nave.jpg"
+      "filename": "wm-chester-cathedral-nave.jpg",
+      "parent_id": "village-medieval-manor",
+      "parent_ref": "church"
     },
     {
       "id": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci",

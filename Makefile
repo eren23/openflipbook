@@ -102,6 +102,15 @@ eval-recon-dry:
 	cd apps/modal-backend && .venv/bin/python -m tests.recon_bench.runner
 eval-recon:
 	cd apps/modal-backend && RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
+# Descent reconstruction (M4): ENTER a parent map's linked place (a child
+# interior/closeup tied via parent_id+parent_ref to a parent entity), score the
+# region-conditioned descent against the REAL child photo (style + continuity)
+# vs a fresh baseline. Dry (resolve chains + cost, $0): make eval-descent-dry
+# Live (DESCENT_BENCH_RUN=1, ~$0.30/chain): make eval-descent
+eval-descent-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.descent_bench.runner
+eval-descent:
+	cd apps/modal-backend && DESCENT_BENCH_RUN=1 .venv/bin/python -m tests.descent_bench.runner
 eval-repair:
 	cd apps/modal-backend && .venv/bin/python -m pytest -m repair -q
 eval-edit:
