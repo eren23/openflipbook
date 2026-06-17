@@ -191,6 +191,20 @@ def test_merge_relations_keeps_consensus_endpoints_and_dedupes() -> None:
     assert rels == [{"subject": "spyglass-hill", "relation": "near", "object": "skeleton-island"}]
 
 
+def test_merge_relations_enforces_allowed_vocabulary() -> None:
+    label_to_ref = {"a": "a", "b": "b"}
+    lists = [
+        [
+            {"subject": "a", "relation": "near", "object": "b"},
+            {"subject": "a", "relation": "attached_to", "object": "b"},  # not in vocab
+        ]
+    ]
+    rels = merge_relations(lists, label_to_ref, allowed={"near", "inside"})
+    assert rels == [{"subject": "a", "relation": "near", "object": "b"}]
+    # no allowed set -> keep all (back-compat)
+    assert len(merge_relations(lists, label_to_ref)) == 2
+
+
 # --- artifact assembly + provenance ------------------------------------------
 
 

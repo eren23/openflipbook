@@ -123,13 +123,16 @@ def merge_entities(
 
 
 def merge_relations(
-    relation_lists: list[list[dict[str, Any]]], label_to_ref: dict[str, str]
+    relation_lists: list[list[dict[str, Any]]],
+    label_to_ref: dict[str, str],
+    allowed: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Reconcile per-model relation lists. Endpoints are entity LABELS (the
     describe prompt asks for labels, not slugs); each is normalised and resolved
     against label_to_ref (norm_label -> consensus ref). A relation survives only
-    when BOTH endpoints resolve to distinct consensus entities. Deduped, first-
-    seen order preserved."""
+    when BOTH endpoints resolve to distinct consensus entities AND its type is in
+    `allowed` (when given — keeps a model's invented relation like "attached_to"
+    out of the corpus vocabulary). Deduped, first-seen order preserved."""
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for rels in relation_lists:
@@ -142,6 +145,8 @@ def merge_relations(
             obj = label_to_ref.get(norm_label(str(r.get("object", ""))))
             rel = str(r.get("relation", "")).strip() or "near"
             if not subj or not obj or subj == obj:
+                continue
+            if allowed is not None and rel not in allowed:
                 continue
             key = (subj, rel, obj)
             if key in seen:
@@ -425,6 +430,13 @@ def _max_iters() -> int:
     return max(1, int(os.environ.get("CORPUS_ANNOTATE_MAX_ITERS", "2")))
 
 
+def _plan_relations() -> set[str]:
+    """The corpus relation vocabulary (the same set the integrity gate enforces)."""
+    from providers.llm import _PLAN_RELATIONS
+
+    return set(_PLAN_RELATIONS)
+
+
 def _longest(strings: list[str]) -> str:
     """The richest (longest) non-empty string — used to pick the consensus style
     and prose from the ensemble's drafts."""
@@ -553,7 +565,9 @@ async def annotate_one(map_id: str) -> Path:
         description = _longest([str(d.get("description", "")) for d in draft_dicts])
         label_to_ref = {norm_label(e["label"]): e["ref"] for e in geo_entities}
         relations = merge_relations(
-            [d.get("relations", []) for d in draft_dicts], label_to_ref
+            [d.get("relations", []) for d in draft_dicts],
+            label_to_ref,
+            allowed=set(_plan_relations()),
         )
         agreement = agreement_score(geo_entities, n)
 
