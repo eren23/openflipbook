@@ -256,6 +256,27 @@ describe("mergeIntoEntities", () => {
     });
   });
 
+  it("captures the SAM3 border from an added entity into appearance_borders", () => {
+    const out = __test.mergeIntoEntities([], "node-1", {
+      ...emptyResult(),
+      added: [
+        makeAdded({
+          border: [
+            [0.1, 0.2],
+            [0.5, 0.2],
+            [0.3, 0.6],
+          ],
+        }),
+      ],
+    });
+    const e = out.entities[0]!;
+    expect(e.appearance_borders?.["node-1"]).toEqual([
+      [0.1, 0.2],
+      [0.5, 0.2],
+      [0.3, 0.6],
+    ]);
+  });
+
   it("merges bbox from a re-added existing entity under the new node id", () => {
     const seed = __test.makeEntity({
       id: "e1",

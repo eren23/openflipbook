@@ -541,6 +541,10 @@ export interface Entity {
   // tile. Older entities (pre-bbox extraction) simply have no entries
   // here and fall back to no-chip rendering.
   appearance_bboxes: Record<string, EntityBBox>;
+  // Sparse map of node_id → SAM3 border polygon ([x,y] pairs, normalized 0..1
+  // image space). Populated by extraction behind WORLD_SEGMENT_BORDERS; the geo
+  // overlay draws a tight outline when present, else falls back to the bbox.
+  appearance_borders?: Record<string, [number, number][]>;
   // User-pinned entries are never auto-deleted or auto-merged. Extractor
   // suggestions targeting a user-renamed entity get reconciled by alias.
   pinned_by_user: boolean;
@@ -741,6 +745,9 @@ export interface ExtractedEntity {
   // Optional bounding box in 0..1 normalized image coords for in-image
   // hover chips. Omitted when the extractor can't localize the entity.
   bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
+  // SAM3 border polygon ([x,y] pairs, 0..1 image space) when the extractor
+  // segmented the entity (WORLD_SEGMENT_BORDERS). Omitted otherwise.
+  border?: [number, number][] | null;
 }
 
 export interface EntityUpdate {
@@ -752,6 +759,7 @@ export interface EntityUpdate {
   // keeps an appearance_bbox per node â without it, geometry/overlay drop the
   // entity on every re-appearance. Omitted when localization fails.
   bbox?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number } | null;
+  border?: [number, number][] | null;  // SAM3 polygon, same shape as ExtractedEntity
 }
 
 export interface EntityExtractionResult {

@@ -80,6 +80,9 @@ interface EntityDoc {
   // Sparse map node_id → bbox. Pre-Phase-4 docs have no entries; the
   // hover-chip overlay falls back to no-render in that case.
   appearance_bboxes: Record<string, EntityBBox>;
+  // Sparse map node_id → SAM3 border polygon ([x,y] pairs, 0..1 image space).
+  // Populated behind WORLD_SEGMENT_BORDERS; absent on older/box-only docs.
+  appearance_borders?: Record<string, [number, number][]>;
   pinned_by_user: boolean;
   confidence: number;
   updated_at: Date;
@@ -117,6 +120,7 @@ function entityToWire(doc: EntityDoc): Entity {
     last_seen_node_id: doc.last_seen_node_id,
     appears_on_node_ids: doc.appears_on_node_ids,
     appearance_bboxes: doc.appearance_bboxes ?? {},
+    appearance_borders: doc.appearance_borders ?? {},
     pinned_by_user: doc.pinned_by_user,
     confidence: doc.confidence,
     updated_at: doc.updated_at.toISOString(),
@@ -313,6 +317,7 @@ function cloneEntity(e: EntityDoc): EntityDoc {
     state: { ...e.state },
     appears_on_node_ids: e.appears_on_node_ids.slice(),
     appearance_bboxes: { ...(e.appearance_bboxes ?? {}) },
+    appearance_borders: { ...(e.appearance_borders ?? {}) },
   };
 }
 
@@ -418,6 +423,7 @@ function applyExtractionToEntities(
       last_seen_node_id: nodeId,
       appears_on_node_ids: [nodeId],
       appearance_bboxes: a.bbox ? { [nodeId]: a.bbox } : {},
+      appearance_borders: a.border ? { [nodeId]: a.border } : {},
       pinned_by_user: false,
       confidence: a.confidence,
       updated_at: now,
@@ -479,6 +485,12 @@ function applyUpdate(
     target.appearance_bboxes = {
       ...target.appearance_bboxes,
       [nodeId]: update.bbox,
+    };
+  }
+  if (update.border) {
+    target.appearance_borders = {
+      ...(target.appearance_borders ?? {}),
+      [nodeId]: update.border,
     };
   }
   target.last_seen_node_id = nodeId;
@@ -585,6 +597,12 @@ function reconcileAddedIntoExisting(
     target.appearance_bboxes = {
       ...target.appearance_bboxes,
       [nodeId]: added.bbox,
+    };
+  }
+  if (added.border) {
+    target.appearance_borders = {
+      ...(target.appearance_borders ?? {}),
+      [nodeId]: added.border,
     };
   }
   target.last_seen_node_id = nodeId;

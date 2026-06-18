@@ -7,7 +7,10 @@ import type { Entity } from "@openflipbook/config";
 import { useContainRect } from "@/hooks/useContainRect";
 
 interface Props {
-  entities: Pick<Entity, "id" | "name" | "kind" | "appearance_bboxes">[];
+  entities: Pick<
+    Entity,
+    "id" | "name" | "kind" | "appearance_bboxes" | "appearance_borders"
+  >[];
   nodeId: string;
   /** The rendered <img>; lets the overlay track the object-contain content rect
    *  so boxes land on the image, not the letterboxed wrapper. */
@@ -61,6 +64,18 @@ export default function GeometryOverlay({
     if (bb.w_pct * bb.h_pct > 0.6) return [];
     return [{ e, bb }];
   });
+  // SAM3 outlines for this node (WORLD_SEGMENT_BORDERS): a tight polygon per
+  // entity, normalized 0..1 image space — same scoping + centroid-in-frame
+  // sanity as the boxes. Drawn over the box, so the box still carries the label.
+  const borders = entities.flatMap((e) => {
+    if (allowedEntityIds && !allowedEntityIds.has(e.id)) return [];
+    const poly = e.appearance_borders?.[nodeId];
+    if (!poly || poly.length < 3) return [];
+    const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+    const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+    if (cx < 0 || cx > 1 || cy < 0 || cy > 1) return [];
+    return [{ e, poly }];
+  });
   // Map an image-space (0..1) bbox onto the element. With a measured content
   // rect we land on the letterboxed image (px); otherwise fall back to
   // wrapper-relative % (exact when the image fills the box, e.g. 16:9-in-16:9).
@@ -85,6 +100,38 @@ export default function GeometryOverlay({
         };
   return (
     <div className="pointer-events-none absolute inset-0" data-testid="geometry-overlay">
+      {borders.map(({ e, poly }) => {
+        const color = KIND_COLOR[e.kind] ?? "#64748b";
+        // SVG box = the measured content rect (px); viewBox 0..1 lets the
+        // normalized polygon map straight in. No content rect ⇒ wrapper-relative
+        // (exact when the image fills the box), matching the box `place` fallback.
+        const style: CSSProperties = content
+          ? {
+              left: `${content.offsetX}px`,
+              top: `${content.offsetY}px`,
+              width: `${content.width}px`,
+              height: `${content.height}px`,
+            }
+          : { inset: 0 };
+        return (
+          <svg
+            key={`border-${e.id}`}
+            data-testid="geo-border"
+            className="absolute"
+            style={style}
+            viewBox="0 0 1 1"
+            preserveAspectRatio="none"
+          >
+            <polygon
+              points={poly.map(([x, y]) => `${x},${y}`).join(" ")}
+              fill={`${color}22`}
+              stroke={color}
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        );
+      })}
       {boxes.map(({ e, bb }) => {
         const color = KIND_COLOR[e.kind] ?? "#64748b";
         return (
@@ -107,7 +154,7 @@ export default function GeometryOverlay({
           </div>
         );
       })}
-      {boxes.length === 0 && (
+      {boxes.length === 0 && borders.length === 0 && (
         // bottom-RIGHT: bottom-left is the Pin-style chip's spot (the audit's
         // overlap bug). pointer-events-auto only here — boxes stay transparent.
         <div className="pointer-events-auto absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
