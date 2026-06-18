@@ -206,6 +206,44 @@ def attach_geometry(
     return out
 
 
+def parse_arbiter_consensus(
+    payload: Any, n_models: int
+) -> list[dict[str, Any]]:
+    """Coerce an LLM arbiter's reconciled reply into consensus entities. The
+    arbiter has already MERGED synonyms across the model drafts and counted how
+    many models referred to each (counting synonyms as one) — we just validate:
+    drop blanks, clamp votes to 1..n_models, slug the ref, dedup by norm_label
+    (first wins). Tolerant: junk -> []."""
+    if isinstance(payload, dict):
+        payload = payload.get("entities") or payload.get("added") or []
+    if not isinstance(payload, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for e in payload:
+        if not isinstance(e, dict):
+            continue
+        label = str(e.get("label", "")).strip()
+        key = norm_label(label)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        try:
+            votes = int(e.get("votes", 1))
+        except (TypeError, ValueError):
+            votes = 1
+        out.append(
+            {
+                "ref": slug(label),
+                "kind": str(e.get("kind", "")).strip() or "place",
+                "label": label,
+                "visual": str(e.get("visual", "")).strip(),
+                "votes": max(1, min(votes, max(1, n_models))),
+            }
+        )
+    return out
+
+
 def vote(values: list[Any], *, default: Any = None) -> Any:
     """Majority vote over scalar values (scale_tier, kind …); ties broken by
     first-seen, empty -> default."""
@@ -418,6 +456,27 @@ def _min_votes_override() -> int | None:
     return int(raw) if raw else None
 
 
+def _arbiter_model() -> str | None:
+    """Optional LLM (text) arbiter that reconciles the model drafts SEMANTICALLY —
+    merging synonymous part/fixture names the deterministic exact-label merge
+    keeps apart (the non-map thinness fix). Unset -> deterministic merge. A strong
+    cheap reasoner like deepseek/deepseek-v4-pro fits (text-only, no image)."""
+    return os.environ.get("CORPUS_ARBITER_MODEL", "").strip() or None
+
+
+_ARBITER_SYSTEM = (
+    "You reconcile entity lists from several annotators of the SAME image into ONE "
+    "consensus list. The annotators each listed the prominent features/parts but "
+    "often use DIFFERENT WORDS for the same thing (e.g. 'rete' vs 'openwork star "
+    "disc'; 'pew' vs 'bench'). MERGE synonyms into a single entity. For each "
+    "consensus entity return: label (the clearest canonical name), kind (one of "
+    "place|item|creature|person), visual (the richest <=12-word description), votes "
+    "(how many of the N annotators referred to it, counting synonyms as the same — "
+    'an integer from 1 to N). Return JSON exactly: {"entities":[{"label":..,'
+    '"kind":..,"visual":..,"votes":..}]}.'
+)
+
+
 def _judge_threshold() -> float:
     return float(os.environ.get("CORPUS_JUDGE_THRESHOLD", "7.0"))
 
@@ -508,6 +567,48 @@ async def _describe(
     )
 
 
+async def arbiter_reconcile(
+    drafts: list[dict[str, Any]], *, model: str, min_votes: int, n_models: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Semantic reconcile via a text LLM: feed the annotators' entity lists, get
+    back one synonym-merged consensus with vote counts. Returns (consensus,
+    minority) split on min_votes, same shape as merge_entities. Falls back to the
+    deterministic merge if the arbiter returns nothing usable."""
+    from providers import llm
+
+    blocks = []
+    for i, d in enumerate(drafts):
+        ents = d.get("entities", []) or []
+        lines = "; ".join(
+            f"{str(e.get('label', '')).strip()} ({str(e.get('visual', '')).strip()})"
+            for e in ents
+            if isinstance(e, dict) and str(e.get("label", "")).strip()
+        )
+        blocks.append(f"Annotator {i + 1}: {lines}")
+    user_text = (
+        f"There are N={n_models} annotators. Merge their entity lists into one "
+        "consensus (synonyms = one entity, with a votes count 1..N):\n\n"
+        + "\n".join(blocks)
+    )
+    parsed = await llm._complete_json(
+        model=model,
+        messages=[
+            {"role": "system", "content": _ARBITER_SYSTEM},
+            {"role": "user", "content": user_text},
+        ],
+        schema=None,
+        schema_name="arbiter_consensus",
+        temperature=0.0,
+        max_tokens=1200,
+    )
+    entities = parse_arbiter_consensus(parsed, n_models)
+    if not entities:  # arbiter failed -> deterministic fallback (never lose the run)
+        return merge_entities([d.get("entities", []) for d in drafts], min_votes=min_votes)
+    consensus = [e for e in entities if e["votes"] >= min_votes]
+    minority = [e for e in entities if e["votes"] < min_votes]
+    return consensus, minority
+
+
 async def annotate_one(map_id: str) -> Path:
     """Ensemble-annotate one corpus map: fan out -> reconcile -> ground -> judge
     -> refine, then write descriptions/<id>.json with provenance + an auto-
@@ -551,9 +652,15 @@ async def annotate_one(map_id: str) -> Path:
             raise SystemExit(f"{map_id}: every ensemble describe call failed/empty")
 
         min_votes = default_min_votes(len(draft_dicts), _min_votes_override())
-        consensus, minority = merge_entities(
-            [d.get("entities", []) for d in draft_dicts], min_votes=min_votes
-        )
+        arbiter = _arbiter_model()
+        if arbiter:
+            consensus, minority = await arbiter_reconcile(
+                draft_dicts, model=arbiter, min_votes=min_votes, n_models=len(draft_dicts)
+            )
+        else:
+            consensus, minority = merge_entities(
+                [d.get("entities", []) for d in draft_dicts], min_votes=min_votes
+            )
         labels = [e["label"] for e in consensus]
         detections = await detect(image_bytes, labels)
         segments = await segment(image_bytes, labels, boxes=detections)
@@ -592,6 +699,7 @@ async def annotate_one(map_id: str) -> Path:
             "iters": attempt + 1,
             "contributors": len(draft_dicts),
             "min_votes": min_votes,
+            "reconcile": arbiter or "deterministic-merge",
         }
         if best is None or cand["judge_score"] > best["judge_score"]:
             best = cand
@@ -603,7 +711,7 @@ async def annotate_one(map_id: str) -> Path:
     annotation = {
         "ensemble": models,
         "contributors": best["contributors"],
-        "reconcile": "deterministic-merge",
+        "reconcile": best["reconcile"],
         "min_votes": best["min_votes"],
         "iters": best["iters"],
         "judge_score": round(float(best["judge_score"]), 2),

@@ -21,6 +21,7 @@ from tests.map_corpus.annotate import (
     merge_relations,
     norm_label,
     output_name,
+    parse_arbiter_consensus,
     slug,
     vote,
 )
@@ -81,6 +82,27 @@ def test_merge_keeps_majority_and_flags_minority() -> None:
     # Random Rock: only 1 model -> minority, not consensus
     assert "random-rock" not in by
     assert [m["label"] for m in minority] == ["Random Rock"]
+
+
+def test_parse_arbiter_consensus_merges_synonyms_clamps_votes_dedups() -> None:
+    # the LLM arbiter returns one consensus list with synonym-corrected votes
+    payload = {
+        "entities": [
+            {"label": "Rete", "kind": "item", "visual": "openwork star disc", "votes": 3},
+            {"label": "rete", "kind": "item", "visual": "", "votes": 1},  # dup norm -> dropped
+            {"label": "Mater", "kind": "item", "visual": "base plate", "votes": 9},  # clamp to n
+            {"label": "  ", "votes": 2},  # blank -> dropped
+        ]
+    }
+    out = parse_arbiter_consensus(payload, n_models=3)
+    by = {e["ref"]: e for e in out}
+    assert set(by) == {"rete", "mater"}
+    assert by["rete"]["votes"] == 3 and by["rete"]["kind"] == "item"
+    assert by["rete"]["label"] == "Rete" and by["rete"]["visual"] == "openwork star disc"
+    assert by["mater"]["votes"] == 3  # 9 clamped to n_models
+    # tolerant: junk shapes yield []
+    assert parse_arbiter_consensus(None, 3) == []
+    assert parse_arbiter_consensus({"nope": 1}, 3) == []
 
 
 def test_merge_min_votes_one_keeps_everything() -> None:
