@@ -1,5 +1,11 @@
 FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# node:22-alpine ships an old corepack whose registry fetch fails the pnpm
+# signature/integrity check ("Internal Error ... fetchUrlStream"). Upgrade
+# corepack first so `prepare` can download pnpm. Direct npm install of pnpm as a
+# belt-and-suspenders fallback if corepack still can't activate.
+RUN npm install -g corepack@latest \
+ && (corepack enable && corepack prepare pnpm@9.15.9 --activate \
+     || npm install -g pnpm@9.15.9)
 ENV CI=1
 
 FROM base AS deps
