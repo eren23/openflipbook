@@ -181,7 +181,7 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
     ) -> tuple[dict[str, Any], float]:
         labels = [e["label"] for e in desc["entities"]]
         detections = _await(lambda: detect(jpeg, labels))
-        segments = _await(lambda: segment(jpeg, labels))
+        segments = _await(lambda: segment(jpeg, labels, boxes=detections))
         inferred = heights_lib.infer_heights_m(list(segments))
         return (
             {

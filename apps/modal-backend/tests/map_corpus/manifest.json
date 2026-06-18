@@ -48,6 +48,68 @@
       "license_note": "Public domain (medieval manor plan via Wikimedia Commons)",
       "sha256": "7d7fcdf1d38ca5a55d592986f370681aa4111021f7574690f71791bb5888c00e",
       "filename": "village-medieval-manor.jpg"
+    },
+    {
+      "id": "met-923639-astrolabe",
+      "tier": "closeup",
+      "genre": "metalwork-copper-alloy",
+      "source_url": "https://images.metmuseum.org/CRDImages/cl/original/DP-41678-001.jpg",
+      "license_note": "CC0 (The Met Open Access)",
+      "attribution": "\"Astrolabe\", The Metropolitan Museum of Art, CC0",
+      "filename": "met-923639-astrolabe.jpg",
+      "sha256": "6e34ec6199e09a41152a17986a395e820711b2f22206477c09e2a2592123dd2d"
+    },
+    {
+      "id": "met-193606-celestial-globe-with-clockwork",
+      "tier": "closeup",
+      "genre": "horology",
+      "source_url": "https://images.metmuseum.org/CRDImages/es/original/DP231286.jpg",
+      "license_note": "CC0 (The Met Open Access)",
+      "attribution": "\"Celestial globe with clockwork\", The Metropolitan Museum of Art, CC0",
+      "filename": "met-193606-celestial-globe-with-clockwork.jpg",
+      "sha256": "428c9fab5f028e57baee7f215611593da2e87f9b2dc0b1913f59a5e53daec855"
+    },
+    {
+      "id": "met-894753-armor-i-gusoku-i-with-box",
+      "tier": "closeup",
+      "genre": "armor",
+      "source_url": "https://images.metmuseum.org/CRDImages/aa/original/LC-TR_360_4a_l_2022-020-2-Edit.jpg",
+      "license_note": "CC0 (The Met Open Access)",
+      "attribution": "\"Armor (<i>Gusoku</i>) with Box\", The Metropolitan Museum of Art, CC0",
+      "filename": "met-894753-armor-i-gusoku-i-with-box.jpg",
+      "sha256": "22b2b0f249801225893a6872481f9b9d91c9ce65e02589e2fbee983aa552a163"
+    },
+    {
+      "id": "wm-loc-main-reading-room-highsmith",
+      "tier": "interior",
+      "genre": "library-of-congress-main-reading-room",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/LOC%20Main%20Reading%20Room%20Highsmith.jpg?width=1600",
+      "license_note": "Public domain (via Wikimedia Commons)",
+      "attribution": "Carol M. Highsmith, via Wikimedia Commons, Public domain",
+      "sha256": "581e3bf552198e1a285ef0c0ab2a6a8d443223827e0ceb550cd2cd32aa6afb2a",
+      "filename": "wm-loc-main-reading-room-highsmith.jpg"
+    },
+    {
+      "id": "wm-chester-cathedral-nave",
+      "tier": "interior",
+      "genre": "gothic-cathedral-nave-interior",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chester%20Cathedral%20Nave.jpg?width=1600",
+      "license_note": "CC0 (via Wikimedia Commons)",
+      "attribution": "Michael D Beckwith, via Wikimedia Commons, CC0",
+      "sha256": "8199a6cdde9dd5ab3b2a1f102c86c25bce772b86e4412f5877df5ca79d0207d9",
+      "filename": "wm-chester-cathedral-nave.jpg",
+      "parent_id": "village-medieval-manor",
+      "parent_ref": "church"
+    },
+    {
+      "id": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci",
+      "tier": "interior",
+      "genre": "palace-grand-hall-interior",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Sala%20del%20Maggior%20Consiglio%20-%20Palau%20Ducal%20de%20Ven%C3%A8cia.JPG?width=1600",
+      "license_note": "CC BY-SA 3.0 (via Wikimedia Commons)",
+      "attribution": "Joanbanjo, via Wikimedia Commons, CC BY-SA 3.0",
+      "sha256": "12f7f44988fc21a2168ea5406db32edb63ac731c446d711d216bb577873d71ec",
+      "filename": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci.jpg"
     }
   ]
 }

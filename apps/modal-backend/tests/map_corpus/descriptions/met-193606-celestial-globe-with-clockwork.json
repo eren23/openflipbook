@@ -1,0 +1,195 @@
+{
+ "map_id": "met-193606-celestial-globe-with-clockwork",
+ "rev": 1,
+ "genre": "horology",
+ "style": "Studio product photography of a Renaissance-era scientific instrument, featuring polished silver and gilded brass against a neutral gray background.",
+ "scale_tier": "object",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "This ornate celestial globe clock is a masterpiece of Renaissance metalwork, standing on a base featuring a silver Pegasus. The central component is a large, polished silver sphere engraved with intricate celestial maps, including constellations and stars. This globe is encased within a gilded brass framework consisting of a vertical meridian ring and a horizontal horizon ring, both inscribed with degrees and astronomical data. At the top of the globe, a small silver clock face with Roman numerals and a single hand is mounted. The entire assembly is supported by a finely sculpted silver Pegasus with gilded wings, depicted in a dynamic galloping pose. The Pegasus stands upon a gilded, oval-shaped base with a stepped, architectural rim. The contrast between the cool, reflective silver of the globe and horse and the warm, matte gold of the rings and wings creates a luxurious aesthetic. The craftsmanship is highly detailed, from the individual feathers on the wings to the precise engravings on the celestial sphere.",
+ "entities": [
+  {
+   "ref": "celestial-globe",
+   "kind": "item",
+   "label": "celestial globe",
+   "visual": "Polished silver sphere engraved with constellations and astronomical lines.",
+   "pos": {
+    "x": 49.8,
+    "y": 25.1
+   },
+   "footprint": {
+    "w": 40.2,
+    "d": 19.7
+   },
+   "height_rel": 0.6,
+   "height_m": 0.1,
+   "border": [
+    [
+     30.8,
+     60.0
+    ],
+    [
+     35.5,
+     60.0
+    ],
+    [
+     44.5,
+     60.0
+    ],
+    [
+     55.5,
+     60.0
+    ],
+    [
+     64.5,
+     60.0
+    ],
+    [
+     69.2,
+     60.0
+    ],
+    [
+     64.5,
+     60.0
+    ],
+    [
+     55.5,
+     60.0
+    ],
+    [
+     44.5,
+     60.0
+    ],
+    [
+     35.5,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "meridian-ring",
+   "kind": "item",
+   "label": "Meridian Ring",
+   "visual": "gilded brass ring encircling the globe vertically with engraved markings",
+   "pos": {
+    "x": 49.4,
+    "y": 24.7
+   },
+   "footprint": {
+    "w": 41.2,
+    "d": 23.5
+   },
+   "height_rel": 0.8,
+   "height_m": 0.2,
+   "border": [
+    [
+     48.5,
+     60.0
+    ],
+    [
+     51.5,
+     60.0
+    ],
+    [
+     61.5,
+     60.0
+    ],
+    [
+     67.5,
+     60.0
+    ],
+    [
+     69.5,
+     60.0
+    ],
+    [
+     67.5,
+     60.0
+    ],
+    [
+     61.5,
+     60.0
+    ],
+    [
+     51.5,
+     60.0
+    ],
+    [
+     48.5,
+     60.0
+    ],
+    [
+     38.5,
+     60.0
+    ],
+    [
+     32.5,
+     60.0
+    ],
+    [
+     30.5,
+     60.0
+    ],
+    [
+     32.5,
+     60.0
+    ],
+    [
+     38.5,
+     60.0
+    ]
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "subject": "celestial-globe",
+   "relation": "inside",
+   "object": "meridian-ring"
+  },
+  {
+   "subject": "meridian-ring",
+   "relation": "on_top_of",
+   "object": "celestial-globe"
+  }
+ ],
+ "annotation": {
+  "ensemble": [
+   "google/gemini-3-flash-preview",
+   "qwen/qwen3-vl-32b-instruct",
+   "openai/gpt-4o-mini"
+  ],
+  "contributors": 3,
+  "reconcile": "deepseek/deepseek-v4-pro",
+  "min_votes": 2,
+  "iters": 1,
+  "judge_score": 9.0,
+  "agreement": 0.833,
+  "minority": [
+   "Silver Pegasus",
+   "Gilded Wings",
+   "Horizon Ring",
+   "Clock Dial",
+   "Gilded Base",
+   "equatorial ring",
+   "clock face",
+   "Pegasus figure",
+   "winged wings",
+   "oval base",
+   "rocky outcrop",
+   "winged horse",
+   "golden frame",
+   "navigation dial",
+   "circular base",
+   "horse legs"
+  ],
+  "judge_rationale": "The description is highly accurate and detailed, though it describes the base as solid/oval when it is actually an open ring."
+ },
+ "review": {
+  "status": "verified",
+  "by": "ensemble-annotate",
+  "date": "2026-06-18"
+ }
+}

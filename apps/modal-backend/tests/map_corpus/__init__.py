@@ -20,8 +20,13 @@ FRAME_W = 100.0
 FRAME_H = 60.0
 
 
-def load_manifest() -> list[dict[str, Any]]:
-    return json.loads(MANIFEST.read_text())["maps"]
+def load_manifest(tier: str | None = None) -> list[dict[str, Any]]:
+    """Corpus source rows. Each row carries a `tier` (map | interior | closeup);
+    rows authored before tiers existed default to "map". Pass `tier` to filter."""
+    rows = json.loads(MANIFEST.read_text())["maps"]
+    for r in rows:
+        r.setdefault("tier", "map")
+    return [r for r in rows if r.get("tier") == tier] if tier is not None else rows
 
 
 def image_path(map_id: str) -> Path:

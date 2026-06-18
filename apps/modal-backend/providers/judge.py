@@ -277,6 +277,34 @@ async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
     return await _ask_judge(system, user_text, [_image_block(image)])
 
 
+async def score_annotation(
+    image: bytes, description: str, labels: list[str]
+) -> JudgeResult:
+    """Annotation-quality judge — drives the corpus ensemble-annotate auto-promote
+    gate (tests/map_corpus/annotate.py). Given the image, the prose meant to let a
+    painter redraw it, and the catalogued entity labels, score how COMPLETE and
+    ACCURATE the annotation is. The rationale is fed back into the refine pass, so
+    it must name what is missing or wrong."""
+    named = ", ".join(label.strip() for label in labels if label and label.strip())[:400]
+    system = (
+        "You are a strict annotation-quality judge for a ground-truth map/scene "
+        "corpus. You are given an image, a prose description meant to let a painter "
+        "redraw it, and the list of entities that were catalogued. Score 0-10 how "
+        "COMPLETE and ACCURATE the annotation is: every prominent feature named and "
+        "correctly placed in the prose, no invented features absent from the image, "
+        "no major visible feature missed. 10 = a faithful, complete annotation; 5 = "
+        "roughly right but missing or misdescribing notable features; 0 = wrong or "
+        "badly incomplete. Judge fidelity to the image only — ignore art quality."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short '
+        'sentence naming what is missing or wrong>"}.'
+    )
+    user_text = (
+        f"Catalogued entities: {named or '(none)'}.\n\nDescription:\n{description[:1200]}\n\n"
+        "Score the annotation's completeness and accuracy against the image (0-10)."
+    )
+    return await _ask_judge(system, user_text, [_image_block(image)])
+
+
 async def score_feature_articulation(
     image: bytes, place_label: str, features: list[str]
 ) -> JudgeResult:

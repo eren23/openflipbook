@@ -68,6 +68,31 @@ corpus-fetch:
 	cd apps/modal-backend && .venv/bin/python scripts/fetch_corpus.py --pin
 corpus-draft:
 	cd apps/modal-backend && CORPUS_DRAFT_RUN=1 .venv/bin/python -m tests.map_corpus.draft $(or $(id),all)
+# Ensemble annotate (the evolvable upgrade to corpus-draft): fan the describe
+# call over N VLMs, reconcile deterministically, judge, refine once on a low
+# score, and AUTO-PROMOTE to review.status=verified when the judge AND ensemble
+# agreement both clear their gates (else needs_human). Non-destructive: a
+# verified description is preserved; output lands in descriptions/candidates/
+# unless CORPUS_ANNOTATE_FORCE=1. PAID (~$0.03-0.10/map).
+# Preview the ensemble + gates with no flag; CORPUS_ANNOTATE_RUN=1 to spend.
+#   make corpus-annotate-preview
+#   make corpus-annotate id=fantasy-treasure-island   (or id=all)
+# Knobs (env): CORPUS_ANNOTATE_MODELS=google/gemini-3-pro-preview,anthropic/claude-sonnet-4-6,qwen/qwen3-vl-235b-a22b-instruct
+#   (middle-ground ensemble — avoid Opus, the describe cost driver; unset = single cheap VLM)
+#   CORPUS_JUDGE_THRESHOLD (7.0)  CORPUS_AGREEMENT_THRESHOLD (0.6)
+#   CORPUS_ANNOTATE_MAX_ITERS (2)  CORPUS_MIN_VOTES (majority)
+corpus-annotate-preview:
+	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
+corpus-annotate:
+	cd apps/modal-backend && CORPUS_ANNOTATE_RUN=1 .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
+# Visual in->out: draw a description's entities (detector boxes + segmenter
+# borders + labels) back onto its source map. FREE (no API). Verified by
+# default; add cand=1 to render the ensemble candidate instead. Writes
+# tests/map_corpus/overlays/<id>.<source>.png.
+#   make corpus-overlay id=fantasy-treasure-island
+#   make corpus-overlay id=fantasy-treasure-island cand=1
+corpus-overlay:
+	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.overlay $(or $(id),fantasy-treasure-island) $(if $(cand),--candidate,)
 # Reconstruction bench: regenerate each VERIFIED corpus map from its authored
 # description (graph = product planning path, direct = ground-truth layout),
 # extract + score vs ground truth + VLM judges. Rides the matrix chassis:
@@ -77,6 +102,15 @@ eval-recon-dry:
 	cd apps/modal-backend && .venv/bin/python -m tests.recon_bench.runner
 eval-recon:
 	cd apps/modal-backend && RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
+# Descent reconstruction (M4): ENTER a parent map's linked place (a child
+# interior/closeup tied via parent_id+parent_ref to a parent entity), score the
+# region-conditioned descent against the REAL child photo (style + continuity)
+# vs a fresh baseline. Dry (resolve chains + cost, $0): make eval-descent-dry
+# Live (DESCENT_BENCH_RUN=1, ~$0.30/chain): make eval-descent
+eval-descent-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.descent_bench.runner
+eval-descent:
+	cd apps/modal-backend && DESCENT_BENCH_RUN=1 .venv/bin/python -m tests.descent_bench.runner
 eval-repair:
 	cd apps/modal-backend && .venv/bin/python -m pytest -m repair -q
 eval-edit:
