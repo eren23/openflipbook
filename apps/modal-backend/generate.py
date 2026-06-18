@@ -314,6 +314,13 @@ def _segment_borders_on() -> bool:
     return env_flag("WORLD_SEGMENT_BORDERS")
 
 
+def _grounding_sam3_on() -> bool:
+    """Tighten the grounding loop's detector boxes to SAM3 mask bboxes
+    (GROUNDING_SAM3). Pairs with SEGMENTER_PROVIDER=sam3_fal; off → box-level
+    grounding (current behaviour)."""
+    return env_flag("GROUNDING_SAM3")
+
+
 def _geometric_world_on() -> bool:
     """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
     endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
@@ -653,6 +660,22 @@ async def _run_grounding(
 
     async def _verify(img: Any) -> Any:
         observed = await detector.detect(img.jpeg_bytes, labels)
+        if _grounding_sam3_on():
+            try:
+                from providers.segmenter import refine_detections_with_masks, segment
+
+                segs = await segment(
+                    img.jpeg_bytes, labels, boxes=cast("list[dict[str, Any]]", observed)
+                )
+                observed = cast(
+                    "list[Detection]",
+                    refine_detections_with_masks(
+                        cast("list[dict[str, Any]]", observed),
+                        cast("list[dict[str, Any]]", segs),
+                    ),
+                )
+            except Exception:  # best-effort: a SAM3 failure keeps the detector boxes
+                pass
         return grounding.diff(expected, observed)
 
     async def _repair(img: Any, report: Any) -> Any | None:
