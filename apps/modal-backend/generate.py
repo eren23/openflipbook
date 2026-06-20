@@ -307,6 +307,20 @@ def _world_mode_on(requested: bool) -> bool:
     return bool(requested) and env_flag("WORLD_MODE")
 
 
+def _segment_borders_on() -> bool:
+    """Fill per-node SAM3 border polygons during extraction (WORLD_SEGMENT_BORDERS).
+    Pairs with SEGMENTER_PROVIDER=sam3_fal to get pixel-accurate outlines in the
+    live overlay; off → only the detector box is known (current behaviour)."""
+    return env_flag("WORLD_SEGMENT_BORDERS")
+
+
+def _grounding_sam3_on() -> bool:
+    """Tighten the grounding loop's detector boxes to SAM3 mask bboxes
+    (GROUNDING_SAM3). Pairs with SEGMENTER_PROVIDER=sam3_fal; off → box-level
+    grounding (current behaviour)."""
+    return env_flag("GROUNDING_SAM3")
+
+
 def _geometric_world_on() -> bool:
     """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
     endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
@@ -646,6 +660,22 @@ async def _run_grounding(
 
     async def _verify(img: Any) -> Any:
         observed = await detector.detect(img.jpeg_bytes, labels)
+        if _grounding_sam3_on():
+            try:
+                from providers.segmenter import refine_detections_with_masks, segment
+
+                segs = await segment(
+                    img.jpeg_bytes, labels, boxes=cast("list[dict[str, Any]]", observed)
+                )
+                observed = cast(
+                    "list[Detection]",
+                    refine_detections_with_masks(
+                        cast("list[dict[str, Any]]", observed),
+                        cast("list[dict[str, Any]]", segs),
+                    ),
+                )
+            except Exception:  # best-effort: a SAM3 failure keeps the detector boxes
+                pass
         return grounding.diff(expected, observed)
 
     async def _repair(img: Any, report: Any) -> Any | None:
@@ -2621,6 +2651,46 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     box = _match(u.match_name)
                     if box:
                         u.bbox = box
+
+                # SAM3 outline pass (best-effort, flag-gated): one segment call
+                # box-prompted with the detector boxes -> a tight border polygon
+                # per entity for the overlay. A failure leaves boxes intact.
+                if _segment_borders_on():
+                    try:
+                        from providers.segmenter import segment as _segment
+
+                        segs = await _segment(
+                            geo_img_bytes,
+                            labels,
+                            boxes=cast("list[dict[str, Any]]", dets),
+                        )
+                        seg_by = {
+                            str(s.get("label", "")).lower().strip(): s for s in segs
+                        }
+
+                        def _border(name: str) -> list[list[float]] | None:
+                            key = name.lower().strip()
+                            s = seg_by.get(key) or next(
+                                (v for k, v in seg_by.items() if k and (k in key or key in k)),
+                                None,
+                            )
+                            poly = s.get("polygon") if s else None
+                            return poly if poly and len(poly) >= 3 else None
+
+                        for e in need_added:
+                            b = _border(e.name)
+                            if b:
+                                e.border = b
+                        for u in need_updated:
+                            b = _border(u.match_name)
+                            if b:
+                                u.border = b
+                    except Exception as exc:  # outlines are optional
+                        log(
+                            "info",
+                            "extract.segment_failed",
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
             log(
                 "info",
                 "extract.localized",
@@ -2660,6 +2730,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             "state": e.state,
             "confidence": e.confidence,
             "bbox": e.bbox,
+            "border": e.border,
         }
 
     return JSONResponse(
@@ -2672,6 +2743,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                         "changes": u.changes,
                         "confidence": u.confidence,
                         "bbox": u.bbox,
+                        "border": u.border,
                     }
                     for u in result.updated
                 ],

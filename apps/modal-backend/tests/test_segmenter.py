@@ -7,9 +7,11 @@ import pytest
 
 from providers.segmenter import (
     MAX_VERTICES,
+    box_from_polygon,
     detector_box_to_sam_box,
     parse_segments,
     polygon_from_mask,
+    refine_detections_with_masks,
     segmenter_provider,
 )
 
@@ -128,6 +130,30 @@ def test_detector_box_to_sam_box_centre_to_pixel_corners() -> None:
         {"x_pct": 0.5, "y_pct": 0.5, "w_pct": 0.2, "h_pct": 0.1}, 1000, 600
     )
     assert b == {"x_min": 400, "y_min": 270, "x_max": 600, "y_max": 330}
+
+
+def test_box_from_polygon_is_the_centre_based_bbox() -> None:
+    b = box_from_polygon([[0.2, 0.3], [0.6, 0.3], [0.5, 0.7]])
+    assert b["x_pct"] == pytest.approx(0.4) and b["y_pct"] == pytest.approx(0.5)
+    assert b["w_pct"] == pytest.approx(0.4) and b["h_pct"] == pytest.approx(0.4)
+
+
+def test_refine_detections_tightens_to_mask_bbox() -> None:
+    dets = [
+        {"label": "tower", "x_pct": 0.5, "y_pct": 0.5, "w_pct": 0.3, "h_pct": 0.3, "score": 0.9},
+        {"label": "lake", "x_pct": 0.2, "y_pct": 0.8, "w_pct": 0.1, "h_pct": 0.1, "score": 0.5},
+    ]
+    segs = [
+        {"label": "tower", "polygon": [[0.4, 0.4], [0.6, 0.4], [0.5, 0.6]],
+         "rel_height": 0.0, "est_height_m": None, "score": 1.0}
+    ]
+    out = refine_detections_with_masks(dets, segs)
+    by = {d["label"]: d for d in out}
+    # tower box tightened to the mask bbox; label + detection score preserved
+    assert by["tower"]["w_pct"] == pytest.approx(0.2) and by["tower"]["h_pct"] == pytest.approx(0.2)
+    assert by["tower"]["x_pct"] == pytest.approx(0.5) and by["tower"]["score"] == 0.9
+    # no matching mask -> unchanged
+    assert by["lake"]["w_pct"] == 0.1
 
 
 def test_detector_box_clamps_to_image_bounds() -> None:

@@ -177,6 +177,10 @@ class ExtractedEntity:
     state: dict[str, str | int | float | bool]
     confidence: float
     bbox: dict[str, float] | None = None
+    # Per-node SAM3 border polygon (normalized 0..1 image space, 3..24 verts).
+    # The VLM doesn't emit this; the extract endpoint's segmenter fills it behind
+    # WORLD_SEGMENT_BORDERS so the overlay can draw a tight outline, not just a box.
+    border: list[list[float]] | None = None
 
 
 @dataclass
@@ -188,6 +192,7 @@ class EntityUpdate:
     # extract endpoint's detector fills it so recurring entities keep a
     # per-node bbox for geometry + the overlay.
     bbox: dict[str, float] | None = None
+    border: list[list[float]] | None = None  # SAM3 polygon, same shape as above
 
 
 @dataclass

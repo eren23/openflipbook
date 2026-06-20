@@ -75,6 +75,40 @@ def detector_box_to_sam_box(det: dict[str, Any], img_w: int, img_h: int) -> dict
     return {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max}
 
 
+def box_from_polygon(polygon: list[list[float]]) -> dict[str, float]:
+    """A polygon's centre-based bounding box {x_pct,y_pct,w_pct,h_pct} (the
+    Detection shape) — the mask's tight extent."""
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    x1, x2, y1, y2 = min(xs), max(xs), min(ys), max(ys)
+    return {
+        "x_pct": (x1 + x2) / 2.0,
+        "y_pct": (y1 + y2) / 2.0,
+        "w_pct": x2 - x1,
+        "h_pct": y2 - y1,
+    }
+
+
+def refine_detections_with_masks(
+    detections: list[dict[str, Any]], segments: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Tighten each detector box to its SAM3 mask's bounding box (label-matched,
+    case-insensitive), keeping the detection's label + score. A detection with no
+    matching mask is passed through unchanged — so this only ever sharpens the
+    grounding loop's observed boxes, never drops one."""
+    seg_by = {str(s.get("label", "")).lower(): s for s in segments}
+    out: list[dict[str, Any]] = []
+    for d in detections:
+        seg = seg_by.get(str(d.get("label", "")).lower())
+        poly = seg.get("polygon") if seg else None
+        if poly and len(poly) >= MIN_VERTICES:
+            box = box_from_polygon(poly)
+            out.append({"label": d.get("label", ""), "score": d.get("score", 1.0), **box})
+        else:
+            out.append(d)
+    return out
+
+
 def polygon_from_mask(
     mask_img: Any, n_vertices: int = 20, thresh: int = 127, max_dim: int = 256
 ) -> list[list[float]]:
