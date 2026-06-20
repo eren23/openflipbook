@@ -469,6 +469,47 @@ def test_maybe_response_format_omitted_for_unsupported_model() -> None:
     assert out == {}
 
 
+# ---------- provider resolution (requesty mirrors openrouter) ------------
+
+
+def test_resolve_provider_requesty_uses_own_key_and_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Requesty is OpenRouter-shaped: its own key + base URL, plus the same
+    # HTTP-Referer / X-Title attribution headers as the openrouter branch.
+    monkeypatch.setenv("LLM_PROVIDER", "requesty")
+    monkeypatch.setenv("REQUESTY_API_KEY", "rq-test-key")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    provider, base_url, api_key, headers = llm._resolve_provider()
+    assert provider == "requesty"
+    assert base_url == llm.REQUESTY_BASE_URL == "https://router.requesty.ai/v1"
+    assert api_key == "rq-test-key"
+    assert headers["X-Title"] == "Endless Canvas"
+    assert "HTTP-Referer" in headers
+
+
+def test_resolve_provider_requesty_requires_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "requesty")
+    monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="REQUESTY_API_KEY"):
+        llm._resolve_provider()
+
+
+def test_resolve_structured_tier_requesty_matches_openrouter() -> None:
+    # Same provider/model slug routing as openrouter: known-good family →
+    # json_object, everything else → prompt.
+    assert (
+        llm._resolve_structured_tier("requesty", "openai/gpt-4o-mini")
+        == "json_object"
+    )
+    assert (
+        llm._resolve_structured_tier("requesty", "mistralai/mistral-large")
+        == "prompt"
+    )
+
+
 def test_extraction_prompt_lists_canonical_state_keys() -> None:
     # Phase 7a/7c — the prompt nudges the VLM toward canonical keys so the
     # web-side allow-list doesn't have to silently drop everything.

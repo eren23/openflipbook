@@ -111,6 +111,7 @@ the base URL and the key:
 | `LLM_PROVIDER` | Base URL | Models to set |
 |---|---|---|
 | `openrouter` (default) | OpenRouter | `OPENROUTER_VLM_MODEL` / `OPENROUTER_TEXT_MODEL` |
+| `requesty` | Requesty (OpenRouter-shaped aggregator) | `REQUESTY_API_KEY`, `LLM_VLM_MODEL=openai/gpt-4o`, `LLM_TEXT_MODEL=openai/gpt-4o-mini` |
 | `openai` | `api.openai.com` | `LLM_VLM_MODEL=gpt-4o`, `LLM_TEXT_MODEL=gpt-4o-mini` |
 | `google` | Gemini OpenAI-compat | `LLM_VLM_MODEL=gemini-2.5-flash` |
 | `anthropic` | Anthropic OpenAI-compat | `LLM_VLM_MODEL=claude-3.5-sonnet` (runs at the `json_object` tier) |

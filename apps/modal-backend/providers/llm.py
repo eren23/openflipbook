@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from .layout_solver import EmptyRegion, PlannedEntity, PlannedRelation, SceneGraph
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+REQUESTY_BASE_URL = "https://router.requesty.ai/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
 DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
 
@@ -49,6 +50,7 @@ DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
 # OpenAI-compatibility endpoints so the single AsyncOpenAI code path is reused.
 _LLM_BASE_URLS = {
     "openrouter": OPENROUTER_BASE_URL,
+    "requesty": REQUESTY_BASE_URL,
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -227,6 +229,21 @@ def _resolve_provider() -> tuple[str, str, str, dict[str, str]]:
             "X-Title": "Endless Canvas",
         }
         return provider, base_override or OPENROUTER_BASE_URL, api_key, headers
+    if provider == "requesty":
+        # Requesty is an OpenRouter-shaped aggregator: same provider/model slug
+        # naming and the same optional HTTP-Referer / X-Title attribution
+        # headers, on its own base URL + key. Mirror the openrouter branch so
+        # the default OpenRouter path is untouched.
+        api_key = os.environ.get("REQUESTY_API_KEY")
+        if not api_key:
+            raise RuntimeError("REQUESTY_API_KEY is not set")
+        headers = {
+            "HTTP-Referer": os.environ.get(
+                "REQUESTY_REFERER", "https://github.com/eren23/openflipbook"
+            ),
+            "X-Title": "Endless Canvas",
+        }
+        return provider, base_override or REQUESTY_BASE_URL, api_key, headers
     base_url = base_override or _LLM_BASE_URLS.get(provider, "")
     if not base_url:
         raise RuntimeError(
@@ -411,6 +428,9 @@ def _resolve_structured_tier(provider: str, model: str) -> str:
         # All three honour json_object on their OpenAI-compatible endpoints.
         return "json_object"
     if provider == "openrouter":
+        return "json_object" if _supports_structured_output(model) else "prompt"
+    if provider == "requesty":
+        # Same OpenRouter-shaped slug family routing.
         return "json_object" if _supports_structured_output(model) else "prompt"
     # custom / unknown (local OpenAI-compatible servers): decide by family.
     if any(fam in m for fam in _STRUCTURED_OUTPUT_FAMILIES):
