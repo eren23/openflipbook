@@ -536,13 +536,25 @@ export default function PlayPage() {
   useEffect(() => {
     const nodeId = page?.nodeId;
     if (!geoOverlayOn || !nodeId || phase !== "ready") return;
+    // Wait for the world snapshot to hydrate before deciding the node is
+    // box-less — `entities` is empty during the initial fetch, so acting on
+    // `phase` alone would re-extract a node whose geometry is already in Mongo.
+    if (worldState.loading || !worldState.updatedAt) return;
     if (localizeAttemptedRef.current.has(nodeId)) return;
     const hasBoxes = worldState.entities.some(
       (e) => e.appearance_bboxes?.[nodeId],
     );
     if (hasBoxes) return;
     void localizeCurrentNode();
-  }, [geoOverlayOn, page?.nodeId, phase, worldState.entities, localizeCurrentNode]);
+  }, [
+    geoOverlayOn,
+    page?.nodeId,
+    phase,
+    worldState.loading,
+    worldState.updatedAt,
+    worldState.entities,
+    localizeCurrentNode,
+  ]);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
