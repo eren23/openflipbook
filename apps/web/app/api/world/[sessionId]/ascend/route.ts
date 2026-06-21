@@ -5,6 +5,7 @@ import { tierTransitionValid } from "@openflipbook/config";
 import { deleteNode, getNode, insertNode, recordError, updateNodeParent } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { getWorldMap, removeEntityGeos, upsertEntityGeos } from "@/lib/world-map";
+import { requireOwner } from "@/lib/session-owner";
 import { reparentRoots } from "@/lib/scale-tree";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
@@ -64,6 +65,8 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 },
     );
   }
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
 
   // Double-ascend guard: C must exist and still be a root.
   const child = await getNode(body.child_node_id);

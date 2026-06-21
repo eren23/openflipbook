@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listRecentErrors, recordError } from "@/lib/db";
+import { debugAccessAllowed } from "@/lib/debug-access";
 import { readServerEnv } from "@/lib/env";
 import { TRACE_HEADER } from "@/lib/trace";
 
@@ -56,6 +57,12 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+  // Recent errors carry stack traces + request-body excerpts (other users'
+  // prompts) — not world-readable on a deployed instance. POST stays open so
+  // the client can report its own errors.
+  if (!debugAccessAllowed(req)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const env = readServerEnv();
   if (!env.MONGODB_URI || !env.MONGODB_DB) {
     return NextResponse.json({ errors: [] }, { status: 200 });

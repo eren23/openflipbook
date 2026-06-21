@@ -6,6 +6,7 @@ import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { isSafeId } from "@/lib/ids";
+import { requireOwner } from "@/lib/session-owner";
 import { inlineStoredImage } from "@/lib/r2";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -83,6 +84,10 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 }
     );
   }
+  // Ownership: extraction runs a paid VLM call and writes into the session's
+  // world_state — block strangers from spending/poisoning someone else's world.
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
   // A replayed/late extraction can arrive with the node's STORE URL — on the
   // docker stack a localhost minio URL the VLM providers refuse. Inline our
   // own stored bytes (best-effort; see lib/r2.inlineStoredImage).

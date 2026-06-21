@@ -5,6 +5,7 @@ import { inlineStoredImage } from "@/lib/r2";
 import { resolveEntitiesForPrompt } from "@/lib/world";
 import { getWorldMap } from "@/lib/world-map";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
+import { verifyOwnerReadonly } from "@/lib/session-owner";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -36,6 +37,22 @@ export async function POST(req: Request) {
   // ever block generation.
   const rawText = await req.text();
   let upstreamBody = rawText;
+  // Ownership gate BEFORE any paid model call: the first generate claims the
+  // session, later ones must own it (blocks a stranger spending on / poisoning
+  // someone else's session). Parsed separately from the enrichment try below so
+  // a Mongo error here fails CLOSED (500) instead of silently bypassing.
+  let ownerSid: string | null = null;
+  try {
+    ownerSid = (JSON.parse(rawText) as GenerateRequestBody)?.session_id ?? null;
+  } catch {
+    ownerSid = null;
+  }
+  if (ownerSid) {
+    // Verify-only (no claim/cookie on this streaming response); the claim +
+    // cookie happen on the reliable /api/nodes write.
+    const auth = await verifyOwnerReadonly(ownerSid);
+    if (!auth.ok) return auth.res;
+  }
   try {
     const parsed = JSON.parse(rawText) as GenerateRequestBody;
     let mutated = false;

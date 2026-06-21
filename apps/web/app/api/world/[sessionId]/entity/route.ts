@@ -8,6 +8,7 @@ import {
   undoDeleteEntity,
 } from "@/lib/world";
 import { removeEntityGeos } from "@/lib/world-map";
+import { requireOwner } from "@/lib/session-owner";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import type { WorldEntityMutation } from "@openflipbook/config";
@@ -54,6 +55,8 @@ export async function POST(req: Request, { params }: Params) {
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
   try {
     switch (mutation.op) {
       case "rename": {

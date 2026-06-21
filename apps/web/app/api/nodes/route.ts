@@ -3,6 +3,7 @@ import type { ScaleTier, SceneView } from "@openflipbook/config";
 import { insertNode } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { readServerEnv } from "@/lib/env";
+import { requireOwner } from "@/lib/session-owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,10 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  // First writer claims the session; later writers must own it (blocks
+  // cross-tenant node insertion / poisoning).
+  const auth = await requireOwner(body.session_id);
+  if (!auth.ok) return auth.res;
 
   const decoded = decodeDataUrl(body.image_data_url);
   const extension = decoded.contentType === "image/png" ? "png" : "jpg";
