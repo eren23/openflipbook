@@ -104,7 +104,7 @@ jobs:
         working-directory: apps/modal-backend
         run: |
           source .venv/bin/activate
-          mypy providers obs.py
+          mypy providers obs.py generate.py
       - name: Pytest
         working-directory: apps/modal-backend
         run: |

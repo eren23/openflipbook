@@ -3,12 +3,18 @@
 #   cp .env.example .env   # add FAL_KEY (+ OPENROUTER_API_KEY)
 #   make demo              # → http://localhost:3000/play
 #
-.PHONY: demo demo-local demo-down demo-clean demo-logs
+.PHONY: demo demo-mock demo-local demo-down demo-clean demo-logs
 
 # Local stores (Mongo + Minio) + backend + web, with cloud AI.
 # Needs FAL_KEY + OPENROUTER_API_KEY in .env (see .env.example).
 demo:
 	docker compose up --build
+
+# Zero-key on-ramp: stubbed providers (MOCK_PROVIDERS=1) — no FAL/OpenRouter
+# keys needed. The whole stack boots and serves mocked generations so a
+# first-time deployer sees /play work instead of a confusing key error.
+demo-mock:
+	MOCK_PROVIDERS=1 docker compose up --build
 
 # Adds Ollama so the planner + click VLM run locally too — only FAL_KEY needed
 # (images stay on fal). First run pulls multi-GB models; CPU-slow.

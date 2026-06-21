@@ -5,6 +5,7 @@ import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { isSafeId } from "@/lib/ids";
 import { inlineStoredImage } from "@/lib/r2";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -71,6 +72,14 @@ export async function POST(req: Request, { params }: Params) {
   if (!body.node_id || !body.image_data_url) {
     return NextResponse.json(
       { error: "missing required fields: node_id, image_data_url" },
+      { status: 400 }
+    );
+  }
+  // node_id becomes a Mongo MAP KEY (appearance_bboxes[nodeId]); reject ids
+  // with `.`/`$`/oversize before they corrupt the document.
+  if (!isSafeId(body.node_id) || !isSafeId(sessionId)) {
+    return NextResponse.json(
+      { error: "invalid session or node id" },
       { status: 400 }
     );
   }

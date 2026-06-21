@@ -15,7 +15,7 @@ import type {
 } from "@openflipbook/config";
 import { tierStep } from "@openflipbook/config";
 
-import { getDb } from "./db";
+import { getDb, recordError } from "./db";
 import { envFlag } from "./env-flag";
 import { optimisticReplace } from "./optimistic-update";
 import {
@@ -488,7 +488,18 @@ export async function deriveGeoFromExtraction(
       const scale = Math.min(Math.max(footprint / localExtent(geos), 1e-3), 10);
       // INV-4: warn (never block) if the learned scale contradicts the rung step.
       const warn = ladderDisagreement(parent.scale_tier, scaleTier, scale);
-      if (warn) console.warn(`[world-map] INV-4: ${warn} — keeping the learned scale`);
+      if (warn) {
+        // Route to the errors collection (not just console) so a mis-seed is
+        // queryable in prod instead of invisible. Best-effort; seeding proceeds.
+        await recordError({
+          trace_id: null,
+          kind: "world-map.inv4",
+          message: `${warn} — keeping the learned scale`,
+          stack: null,
+          body_excerpt: `session=${sessionId} parent=${parentId}`,
+          source: "backend",
+        }).catch(() => {});
+      }
       if ((parent.scale ?? 1) !== scale) geos.push({ ...parent, scale });
     }
   }
