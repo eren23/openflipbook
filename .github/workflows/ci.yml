@@ -138,6 +138,20 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"query":"a small harbor town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_mock","current_node_id":""}' \
             | grep -m1 '"type": "final"'
+      - name: Idempotency — a re-sent generation is refused (409)
+        run: |
+          key="ci-idem-$$"
+          # First request claims the key (and streams a full generation); the
+          # replay with the same key must be refused before any work.
+          curl -fsS -N --max-time 120 -X POST http://localhost:3000/api/generate-page \
+            -H 'Content-Type: application/json' -H "Idempotency-Key: $key" \
+            -d '{"query":"a town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_idem","current_node_id":""}' \
+            | grep -m1 '"type": "final"'
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST http://localhost:3000/api/generate-page \
+            -H 'Content-Type: application/json' -H "Idempotency-Key: $key" \
+            -d '{"query":"a town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_idem","current_node_id":""}')
+          echo "replay status: $code"
+          test "$code" = "409"
 
   e2e:
     # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +
