@@ -230,7 +230,12 @@ async function persistNode(
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (traceId) headers[TRACE_HEADER] = traceId;
+    if (traceId) {
+      headers[TRACE_HEADER] = traceId;
+      // Idempotent create: a retry with the same trace returns the existing node
+      // instead of inserting a duplicate.
+      headers["Idempotency-Key"] = traceId;
+    }
     const res = await fetch("/api/nodes", {
       method: "POST",
       headers,
@@ -777,6 +782,9 @@ export default function PlayPage() {
           headers: {
             "Content-Type": "application/json",
             [TRACE_HEADER]: traceId,
+            // Dedup a re-sent generation server-side (same trace = same logical
+            // request) so a retry can't re-run the paid model stack.
+            "Idempotency-Key": traceId,
           },
           body: JSON.stringify({ ...body, trace_id: traceId }),
           signal: ac.signal,
