@@ -168,6 +168,11 @@ interface Page {
   // minimap to the place you're inside; null/absent on the world map + classic
   // pages → the minimap shows the whole world frame.
   sceneView?: SceneView | null;
+  // Whether entity extraction has already run for this node (read back from
+  // Mongo on revisit/reload). Gates the auto-localize effect so a revisit never
+  // silently re-runs the non-deterministic VLM pass. Absent on freshly-created
+  // pages this session → the in-memory attempt guard covers them instead.
+  geoExtracted?: boolean;
 }
 
 function newSessionId(): string {
@@ -225,7 +230,12 @@ async function persistNode(
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (traceId) headers[TRACE_HEADER] = traceId;
+    if (traceId) {
+      headers[TRACE_HEADER] = traceId;
+      // Idempotent create: a retry with the same trace returns the existing node
+      // instead of inserting a duplicate.
+      headers["Idempotency-Key"] = traceId;
+    }
     const res = await fetch("/api/nodes", {
       method: "POST",
       headers,
@@ -536,13 +546,31 @@ export default function PlayPage() {
   useEffect(() => {
     const nodeId = page?.nodeId;
     if (!geoOverlayOn || !nodeId || phase !== "ready") return;
+    // Extraction already ran for this node (persisted in Mongo, read back on
+    // load). Never auto-re-run the non-deterministic VLM on a revisit/reload —
+    // that's what made geo results drift between visits. Manual localize still
+    // forces a re-run.
+    if (page?.geoExtracted) return;
+    // Wait for the world snapshot to hydrate before deciding the node is
+    // box-less — `entities` is empty during the initial fetch, so acting on
+    // `phase` alone would re-extract a node whose geometry is already in Mongo.
+    if (worldState.loading || !worldState.updatedAt) return;
     if (localizeAttemptedRef.current.has(nodeId)) return;
     const hasBoxes = worldState.entities.some(
       (e) => e.appearance_bboxes?.[nodeId],
     );
     if (hasBoxes) return;
     void localizeCurrentNode();
-  }, [geoOverlayOn, page?.nodeId, phase, worldState.entities, localizeCurrentNode]);
+  }, [
+    geoOverlayOn,
+    page?.nodeId,
+    page?.geoExtracted,
+    phase,
+    worldState.loading,
+    worldState.updatedAt,
+    worldState.entities,
+    localizeCurrentNode,
+  ]);
   // Guard against re-entry between the click handler's synchronous
   // setMorphFx() call and React's next render that propagates
   // phase==="generating" into the click effect closure. Without this, a
@@ -754,6 +782,9 @@ export default function PlayPage() {
           headers: {
             "Content-Type": "application/json",
             [TRACE_HEADER]: traceId,
+            // Dedup a re-sent generation server-side (same trace = same logical
+            // request) so a retry can't re-run the paid model stack.
+            "Idempotency-Key": traceId,
           },
           body: JSON.stringify({ ...body, trace_id: traceId }),
           signal: ac.signal,
@@ -887,6 +918,11 @@ export default function PlayPage() {
                 },
                 traceId
               ).then((saved) => {
+                // A newer generation or a navigation aborted this one while the
+                // node was persisting. This .then is detached from the fetch
+                // reader, so without this guard it would clobber the current
+                // page/history/URL with THIS (stale) node. (#3)
+                if (ac.signal.aborted) return;
                 if (saved) {
                   const persisted: Page = {
                     nodeId: saved.id,
@@ -949,6 +985,15 @@ export default function PlayPage() {
                       ? { ...body.scene_view, node_id: saved.id }
                       : null,
                     traceId,
+                  }).then((res) => {
+                    // Surface a silent extraction miss (error or 0/0 even after
+                    // the one retry) so the user isn't left on a page whose taps
+                    // quietly mis-behave with no signal. Reuses localizeStatus so
+                    // the "Map it" affordance is one click, overlay or not. (#6)
+                    if (ac.signal.aborted) return;
+                    if (!res || (res.added === 0 && res.updated === 0)) {
+                      setLocalizeStatus({ nodeId: saved.id, status: "failed" });
+                    }
                   });
                 }
               });
@@ -1062,6 +1107,11 @@ export default function PlayPage() {
     outputLocale,
     styleAnchor,
     history,
+    // Read by the logical-AROUND branch above — omitting these captured a stale
+    // map/flag, so the E-key / Around button grounded blooms in old or empty
+    // neighbours after the geo map seeded or World Mode toggled. (#9)
+    worldEnabled,
+    geoMap.entities,
   ]);
 
   const acceptUploadedImage = useCallback(
@@ -1072,6 +1122,11 @@ export default function PlayPage() {
       }
       try {
         const dataUrl = await readFileAsDataUrl(file);
+        // Join the abort scheme so a generation/navigation that supersedes this
+        // upload flips ac.signal and the detached persist .then below bails (#3).
+        abortRef.current?.abort();
+        const ac = new AbortController();
+        abortRef.current = ac;
         const seedTitle = "Uploaded image";
         const seedQuery = "Uploaded image";
         setPage({
@@ -1100,6 +1155,7 @@ export default function PlayPage() {
           },
           uploadTrace
         ).then((saved) => {
+          if (ac.signal.aborted) return;
           if (saved) {
             const persisted: Page = {
               nodeId: saved.id,
@@ -1758,6 +1814,7 @@ export default function PlayPage() {
             click_in_parent: { x_pct: number; y_pct: number } | null;
             sources?: { url: string; title: string | null }[] | null;
             scene_view?: SceneView | null;
+            geo_extracted?: boolean;
           }>;
         };
         if (cancelled) return;
@@ -1771,6 +1828,7 @@ export default function PlayPage() {
           parentId: n.parent_id,
           sources: Array.isArray(n.sources) ? n.sources : [],
           sceneView: n.scene_view ?? null,
+          geoExtracted: n.geo_extracted ?? false,
           ...(n.click_in_parent
             ? {
                 clickInParent: {
@@ -3407,6 +3465,29 @@ export default function PlayPage() {
               )}
 
             {phase === "generating" && <GeneratingBanner statusMsg={statusMsg} />}
+
+            {phase === "ready" &&
+              localizeStatus?.status === "failed" &&
+              localizeStatus.nodeId === page?.nodeId && (
+                <div className="pointer-events-auto absolute bottom-3 left-3 flex items-center gap-3 rounded-full bg-amber-700/90 px-4 py-2 text-xs text-white shadow-lg">
+                  <span>Couldn’t map this page — taps may miss.</span>
+                  <button
+                    type="button"
+                    onClick={() => void localizeCurrentNode()}
+                    className="rounded-full bg-white/20 px-2.5 py-1 font-medium hover:bg-white/30"
+                  >
+                    Map it
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Dismiss"
+                    onClick={() => setLocalizeStatus(null)}
+                    className="text-white/70 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
             {phase !== "generating" &&
               streamStatus === "connecting" &&

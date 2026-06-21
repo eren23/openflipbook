@@ -33,6 +33,8 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
 _DEFAULT_IMAGE_PRICE = 0.15  # unknown slug: assume the balanced default
 VLM_STACK_FLAT = 0.02  # planner + judges + extraction, per generation
 
+VLM_CALL_FLAT = 0.005  # one standalone VLM/text-LLM call (extract/edit/plan/precompute)
+
 _MAX_SESSIONS = 512  # bounded LRU of per-session totals
 
 _lock = threading.Lock()
@@ -102,6 +104,45 @@ def daily_cap() -> float:
 def cap_exceeded() -> bool:
     cap = daily_cap()
     return cap > 0 and daily_total() >= cap
+
+
+def session_cap() -> float:
+    """Per-session cap in dollars (MAX_SESSION_SPEND); 0 = unlimited. Stops one
+    runaway session/client burning the whole daily budget."""
+    try:
+        return max(0.0, float(os.environ.get("MAX_SESSION_SPEND", "") or 0.0))
+    except ValueError:
+        return 0.0
+
+
+def session_cap_exceeded(session_id: str) -> bool:
+    cap = session_cap()
+    return cap > 0 and session_total(session_id) >= cap
+
+
+def over_cap(session_id: str | None = None) -> str | None:
+    """A human-readable reason if a hard cap is already crossed, else None — the
+    single pre-flight gate shared by every paid endpoint. Daily-global first,
+    then the optional per-session cap. Both default off (env unset) → None."""
+    if cap_exceeded():
+        return (
+            f"daily spend cap reached (≈${daily_total():.2f} of "
+            f"MAX_DAILY_SPEND=${daily_cap():.2f})"
+        )
+    if session_id and session_cap_exceeded(session_id):
+        return (
+            f"session spend cap reached (≈${session_total(session_id):.2f} of "
+            f"MAX_SESSION_SPEND=${session_cap():.2f})"
+        )
+    return None
+
+
+def record_vlm_call(session_id: str) -> float:
+    """Meter ONE standalone VLM/text-LLM call made outside a generation (manual
+    re-extract, NL geo edit, precompute, plan-world). The generation flat already
+    covers the in-generation extraction; this only counts the extra out-of-band
+    calls that were previously free and uncapped."""
+    return record(session_id, VLM_CALL_FLAT)
 
 
 def reset_for_tests() -> None:

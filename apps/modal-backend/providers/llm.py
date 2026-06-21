@@ -269,6 +269,13 @@ def _client() -> AsyncOpenAI:
             api_key=api_key,
             base_url=base_url,
             default_headers=headers or None,
+            # _create_with_retry is the single source of retry truth — disable
+            # the SDK's own 2 retries so a transient 429/5xx can't fan out to
+            # (2+1)*(2+1)=9 paid attempts per logical call.
+            max_retries=0,
+            # Cap per-request wall time so a hung upstream can't pin a container
+            # (and its Modal slot) for the SDK default of 600s. Env-tunable.
+            timeout=_request_timeout_s(),
         )
         # Surface the resolved provider + structured-output tier on cold start
         # so a deployer who swapped providers/models sees a weak model fall to
@@ -666,6 +673,16 @@ _TRANSIENT_LLM_ERRORS = (
     RateLimitError,
     InternalServerError,
 )
+
+
+def _request_timeout_s() -> float:
+    """Per-request wall-clock cap for the LLM/VLM client (LLM_REQUEST_TIMEOUT_S,
+    default 60s, floor 5s). The SDK default is 600s — far too long to hold a
+    container slot on a hung upstream."""
+    try:
+        return max(5.0, float(os.environ.get("LLM_REQUEST_TIMEOUT_S", "") or 60.0))
+    except ValueError:
+        return 60.0
 
 
 async def _create_with_retry(
@@ -2134,7 +2151,9 @@ async def extract_entities(
             ],
             schema=EXTRACTION_SCHEMA,
             schema_name="entity_extraction",
-            temperature=0.2,
+            # Deterministic: extraction is treated as reproducible (and can
+            # overwrite catalogued descriptions), so it must not drift run-to-run.
+            temperature=0.0,
             max_tokens=2200,
             span_ctx=ctx,
         )

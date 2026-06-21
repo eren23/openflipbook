@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { updateNodeEstimatedView } from "@/lib/db";
+import { markNodeGeoExtracted, recordError, updateNodeEstimatedView } from "@/lib/db";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { isSafeId } from "@/lib/ids";
+import { requireOwner } from "@/lib/session-owner";
 import { inlineStoredImage } from "@/lib/r2";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -74,6 +76,18 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 }
     );
   }
+  // node_id becomes a Mongo MAP KEY (appearance_bboxes[nodeId]); reject ids
+  // with `.`/`$`/oversize before they corrupt the document.
+  if (!isSafeId(body.node_id) || !isSafeId(sessionId)) {
+    return NextResponse.json(
+      { error: "invalid session or node id" },
+      { status: 400 }
+    );
+  }
+  // Ownership: extraction runs a paid VLM call and writes into the session's
+  // world_state — block strangers from spending/poisoning someone else's world.
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
   // A replayed/late extraction can arrive with the node's STORE URL — on the
   // docker stack a localhost minio URL the VLM providers refuse. Inline our
   // own stored bytes (best-effort; see lib/r2.inlineStoredImage).
@@ -161,6 +175,11 @@ export async function POST(req: Request, { params }: Params) {
       node_id: body.node_id,
       result: upstreamResult,
     });
+    // Whether the geo-seeding step below completed. The durable "fully
+    // processed" stamp is set only when this stays true, so a node whose
+    // seeding FAILED is left un-stamped and a later visit retries — instead of
+    // locking in a half-seeded map that disagrees with the codex forever.
+    let geoSeedOk = true;
     // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
     // entities localized on this node — the world map populates for free. Default
     // scene_view = a top-down map so each bbox maps straight into a normalized
@@ -261,8 +280,31 @@ export async function POST(req: Request, { params }: Params) {
             );
           }
         }
+      } catch (err) {
+        // Seeding failed: surface it (so the under-seeded map is debuggable)
+        // and leave the node un-stamped so a revisit retries — never block the
+        // extraction response.
+        geoSeedOk = false;
+        await recordError({
+          trace_id: traceId,
+          kind: "extract.geo_seed_failed",
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack ?? null : null,
+          body_excerpt: null,
+          source: "backend",
+        }).catch(() => {});
+      }
+    }
+    // Durable "fully processed" stamp — set only after BOTH the codex merge and
+    // (when applicable) geo seeding succeeded, or there was nothing to seed.
+    // Gates the client's auto-localize so a revisit/reload never re-runs the
+    // non-deterministic VLM on an already-complete node. Best-effort: a failed
+    // stamp must not break the response.
+    if (geoSeedOk) {
+      try {
+        await markNodeGeoExtracted(body.node_id);
       } catch {
-        /* seeding is best-effort — never block the extraction response */
+        // best-effort only
       }
     }
     // Inline projection of added/updated records so the debug HUD (and any

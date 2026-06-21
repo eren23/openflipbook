@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import type { ScaleTier, SceneView, WorldEntityGeo } from "@openflipbook/config";
 import { tierTransitionValid } from "@openflipbook/config";
 
-import { deleteNode, getNode, insertNode, updateNodeParent } from "@/lib/db";
+import { deleteNode, getNode, insertNode, recordError, updateNodeParent } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
-import { getWorldMap, upsertEntityGeos } from "@/lib/world-map";
+import { getWorldMap, removeEntityGeos, upsertEntityGeos } from "@/lib/world-map";
+import { requireOwner } from "@/lib/session-owner";
 import { reparentRoots } from "@/lib/scale-tree";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
@@ -64,6 +65,8 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 },
     );
   }
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
 
   // Double-ascend guard: C must exist and still be a root.
   const child = await getNode(body.child_node_id);
@@ -131,6 +134,10 @@ export async function POST(req: Request, { params }: Params) {
   // 2. Seed geo — re-point every root geo under P (load-bearing for ascend, NOT
   //    best-effort). Skip cleanly when the world map has no roots yet.
   let learnedScale: number | null = null;
+  // Did step 2 durably write the geo reparent? If so and step 3 fails, we must
+  // undo it (drop geo_${pId} + re-root its children) — otherwise the tree hangs
+  // off a phantom container whose node we delete below.
+  let geoWritten = false;
   try {
     const snapshot = await getWorldMap(sessionId);
     const hasRoots = snapshot.entities.some((e) => (e.parent_id ?? null) === null);
@@ -154,6 +161,7 @@ export async function POST(req: Request, { params }: Params) {
       const result = reparentRoots(snapshot.entities, pGeo, nowIso);
       learnedScale = result.learnedScale;
       await upsertEntityGeos(sessionId, result.geos);
+      geoWritten = true;
     }
   } catch (err) {
     // Abort: delete the orphan P node so C + the existing tree are untouched.
@@ -170,6 +178,23 @@ export async function POST(req: Request, { params }: Params) {
   const repointed = await updateNodeParent(body.child_node_id, pId);
   if (!repointed) {
     await deleteNode(pId).catch(() => {});
+    // Revert step 2's geo write: removeEntityGeos drops geo_${pId} AND re-roots
+    // its children (the former roots) back to parent_id=null — restoring the
+    // pre-ascend topology. Best-effort: a failed revert is logged, not fatal.
+    if (geoWritten) {
+      try {
+        await removeEntityGeos(sessionId, [`geo_${pId}`]);
+      } catch (err) {
+        await recordError({
+          trace_id: null,
+          kind: "ascend.geo_revert_failed",
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack ?? null : null,
+          body_excerpt: `session=${sessionId} pId=${pId}`,
+          source: "backend",
+        }).catch(() => {});
+      }
+    }
     return NextResponse.json(
       { error: "child was concurrently reparented or removed", parent_node_id: pId },
       { status: 409 },

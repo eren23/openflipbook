@@ -46,6 +46,7 @@ export async function GET(req: Request, { params }: Params) {
       click_in_parent: row.click_in_parent,
       sources: row.sources,
       scene_view: row.scene_view,
+      geo_extracted: row.geo_extracted,
       created_at: row.created_at,
     })),
   });

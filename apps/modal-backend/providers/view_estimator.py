@@ -136,7 +136,8 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
         },
     ]
     try:
-        resp = await client.chat.completions.create(
+        resp = await llm._create_with_retry(
+            client,
             model=model,
             messages=messages,
             temperature=0.0,

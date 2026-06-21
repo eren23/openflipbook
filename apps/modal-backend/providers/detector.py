@@ -99,7 +99,11 @@ async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
             ],
         },
     ]
-    resp = await client.chat.completions.create(
+    # Through _create_with_retry (not raw create) so a transient 429/5xx retries
+    # with backoff instead of silently degrading grounding quality — the client
+    # now disables the SDK's own retries.
+    resp = await llm._create_with_retry(
+        client,
         model=model,
         messages=messages,
         temperature=0.0,

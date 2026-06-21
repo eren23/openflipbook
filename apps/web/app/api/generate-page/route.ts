@@ -5,6 +5,13 @@ import { inlineStoredImage } from "@/lib/r2";
 import { resolveEntitiesForPrompt } from "@/lib/world";
 import { getWorldMap } from "@/lib/world-map";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
+import { verifyOwnerReadonly } from "@/lib/session-owner";
+import { claimIdempotencyKey } from "@/lib/idempotency";
+import {
+  estimateGenerationCost,
+  recordSpend,
+  spendOverCap,
+} from "@/lib/spend-ledger";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -36,6 +43,45 @@ export async function POST(req: Request) {
   // ever block generation.
   const rawText = await req.text();
   let upstreamBody = rawText;
+  // Ownership gate BEFORE any paid model call: the first generate claims the
+  // session, later ones must own it (blocks a stranger spending on / poisoning
+  // someone else's session). Parsed separately from the enrichment try below so
+  // a Mongo error here fails CLOSED (500) instead of silently bypassing.
+  let guardBody: GenerateRequestBody | null = null;
+  try {
+    guardBody = JSON.parse(rawText) as GenerateRequestBody;
+  } catch {
+    guardBody = null;
+  }
+  if (guardBody?.session_id) {
+    // Verify-only (no claim/cookie on this streaming response); the claim +
+    // cookie happen on the reliable /api/nodes write.
+    const auth = await verifyOwnerReadonly(guardBody.session_id);
+    if (!auth.ok) return auth.res;
+  }
+  // Idempotency: refuse a re-sent generation (same key) BEFORE any paid work, so
+  // a retry / double-submit / proxy replay can't re-run the model stack.
+  const idemKey = req.headers.get("idempotency-key");
+  if (idemKey && (await claimIdempotencyKey(`gen:${idemKey}`)) === "duplicate") {
+    return NextResponse.json(
+      { error: "duplicate request (idempotency-key already used)" },
+      { status: 409 },
+    );
+  }
+  if (guardBody?.session_id) {
+    // Durable global + per-session spend cap (Mongo-backed; shared across
+    // replicas and restart-proof — the backend meter is only per-container).
+    const reason = await spendOverCap(guardBody.session_id);
+    if (reason) {
+      return NextResponse.json(
+        {
+          error: `spend cap reached — ${reason}. Raise/unset MAX_DAILY_SPEND / MAX_SESSION_SPEND.`,
+        },
+        { status: 429 },
+      );
+    }
+    await recordSpend(guardBody.session_id, estimateGenerationCost(guardBody));
+  }
   try {
     const parsed = JSON.parse(rawText) as GenerateRequestBody;
     let mutated = false;

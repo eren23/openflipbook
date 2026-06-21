@@ -130,6 +130,17 @@ describe("applyEntityEdit (P5 structured geo edits)", () => {
     expect(applyEntityEdit(base(), { op: "remove", target: "geo_a" }, "t")).toEqual([]);
   });
 
+  it("remove re-roots orphaned children instead of leaving a dangling parent_id", () => {
+    const parent = geo("geo_uu", "derived", 10, 10);
+    const child = { ...geo("geo_tower", "derived", 1, 2), parent_id: "geo_uu" };
+    const sibling = { ...geo("geo_lib", "derived", 3, 4), parent_id: "geo_uu" };
+    const out = applyEntityEdit([parent, child, sibling], { op: "remove", target: "geo_uu" }, "t");
+    expect(out.map((e) => e.id).sort()).toEqual(["geo_lib", "geo_tower"]);
+    // Children must NOT keep pointing at the removed parent — else
+    // resolveAbsolutePos mis-places them as roots in their own local frame.
+    expect(out.every((e) => (e.parent_id ?? null) === null)).toBe(true);
+  });
+
   it("add appends a user entity with defaults + deterministic id", () => {
     const out = applyEntityEdit(base(), { op: "add", label: "Well", pos: { x: 2, y: 4 } }, "t");
     expect(out).toHaveLength(2);

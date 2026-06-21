@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getNode, publishSession, unpublishSession } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
+import { requireOwner } from "@/lib/session-owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,10 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  // Only the session owner may publish it (blocks publishing on someone else's
+  // behalf even with a leaked {session_id, node_id} pair).
+  const auth = await requireOwner(body.session_id);
+  if (!auth.ok) return auth.res;
   const node = await getNode(body.node_id);
   if (!node || node.session_id !== body.session_id) {
     return NextResponse.json(
@@ -89,6 +94,10 @@ export async function DELETE(req: Request) {
   if (!sessionId) {
     return NextResponse.json({ error: "missing session_id" }, { status: 400 });
   }
+  // Only the owner may unpublish — closes the "unpublish anyone's session by id"
+  // griefing hole.
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
   const removed = await unpublishSession(sessionId);
   return NextResponse.json({ ok: true, removed });
 }

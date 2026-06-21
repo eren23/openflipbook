@@ -1,10 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { debugAccessAllowed } from "@/lib/debug-access";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  // Proxies the backend trace buffer (cross-tenant) — gate like the errors GET.
+  if (!debugAccessAllowed(req)) {
+    return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+  }
   const modalUrl = process.env.MODAL_API_URL;
   if (!modalUrl) {
     return NextResponse.json(

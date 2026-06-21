@@ -131,6 +131,11 @@ export interface NodeDoc extends Document {
   // Geometric world (GEOMETRIC_WORLD): the observer pose + view level this
   // scene was rendered from. Optional + null for pre-geometry / classic nodes.
   scene_view?: SceneView | null;
+  // When entity extraction last RAN for this node (set even if it found zero
+  // entities). Durable "already extracted" marker so a later revisit / reload
+  // never silently re-runs the non-deterministic VLM pass. Absent on legacy
+  // rows → treated as "not yet extracted".
+  geo_extracted_at?: Date | null;
   created_at: Date;
 }
 
@@ -175,6 +180,9 @@ export interface NodeRow {
   // pre-geometry / classic nodes. Read back on revisit so the minimap scopes to
   // the right frame and the entered angle is reproducible.
   scene_view: SceneView | null;
+  // Whether entity extraction has already run for this node. Read back on
+  // revisit so the client never auto-re-extracts a node it has already done.
+  geo_extracted: boolean;
   created_at: string;
 }
 
@@ -188,6 +196,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     scale,
     scale_tier,
     scene_view,
+    geo_extracted_at,
     ...rest
   } = doc;
   return {
@@ -199,6 +208,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     scale: scale ?? "peer",
     scale_tier: scale_tier ?? null,
     scene_view: scene_view ?? null,
+    geo_extracted: geo_extracted_at != null,
     created_at: created_at.toISOString(),
   };
 }
@@ -396,6 +406,19 @@ export async function updateNodeEstimatedView(
     { $set: { "scene_view.view": view } },
   );
   return res.matchedCount === 1;
+}
+
+/** Stamp a node as having had entity extraction run (set even when it found
+ *  zero entities). The durable counterpart to the client's in-memory
+ *  "already attempted" guard — read back via `NodeRow.geo_extracted` so a
+ *  revisit / reload never silently re-runs the non-deterministic VLM pass.
+ *  Best-effort + idempotent; the caller never blocks on it. */
+export async function markNodeGeoExtracted(id: string): Promise<void> {
+  const collection = await nodes();
+  await collection.updateOne(
+    { _id: id },
+    { $set: { geo_extracted_at: new Date() } },
+  );
 }
 
 /** The root→node path: walk parent_id up from `nodeId` (cycle-guarded,

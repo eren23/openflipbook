@@ -3,6 +3,8 @@ import type { ScaleTier, SceneView } from "@openflipbook/config";
 import { insertNode } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { readServerEnv } from "@/lib/env";
+import { requireOwner } from "@/lib/session-owner";
+import { getIdempotentResult, saveIdempotentResult } from "@/lib/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +46,23 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  // First writer claims the session; later writers must own it (blocks
+  // cross-tenant node insertion / poisoning).
+  const auth = await requireOwner(body.session_id);
+  if (!auth.ok) return auth.res;
+
+  // Idempotent create: a retry with the same Idempotency-Key returns the
+  // already-persisted node instead of inserting a duplicate (and skips the
+  // re-upload).
+  const idemKey = req.headers.get("idempotency-key");
+  if (idemKey) {
+    const cached = await getIdempotentResult<{
+      id: string;
+      image_url: string;
+      created_at: string;
+    }>(`node:${idemKey}`);
+    if (cached) return NextResponse.json(cached);
+  }
 
   const decoded = decodeDataUrl(body.image_data_url);
   const extension = decoded.contentType === "image/png" ? "png" : "jpg";
@@ -70,9 +89,11 @@ export async function POST(req: Request) {
     scene_view: body.scene_view ?? null,
   });
 
-  return NextResponse.json({
+  const result = {
     id: row.id,
     image_url: uploaded.url,
     created_at: row.created_at,
-  });
+  };
+  if (idemKey) await saveIdempotentResult(`node:${idemKey}`, result);
+  return NextResponse.json(result);
 }

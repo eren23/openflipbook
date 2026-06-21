@@ -38,6 +38,8 @@ class SegmentEntity(TypedDict):
 
 MAX_VERTICES = 24
 MIN_VERTICES = 3
+_MAX_SAM3_LABELS = 12  # cap paid SAM3 jobs per scene (one fal call per label)
+_SAM3_CONCURRENCY = 4  # in-flight SAM3 calls — bound provider rate-limit pressure
 
 
 def _segmenter_model() -> str:
@@ -311,7 +313,21 @@ async def _segment_sam3(
         }
         return seg, box_h
 
-    results = [r for r in await asyncio.gather(*[one(label) for label in labels]) if r]
+    # Bound the fan-out: a busy scene can emit many labels, and one paid fal SAM3
+    # job per label (unbounded) is both a cost and a provider rate-limit hazard.
+    # Cap the label count and the in-flight concurrency.
+    capped = labels[:_MAX_SAM3_LABELS]
+    if len(labels) > len(capped):
+        from obs import log
+
+        log("warn", "segmenter.sam3.labels_capped", total=len(labels), kept=len(capped))
+    sem = asyncio.Semaphore(_SAM3_CONCURRENCY)
+
+    async def _bounded(label: str) -> tuple[SegmentEntity, float] | None:
+        async with sem:
+            return await one(label)
+
+    results = [r for r in await asyncio.gather(*[_bounded(label) for label in capped]) if r]
     if not results:
         return []
     tallest = max((box_h for _, box_h in results), default=0.0)
@@ -359,7 +375,10 @@ async def _segment_vlm(image_bytes: bytes, labels: list[str]) -> list[SegmentEnt
             ],
         },
     ]
-    resp = await client.chat.completions.create(
+    # Via _create_with_retry so a transient 429/5xx retries instead of dropping
+    # this label silently (the client now disables the SDK's own retries).
+    resp = await llm._create_with_retry(
+        client,
         model=model,
         messages=messages,
         temperature=0.0,
