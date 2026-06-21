@@ -910,6 +910,11 @@ export default function PlayPage() {
                 },
                 traceId
               ).then((saved) => {
+                // A newer generation or a navigation aborted this one while the
+                // node was persisting. This .then is detached from the fetch
+                // reader, so without this guard it would clobber the current
+                // page/history/URL with THIS (stale) node. (#3)
+                if (ac.signal.aborted) return;
                 if (saved) {
                   const persisted: Page = {
                     nodeId: saved.id,
@@ -972,6 +977,15 @@ export default function PlayPage() {
                       ? { ...body.scene_view, node_id: saved.id }
                       : null,
                     traceId,
+                  }).then((res) => {
+                    // Surface a silent extraction miss (error or 0/0 even after
+                    // the one retry) so the user isn't left on a page whose taps
+                    // quietly mis-behave with no signal. Reuses localizeStatus so
+                    // the "Map it" affordance is one click, overlay or not. (#6)
+                    if (ac.signal.aborted) return;
+                    if (!res || (res.added === 0 && res.updated === 0)) {
+                      setLocalizeStatus({ nodeId: saved.id, status: "failed" });
+                    }
                   });
                 }
               });
@@ -1085,6 +1099,11 @@ export default function PlayPage() {
     outputLocale,
     styleAnchor,
     history,
+    // Read by the logical-AROUND branch above — omitting these captured a stale
+    // map/flag, so the E-key / Around button grounded blooms in old or empty
+    // neighbours after the geo map seeded or World Mode toggled. (#9)
+    worldEnabled,
+    geoMap.entities,
   ]);
 
   const acceptUploadedImage = useCallback(
@@ -1095,6 +1114,11 @@ export default function PlayPage() {
       }
       try {
         const dataUrl = await readFileAsDataUrl(file);
+        // Join the abort scheme so a generation/navigation that supersedes this
+        // upload flips ac.signal and the detached persist .then below bails (#3).
+        abortRef.current?.abort();
+        const ac = new AbortController();
+        abortRef.current = ac;
         const seedTitle = "Uploaded image";
         const seedQuery = "Uploaded image";
         setPage({
@@ -1123,6 +1147,7 @@ export default function PlayPage() {
           },
           uploadTrace
         ).then((saved) => {
+          if (ac.signal.aborted) return;
           if (saved) {
             const persisted: Page = {
               nodeId: saved.id,
@@ -3432,6 +3457,29 @@ export default function PlayPage() {
               )}
 
             {phase === "generating" && <GeneratingBanner statusMsg={statusMsg} />}
+
+            {phase === "ready" &&
+              localizeStatus?.status === "failed" &&
+              localizeStatus.nodeId === page?.nodeId && (
+                <div className="pointer-events-auto absolute bottom-3 left-3 flex items-center gap-3 rounded-full bg-amber-700/90 px-4 py-2 text-xs text-white shadow-lg">
+                  <span>Couldn’t map this page — taps may miss.</span>
+                  <button
+                    type="button"
+                    onClick={() => void localizeCurrentNode()}
+                    className="rounded-full bg-white/20 px-2.5 py-1 font-medium hover:bg-white/30"
+                  >
+                    Map it
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Dismiss"
+                    onClick={() => setLocalizeStatus(null)}
+                    className="text-white/70 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
             {phase !== "generating" &&
               streamStatus === "connecting" &&
