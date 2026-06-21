@@ -168,6 +168,23 @@ function slugLabel(label: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+/** Re-root (parent_id = null) any survivor whose parent points at a removed id.
+ *  Without this, `resolveAbsolutePos` treats the orphan as a root and composes
+ *  its LOCAL pos as if it were absolute — silently mis-placing it and skewing
+ *  `recomputeBounds`. Pure; entities whose parent survives are returned as-is. */
+function rerootOrphans(
+  entities: WorldEntityGeo[],
+  removedIds: Iterable<string>,
+): WorldEntityGeo[] {
+  const removed = new Set(removedIds);
+  if (removed.size === 0) return entities;
+  return entities.map((e) =>
+    e.parent_id != null && removed.has(e.parent_id)
+      ? { ...e, parent_id: null }
+      : e,
+  );
+}
+
 /** Apply one structured geo edit to the entity list. Pure + total: an edit whose
  *  target id isn't present is a no-op (never throws). Edited/added entities are
  *  stamped `source:"user"` so a later derived re-seed can't clobber the change. */
@@ -194,7 +211,12 @@ export function applyEntityEdit(
     return [...entities, added];
   }
   if (edit.op === "remove") {
-    return entities.filter((e) => e.id !== edit.target);
+    // Drop the target AND re-root its children — leaving a dangling parent_id
+    // silently mis-places them (see rerootOrphans).
+    return rerootOrphans(
+      entities.filter((e) => e.id !== edit.target),
+      [edit.target],
+    );
   }
   return entities.map((e) => {
     if (e.id !== edit.target) return e;
@@ -345,6 +367,39 @@ export async function applyEntityEdits(
       };
     },
     { retryLimit: OPTIMISTIC_RETRY_LIMIT, isDuplicateKeyError, label: "applyEntityEdits" },
+  );
+  return snapshotFromDoc(next);
+}
+
+/** Remove geometry entries by id under optimistic concurrency — used when a
+ *  codex entity is deleted (drop its `geo_<id>`) or to revert a failed ascend
+ *  (drop the phantom container). Re-roots any orphaned children so they don't
+ *  silently mis-resolve. Missing ids are a no-op. */
+export async function removeEntityGeos(
+  sessionId: string,
+  ids: string[],
+): Promise<WorldMapSnapshot> {
+  if (ids.length === 0) return getWorldMap(sessionId);
+  const removeSet = new Set(ids);
+  const col = await collection();
+  const next = await optimisticReplace<WorldMapDoc>(
+    col,
+    sessionId,
+    (existing) => {
+      const now = new Date();
+      const kept = rerootOrphans(
+        (existing ? existing.entities : []).filter((e) => !removeSet.has(e.id)),
+        ids,
+      );
+      return {
+        _id: sessionId,
+        entities: kept,
+        bounds: recomputeBounds(kept),
+        schema_version: SCHEMA_VERSION,
+        updated_at: now,
+      };
+    },
+    { retryLimit: OPTIMISTIC_RETRY_LIMIT, isDuplicateKeyError, label: "removeEntityGeos" },
   );
   return snapshotFromDoc(next);
 }

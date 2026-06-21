@@ -7,6 +7,7 @@ import {
   setEntityAppearance,
   undoDeleteEntity,
 } from "@/lib/world";
+import { removeEntityGeos } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import type { WorldEntityMutation } from "@openflipbook/config";
@@ -74,6 +75,11 @@ export async function POST(req: Request, { params }: Params) {
       }
       case "delete": {
         const snapshot = await deleteEntity(sessionId, mutation.id);
+        // Keep the geo map in step with the codex: drop the deleted entity's
+        // `geo_<id>` (and re-root any children) so it doesn't linger in the
+        // overlay + world bounds. Best-effort — the codex delete is the source
+        // of truth; a later re-sighting re-seeds geometry.
+        await removeEntityGeos(sessionId, [`geo_${mutation.id}`]).catch(() => {});
         return NextResponse.json(snapshot);
       }
       case "undo_delete": {
