@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updateNodeEstimatedView } from "@/lib/db";
+import { markNodeGeoExtracted, updateNodeEstimatedView } from "@/lib/db";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import { deriveGeoFromExtraction } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
@@ -161,6 +161,15 @@ export async function POST(req: Request, { params }: Params) {
       node_id: body.node_id,
       result: upstreamResult,
     });
+    // Durable "already extracted" stamp — set whether or not entities were
+    // found, so a revisit/reload skips the auto-localize re-run that used to
+    // re-extract box-less nodes (non-deterministic → different results each
+    // time). Best-effort: a failed stamp must not break the response.
+    try {
+      await markNodeGeoExtracted(body.node_id);
+    } catch {
+      // best-effort only
+    }
     // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
     // entities localized on this node — the world map populates for free. Default
     // scene_view = a top-down map so each bbox maps straight into a normalized

@@ -168,6 +168,11 @@ interface Page {
   // minimap to the place you're inside; null/absent on the world map + classic
   // pages → the minimap shows the whole world frame.
   sceneView?: SceneView | null;
+  // Whether entity extraction has already run for this node (read back from
+  // Mongo on revisit/reload). Gates the auto-localize effect so a revisit never
+  // silently re-runs the non-deterministic VLM pass. Absent on freshly-created
+  // pages this session → the in-memory attempt guard covers them instead.
+  geoExtracted?: boolean;
 }
 
 function newSessionId(): string {
@@ -536,6 +541,11 @@ export default function PlayPage() {
   useEffect(() => {
     const nodeId = page?.nodeId;
     if (!geoOverlayOn || !nodeId || phase !== "ready") return;
+    // Extraction already ran for this node (persisted in Mongo, read back on
+    // load). Never auto-re-run the non-deterministic VLM on a revisit/reload —
+    // that's what made geo results drift between visits. Manual localize still
+    // forces a re-run.
+    if (page?.geoExtracted) return;
     // Wait for the world snapshot to hydrate before deciding the node is
     // box-less — `entities` is empty during the initial fetch, so acting on
     // `phase` alone would re-extract a node whose geometry is already in Mongo.
@@ -549,6 +559,7 @@ export default function PlayPage() {
   }, [
     geoOverlayOn,
     page?.nodeId,
+    page?.geoExtracted,
     phase,
     worldState.loading,
     worldState.updatedAt,
@@ -1770,6 +1781,7 @@ export default function PlayPage() {
             click_in_parent: { x_pct: number; y_pct: number } | null;
             sources?: { url: string; title: string | null }[] | null;
             scene_view?: SceneView | null;
+            geo_extracted?: boolean;
           }>;
         };
         if (cancelled) return;
@@ -1783,6 +1795,7 @@ export default function PlayPage() {
           parentId: n.parent_id,
           sources: Array.isArray(n.sources) ? n.sources : [],
           sceneView: n.scene_view ?? null,
+          geoExtracted: n.geo_extracted ?? false,
           ...(n.click_in_parent
             ? {
                 clickInParent: {

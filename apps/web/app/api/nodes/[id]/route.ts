@@ -32,6 +32,7 @@ export async function GET(_req: Request, { params }: Params) {
     aspect_ratio: row.aspect_ratio,
     click_in_parent: row.click_in_parent,
     sources: row.sources,
+    geo_extracted: row.geo_extracted,
     created_at: row.created_at,
   });
 }
