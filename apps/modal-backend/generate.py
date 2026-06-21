@@ -88,7 +88,10 @@ def _client_ip(req: Request) -> str:
     forwarded = req.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
-    return req.client.host if req.client else "unknown"
+    # getattr: a malformed/mocked request may lack `.client` — never crash the
+    # rate-limit pre-flight over a missing attribute (it just buckets as anon).
+    client = getattr(req, "client", None)
+    return client.host if client else "unknown"
 
 
 def _rate_limited(req: Request) -> JSONResponse | None:
@@ -101,6 +104,32 @@ def _rate_limited(req: Request) -> JSONResponse | None:
     return JSONResponse(
         {"error": "rate limited — slow down (RATE_LIMIT_RPM)"}, status_code=429
     )
+
+
+def _paid_guard(
+    req: Request, trace_id: str, session_id: str | None = None
+) -> JSONResponse | None:
+    """Pre-flight for the NON-streaming paid endpoints (extract / edit / plan /
+    precompute): per-IP rate limit + the daily/session spend cap. The streaming
+    /sse/generate path has its own inline gate. Returns the response to send, or
+    None to proceed. Both controls default off (env unset)."""
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
+    from providers import spend
+
+    reason = spend.over_cap(session_id)
+    if reason is not None:
+        return JSONResponse(
+            {
+                "error": f"spend cap reached — {reason}. "
+                "Raise/unset MAX_DAILY_SPEND / MAX_SESSION_SPEND to continue.",
+                "trace_id": trace_id,
+            },
+            status_code=429,
+            headers={"X-Trace-Id": trace_id},
+        )
+    return None
 
 
 class Click(BaseModel):
@@ -2469,8 +2498,13 @@ async def precompute_candidates(req: Request, body: PrecomputeBody):
     """
     from obs import TRACE_HEADER, bind_trace, record_error
     from providers import llm as llm_provider
+    from providers import spend
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    guard = _paid_guard(req, trace_id)
+    if guard is not None:
+        return guard
+    spend.record_vlm_call("_anon")
     try:
         cands = await llm_provider.precompute_click_candidates(
             image_data_url=body.image_data_url,
@@ -2566,8 +2600,13 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     """
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers import spend
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    guard = _paid_guard(req, trace_id, body.session_id)
+    if guard is not None:
+        return guard
+    spend.record_vlm_call(body.session_id)
     img_size_kb = len(body.image_data_url) // 1024
     log(
         "info",
@@ -2781,10 +2820,15 @@ async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
     """
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers import spend
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     if not _geometric_world_on():
         return _gate_json("geometric world disabled (set GEOMETRIC_WORLD=1)", trace_id)
+    guard = _paid_guard(req, trace_id, body.session_id)
+    if guard is not None:
+        return guard
+    spend.record_vlm_call(body.session_id)
     log(
         "info",
         "edit_entities.request",
@@ -2834,12 +2878,17 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody):
 
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers import spend
     from providers.geometry_checks import check_geo_entities
     from providers.layout_solver import solve_layout
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     if not env_flag("WORLD_FROM_DESCRIPTION"):
         return _gate_json("describe-a-place disabled (set WORLD_FROM_DESCRIPTION=1)", trace_id)
+    guard = _paid_guard(req, trace_id, body.session_id)
+    if guard is not None:
+        return guard
+    spend.record_vlm_call(body.session_id)
     log("info", "plan_world.request", session_id=body.session_id,
         description_len=len(body.description or ""), answers=len(body.answers))
     try:
