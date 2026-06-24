@@ -135,6 +135,22 @@ def test_expected_layout_needs_two_real_heights() -> None:
 # --- scenario resolution -----------------------------------------------------
 
 
+def test_corpus_scenarios_filters_by_tier() -> None:
+    from tests.map_corpus import load_descriptions, load_manifest
+
+    closeups = corpus_scenarios(["corpus:tier=closeup"])
+    ids = {s.id for s in closeups}
+    expected = {m["id"] for m in load_manifest(tier="closeup")} & {
+        d["map_id"] for d in load_descriptions(status="verified")
+    }
+    assert ids == expected and expected  # resolves the verified closeups, non-empty
+    # maps must NOT leak into a closeup-tier sweep
+    assert "fantasy-treasure-island" not in ids
+    # and a map-tier sweep excludes the closeups
+    map_ids = {s.id for s in corpus_scenarios(["corpus:tier=map"])}
+    assert "fantasy-treasure-island" in map_ids and not (map_ids & ids)
+
+
 def test_corpus_scenarios_verified_only_and_deduped() -> None:
     scenarios = corpus_scenarios(["corpus:*", "corpus:fantasy-treasure-island"])
     ids = [s.id for s in scenarios]
