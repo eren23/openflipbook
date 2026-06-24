@@ -1,240 +1,513 @@
 {
  "map_id": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci",
- "rev": 1,
+ "rev": 2,
  "genre": "palace-grand-hall-interior",
- "style": "Baroque ceiling with gilded stucco and frescoed panels; rich gold, deep blues, and earth tones; dramatic chiaroscuro lighting",
+ "style": "Baroque ceiling with gilded stucco and frescoed panels; rich gold, deep blues, and dramatic chiaroscuro; highly ornate and theatrical.",
  "scale_tier": "room",
  "frame": {
   "w": 100.0,
   "h": 60.0
  },
- "description": "This low-angle shot captures the opulent, heavily ornamented ceiling of a grand hall, likely within the Doge's Palace. The layout is defined by a massive, gilded wooden framework that divides the ceiling into various geometric compartments. In the center-right, a large oval painting is encased in thick, scrolled gold molding. To the left and foreground, rectangular and irregularly shaped panels feature dynamic, multi-figure oil paintings depicting historical or allegorical scenes with rich blues, reds, and earthy tones. The gold leaf on the carvings is highly reflective, catching light from below to create deep shadows and bright highlights. Along the bottom edge of the frame, a frieze of smaller, arched portraits sits above large wall-mounted canvases, suggesting a continuous narrative cycle. The perspective is tilted upward, emphasizing the monumental scale and the intricate craftsmanship of the three-dimensional carvings that separate the painted masterpieces.",
+ "description": "This is a low-angle shot looking up at a lavishly decorated Renaissance or Baroque ceiling, likely within a Venetian palace. The layout is a complex grid of deeply recessed coffered panels. In the center-right, a large oval painting serves as the focal point, surrounded by an exceptionally thick, ornate gilded frame featuring scrollwork and dentil molding. To the left and foreground, several rectangular and irregularly shaped panels contain dramatic oil paintings depicting mythological or historical scenes with dynamic figures and cloudy skies. The entire ceiling structure is covered in bright gold leaf, which catches the light to create deep shadows and brilliant highlights. Below the ceiling, along the right and bottom edges, a frieze of smaller portrait-like paintings in arched frames transitions into large-scale wall murals. The lighting is ambient but directional, emphasizing the three-dimensional relief of the wood carvings and the rich textures of the canvas paintings.",
  "entities": [
   {
-   "ref": "central-oval-painting",
+   "ref": "central-oval-medallion",
    "kind": "item",
-   "label": "Central Oval Painting",
-   "visual": "Large oval canvas depicting mythological figures, clouds, and blue sky, framed in gold",
+   "label": "Central Oval Medallion",
+   "visual": "Large oval fresco with crowded figures, blue sky, clouds, vibrant colors.",
    "pos": {
     "x": 67.1,
     "y": 25.8
    },
    "footprint": {
-    "w": 47.0,
-    "d": 20.4
+    "w": 47.4,
+    "d": 21.0
    },
-   "height_rel": 1.0,
-   "height_m": 0.5,
+   "height_rel": 0.34018706945770505,
+   "height_m": null,
    "border": [
     [
-     43.8,
-     60.0
+     85.9,
+     26.0
+    ],
+    [
+     80.5,
+     29.4
+    ],
+    [
+     76.6,
+     31.2
+    ],
+    [
+     73.4,
+     32.5
+    ],
+    [
+     70.3,
+     33.1
+    ],
+    [
+     67.6,
+     34.0
+    ],
+    [
+     64.1,
+     34.6
+    ],
+    [
+     58.6,
+     35.6
+    ],
+    [
+     50.8,
+     35.6
+    ],
+    [
+     44.1,
+     31.9
+    ],
+    [
+     48.8,
+     26.0
+    ],
+    [
+     54.3,
+     22.6
+    ],
+    [
+     58.6,
+     20.7
+    ],
+    [
+     61.7,
+     19.8
+    ],
+    [
+     64.5,
+     18.6
+    ],
+    [
+     67.6,
+     17.9
+    ],
+    [
+     71.1,
+     17.0
+    ],
+    [
+     76.6,
+     16.1
+    ],
+    [
+     84.4,
+     16.4
+    ],
+    [
+     89.8,
+     20.1
+    ]
+   ]
+  },
+  {
+   "ref": "gilded-frame",
+   "kind": "item",
+   "label": "Gilded Frame",
+   "visual": "Thick ornate gold-leafed border with scrolls, acanthus leaves, molding.",
+   "pos": {
+    "x": 49.9,
+    "y": 29.9
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 59.9
+   },
+   "height_rel": 0.9996791647829423,
+   "height_m": null,
+   "border": [
+    [
+     38.3,
+     28.8
+    ],
+    [
+     38.7,
+     29.1
+    ],
+    [
+     38.3,
+     29.4
+    ],
+    [
+     37.9,
+     29.4
+    ],
+    [
+     37.9,
+     29.1
+    ],
+    [
+     37.9,
+     28.8
+    ],
+    [
+     38.3,
+     28.5
+    ]
+   ]
+  },
+  {
+   "ref": "rectangular-ceiling-panel",
+   "kind": "item",
+   "label": "Rectangular Ceiling Panel",
+   "visual": "Large rectangular fresco with mythological figures in bright sky.",
+   "pos": {
+    "x": 21.5,
+    "y": 44.6
+   },
+   "footprint": {
+    "w": 42.9,
+    "d": 14.0
+   },
+   "height_rel": 0.22754011380860076,
+   "height_m": null,
+   "border": [
+    [
+     39.5,
+     44.8
+    ],
+    [
+     31.2,
+     47.6
+    ],
+    [
+     27.7,
+     48.9
+    ],
+    [
+     25.4,
+     49.5
+    ],
+    [
+     23.4,
+     50.4
+    ],
+    [
+     21.1,
+     51.0
+    ],
+    [
+     18.4,
+     50.7
+    ],
+    [
+     16.0,
+     50.1
+    ],
+    [
+     12.9,
+     49.5
+    ],
+    [
+     7.0,
+     48.2
+    ],
+    [
+     5.9,
+     44.8
+    ],
+    [
+     10.9,
+     42.4
+    ],
+    [
+     13.7,
+     40.5
+    ],
+    [
+     16.0,
+     39.3
+    ],
+    [
+     18.4,
+     38.0
+    ],
+    [
+     21.1,
+     38.4
+    ],
+    [
+     23.4,
+     39.0
+    ],
+    [
+     25.8,
+     39.6
+    ],
+    [
+     28.5,
+     40.5
+    ],
+    [
+     32.0,
+     42.1
+    ]
+   ]
+  },
+  {
+   "ref": "decorative-frieze",
+   "kind": "item",
+   "label": "Decorative Frieze",
+   "visual": "Row of small arched paintings with robed figures along wall top.",
+   "pos": {
+    "x": 50.1,
+    "y": 54.2
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 11.5
+   },
+   "height_rel": 0.20615115756239324,
+   "height_m": null,
+   "border": [
+    [
+     99.6,
+     55.4
+    ],
+    [
+     80.9,
+     58.5
+    ],
+    [
+     77.0,
+     59.7
+    ],
+    [
+     73.4,
+     59.7
+    ],
+    [
+     71.5,
+     59.7
+    ],
+    [
+     69.5,
+     59.7
+    ],
+    [
+     67.6,
+     59.7
+    ],
+    [
+     65.6,
+     59.7
+    ],
+    [
+     61.7,
+     59.7
+    ],
+    [
+     52.3,
+     59.7
+    ],
+    [
+     62.9,
+     55.4
+    ],
+    [
+     66.8,
+     54.7
+    ],
+    [
+     68.4,
+     54.7
+    ],
+    [
+     68.8,
+     54.7
+    ],
+    [
+     69.1,
+     54.4
+    ],
+    [
+     69.5,
+     54.4
+    ],
+    [
+     69.9,
+     54.4
+    ],
+    [
+     70.7,
+     54.1
+    ],
+    [
+     72.3,
+     53.8
+    ],
+    [
+     86.7,
+     51.0
+    ]
+   ]
+  },
+  {
+   "ref": "gilded-ceiling-grid",
+   "kind": "item",
+   "label": "Gilded Ceiling Grid",
+   "visual": "Intersecting gilded beams with carved scrollwork forming rectangular compartments.",
+   "pos": {
+    "x": 49.9,
+    "y": 29.9
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 59.9
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": null
+  },
+  {
+   "ref": "ornate-cornice",
+   "kind": "item",
+   "label": "Ornate Cornice",
+   "visual": "Decorative gold molding along ceiling edge with intricate baroque design.",
+   "pos": {
+    "x": 50.1,
+    "y": 48.7
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 9.0
+   },
+   "height_rel": 0.21131139028581558,
+   "height_m": null,
+   "border": [
+    [
+     49.2,
+     49.8
+    ],
+    [
+     49.2,
+     50.1
+    ],
+    [
+     48.8,
+     50.1
+    ],
+    [
+     48.4,
+     50.1
     ],
     [
      48.0,
-     60.0
+     50.1
     ],
     [
-     56.0,
-     60.0
+     48.4,
+     49.8
     ],
     [
-     66.0,
-     60.0
+     48.8,
+     49.8
+    ]
+   ]
+  },
+  {
+   "ref": "frescoed-ceiling",
+   "kind": "place",
+   "label": "Frescoed Ceiling",
+   "visual": "Entire ceiling surface covered in vibrant paintings and gilding.",
+   "pos": {
+    "x": 49.9,
+    "y": 29.9
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 59.9
+   },
+   "height_rel": 1.0,
+   "height_m": null,
+   "border": [
+    [
+     99.2,
+     28.8
     ],
     [
-     78.0,
-     60.0
+     98.4,
+     41.4
     ],
     [
-     88.0,
-     60.0
-    ],
-    [
-     90.5,
-     60.0
-    ],
-    [
-     86.0,
-     60.0
-    ],
-    [
-     78.0,
-     60.0
+     79.3,
+     45.8
     ],
     [
      68.0,
-     60.0
+     49.5
     ],
     [
-     56.0,
-     60.0
+     58.2,
+     51.0
     ],
     [
-     47.0,
-     60.0
-    ]
-   ]
-  },
-  {
-   "ref": "gilded-framework",
-   "kind": "item",
-   "label": "Gilded Framework",
-   "visual": "Intricately carved, gold-leafed wooden beams with scrolls, leaves, and cartouches",
-   "pos": {
-    "x": 50.0,
-    "y": 30.0
-   },
-   "footprint": {
-    "w": 100.0,
-    "d": 60.0
-   },
-   "height_rel": 0.8,
-   "height_m": 0.4,
-   "border": [
-    [
-     32.0,
-     60.0
+     49.2,
+     53.2
     ],
     [
-     41.0,
-     60.0
+     37.9,
+     56.3
     ],
     [
-     52.0,
-     60.0
+     21.5,
+     58.8
     ],
     [
-     68.0,
-     60.0
+     3.1,
+     55.0
     ],
     [
-     82.0,
-     60.0
+     0.0,
+     41.1
     ],
     [
-     94.0,
-     60.0
+     0.0,
+     28.8
     ],
     [
-     96.0,
-     60.0
+     9.4,
+     18.6
     ],
     [
-     88.0,
-     60.0
+     17.6,
+     10.5
     ],
     [
-     72.0,
-     60.0
+     23.1,
+     0.3
     ],
     [
-     54.0,
-     60.0
+     44.1,
+     16.7
     ],
     [
-     42.0,
-     60.0
+     49.2,
+     16.7
     ],
     [
-     36.0,
-     60.0
+     57.0,
+     9.3
     ],
     [
-     34.0,
-     60.0
-    ]
-   ]
-  },
-  {
-   "ref": "rectangular-panel",
-   "kind": "item",
-   "label": "Rectangular Panel",
-   "visual": "Large rectangular painting showing dynamic historical or battle scenes",
-   "pos": {
-    "x": 21.4,
-    "y": 44.5
-   },
-   "footprint": {
-    "w": 42.8,
-    "d": 14.2
-   },
-   "height_rel": 0.6,
-   "height_m": 0.3,
-   "border": [
-    [
-     1.0,
-     60.0
+     68.8,
+     7.4
     ],
     [
-     18.0,
-     60.0
+     98.4,
+     0.3
     ],
     [
-     42.0,
-     60.0
-    ],
-    [
-     22.0,
-     60.0
-    ]
-   ]
-  },
-  {
-   "ref": "portrait-frieze",
-   "kind": "item",
-   "label": "Portrait Frieze",
-   "visual": "Row of small, arched individual portraits along the upper wall",
-   "pos": {
-    "x": 61.5,
-    "y": 52.5
-   },
-   "footprint": {
-    "w": 77.0,
-    "d": 15.0
-   },
-   "height_rel": 0.4,
-   "height_m": 0.2,
-   "border": [
-    [
-     24.0,
-     60.0
-    ],
-    [
-     38.0,
-     60.0
-    ],
-    [
-     54.0,
-     60.0
-    ],
-    [
-     72.0,
-     60.0
-    ],
-    [
-     88.0,
-     60.0
-    ],
-    [
-     99.0,
-     60.0
-    ],
-    [
-     88.0,
-     60.0
-    ],
-    [
-     72.0,
-     60.0
-    ],
-    [
-     54.0,
-     60.0
-    ],
-    [
-     38.0,
-     60.0
+     99.2,
+     15.8
     ]
    ]
   }
@@ -249,21 +522,16 @@
   "contributors": 3,
   "reconcile": "deepseek/deepseek-v4-pro",
   "min_votes": 2,
-  "iters": 2,
-  "judge_score": 10.0,
-  "agreement": 0.917,
+  "iters": 1,
+  "judge_score": 9.0,
+  "agreement": 0.762,
   "minority": [
-   "Wall Canvas",
-   "Scrolled Molding",
-   "Foreground Painting",
-   "Corner Medallion",
-   "Ceiling Beams",
+   "Upper Left Painting",
+   "Wall Mural",
    "Cloud Motif Painting",
-   "Acanthus Leaf Decoration",
-   "Volutes and Scrolls",
-   "Blue Backgrounds"
+   "Lighting"
   ],
-  "judge_rationale": "The description and entity list perfectly capture the complex geometry, specific subjects, and lighting of the ceiling."
+  "judge_rationale": "The description and entity list are highly accurate, though the description incorrectly identifies the oval as being in the 'center-right' when it is the central focal point."
  },
  "review": {
   "status": "verified",
