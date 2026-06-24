@@ -1,0 +1,9 @@
+{style}
+
+{description}
+
+{layout_clause}
+
+Render the WHOLE object centered and filling the frame — one coherent subject,
+nothing cropped, no collage panels. Make each named part distinct and
+identifiable. Keep any lettering sparse and legible — no garbled text.

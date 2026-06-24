@@ -1,0 +1,9 @@
+{style}
+
+{description}
+
+{layout_clause}
+
+Render the WHOLE interior as one coherent scene — the room or hall as described,
+with its fixtures in place, nothing cropped, no collage panels. A natural
+interior view, not a top-down plan. Keep any lettering sparse and legible.

@@ -1,0 +1,18 @@
+{
+  "name": "recon_interior",
+  "scenarios": ["corpus:tier=interior"],
+  "arms": ["graph", "direct"],
+  "models": ["fal-ai/nano-banana"],
+  "variants": ["recon_interior_base.v1"],
+  "params": { "aspect_ratio": "16:9" },
+  "judges": ["style_pair", "prompt_alignment", "feature_articulation"],
+  "composite_weights": {
+    "presence": 0.1,
+    "pos_aligned": 0.1,
+    "size": 0.1,
+    "style_pair": 0.25,
+    "prompt_alignment": 0.2,
+    "feature_articulation": 0.25
+  },
+  "budget_usd": 1.0
+}

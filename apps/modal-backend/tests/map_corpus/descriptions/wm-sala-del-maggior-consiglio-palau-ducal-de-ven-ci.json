@@ -1,0 +1,273 @@
+{
+ "map_id": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci",
+ "rev": 1,
+ "genre": "palace-grand-hall-interior",
+ "style": "Baroque ceiling with gilded stucco and frescoed panels; rich gold, deep blues, and earth tones; dramatic chiaroscuro lighting",
+ "scale_tier": "room",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "This low-angle shot captures the opulent, heavily ornamented ceiling of a grand hall, likely within the Doge's Palace. The layout is defined by a massive, gilded wooden framework that divides the ceiling into various geometric compartments. In the center-right, a large oval painting is encased in thick, scrolled gold molding. To the left and foreground, rectangular and irregularly shaped panels feature dynamic, multi-figure oil paintings depicting historical or allegorical scenes with rich blues, reds, and earthy tones. The gold leaf on the carvings is highly reflective, catching light from below to create deep shadows and bright highlights. Along the bottom edge of the frame, a frieze of smaller, arched portraits sits above large wall-mounted canvases, suggesting a continuous narrative cycle. The perspective is tilted upward, emphasizing the monumental scale and the intricate craftsmanship of the three-dimensional carvings that separate the painted masterpieces.",
+ "entities": [
+  {
+   "ref": "central-oval-painting",
+   "kind": "item",
+   "label": "Central Oval Painting",
+   "visual": "Large oval canvas depicting mythological figures, clouds, and blue sky, framed in gold",
+   "pos": {
+    "x": 67.1,
+    "y": 25.8
+   },
+   "footprint": {
+    "w": 47.0,
+    "d": 20.4
+   },
+   "height_rel": 1.0,
+   "height_m": 0.5,
+   "border": [
+    [
+     43.8,
+     60.0
+    ],
+    [
+     48.0,
+     60.0
+    ],
+    [
+     56.0,
+     60.0
+    ],
+    [
+     66.0,
+     60.0
+    ],
+    [
+     78.0,
+     60.0
+    ],
+    [
+     88.0,
+     60.0
+    ],
+    [
+     90.5,
+     60.0
+    ],
+    [
+     86.0,
+     60.0
+    ],
+    [
+     78.0,
+     60.0
+    ],
+    [
+     68.0,
+     60.0
+    ],
+    [
+     56.0,
+     60.0
+    ],
+    [
+     47.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "gilded-framework",
+   "kind": "item",
+   "label": "Gilded Framework",
+   "visual": "Intricately carved, gold-leafed wooden beams with scrolls, leaves, and cartouches",
+   "pos": {
+    "x": 50.0,
+    "y": 30.0
+   },
+   "footprint": {
+    "w": 100.0,
+    "d": 60.0
+   },
+   "height_rel": 0.8,
+   "height_m": 0.4,
+   "border": [
+    [
+     32.0,
+     60.0
+    ],
+    [
+     41.0,
+     60.0
+    ],
+    [
+     52.0,
+     60.0
+    ],
+    [
+     68.0,
+     60.0
+    ],
+    [
+     82.0,
+     60.0
+    ],
+    [
+     94.0,
+     60.0
+    ],
+    [
+     96.0,
+     60.0
+    ],
+    [
+     88.0,
+     60.0
+    ],
+    [
+     72.0,
+     60.0
+    ],
+    [
+     54.0,
+     60.0
+    ],
+    [
+     42.0,
+     60.0
+    ],
+    [
+     36.0,
+     60.0
+    ],
+    [
+     34.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "rectangular-panel",
+   "kind": "item",
+   "label": "Rectangular Panel",
+   "visual": "Large rectangular painting showing dynamic historical or battle scenes",
+   "pos": {
+    "x": 21.4,
+    "y": 44.5
+   },
+   "footprint": {
+    "w": 42.8,
+    "d": 14.2
+   },
+   "height_rel": 0.6,
+   "height_m": 0.3,
+   "border": [
+    [
+     1.0,
+     60.0
+    ],
+    [
+     18.0,
+     60.0
+    ],
+    [
+     42.0,
+     60.0
+    ],
+    [
+     22.0,
+     60.0
+    ]
+   ]
+  },
+  {
+   "ref": "portrait-frieze",
+   "kind": "item",
+   "label": "Portrait Frieze",
+   "visual": "Row of small, arched individual portraits along the upper wall",
+   "pos": {
+    "x": 61.5,
+    "y": 52.5
+   },
+   "footprint": {
+    "w": 77.0,
+    "d": 15.0
+   },
+   "height_rel": 0.4,
+   "height_m": 0.2,
+   "border": [
+    [
+     24.0,
+     60.0
+    ],
+    [
+     38.0,
+     60.0
+    ],
+    [
+     54.0,
+     60.0
+    ],
+    [
+     72.0,
+     60.0
+    ],
+    [
+     88.0,
+     60.0
+    ],
+    [
+     99.0,
+     60.0
+    ],
+    [
+     88.0,
+     60.0
+    ],
+    [
+     72.0,
+     60.0
+    ],
+    [
+     54.0,
+     60.0
+    ],
+    [
+     38.0,
+     60.0
+    ]
+   ]
+  }
+ ],
+ "relations": [],
+ "annotation": {
+  "ensemble": [
+   "google/gemini-3-flash-preview",
+   "qwen/qwen3-vl-32b-instruct",
+   "openai/gpt-4o-mini"
+  ],
+  "contributors": 3,
+  "reconcile": "deepseek/deepseek-v4-pro",
+  "min_votes": 2,
+  "iters": 2,
+  "judge_score": 10.0,
+  "agreement": 0.917,
+  "minority": [
+   "Wall Canvas",
+   "Scrolled Molding",
+   "Foreground Painting",
+   "Corner Medallion",
+   "Ceiling Beams",
+   "Cloud Motif Painting",
+   "Acanthus Leaf Decoration",
+   "Volutes and Scrolls",
+   "Blue Backgrounds"
+  ],
+  "judge_rationale": "The description and entity list perfectly capture the complex geometry, specific subjects, and lighting of the ceiling."
+ },
+ "review": {
+  "status": "verified",
+  "by": "ensemble-annotate",
+  "date": "2026-06-24"
+ }
+}

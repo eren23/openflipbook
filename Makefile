@@ -108,6 +108,20 @@ eval-recon-dry:
 	cd apps/modal-backend && .venv/bin/python -m tests.recon_bench.runner
 eval-recon:
 	cd apps/modal-backend && RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
+# Per-tier recon for the CLOSEUP tier (verified Met objects): same chassis, an
+# object-worded render template + object-parts judge (feature_articulation
+# instead of map_plausibility). RECON_SWEEP picks the sweep + report + baseline.
+eval-recon-closeup-dry:
+	cd apps/modal-backend && RECON_SWEEP=recon_closeup .venv/bin/python -m tests.recon_bench.runner
+eval-recon-closeup:
+	cd apps/modal-backend && RECON_SWEEP=recon_closeup RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
+# Per-tier recon for the INTERIOR tier (verified scene descriptions): scene-worded
+# template + image judges (style/alignment/feature_articulation); geo weighted low
+# since interior fixture positions are approximate (prose-decoupled, not grounded).
+eval-recon-interior-dry:
+	cd apps/modal-backend && RECON_SWEEP=recon_interior .venv/bin/python -m tests.recon_bench.runner
+eval-recon-interior:
+	cd apps/modal-backend && RECON_SWEEP=recon_interior RECON_BENCH_RUN=1 .venv/bin/python -m tests.recon_bench.runner
 # Descent reconstruction (M4): ENTER a parent map's linked place (a child
 # interior/closeup tied via parent_id+parent_ref to a parent entity), score the
 # region-conditioned descent against the REAL child photo (style + continuity)

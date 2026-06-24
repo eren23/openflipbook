@@ -1,0 +1,19 @@
+{
+  "name": "recon_closeup",
+  "scenarios": ["corpus:tier=closeup"],
+  "arms": ["graph", "direct"],
+  "models": ["fal-ai/nano-banana"],
+  "variants": ["recon_closeup_base.v1"],
+  "params": { "aspect_ratio": "1:1" },
+  "judges": ["style_pair", "prompt_alignment", "feature_articulation"],
+  "composite_weights": {
+    "presence": 0.25,
+    "pos_aligned": 0.2,
+    "pos_raw": 0.05,
+    "size": 0.1,
+    "style_pair": 0.15,
+    "prompt_alignment": 0.1,
+    "feature_articulation": 0.15
+  },
+  "budget_usd": 1.0
+}

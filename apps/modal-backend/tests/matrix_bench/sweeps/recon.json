@@ -1,6 +1,6 @@
 {
   "name": "recon",
-  "scenarios": ["corpus:*"],
+  "scenarios": ["corpus:tier=map"],
   "arms": ["graph", "direct"],
   "models": ["fal-ai/nano-banana"],
   "variants": ["recon_base.v1"],

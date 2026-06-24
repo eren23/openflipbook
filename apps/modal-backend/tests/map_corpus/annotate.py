@@ -161,21 +161,50 @@ def attach_geometry(
     detections: list[dict[str, Any]],
     segments: list[dict[str, Any]],
     heights_m: dict[str, float],
+    *,
+    keep_ungrounded: bool = False,
 ) -> list[dict[str, Any]]:
     """Bridge consensus labels to positioned corpus entities (ported from
     draft.py): detector box -> pos + footprint in the 100x60 frame, segmenter
-    polygon -> border + rel_height, anchored heights -> height_m. An entity the
-    detector did NOT box is dropped (its prose mention stays in the description).
-    Label matching is case-insensitive (the VLM often lowercases labels)."""
+    polygon -> border + rel_height, anchored heights -> height_m. Label matching
+    is case-insensitive (the VLM often lowercases labels).
+
+    An entity the detector did NOT box is dropped — UNLESS keep_ungrounded (the
+    interior/scene case, where the detector can't box room-fixtures): then it is
+    kept with a nominal spread placement so the fixture survives as scene ground
+    truth (positions are approximate, weighted ~0 in interior recon)."""
     det_by = {str(d["label"]).lower(): d for d in detections}
     seg_by = {str(s["label"]).lower(): s for s in segments}
     h_by = {str(k).lower(): v for k, v in heights_m.items()}
 
     out: list[dict[str, Any]] = []
+    ungrounded = 0
     for e in consensus:
         label = str(e["label"]).strip()
         det = det_by.get(label.lower())
         if det is None:
+            if not keep_ungrounded:
+                continue
+            grid = 3  # spread fixtures on a 3x3 nominal grid, deterministic by order
+            col, row = ungrounded % grid, (ungrounded // grid) % grid
+            ungrounded += 1
+            out.append(
+                {
+                    "ref": e["ref"],
+                    "kind": e.get("kind", "place"),
+                    "label": label,
+                    "visual": e.get("visual", ""),
+                    "votes": e.get("votes", 0),
+                    "pos": {
+                        "x": round((col + 1) / (grid + 1) * FRAME_W, 1),
+                        "y": round((row + 1) / (grid + 1) * FRAME_H, 1),
+                    },
+                    "footprint": {"w": round(FRAME_W * 0.15, 1), "d": round(FRAME_H * 0.15, 1)},
+                    "height_rel": 0.0,
+                    "height_m": None,
+                    "border": None,
+                }
+            )
             continue
         seg = seg_by.get(label.lower())
         h = h_by.get(label.lower())
@@ -665,7 +694,11 @@ async def annotate_one(map_id: str) -> Path:
         detections = await detect(image_bytes, labels)
         segments = await segment(image_bytes, labels, boxes=detections)
         heights_m = heights_lib.infer_heights_m(list(segments))
-        geo_entities = attach_geometry(consensus, detections, segments, heights_m)
+        # interiors: keep fixtures the detector can't box (rooms aren't top-down
+        # maps) so the scene's fixture set survives + drives agreement.
+        geo_entities = attach_geometry(
+            consensus, detections, segments, heights_m, keep_ungrounded=(tier == "interior")
+        )
 
         scale_tier = vote([d.get("scale_tier") for d in draft_dicts], default="region")
         style = _longest([str(d.get("style", "")) for d in draft_dicts])

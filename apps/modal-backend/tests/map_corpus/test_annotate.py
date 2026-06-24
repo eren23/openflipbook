@@ -260,6 +260,26 @@ def test_assemble_strips_votes_and_wires_provenance() -> None:
 # --- geometry bridge (consensus labels -> positioned entities) ---------------
 
 
+def test_attach_geometry_keep_ungrounded_places_fixtures() -> None:
+    # interiors: the detector can't box room-fixtures, so keep_ungrounded keeps
+    # them (nominal spread placement) instead of dropping -> they survive as
+    # scene ground truth + the fixture set drives agreement.
+    consensus = [
+        {"ref": "desk", "kind": "item", "label": "Reading Desk", "visual": "v", "votes": 3},
+        {"ref": "dome", "kind": "place", "label": "Dome", "visual": "", "votes": 2},
+    ]
+    out = attach_geometry(consensus, [], [], {}, keep_ungrounded=True)
+    assert [e["ref"] for e in out] == ["desk", "dome"]
+    for e in out:
+        assert 0.0 <= e["pos"]["x"] <= 100.0 and 0.0 <= e["pos"]["y"] <= 60.0
+        assert e["footprint"]["w"] > 0 and e["footprint"]["d"] > 0
+        assert e["border"] is None
+    assert out[0]["votes"] == 3 and out[1]["votes"] == 2
+    assert out[0]["pos"] != out[1]["pos"]  # spread, not stacked
+    # default (maps/closeups) still drops the undetected ones
+    assert attach_geometry(consensus, [], [], {}) == []
+
+
 def test_attach_geometry_scales_to_frame_and_drops_undetected() -> None:
     consensus = [
         {"ref": "tower", "kind": "place", "label": "The Tower", "visual": "v", "votes": 3},

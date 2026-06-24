@@ -31,24 +31,48 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from providers.geometry import ProjectedEntity, ProjectInput
 
-from tests.map_corpus import description_sha, image_path, load_descriptions
+from tests.map_corpus import (
+    description_sha,
+    image_path,
+    load_descriptions,
+    load_manifest,
+)
 from tests.matrix_bench._budget import JUDGE_CALL_FLAT
 from tests.matrix_bench._record import Cell, load_sweep, render_prompt
 from tests.matrix_bench.runner import EXTRACT_FLAT, Scenario, run_matrix
 from tests.recon_bench._align import FRAME_H, FRAME_W, geo_scores
 
-_REPORT = Path(__file__).resolve().parent / "reports" / "recon_latest.json"
-_SWEEP = Path(__file__).resolve().parents[1] / "matrix_bench" / "sweeps" / "recon.json"
+_SWEEPS_DIR = Path(__file__).resolve().parents[1] / "matrix_bench" / "sweeps"
+_REPORTS_DIR = Path(__file__).resolve().parent / "reports"
+
+
+def _sweep_name() -> str:
+    """Which sweep to run: RECON_SWEEP (default "recon" = maps; "recon_closeup"
+    = the closeup tier). Picks the sweep file, the report, and the baseline key."""
+    return os.environ.get("RECON_SWEEP", "recon")
+
+
+def _sweep_path() -> Path:
+    return _SWEEPS_DIR / f"{_sweep_name()}.json"
+
+
+def _report_path() -> Path:
+    return _REPORTS_DIR / f"{_sweep_name()}_latest.json"
 
 
 def corpus_scenarios(specs: list[str]) -> list[Scenario]:
     """Resolve sweep scenario specs: "corpus:*" → every VERIFIED corpus
-    description; "corpus:<map_id>" → that one (must be verified)."""
+    description; "corpus:tier=<map|interior|closeup>" → the verified ones of that
+    tier; "corpus:<map_id>" → that one (must be verified)."""
     verified = {d["map_id"]: d for d in load_descriptions(status="verified")}
     wanted: list[dict[str, Any]] = []
     for spec in specs:
         if spec == "corpus:*":
             wanted.extend(verified.values())
+        elif spec.startswith("corpus:tier="):
+            tier = spec.split("=", 1)[1]
+            tier_ids = {m["id"] for m in load_manifest(tier=tier)}
+            wanted.extend(d for d in verified.values() if d["map_id"] in tier_ids)
         elif spec.startswith("corpus:"):
             map_id = spec.split(":", 1)[1]
             if map_id not in verified:
@@ -218,6 +242,18 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
         )
         return r.score, JUDGE_CALL_FLAT
 
+    def _articulation_judge(
+        cell: Cell, desc: dict[str, Any], jpeg: bytes
+    ) -> tuple[float, float]:
+        # The closeup/interior-tier analogue of map_plausibility: does the render
+        # ARTICULATE the object's named parts, rather than read as a coherent map?
+        # features = the description's catalogued part labels.
+        labels = [str(e["label"]) for e in desc["entities"]]
+        r = _await(
+            lambda: judge.score_feature_articulation(jpeg, desc.get("genre", "object"), labels)
+        )
+        return r.score, JUDGE_CALL_FLAT
+
     def score_fn(
         cell: Cell,
         desc: dict[str, Any],
@@ -278,6 +314,7 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
             "style_pair": _style_judge,
             "map_plausibility": _plausibility_judge,
             "prompt_alignment": _alignment_judge,
+            "feature_articulation": _articulation_judge,
         },
         "score_fn": score_fn,
     }
@@ -297,12 +334,13 @@ def _load_env() -> None:
 
 def main() -> int:
     _load_env()
-    sweep = load_sweep(_SWEEP)
+    report_path = _report_path()
+    sweep = load_sweep(_sweep_path())
     if os.environ.get("MATRIX_BUDGET_USD"):
         sweep["budget_usd"] = float(os.environ["MATRIX_BUDGET_USD"])
     scenarios = corpus_scenarios(sweep["scenarios"])
     if not scenarios:
-        print("recon: no VERIFIED corpus descriptions — review the drafts first.")
+        print(f"recon[{_sweep_name()}]: no VERIFIED corpus descriptions of that tier.")
         return 1
     live = os.environ.get("RECON_BENCH_RUN") == "1"
     report = run_matrix(
@@ -311,7 +349,7 @@ def main() -> int:
         live=live,
         allow_partial=os.environ.get("MATRIX_ALLOW_PARTIAL") == "1",
         run_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        report_path=_REPORT,
+        report_path=report_path,
         **recon_fns(sweep),
     )
     if live:
@@ -325,10 +363,13 @@ def main() -> int:
             try:
                 from tests._baseline import compare
 
-                for name, key in (
-                    ("recon_fidelity", "composite"),
-                    ("height_order", "height_order"),
-                ):
+                # fidelity baseline is per-sweep ("recon_fidelity" for maps,
+                # "recon_closeup_fidelity" for closeups); height_order only the
+                # map sweep (objects carry no built-height ladder).
+                baselines = [(f"{_sweep_name()}_fidelity", "composite")]
+                if _sweep_name() == "recon":
+                    baselines.append(("height_order", "height_order"))
+                for name, key in baselines:
                     vals = [c["scores"][key] for c in cells if key in c.get("scores", {})]
                     if vals:
                         v = compare(name, sum(vals) / len(vals), len(vals))
@@ -338,7 +379,7 @@ def main() -> int:
     if live:
         from tests.matrix_bench import report as report_mod
 
-        print(report_mod.format_summary(report_mod.attach_summary(_REPORT)))
+        print(report_mod.format_summary(report_mod.attach_summary(report_path)))
     json.dumps(report)  # smoke: the report is JSON-serializable
     return 0 if report.get("stopped_reason") is None else 1
 

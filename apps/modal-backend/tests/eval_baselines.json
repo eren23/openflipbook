@@ -43,6 +43,20 @@
       "n_min": 4,
       "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
     },
+    "recon_closeup_fidelity": {
+      "metric": "composite_mean",
+      "baseline": 0.86,
+      "regression_band": 0.12,
+      "n_min": 4,
+      "source": "make eval-recon-closeup 2026-06-24 (3 verified Met closeups x graph/direct, nano-banana, recon_closeup_base.v1; object-parts feature_articulation judge — objects reconstruct higher than maps)"
+    },
+    "recon_interior_fidelity": {
+      "metric": "composite_mean",
+      "baseline": 0.80,
+      "regression_band": 0.15,
+      "n_min": 4,
+      "source": "make eval-recon-interior 2026-06-24 (3 verified interiors x graph/direct, nano-banana, recon_interior_base.v1; prose-decoupled so geo weighted low, image judges carry it — wider band as interior positions are approximate)"
+    },
     "grounding": {
       "metric": "grounding_mean",
       "baseline": 0.55,

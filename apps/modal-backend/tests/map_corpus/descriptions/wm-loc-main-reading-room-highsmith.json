@@ -1,0 +1,92 @@
+{
+ "map_id": "wm-loc-main-reading-room-highsmith",
+ "rev": 1,
+ "genre": "library-of-congress-main-reading-room",
+ "style": "Grand neoclassical interior with warm golden and cream tones, ornate plasterwork, and rich marbled columns; illuminated by natural light through arched stained-glass windows and warm artificial desk lamps.",
+ "scale_tier": "place",
+ "frame": {
+  "w": 100.0,
+  "h": 60.0
+ },
+ "description": "This is the Main Reading Room of the Library of Congress, a vast octagonal space defined by towering marble columns and ornate arches. In the center foreground sits a large, circular wooden circulation desk with tiered shelving. Radiating outward from this center are concentric rows of curved wooden reading desks, each equipped with individual glowing lamps. The floor is covered in a patterned grey carpet featuring circular laurel wreath motifs. The walls are constructed from yellow and pink marble, featuring three levels: the ground floor with arched book alcoves, a middle gallery with a balustrade and bronze statues of historical figures, and a top level with massive semi-circular stained-glass windows. The ceiling transitions into a grand dome with intricate plasterwork and gold leaf. Lighting is a mix of natural light from the high windows and the warm, rhythmic glow of hundreds of desk lamps, creating a scholarly and reverent atmosphere.",
+ "entities": [
+  {
+   "ref": "marble-columns",
+   "kind": "item",
+   "label": "marble columns",
+   "visual": "Massive Corinthian columns made of variegated pink and yellow marble.",
+   "pos": {
+    "x": 84.9,
+    "y": 60.0
+   },
+   "footprint": {
+    "w": 8.2,
+    "d": 60.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": null
+  },
+  {
+   "ref": "bookshelves",
+   "kind": "item",
+   "label": "bookshelves",
+   "visual": "wooden shelves filled with books, set within arched alcoves",
+   "pos": {
+    "x": 77.7,
+    "y": 60.0
+   },
+   "footprint": {
+    "w": 4.1,
+    "d": 60.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": null
+  }
+ ],
+ "relations": [],
+ "annotation": {
+  "ensemble": [
+   "google/gemini-3-flash-preview",
+   "qwen/qwen3-vl-32b-instruct",
+   "openai/gpt-4o-mini"
+  ],
+  "contributors": 3,
+  "reconcile": "deepseek/deepseek-v4-pro",
+  "min_votes": 2,
+  "iters": 2,
+  "judge_score": 10.0,
+  "agreement": 0.667,
+  "minority": [
+   "circular circulation desk",
+   "curved reading desks",
+   "stained glass windows",
+   "bronze statues",
+   "book alcoves",
+   "patterned carpet",
+   "ornate dome",
+   "central circular desk",
+   "reading desks",
+   "stained-glass windows",
+   "ceiling frescoes",
+   "balcony statues",
+   "floor emblems",
+   "upper balcony",
+   "central archway",
+   "circular reading area",
+   "wooden desks",
+   "ornate columns",
+   "high ceiling",
+   "large arched windows",
+   "statues of historical figures",
+   "main entrance"
+  ],
+  "judge_rationale": "The description is exceptionally accurate and comprehensive, capturing every architectural detail and the specific layout of the room perfectly."
+ },
+ "review": {
+  "status": "verified",
+  "by": "ensemble-annotate",
+  "date": "2026-06-24"
+ }
+}
