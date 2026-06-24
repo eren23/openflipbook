@@ -276,8 +276,23 @@ def test_attach_geometry_keep_ungrounded_places_fixtures() -> None:
         assert e["border"] is None
     assert out[0]["votes"] == 3 and out[1]["votes"] == 2
     assert out[0]["pos"] != out[1]["pos"]  # spread, not stacked
-    # default (maps/closeups) still drops the undetected ones
-    assert attach_geometry(consensus, [], [], {}) == []
+
+
+def test_attach_geometry_grounds_interior_fixture_from_sam3_concept_polygon() -> None:
+    # Part 2: the detector misses the fixture, but SAM3 concept-detect segmented
+    # it -> use the mask polygon's bbox as a REAL position (not nominal).
+    consensus = [{"ref": "col", "kind": "item", "label": "Marble Column", "visual": "v", "votes": 3}]
+    segs = [
+        {"label": "marble column", "polygon": [[0.4, 0.2], [0.6, 0.2], [0.6, 0.8], [0.4, 0.8]],
+         "rel_height": 0.5, "est_height_m": None, "score": 0.9}
+    ]
+    out = attach_geometry(consensus, [], segs, {}, keep_ungrounded=True)
+    assert len(out) == 1
+    e = out[0]
+    assert e["pos"] == {"x": 50.0, "y": 30.0}  # polygon centroid, scaled to frame
+    assert e["border"] is not None  # the SAM3 mask is kept as the border
+    # maps/closeups (keep_ungrounded=False) ignore it -> still dropped
+    assert attach_geometry(consensus, [], segs, {}) == []
 
 
 def test_attach_geometry_scales_to_frame_and_drops_undetected() -> None:
