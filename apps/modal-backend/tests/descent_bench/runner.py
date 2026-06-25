@@ -5,14 +5,16 @@ a place ENTITY in a parent map), crop the parent map at that place and generate 
 "enter" view two ways:
   with   — region-conditioned on the cropped parent place (the product descent)
   without— a plain fresh generation (baseline)
-then JUDGE both against the REAL child photo (style match) and the cropped region
-(continuity). The headline metric is style_lift = how much region-conditioning
-moves the descent TOWARD the real place. Reuses the continuity bench's region
-crop + enter generation.
+then JUDGE both against the REAL child photo and the cropped region (continuity).
+The headline metric is place_lift = how much region-conditioning moves the
+descent TOWARD the real PLACE, scored medium-AGNOSTICALLY (score_place_match) so
+an illustration->photo chain isn't penalised for the medium gap it can't close.
+style_lift (score_style_pair, medium-sensitive) is kept as a secondary signal.
+Reuses the continuity bench's region crop + enter generation.
 
 Dry by default (resolve chains + cost preview, $0):
     .venv/bin/python -m tests.descent_bench.runner
-Live (DESCENT_BENCH_RUN=1, ~$0.30/chain — 2 image gens + 3 judges):
+Live (DESCENT_BENCH_RUN=1, ~$0.31/chain — 2 image gens + 5 judges):
     make eval-descent
 Needs `make corpus-fetch` (parent + child images) and VERIFIED parent descriptions.
 """
@@ -81,6 +83,12 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     (art / f"descent-{chain['child_id']}-without.jpg").write_bytes(without_img)
     real_with = await judge.score_style_pair(child_bytes, with_img)
     real_without = await judge.score_style_pair(child_bytes, without_img)
+    # medium-AGNOSTIC place judge: style_pair sinks a CORRECT illustrated descent
+    # of a photographed place to ~0 purely on the medium gap. place_match scores
+    # same-place-ignoring-medium, so place_lift measures what the descent is
+    # actually for — carrying the real place over — across illustration->photo.
+    place_with = await judge.score_place_match(child_bytes, with_img)
+    place_without = await judge.score_place_match(child_bytes, without_img)
     continuity = await judge.score_continuation(region, with_img)
     return {
         "child_id": chain["child_id"],
@@ -89,19 +97,33 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
         "real_style_with": round(real_with.score, 2),
         "real_style_without": round(real_without.score, 2),
         "style_lift": round(real_with.score - real_without.score, 2),
+        "place_match_with": round(place_with.score, 2),
+        "place_match_without": round(place_without.score, 2),
+        "place_lift": round(place_with.score - place_without.score, 2),
         "continuity_with": round(continuity.score, 2),
-        "rationale": real_with.rationale,
+        "rationale": place_with.rationale,
+    }
+
+
+def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Roll rows up into the report. The HEADLINE is mean_place_lift (medium-
+    agnostic); mean_style_lift is kept as a secondary medium-transfer signal so
+    the committed baseline stays comparable."""
+    def _mean(key: str) -> float:
+        vals = [r[key] for r in rows]
+        return round(sum(vals) / len(vals), 3) if vals else 0.0
+
+    return {
+        "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "chains": rows,
+        "mean_place_lift": _mean("place_lift"),
+        "mean_style_lift": _mean("style_lift"),
     }
 
 
 async def _run(chains: list[dict[str, Any]]) -> dict[str, Any]:
     rows = [await _score_chain(c, "16:9") for c in chains]
-    lifts = [r["style_lift"] for r in rows]
-    return {
-        "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "chains": rows,
-        "mean_style_lift": round(sum(lifts) / len(lifts), 3) if lifts else 0.0,
-    }
+    return _aggregate(rows)
 
 
 def main() -> int:
@@ -115,19 +137,23 @@ def main() -> int:
               "verified parent map entity)")
         return 0
     if os.environ.get("DESCENT_BENCH_RUN") != "1":
-        cost = len(chains) * (2 * _GEN_USD + 3 * _JUDGE_USD)
-        print(f"\nDRY RUN — would spend ~${cost:.2f} ({len(chains)} chain(s) x 2 gens + 3 judges).")
+        cost = len(chains) * (2 * _GEN_USD + 5 * _JUDGE_USD)
+        print(f"\nDRY RUN — would spend ~${cost:.2f} ({len(chains)} chain(s) x 2 gens + 5 judges).")
         print("Set DESCENT_BENCH_RUN=1 to execute.")
         return 0
     report = asyncio.run(_run(chains))
     _REPORT.parent.mkdir(parents=True, exist_ok=True)
     _REPORT.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"\nmean style_lift: {report['mean_style_lift']:+.3f} over {len(report['chains'])} chain(s)")
+    print(
+        f"\nmean place_lift: {report['mean_place_lift']:+.3f}  "
+        f"(style_lift: {report['mean_style_lift']:+.3f}) over "
+        f"{len(report['chains'])} chain(s)"
+    )
     for r in report["chains"]:
         print(
-            f"  {r['place']:<16} real-style with={r['real_style_with']} "
-            f"without={r['real_style_without']} (lift {r['style_lift']:+}) "
-            f"continuity={r['continuity_with']}"
+            f"  {r['place']:<16} place with={r['place_match_with']} "
+            f"without={r['place_match_without']} (lift {r['place_lift']:+}) | "
+            f"style-lift {r['style_lift']:+} continuity={r['continuity_with']}"
         )
     return 0
 

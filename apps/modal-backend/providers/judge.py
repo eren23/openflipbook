@@ -105,6 +105,39 @@ async def score_style_pair(image_a: bytes, image_b: bytes) -> JudgeResult:
     )
 
 
+async def score_place_match(image_a: bytes, image_b: bytes) -> JudgeResult:
+    """Medium-AGNOSTIC twin of score_style_pair — the descent bench's real-child
+    judge. style_pair conflates two things a cross-medium descent can never win
+    on at once: is it the same PLACE, and is it the same MEDIUM. Descending from
+    an illustrated map into a real photographed church yields a correct
+    illustrated church that style_pair scores ~0 against the photo, sinking
+    style_lift even though region-conditioning carried the place over perfectly.
+    This judge scores ONLY place identity — same structure, layout, key features
+    — and is explicitly told to ignore medium, palette and art style, so descent
+    recon measures place fidelity across illustration->photo golden chains."""
+    system = (
+        "You judge whether two images depict the SAME PLACE — the same physical "
+        "structure, architecture, spatial layout and distinctive features — "
+        "REGARDLESS of how they are rendered. Image 1 is the real reference "
+        "place; image 2 is a candidate. IGNORE the artistic medium entirely: a "
+        "photograph, an illustration, a painting and a 3D render of the SAME "
+        "place must all score high. Ignore palette, lighting, line work and art "
+        "style. Score ONLY place identity. 10 = unmistakably the same place / "
+        "same kind of structured place (same layout, the same key features in "
+        "the same arrangement); 5 = the right KIND of place but a different "
+        "specific one; 0 = an unrelated place."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        "Image 1 = the real place. Image 2 = the candidate. Are they the SAME "
+        "place / same structured place — same layout and features — ignoring "
+        "medium, palette and style? Score 0-10."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(image_a), _image_block(image_b)]
+    )
+
+
 async def score_entity_consistency(
     entity_name: str, appearance: str, image_a: bytes, image_b: bytes
 ) -> JudgeResult:
