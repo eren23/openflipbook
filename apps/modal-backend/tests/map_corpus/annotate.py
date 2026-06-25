@@ -185,6 +185,35 @@ def attach_geometry(
         if det is None:
             if not keep_ungrounded:
                 continue
+            seg = seg_by.get(label.lower())
+            poly = seg.get("polygon") if seg else None
+            if poly and len(poly) >= 3:
+                # SAM3 concept-detect grounded the fixture though the detector
+                # missed it: use the mask polygon's bbox for a REAL position.
+                xs = [p[0] for p in poly]
+                ys = [p[1] for p in poly]
+                cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+                hh = h_by.get(label.lower())
+                out.append(
+                    {
+                        "ref": e["ref"],
+                        "kind": e.get("kind", "place"),
+                        "label": label,
+                        "visual": e.get("visual", ""),
+                        "votes": e.get("votes", 0),
+                        "pos": {"x": round(cx * FRAME_W, 1), "y": round(cy * FRAME_H, 1)},
+                        "footprint": {
+                            "w": round(max((max(xs) - min(xs)) * FRAME_W, 0.5), 1),
+                            "d": round(max((max(ys) - min(ys)) * FRAME_H, 0.5), 1),
+                        },
+                        "height_rel": seg["rel_height"] if seg else 0.0,
+                        "height_m": (round(hh, 1) or None) if hh else None,
+                        "border": [
+                            [round(x * FRAME_W, 1), round(y * FRAME_H, 1)] for x, y in poly
+                        ],
+                    }
+                )
+                continue
             grid = 3  # spread fixtures on a 3x3 nominal grid, deterministic by order
             col, row = ungrounded % grid, (ungrounded // grid) % grid
             ungrounded += 1
