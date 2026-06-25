@@ -54,6 +54,21 @@ def norm_label(s: str) -> str:
     return t.strip()
 
 
+def _canonical(label: str) -> str:
+    """A stronger dedup key than norm_label: also folds internal hyphens and
+    singularizes each token, so "stained-glass windows" == "stained glass
+    windows" and "desks" == "desk". Adjective-variants ("marble columns" vs
+    "tall columns") are deliberately NOT collapsed — a token rule can't tell
+    those from genuinely distinct same-head places ("Spyglass Hill" vs
+    "Mizzenmast Hill"); that semantic merge is the LLM arbiter's job."""
+    toks = []
+    for w in norm_label(label).replace("-", " ").split():
+        if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+            w = w[:-1]
+        toks.append(w)
+    return " ".join(toks)
+
+
 def slug(s: str) -> str:
     """Kebab-case ref slug (same convention as draft._slug)."""
     return re.sub(r"[^a-z0-9]+", "-", str(s).lower()).strip("-") or "x"
@@ -91,7 +106,7 @@ def merge_entities(
             label = str(e.get("label", "")).strip()
             if not label:
                 continue
-            key = norm_label(label)
+            key = _canonical(label)  # fold hyphen/plural variants even on this fallback path
             if not key:
                 continue
             if key not in info:
@@ -193,7 +208,6 @@ def attach_geometry(
                 xs = [p[0] for p in poly]
                 ys = [p[1] for p in poly]
                 cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
-                hh = h_by.get(label.lower())
                 out.append(
                     {
                         "ref": e["ref"],
@@ -206,8 +220,10 @@ def attach_geometry(
                             "w": round(max((max(xs) - min(xs)) * FRAME_W, 0.5), 1),
                             "d": round(max((max(ys) - min(ys)) * FRAME_H, 0.5), 1),
                         },
-                        "height_rel": seg["rel_height"] if seg else 0.0,
-                        "height_m": (round(hh, 1) or None) if hh else None,
+                        # interiors are scenes, not a built-height ladder — no height_m
+                        # (it also tripped the room-tier height sanity band)
+                        "height_rel": 0.0,
+                        "height_m": None,
                         "border": [
                             [round(x * FRAME_W, 1), round(y * FRAME_H, 1)] for x, y in poly
                         ],
@@ -252,8 +268,10 @@ def attach_geometry(
                     "w": round(max(det["w_pct"] * FRAME_W, 0.5), 1),
                     "d": round(max(det["h_pct"] * FRAME_H, 0.5), 1),
                 },
-                "height_rel": seg["rel_height"] if seg else 0.0,
-                "height_m": (round(h, 1) or None) if h else None,
+                # interiors are scenes, not a built-height ladder — no height_m
+                # (it tripped the room-tier height sanity band)
+                "height_rel": 0.0 if keep_ungrounded else (seg["rel_height"] if seg else 0.0),
+                "height_m": None if keep_ungrounded else ((round(h, 1) or None) if h else None),
                 "border": (
                     [[round(x * FRAME_W, 1), round(y * FRAME_H, 1)] for x, y in seg["polygon"]]
                     if seg
@@ -282,7 +300,7 @@ def parse_arbiter_consensus(
         if not isinstance(e, dict):
             continue
         label = str(e.get("label", "")).strip()
-        key = norm_label(label)
+        key = _canonical(label)  # folds hyphen/plural variants the arbiter left split
         if not key or key in seen:
             continue
         seen.add(key)
@@ -524,13 +542,19 @@ def _arbiter_model() -> str | None:
 
 _ARBITER_SYSTEM = (
     "You reconcile entity lists from several annotators of the SAME image into ONE "
-    "consensus list. The annotators each listed the prominent features/parts but "
-    "often use DIFFERENT WORDS for the same thing (e.g. 'rete' vs 'openwork star "
-    "disc'; 'pew' vs 'bench'). MERGE synonyms into a single entity. For each "
+    "consensus list. AGGRESSIVELY MERGE any entries that refer to the SAME physical "
+    "thing, even when worded differently or at different specificity — DIFFERENT "
+    "WORDS ('rete' = 'openwork star disc'; 'pew' = 'bench'), DIFFERENT ADJECTIVES "
+    "('marble columns' = 'tall columns' = 'columns'), and SINGULAR/PLURAL ('statue' "
+    "= 'statues'). Collapse each such group into ONE entity with the clearest "
+    "canonical name; prefer FEWER, well-named entities over many near-duplicates. "
+    "BUT keep genuinely distinct things separate — two differently-named places "
+    "('Spyglass Hill' vs 'Mizzenmast Hill') or two functionally different objects "
+    "('reading desks' vs the 'central circulation desk') are NOT the same. For each "
     "consensus entity return: label (the clearest canonical name), kind (one of "
     "place|item|creature|person), visual (the richest <=12-word description), votes "
-    "(how many of the N annotators referred to it, counting synonyms as the same — "
-    'an integer from 1 to N). Return JSON exactly: {"entities":[{"label":..,'
+    "(how many of the N annotators referred to it, counting all merged variants as "
+    'one — an integer from 1 to N). Return JSON exactly: {"entities":[{"label":..,'
     '"kind":..,"visual":..,"votes":..}]}.'
 )
 

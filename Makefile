@@ -86,7 +86,10 @@ corpus-draft:
 # Knobs (env): CORPUS_ANNOTATE_MODELS=google/gemini-3-pro-preview,anthropic/claude-sonnet-4-6,qwen/qwen3-vl-235b-a22b-instruct
 #   (middle-ground ensemble — avoid Opus, the describe cost driver; unset = single cheap VLM)
 #   CORPUS_JUDGE_THRESHOLD (7.0)  CORPUS_AGREEMENT_THRESHOLD (0.6)
-#   CORPUS_ANNOTATE_MAX_ITERS (2)  CORPUS_MIN_VOTES (majority)
+#   CORPUS_ANNOTATE_MAX_ITERS (2)  CORPUS_MIN_VOTES (majority; =1 union for scenes)
+#   CORPUS_ARBITER_MODEL=google/gemini-3-flash-preview (text arbiter that semantically
+#   merges synonym fixtures; unset = deterministic merge. NOTE deepseek-v4-pro flakily
+#   returns {} -> silent fallback; use gemini-3-flash / gpt-4o-mini / deepseek-v4-flash.)
 corpus-annotate-preview:
 	cd apps/modal-backend && .venv/bin/python -m tests.map_corpus.annotate $(or $(id),all)
 corpus-annotate:
