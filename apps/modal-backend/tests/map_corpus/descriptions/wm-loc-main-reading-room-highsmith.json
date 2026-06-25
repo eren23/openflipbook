@@ -1,8 +1,8 @@
 {
  "map_id": "wm-loc-main-reading-room-highsmith",
- "rev": 2,
+ "rev": 4,
  "genre": "library-of-congress-main-reading-room",
- "style": "Grand neoclassical interior with warm golden and cream tones, ornate plasterwork, and marble columns; illuminated by soft ambient and focused desk lighting.",
+ "style": "Grand neoclassical interior with warm golden and cream tones, ornate plasterwork, and marble columns; soft, diffused lighting from skylights and lamps.",
  "scale_tier": "place",
  "frame": {
   "w": 100.0,
@@ -11,96 +11,474 @@
  "description": "A vast, octagonal rotunda serving as a grand reading room. The layout is defined by a central, circular wooden circulation desk that acts as the focal point. Radiating outward from this center are concentric rows of curved wooden desks equipped with individual reading lamps. The floor is covered in a light grey patterned carpet. The walls are constructed from multi-toned marble, featuring massive Corinthian columns that support a series of high arches. Above the ground floor, a gallery level with arched openings and bronze statues overlooks the room. Large semi-circular stained-glass windows are set within the upper arches, flooding the space with soft light. The ceiling transitions into a highly ornate, coffered dome with intricate plasterwork and gold leaf accents. Bookshelves are visible within recessed alcoves along the perimeter walls on the ground level. The lighting is a mix of natural light from above and the warm glow of hundreds of small desk lamps.",
  "entities": [
   {
+   "ref": "central-circulation-desk",
+   "kind": "item",
+   "label": "central circulation desk",
+   "visual": "Multi-tiered circular dark wood desk with inner workstations and high counters.",
+   "pos": {
+    "x": 49.7,
+    "y": 49.3
+   },
+   "footprint": {
+    "w": 31.9,
+    "d": 17.6
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     48.4,
+     46.2
+    ],
+    [
+     48.0,
+     46.2
+    ],
+    [
+     45.3,
+     45.5
+    ],
+    [
+     43.0,
+     42.7
+    ],
+    [
+     46.5,
+     44.1
+    ],
+    [
+     48.0,
+     45.2
+    ],
+    [
+     48.4,
+     45.5
+    ],
+    [
+     48.8,
+     45.5
+    ],
+    [
+     49.2,
+     45.2
+    ],
+    [
+     49.2,
+     45.5
+    ]
+   ]
+  },
+  {
+   "ref": "reading-desks",
+   "kind": "item",
+   "label": "reading desks",
+   "visual": "Concentric rows of polished wood desks with integrated warm glowing lamps.",
+   "pos": {
+    "x": 49.9,
+    "y": 47.6
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 24.5
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     52.7,
+     48.4
+    ],
+    [
+     51.9,
+     48.4
+    ],
+    [
+     51.9,
+     48.7
+    ],
+    [
+     55.5,
+     53.3
+    ],
+    [
+     51.6,
+     48.4
+    ],
+    [
+     55.1,
+     44.1
+    ],
+    [
+     53.1,
+     47.3
+    ],
+    [
+     52.7,
+     48.0
+    ]
+   ]
+  },
+  {
    "ref": "marble-columns",
    "kind": "item",
    "label": "marble columns",
    "visual": "Massive reddish-brown marble pillars with ornate gold Corinthian capitals.",
    "pos": {
-    "x": 84.9,
-    "y": 60.0
+    "x": 15.6,
+    "y": 25.9
    },
    "footprint": {
-    "w": 8.2,
-    "d": 60.0
+    "w": 4.8,
+    "d": 25.6
    },
-   "height_rel": 0.9102073145151889,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
-     85.5,
-     51.5
+     16.8,
+     28.2
     ],
     [
-     85.9,
-     51.9
+     16.8,
+     28.6
     ],
     [
-     85.9,
-     52.2
+     16.8,
+     28.9
     ],
     [
-     89.5,
-     57.2
+     16.8,
+     30.0
     ],
     [
-     87.9,
-     59.6
+     16.8,
+     32.1
     ],
     [
-     84.8,
-     59.6
+     15.6,
+     40.6
     ],
     [
-     82.4,
-     58.9
+     14.1,
+     32.5
     ],
     [
-     82.4,
-     54.4
+     14.1,
+     30.0
     ],
     [
-     82.4,
-     53.3
+     14.1,
+     29.3
     ],
     [
-     82.0,
-     52.6
+     14.1,
+     28.6
     ],
     [
-     81.2,
-     51.5
+     13.7,
+     28.2
     ],
     [
-     81.2,
-     50.5
+     14.1,
+     27.9
     ],
     [
-     81.2,
-     49.1
+     14.1,
+     27.2
     ],
     [
-     82.8,
-     49.1
+     13.7,
+     25.8
     ],
     [
-     84.0,
-     49.4
+     14.1,
+     23.6
     ],
     [
-     84.8,
-     49.8
+     15.6,
+     14.8
     ],
     [
-     85.2,
-     50.5
+     16.8,
+     24.0
     ],
     [
-     85.2,
-     51.2
+     16.8,
+     26.5
     ],
     [
-     85.5,
-     51.2
+     16.8,
+     27.2
+    ],
+    [
+     16.8,
+     27.9
+    ]
+   ]
+  },
+  {
+   "ref": "stained-glass-windows",
+   "kind": "item",
+   "label": "stained glass windows",
+   "visual": "Large semi-circular windows with intricate leaded patterns and heraldic symbols.",
+   "pos": {
+    "x": 49.6,
+    "y": 14.0
+   },
+   "footprint": {
+    "w": 13.1,
+    "d": 5.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     55.1,
+     14.5
+    ],
+    [
+     55.5,
+     15.9
+    ],
+    [
+     53.1,
+     16.6
+    ],
+    [
+     51.2,
+     16.6
+    ],
+    [
+     50.4,
+     16.6
+    ],
+    [
+     49.6,
+     16.6
+    ],
+    [
+     48.8,
+     16.6
+    ],
+    [
+     47.7,
+     16.6
+    ],
+    [
+     46.1,
+     16.6
+    ],
+    [
+     43.4,
+     16.2
+    ],
+    [
+     43.8,
+     14.5
+    ],
+    [
+     44.9,
+     13.1
+    ],
+    [
+     46.1,
+     12.0
+    ],
+    [
+     47.3,
+     11.6
+    ],
+    [
+     48.4,
+     11.3
+    ],
+    [
+     49.6,
+     11.3
+    ],
+    [
+     50.4,
+     11.3
+    ],
+    [
+     51.6,
+     11.6
+    ],
+    [
+     52.7,
+     12.4
+    ],
+    [
+     54.3,
+     13.1
+    ]
+   ]
+  },
+  {
+   "ref": "bronze-statues",
+   "kind": "item",
+   "label": "bronze statues",
+   "visual": "Dark figures of historical scholars perched on the gallery balustrade.",
+   "pos": {
+    "x": 52.8,
+    "y": 20.6
+   },
+   "footprint": {
+    "w": 1.4,
+    "d": 2.6
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     53.1,
+     20.5
+    ],
+    [
+     53.1,
+     20.8
+    ],
+    [
+     53.1,
+     21.2
+    ],
+    [
+     52.7,
+     21.2
+    ],
+    [
+     52.7,
+     21.9
+    ],
+    [
+     52.3,
+     21.5
+    ],
+    [
+     52.3,
+     20.8
+    ],
+    [
+     51.9,
+     20.8
+    ],
+    [
+     51.9,
+     20.5
+    ],
+    [
+     51.9,
+     20.1
+    ],
+    [
+     52.3,
+     19.4
+    ],
+    [
+     52.7,
+     19.4
+    ],
+    [
+     52.7,
+     19.8
+    ],
+    [
+     53.1,
+     19.8
+    ],
+    [
+     53.1,
+     20.1
+    ]
+   ]
+  },
+  {
+   "ref": "ornate-dome",
+   "kind": "place",
+   "label": "ornate dome",
+   "visual": "High vaulted ceiling with cream and gold coffering and sculptural reliefs.",
+   "pos": {
+    "x": 49.9,
+    "y": 4.0
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 8.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     70.7,
+     2.5
+    ],
+    [
+     56.6,
+     4.2
+    ],
+    [
+     50.4,
+     2.8
+    ],
+    [
+     50.0,
+     2.8
+    ],
+    [
+     49.6,
+     2.8
+    ],
+    [
+     48.8,
+     3.2
+    ],
+    [
+     48.4,
+     3.2
+    ],
+    [
+     48.4,
+     2.8
+    ],
+    [
+     34.4,
+     2.5
+    ],
+    [
+     41.4,
+     0.0
+    ],
+    [
+     45.7,
+     0.0
+    ],
+    [
+     47.7,
+     0.0
+    ],
+    [
+     48.8,
+     0.0
+    ],
+    [
+     49.6,
+     0.0
+    ],
+    [
+     50.4,
+     0.0
+    ],
+    [
+     51.6,
+     0.0
+    ],
+    [
+     53.5,
+     0.0
+    ],
+    [
+     57.8,
+     0.0
     ]
    ]
   },
@@ -108,102 +486,346 @@
    "ref": "bookshelves",
    "kind": "item",
    "label": "bookshelves",
-   "visual": "built-in arched shelves filled with books",
+   "visual": "Tall wooden shelves filled with colorful book spines inside wall alcoves.",
    "pos": {
-    "x": 77.7,
-    "y": 60.0
+    "x": 21.4,
+    "y": 35.5
    },
    "footprint": {
     "w": 4.1,
-    "d": 60.0
+    "d": 6.5
    },
-   "height_rel": 1.0,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
-     79.3,
+     23.1,
      35.3
     ],
     [
-     79.3,
-     35.6
-    ],
-    [
-     79.3,
-     36.4
-    ],
-    [
-     79.3,
-     37.4
-    ],
-    [
-     78.5,
-     38.1
-    ],
-    [
-     77.3,
-     38.1
-    ],
-    [
-     76.6,
-     38.1
-    ],
-    [
-     75.8,
-     37.4
-    ],
-    [
-     75.8,
-     36.4
-    ],
-    [
-     75.4,
+     23.1,
      36.0
     ],
     [
-     75.8,
+     23.1,
+     36.7
+    ],
+    [
+     23.1,
+     37.8
+    ],
+    [
+     22.3,
+     37.8
+    ],
+    [
+     21.1,
+     38.1
+    ],
+    [
+     20.3,
+     38.5
+    ],
+    [
+     19.5,
+     37.8
+    ],
+    [
+     19.5,
+     36.7
+    ],
+    [
+     19.5,
+     36.0
+    ],
+    [
+     19.5,
      35.3
     ],
     [
-     75.4,
-     34.6
+     19.5,
+     34.9
     ],
     [
-     75.4,
-     33.9
+     19.5,
+     34.2
     ],
     [
-     75.8,
-     32.8
-    ],
-    [
-     76.6,
-     32.1
-    ],
-    [
-     77.3,
-     31.8
-    ],
-    [
-     78.5,
-     32.1
-    ],
-    [
-     78.9,
+     19.5,
      33.2
     ],
     [
-     79.3,
-     33.9
+     20.3,
+     32.5
     ],
     [
-     79.3,
-     34.6
+     21.1,
+     32.5
+    ],
+    [
+     22.3,
+     32.5
+    ],
+    [
+     23.1,
+     33.2
+    ],
+    [
+     23.1,
+     34.2
+    ],
+    [
+     23.1,
+     34.9
+    ]
+   ]
+  },
+  {
+   "ref": "patterned-floor",
+   "kind": "place",
+   "label": "patterned floor",
+   "visual": "Light grey floor covering with circular laurel wreath motifs.",
+   "pos": {
+    "x": 49.9,
+    "y": 53.0
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 13.9
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     66.8,
+     56.1
+    ],
+    [
+     66.4,
+     56.5
+    ],
+    [
+     67.2,
+     57.5
+    ],
+    [
+     66.8,
+     57.9
+    ],
+    [
+     65.6,
+     57.2
+    ],
+    [
+     65.2,
+     56.8
+    ],
+    [
+     65.2,
+     56.5
+    ],
+    [
+     65.2,
+     56.1
+    ],
+    [
+     66.0,
+     55.4
+    ],
+    [
+     66.8,
+     55.1
+    ],
+    [
+     68.4,
+     55.4
+    ]
+   ]
+  },
+  {
+   "ref": "upper-galleries",
+   "kind": "place",
+   "label": "upper galleries",
+   "visual": "Balustraded walkways with arched alcoves and bookshelves on upper levels.",
+   "pos": {
+    "x": 49.9,
+    "y": 25.9
+   },
+   "footprint": {
+    "w": 99.8,
+    "d": 3.2
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     56.2,
+     26.1
+    ],
+    [
+     55.9,
+     27.9
+    ],
+    [
+     51.9,
+     27.5
+    ],
+    [
+     50.8,
+     27.9
+    ],
+    [
+     50.0,
+     27.9
+    ],
+    [
+     49.2,
+     27.9
+    ],
+    [
+     48.8,
+     27.5
+    ],
+    [
+     47.7,
+     27.9
+    ],
+    [
+     46.9,
+     27.5
+    ],
+    [
+     46.9,
+     26.8
+    ],
+    [
+     46.9,
+     26.1
+    ],
+    [
+     46.9,
+     25.4
+    ],
+    [
+     47.7,
+     25.1
+    ],
+    [
+     48.8,
+     25.4
+    ],
+    [
+     49.2,
+     25.4
+    ],
+    [
+     49.2,
+     25.1
+    ],
+    [
+     49.6,
+     25.1
+    ],
+    [
+     49.6,
+     25.4
+    ],
+    [
+     50.8,
+     25.1
+    ],
+    [
+     51.9,
+     25.4
+    ]
+   ]
+  },
+  {
+   "ref": "desk-lamps",
+   "kind": "item",
+   "label": "desk lamps",
+   "visual": "Individual brass or bronze lamps on each reading desk.",
+   "pos": {
+    "x": 21.4,
+    "y": 53.8
+   },
+   "footprint": {
+    "w": 1.5,
+    "d": 1.4
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     21.5,
+     53.6
+    ],
+    [
+     21.5,
+     54.0
+    ],
+    [
+     21.1,
+     54.0
+    ],
+    [
+     21.1,
+     54.4
+    ],
+    [
+     21.1,
+     54.0
+    ],
+    [
+     20.7,
+     54.0
+    ],
+    [
+     20.7,
+     53.6
+    ],
+    [
+     20.7,
+     53.3
+    ],
+    [
+     21.1,
+     53.3
+    ],
+    [
+     21.5,
+     53.3
     ]
    ]
   }
  ],
- "relations": [],
+ "relations": [
+  {
+   "subject": "bronze-statues",
+   "relation": "on_top_of",
+   "object": "marble-columns"
+  },
+  {
+   "subject": "stained-glass-windows",
+   "relation": "inside",
+   "object": "ornate-dome"
+  },
+  {
+   "subject": "reading-desks",
+   "relation": "in_front_of",
+   "object": "marble-columns"
+  },
+  {
+   "subject": "bookshelves",
+   "relation": "inside",
+   "object": "upper-galleries"
+  },
+  {
+   "subject": "desk-lamps",
+   "relation": "on_top_of",
+   "object": "reading-desks"
+  }
+ ],
  "annotation": {
   "ensemble": [
    "google/gemini-3-flash-preview",
@@ -211,36 +833,17 @@
    "openai/gpt-4o-mini"
   ],
   "contributors": 3,
-  "reconcile": "deepseek/deepseek-v4-pro",
-  "min_votes": 2,
+  "reconcile": "google/gemini-3-flash-preview",
+  "min_votes": 1,
   "iters": 1,
   "judge_score": 10.0,
-  "agreement": 0.667,
-  "minority": [
-   "central circulation desk",
-   "curved reading desks",
-   "stained glass windows",
-   "bronze statues",
-   "ornate dome",
-   "perimeter bookshelves",
-   "patterned carpet",
-   "central desk structure",
-   "reading desks",
-   "stained-glass windows",
-   "statues on balcony",
-   "domed ceiling",
-   "patterned floor",
-   "central reading area",
-   "wooden desks",
-   "tall columns",
-   "high ceiling",
-   "statues"
-  ],
-  "judge_rationale": "The description is exceptionally detailed and accurately captures every architectural and decorative element of the Library of Congress Main Reading Room."
+  "agreement": 0.867,
+  "minority": [],
+  "judge_rationale": "The description and entity list are exceptionally accurate and capture all major architectural and functional elements of the scene."
  },
  "review": {
   "status": "verified",
   "by": "ensemble-annotate",
-  "date": "2026-06-24"
+  "date": "2026-06-25"
  }
 }

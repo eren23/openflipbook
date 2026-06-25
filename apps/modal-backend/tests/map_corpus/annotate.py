@@ -208,7 +208,6 @@ def attach_geometry(
                 xs = [p[0] for p in poly]
                 ys = [p[1] for p in poly]
                 cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
-                hh = h_by.get(label.lower())
                 out.append(
                     {
                         "ref": e["ref"],
@@ -221,8 +220,10 @@ def attach_geometry(
                             "w": round(max((max(xs) - min(xs)) * FRAME_W, 0.5), 1),
                             "d": round(max((max(ys) - min(ys)) * FRAME_H, 0.5), 1),
                         },
-                        "height_rel": seg["rel_height"] if seg else 0.0,
-                        "height_m": (round(hh, 1) or None) if hh else None,
+                        # interiors are scenes, not a built-height ladder — no height_m
+                        # (it also tripped the room-tier height sanity band)
+                        "height_rel": 0.0,
+                        "height_m": None,
                         "border": [
                             [round(x * FRAME_W, 1), round(y * FRAME_H, 1)] for x, y in poly
                         ],
@@ -267,8 +268,10 @@ def attach_geometry(
                     "w": round(max(det["w_pct"] * FRAME_W, 0.5), 1),
                     "d": round(max(det["h_pct"] * FRAME_H, 0.5), 1),
                 },
-                "height_rel": seg["rel_height"] if seg else 0.0,
-                "height_m": (round(h, 1) or None) if h else None,
+                # interiors are scenes, not a built-height ladder — no height_m
+                # (it tripped the room-tier height sanity band)
+                "height_rel": 0.0 if keep_ungrounded else (seg["rel_height"] if seg else 0.0),
+                "height_m": None if keep_ungrounded else ((round(h, 1) or None) if h else None),
                 "border": (
                     [[round(x * FRAME_W, 1), round(y * FRAME_H, 1)] for x, y in seg["polygon"]]
                     if seg

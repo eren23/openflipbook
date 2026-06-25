@@ -1,6 +1,6 @@
 {
  "map_id": "wm-chester-cathedral-nave",
- "rev": 2,
+ "rev": 4,
  "genre": "gothic-cathedral-nave-interior",
  "style": "Gothic cathedral interior with dark stone, intricate wooden vaulted ceiling, and soft natural light; high contrast, muted palette with gold accents.",
  "scale_tier": "place",
@@ -11,179 +11,19 @@
  "description": "A wide-angle interior view of a Gothic cathedral nave looking toward the altar. The layout is symmetrical, featuring a central stone aisle flanked by rows of light-colored wooden pews. Massive, dark grey stone pillars with clustered shafts rise on both sides, forming pointed arches that lead into side aisles. Above, a complex lierne vault ceiling is constructed from dark wood ribs decorated with numerous gilded bosses. In the background, a series of receding arches culminates in a distant sanctuary with a dark wooden reredos and a stained-glass window. The lighting is atmospheric, with natural light filtering through high clerestory windows on the left and right, casting soft highlights on the stone surfaces while leaving deep shadows in the recesses of the arches. The side aisles contain smaller stained-glass windows and wall murals, adding subtle color to the predominantly grey and brown environment.",
  "entities": [
   {
-   "ref": "wooden-pews",
+   "ref": "lierne-vault-ceiling",
    "kind": "item",
-   "label": "wooden pews",
-   "visual": "Light-colored timber benches arranged in neat rows along the nave.",
+   "label": "lierne vault ceiling",
+   "visual": "Intricate dark wood ribbed ceiling with numerous small golden decorative bosses.",
    "pos": {
-    "x": 49.5,
-    "y": 55.2
+    "x": 49.9,
+    "y": 17.1
    },
    "footprint": {
-    "w": 98.0,
-    "d": 9.0
+    "w": 41.2,
+    "d": 34.1
    },
-   "height_rel": 0.2744382937694808,
-   "height_m": null,
-   "border": [
-    [
-     99.2,
-     55.9
-    ],
-    [
-     73.8,
-     59.8
-    ],
-    [
-     63.3,
-     59.8
-    ],
-    [
-     59.0,
-     59.8
-    ],
-    [
-     54.3,
-     55.9
-    ],
-    [
-     52.3,
-     52.0
-    ],
-    [
-     54.3,
-     52.0
-    ],
-    [
-     56.2,
-     52.0
-    ],
-    [
-     59.0,
-     52.0
-    ],
-    [
-     62.9,
-     52.0
-    ],
-    [
-     70.3,
-     52.7
-    ]
-   ]
-  },
-  {
-   "ref": "central-aisle",
-   "kind": "place",
-   "label": "central aisle",
-   "visual": "A straight stone path leading from the foreground to the altar.",
-   "pos": {
-    "x": 49.5,
-    "y": 56.4
-   },
-   "footprint": {
-    "w": 10.0,
-    "d": 7.2
-   },
-   "height_rel": 0.20217293170882442,
-   "height_m": null,
-   "border": [
-    [
-     55.1,
-     57.1
-    ],
-    [
-     56.2,
-     58.3
-    ],
-    [
-     55.9,
-     59.8
-    ],
-    [
-     52.7,
-     59.8
-    ],
-    [
-     51.2,
-     59.5
-    ],
-    [
-     49.6,
-     59.5
-    ],
-    [
-     48.0,
-     59.8
-    ],
-    [
-     46.5,
-     59.8
-    ],
-    [
-     43.4,
-     59.8
-    ],
-    [
-     43.4,
-     58.3
-    ],
-    [
-     44.1,
-     57.1
-    ],
-    [
-     44.9,
-     56.1
-    ],
-    [
-     45.7,
-     55.2
-    ],
-    [
-     46.5,
-     54.2
-    ],
-    [
-     47.7,
-     53.2
-    ],
-    [
-     49.6,
-     53.0
-    ],
-    [
-     51.6,
-     53.0
-    ],
-    [
-     52.7,
-     54.4
-    ],
-    [
-     53.5,
-     55.4
-    ],
-    [
-     54.3,
-     56.1
-    ]
-   ]
-  },
-  {
-   "ref": "vaulted-ceiling",
-   "kind": "place",
-   "label": "vaulted ceiling",
-   "visual": "wooden fan-vaulted ceiling with golden decorative bosses",
-   "pos": {
-    "x": 49.5,
-    "y": 16.8
-   },
-   "footprint": {
-    "w": 40.0,
-    "d": 33.0
-   },
-   "height_rel": 0.9806904027984551,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
@@ -203,23 +43,23 @@
      23.7
     ],
     [
-     58.6,
+     59.0,
      30.5
     ],
     [
      49.6,
-     29.5
+     29.3
     ],
     [
      40.6,
      30.2
     ],
     [
-     37.1,
-     24.0
+     37.5,
+     23.7
     ],
     [
-     34.8,
+     35.2,
      19.8
     ],
     [
@@ -243,24 +83,24 @@
      0.0
     ],
     [
-     42.6,
-     0.0
+     43.0,
+     0.2
     ],
     [
      49.6,
      0.0
     ],
     [
-     56.2,
-     0.5
+     56.6,
+     0.2
     ],
     [
      65.2,
      0.0
     ],
     [
-     71.9,
-     3.4
+     72.3,
+     3.1
     ],
     [
      70.7,
@@ -269,130 +109,424 @@
    ]
   },
   {
-   "ref": "altar",
+   "ref": "stone-pillars",
    "kind": "item",
-   "label": "altar",
-   "visual": "ornate altar with reredos at far end of nave",
+   "label": "stone pillars",
+   "visual": "Massive dark grey clustered columns supporting the nave's pointed arches.",
    "pos": {
-    "x": 49.5,
-    "y": 48.6
+    "x": 25.1,
+    "y": 44.3
    },
    "footprint": {
-    "w": 15.0,
-    "d": 6.0
+    "w": 8.4,
+    "d": 26.7
    },
-   "height_rel": 0.18612910521743797,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
-     56.2,
-     49.1
+     28.9,
+     45.2
     ],
     [
-     56.2,
-     50.3
-    ],
-    [
-     55.1,
-     51.5
-    ],
-    [
-     52.3,
-     51.5
-    ],
-    [
-     50.8,
-     51.8
-    ],
-    [
-     49.2,
-     51.8
-    ],
-    [
-     48.0,
-     51.8
-    ],
-    [
-     46.1,
-     51.8
-    ],
-    [
-     43.8,
-     51.5
-    ],
-    [
-     43.0,
-     50.3
-    ],
-    [
-     43.0,
-     49.1
-    ],
-    [
-     42.6,
-     47.7
-    ],
-    [
-     44.1,
-     46.7
-    ],
-    [
-     45.7,
+     28.9,
      46.0
     ],
     [
-     47.7,
-     46.0
+     28.9,
+     46.9
     ],
     [
-     49.2,
-     45.7
+     28.9,
+     48.6
     ],
     [
-     50.8,
-     46.0
+     28.9,
+     53.0
     ],
     [
-     52.3,
-     46.5
+     25.0,
+     48.1
     ],
     [
-     54.3,
-     46.7
+     20.7,
+     53.7
     ],
     [
-     55.5,
-     47.9
+     21.5,
+     48.4
+    ],
+    [
+     21.1,
+     47.2
+    ],
+    [
+     21.1,
+     46.2
+    ],
+    [
+     21.1,
+     45.2
+    ],
+    [
+     21.1,
+     44.5
+    ],
+    [
+     21.1,
+     43.5
+    ],
+    [
+     21.1,
+     41.9
+    ],
+    [
+     22.3,
+     39.7
+    ],
+    [
+     25.0,
+     37.3
+    ],
+    [
+     28.9,
+     38.0
+    ],
+    [
+     28.9,
+     41.9
+    ],
+    [
+     28.9,
+     43.5
+    ],
+    [
+     28.9,
+     44.5
     ]
    ]
   },
   {
-   "ref": "stained-glass-windows",
+   "ref": "wooden-pews",
    "kind": "item",
-   "label": "stained glass windows",
-   "visual": "tall narrow windows with colored glass on upper walls",
+   "label": "wooden pews",
+   "visual": "Light-colored timber benches arranged in neat rows along the nave.",
    "pos": {
-    "x": 49.5,
-    "y": 43.8
+    "x": 23.5,
+    "y": 56.3
    },
    "footprint": {
-    "w": 5.0,
-    "d": 3.0
+    "w": 45.0,
+    "d": 7.4
    },
-   "height_rel": 0.08925125176805523,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
+     44.1,
+     56.6
+    ],
+    [
+     41.4,
+     59.5
+    ],
+    [
+     33.2,
+     59.5
+    ],
+    [
+     30.1,
+     59.5
+    ],
+    [
+     28.1,
+     59.5
+    ],
+    [
+     26.6,
+     59.5
+    ],
+    [
+     25.0,
+     59.5
+    ],
+    [
+     23.1,
+     59.5
+    ],
+    [
+     20.3,
+     59.3
+    ],
+    [
+     12.9,
+     59.3
+    ],
+    [
+     1.9,
+     56.6
+    ],
+    [
+     17.6,
+     54.9
+    ],
+    [
+     21.5,
+     54.4
+    ],
+    [
+     23.8,
+     54.2
+    ],
+    [
+     25.0,
+     54.0
+    ],
+    [
+     26.6,
+     53.7
+    ],
+    [
+     28.1,
+     53.5
+    ],
+    [
+     30.5,
+     53.2
+    ],
+    [
+     35.5,
+     52.5
+    ],
+    [
+     46.5,
+     52.5
+    ]
+   ]
+  },
+  {
+   "ref": "central-aisle",
+   "kind": "place",
+   "label": "central aisle",
+   "visual": "A straight stone-tiled path leading from the foreground to the altar.",
+   "pos": {
+    "x": 49.5,
+    "y": 56.3
+   },
+   "footprint": {
+    "w": 7.0,
+    "d": 7.4
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     53.9,
+     56.4
+    ],
+    [
+     53.9,
+     57.3
+    ],
+    [
+     52.7,
+     57.8
+    ],
+    [
+     52.3,
+     58.8
+    ],
+    [
      51.2,
+     59.5
+    ],
+    [
+     49.6,
+     59.5
+    ],
+    [
+     48.0,
+     59.8
+    ],
+    [
+     46.1,
+     59.5
+    ],
+    [
+     46.1,
+     58.1
+    ],
+    [
+     46.1,
+     57.1
+    ],
+    [
+     46.1,
+     56.4
+    ],
+    [
+     46.1,
+     55.6
+    ],
+    [
+     46.1,
+     54.9
+    ],
+    [
+     46.9,
+     54.0
+    ],
+    [
+     48.0,
+     53.0
+    ],
+    [
+     49.6,
+     53.0
+    ],
+    [
+     51.6,
+     53.0
+    ],
+    [
+     52.3,
+     54.2
+    ],
+    [
+     53.1,
+     54.9
+    ],
+    [
+     53.5,
+     55.6
+    ]
+   ]
+  },
+  {
+   "ref": "altar-reredos",
+   "kind": "item",
+   "label": "altar reredos",
+   "visual": "Intricately carved dark wood screen and ornate altar at the end.",
+   "pos": {
+    "x": 49.5,
+    "y": 48.3
+   },
+   "footprint": {
+    "w": 12.0,
+    "d": 4.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     55.1,
+     48.6
+    ],
+    [
+     55.1,
+     49.6
+    ],
+    [
+     53.5,
+     50.3
+    ],
+    [
+     51.6,
+     50.3
+    ],
+    [
+     50.4,
+     50.3
+    ],
+    [
+     49.6,
+     49.6
+    ],
+    [
+     48.4,
+     50.6
+    ],
+    [
+     47.3,
+     50.6
+    ],
+    [
+     44.9,
+     50.6
+    ],
+    [
+     43.8,
+     49.6
+    ],
+    [
+     44.1,
+     48.6
+    ],
+    [
+     44.5,
+     47.7
+    ],
+    [
+     45.7,
+     46.9
+    ],
+    [
+     46.9,
+     46.5
+    ],
+    [
+     48.4,
+     46.5
+    ],
+    [
+     49.6,
+     46.2
+    ],
+    [
+     50.4,
+     46.5
+    ],
+    [
+     51.2,
+     46.9
+    ],
+    [
+     53.5,
+     46.7
+    ],
+    [
+     54.7,
+     47.4
+    ]
+   ]
+  },
+  {
+   "ref": "stained-glass-window",
+   "kind": "item",
+   "label": "stained glass window",
+   "visual": "Large colorful arched window visible in the far background sanctuary.",
+   "pos": {
+    "x": 49.5,
+    "y": 44.1
+   },
+   "footprint": {
+    "w": 3.5,
+    "d": 3.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     50.8,
      44.0
     ],
     [
-     51.2,
+     50.8,
      44.3
     ],
     [
-     51.2,
-     44.8
+     50.8,
+     44.5
     ],
     [
      50.8,
@@ -403,181 +537,477 @@
      45.2
     ],
     [
-     49.2,
+     49.6,
      45.2
     ],
     [
-     48.4,
+     48.8,
      45.2
     ],
     [
-     47.7,
+     48.0,
      45.2
     ],
     [
-     47.3,
-     45.0
+     48.0,
+     44.8
     ],
     [
-     47.3,
+     48.0,
      44.3
     ],
     [
-     47.3,
+     48.0,
      44.0
     ],
     [
-     47.7,
-     43.5
+     48.0,
+     43.8
     ],
     [
-     47.7,
-     43.3
+     48.0,
+     43.5
     ],
     [
      48.4,
      43.1
     ],
     [
-     48.4,
+     48.8,
      42.6
     ],
     [
-     49.2,
-     42.1
-    ],
-    [
-     50.0,
+     49.6,
      42.3
     ],
     [
-     50.8,
-     42.8
+     50.0,
+     42.6
     ],
     [
-     50.8,
+     50.4,
      43.3
     ],
     [
-     51.2,
+     50.8,
      43.5
+    ],
+    [
+     50.8,
+     43.8
     ]
    ]
   },
   {
-   "ref": "arches",
-   "kind": "place",
-   "label": "arches",
-   "visual": "pointed stone arches connecting columns and ceiling",
+   "ref": "clerestory-windows",
+   "kind": "item",
+   "label": "clerestory windows",
+   "visual": "High-level narrow windows with leaded glass providing natural upper lighting.",
    "pos": {
-    "x": 20.0,
-    "y": 36.0
+    "x": 18.5,
+    "y": 8.7
    },
    "footprint": {
-    "w": 30.0,
-    "d": 36.0
+    "w": 7.5,
+    "d": 16.8
    },
-   "height_rel": 1.0,
+   "height_rel": 0.0,
    "height_m": null,
    "border": [
     [
-     34.0,
-     39.7
+     21.5,
+     8.0
     ],
     [
-     34.0,
-     42.1
+     21.9,
+     8.7
     ],
     [
-     33.6,
+     21.9,
+     9.4
+    ],
+    [
+     21.9,
+     10.9
+    ],
+    [
+     21.5,
+     14.0
+    ],
+    [
+     18.4,
+     14.0
+    ],
+    [
+     16.4,
+     11.6
+    ],
+    [
+     15.6,
+     10.6
+    ],
+    [
+     14.8,
+     9.4
+    ],
+    [
+     14.8,
+     8.7
+    ],
+    [
+     14.8,
+     8.0
+    ],
+    [
+     14.8,
+     7.3
+    ],
+    [
+     15.2,
+     6.5
+    ],
+    [
+     15.2,
+     5.3
+    ],
+    [
+     15.2,
+     1.5
+    ],
+    [
+     18.4,
+     2.7
+    ],
+    [
+     20.7,
+     3.4
+    ],
+    [
+     21.1,
+     5.6
+    ],
+    [
+     21.1,
+     6.8
+    ],
+    [
+     21.5,
+     7.5
+    ]
+   ]
+  },
+  {
+   "ref": "wall-plaques",
+   "kind": "item",
+   "label": "wall plaques",
+   "visual": "Recessed stone plaques and memorials on the side walls.",
+   "pos": {
+    "x": 84.5,
+    "y": 50.1
+   },
+   "footprint": {
+    "w": 5.5,
+    "d": 3.0
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     86.7,
+     50.1
+    ],
+    [
+     86.7,
+     50.6
+    ],
+    [
+     86.7,
+     51.0
+    ],
+    [
+     85.9,
+     51.3
+    ],
+    [
+     85.2,
+     51.5
+    ],
+    [
+     84.4,
+     51.5
+    ],
+    [
+     84.0,
+     51.3
+    ],
+    [
+     83.2,
+     51.0
+    ],
+    [
+     82.4,
+     51.0
+    ],
+    [
+     82.0,
+     50.6
+    ],
+    [
+     82.0,
+     50.1
+    ],
+    [
+     82.0,
+     49.6
+    ],
+    [
+     82.4,
+     49.1
+    ],
+    [
+     82.8,
+     48.6
+    ],
+    [
+     83.6,
+     48.6
+    ],
+    [
+     84.4,
+     48.9
+    ],
+    [
+     85.2,
+     48.9
+    ],
+    [
+     85.9,
+     48.9
+    ],
+    [
+     86.7,
+     49.1
+    ],
+    [
+     87.1,
+     49.6
+    ]
+   ]
+  },
+  {
+   "ref": "modern-speakers",
+   "kind": "item",
+   "label": "modern speakers",
+   "visual": "Small gray speakers mounted on stone walls near the pews.",
+   "pos": {
+    "x": 96.8,
+    "y": 46.2
+   },
+   "footprint": {
+    "w": 2.5,
+    "d": 3.3
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     97.7,
+     46.0
+    ],
+    [
+     97.7,
+     46.2
+    ],
+    [
+     97.7,
+     46.5
+    ],
+    [
+     97.7,
+     46.9
+    ],
+    [
+     97.3,
+     47.4
+    ],
+    [
+     96.9,
+     47.7
+    ],
+    [
+     96.1,
+     47.4
+    ],
+    [
+     95.7,
+     46.9
+    ],
+    [
+     95.7,
+     46.5
+    ],
+    [
+     95.7,
+     46.2
+    ],
+    [
+     95.7,
+     46.0
+    ],
+    [
+     95.7,
+     45.7
+    ],
+    [
+     95.7,
      45.0
     ],
     [
-     34.0,
-     50.3
+     96.1,
+     44.8
     ],
     [
-     28.5,
-     52.7
+     96.9,
+     44.5
     ],
     [
-     21.5,
-     53.7
+     97.7,
+     44.5
     ],
     [
-     20.3,
-     42.1
+     97.7,
+     45.0
     ],
     [
-     19.1,
+     97.7,
+     45.7
+    ]
+   ]
+  },
+  {
+   "ref": "stone-walls",
+   "kind": "place",
+   "label": "stone walls",
+   "visual": "Rough, dark stone surfaces forming the interior structure.",
+   "pos": {
+    "x": 93.5,
+    "y": 29.7
+   },
+   "footprint": {
+    "w": 12.5,
+    "d": 58.8
+   },
+   "height_rel": 0.0,
+   "height_m": null,
+   "border": [
+    [
+     99.6,
+     29.5
+    ],
+    [
+     99.6,
+     30.7
+    ],
+    [
+     99.6,
+     31.9
+    ],
+    [
+     99.6,
+     34.4
+    ],
+    [
+     99.6,
+     40.6
+    ],
+    [
+     94.1,
+     55.2
+    ],
+    [
+     87.5,
      41.6
     ],
     [
-     16.0,
-     42.3
-    ],
-    [
-     16.0,
-     40.9
-    ],
-    [
-     14.1,
-     39.7
-    ],
-    [
-     8.6,
-     37.0
-    ],
-    [
-     10.9,
+     87.9,
      34.8
     ],
     [
-     11.7,
-     31.2
+     88.3,
+     31.9
     ],
     [
-     14.1,
-     25.2
+     87.9,
+     30.7
     ],
     [
-     21.5,
-     24.2
+     88.3,
+     29.5
     ],
     [
-     27.0,
-     29.0
+     88.3,
+     28.3
     ],
     [
-     28.1,
-     34.1
+     88.7,
+     27.1
     ],
     [
-     32.8,
-     34.6
+     88.7,
+     24.7
     ],
     [
-     34.0,
-     37.3
+     88.7,
+     19.1
+    ],
+    [
+     94.1,
+     3.9
+    ],
+    [
+     99.6,
+     18.6
+    ],
+    [
+     99.6,
+     24.7
+    ],
+    [
+     99.6,
+     26.9
+    ],
+    [
+     99.2,
+     28.5
     ]
    ]
   }
  ],
  "relations": [
   {
+   "subject": "lierne-vault-ceiling",
+   "relation": "on_top_of",
+   "object": "stone-pillars"
+  },
+  {
    "subject": "wooden-pews",
    "relation": "left_of",
    "object": "central-aisle"
   },
   {
-   "subject": "vaulted-ceiling",
+   "subject": "altar-reredos",
    "relation": "behind",
-   "object": "altar"
+   "object": "central-aisle"
   },
   {
-   "subject": "wooden-pews",
+   "subject": "stained-glass-window",
+   "relation": "behind",
+   "object": "altar-reredos"
+  },
+  {
+   "subject": "stone-pillars",
    "relation": "facing",
-   "object": "altar"
+   "object": "central-aisle"
   }
  ],
  "annotation": {
@@ -587,28 +1017,17 @@
    "openai/gpt-4o-mini"
   ],
   "contributors": 3,
-  "reconcile": "deepseek/deepseek-v4-pro",
-  "min_votes": 2,
+  "reconcile": "google/gemini-3-flash-preview",
+  "min_votes": 1,
   "iters": 1,
   "judge_score": 10.0,
-  "agreement": 0.667,
-  "minority": [
-   "lierne vault ceiling",
-   "stone pillars",
-   "altar reredos",
-   "clerestory windows",
-   "stained glass window",
-   "gilded bosses",
-   "stone columns",
-   "pews",
-   "speakers",
-   "stone walls"
-  ],
-  "judge_rationale": "The description is exceptionally accurate and detailed, correctly identifying specific architectural elements like the lierne vault with gilded bosses and the wall murals."
+  "agreement": 0.733,
+  "minority": [],
+  "judge_rationale": "The description and entity list are highly accurate, correctly identifying the specific lierne vaulting, materials, and architectural layout."
  },
  "review": {
   "status": "verified",
   "by": "ensemble-annotate",
-  "date": "2026-06-24"
+  "date": "2026-06-25"
  }
 }
