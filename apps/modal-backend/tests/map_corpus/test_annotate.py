@@ -11,6 +11,7 @@ import pytest
 
 from tests.map_corpus import load_manifest
 from tests.map_corpus.annotate import (
+    _canonical,
     agreement_score,
     assemble_description,
     attach_geometry,
@@ -82,6 +83,32 @@ def test_merge_keeps_majority_and_flags_minority() -> None:
     # Random Rock: only 1 model -> minority, not consensus
     assert "random-rock" not in by
     assert [m["label"] for m in minority] == ["Random Rock"]
+
+
+def test_canonical_collapses_hyphen_and_plural_variants() -> None:
+    # the stronger dedup key folds hyphens + plurals so the arbiter's trivial
+    # duplicates collapse (the LOC noise: 'stained-glass windows' x3, 'desks')
+    assert _canonical("stained-glass windows") == _canonical("stained glass windows")
+    assert _canonical("Reading Desks") == _canonical("reading desk")
+    assert _canonical("Marble Columns") == _canonical("marble column")
+    assert _canonical("Statues") == _canonical("statue")
+    # never wrongly singularize -ss/-us words
+    assert _canonical("stained glass") == "stained glass"
+    # distinct adjectives stay distinct (that's the LLM arbiter's job, not a token rule)
+    assert _canonical("marble columns") != _canonical("tall columns")
+    # inherits norm_label (articles dropped)
+    assert _canonical("The Stockade") == _canonical("stockade")
+
+
+def test_parse_arbiter_consensus_dedups_hyphen_and_plural_variants() -> None:
+    payload = {"entities": [
+        {"label": "Stained-Glass Windows", "kind": "item", "visual": "tall", "votes": 2},
+        {"label": "stained glass windows", "kind": "item", "visual": "", "votes": 1},  # dup
+        {"label": "statues", "kind": "item", "visual": "", "votes": 1},
+        {"label": "Statue", "kind": "item", "visual": "", "votes": 1},  # dup
+    ]}
+    out = parse_arbiter_consensus(payload, n_models=3)
+    assert {e["ref"] for e in out} == {"stained-glass-windows", "statues"}
 
 
 def test_parse_arbiter_consensus_merges_synonyms_clamps_votes_dedups() -> None:
