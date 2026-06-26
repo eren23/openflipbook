@@ -1,3 +1,5 @@
+import { clamp01 } from "./clamp";
+
 export interface NormalizedClick {
   x_pct: number;
   y_pct: number;
@@ -84,13 +86,6 @@ export function normalizeClickOnImage(
     x_pct: clamp01(localX / content.width),
     y_pct: clamp01(localY / content.height),
   };
-}
-
-function clamp01(n: number): number {
-  if (Number.isNaN(n)) return 0;
-  if (n < 0) return 0;
-  if (n > 1) return 1;
-  return n;
 }
 
 /** Compute centroid + bbox from a list of normalized stroke points. */

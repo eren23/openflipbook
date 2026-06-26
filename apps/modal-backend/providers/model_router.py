@@ -6,11 +6,10 @@ region crop zoom-continues (a faithful Kontext zoom of the map); entering a
 place routes through an EDIT endpoint (the only path where the parent-region
 ref actually bites); everything else is a fresh generation.
 
-`outpaint`/`inpaint`/`upscale` slots are declared for the verify→repair loop
-(and map-pan reuse) but only activate once their FAL_*_MODEL is set AND a
-provider function is wired — `scripts/verify-fal-models.py` confirms the slug
-before that. fal-only by design (no ControlNet): geometry steers via the
-layout-as-prompt constraints in geometry_prompt, not a structure model.
+The `inpaint` slot feeds the mask edit path (providers/inpaint.py);
+`scripts/verify-fal-models.py` confirms the slug. fal-only by design (no
+ControlNet): geometry steers via the layout-as-prompt constraints in
+geometry_prompt, not a structure model.
 """
 from __future__ import annotations
 
@@ -25,13 +24,11 @@ MODEL_SLOTS: dict[str, tuple[str | None, str | None]] = {
     # and tolerate a view change, where Kontext strict-zooms. The enter eval
     # (tests/continuity_bench/enter_runner.py) A/Bs the candidates.
     "enter_scene": ("fal-ai/nano-banana-pro/edit", "FAL_ENTER_MODEL"),
-    "outpaint": ("fal-ai/bria/expand", "FAL_OUTPAINT_MODEL"),
-    # B2 OUTWARD: a centered BRIA outpaint (reuses the bria slot) paints the
-    # container around the source; the medium-flip hop is a tier-based fresh gen.
+    # B2 OUTWARD: a centered BRIA outpaint paints the container around the
+    # source; the medium-flip hop is a tier-based fresh gen.
     "outpaint_zoomout": ("fal-ai/bria/expand", "FAL_OUTPAINT_MODEL"),
     "scale_parent_fresh": (None, None),
     "inpaint": ("fal-ai/flux-pro/v1/fill", "FAL_INPAINT_MODEL"),
-    "upscale": ("fal-ai/clarity-upscaler", "FAL_UPSCALE_MODEL"),
 }
 
 # Mirrors SCALE_LADDER in packages/config (coarsest→finest); kept in sync by hand
@@ -68,8 +65,8 @@ def select_operation(render_mode: str | None, has_region: bool) -> str:
     site still needs a source image, hence no has_region condition here — it
     falls back to fresh only when there is nothing to condition on.
 
-    Everything else is a fresh generation. (outpaint/inpaint/upscale are invoked
-    explicitly by callers — the repair loop — not chosen here.)"""
+    Everything else is a fresh generation. (inpaint is invoked explicitly by
+    the mask edit path, not chosen here.)"""
     if render_mode in ("place_submap", "place_closeup") and has_region:
         return "zoom_continue"
     if render_mode == "place_scene":
@@ -161,16 +158,6 @@ CAPABILITIES: tuple[tuple[str, ModelCaps], ...] = (
     ("openrouter:sourceful/riverflow-v2.5-pro", ModelCaps("riverflow pro", False, False, True, 0.24, 150)),
     ("openai/gpt-image-2", ModelCaps("gpt-image-2", True, False, True, 0.17, 90)),
 )
-
-
-def capabilities_for(slug: str) -> ModelCaps | None:
-    s = (slug or "").lower()
-    best: ModelCaps | None = None
-    best_len = -1
-    for prefix, caps in CAPABILITIES:
-        if s.startswith(prefix) and len(prefix) > best_len:
-            best, best_len = caps, len(prefix)
-    return best
 
 
 def registry() -> list[dict[str, object]]:

@@ -34,7 +34,6 @@ def test_select_operation_non_enter_is_fresh(rm) -> None:
 
 def test_resolve_model_defaults() -> None:
     assert "kontext" in (model_router.resolve_model("zoom_continue") or "")
-    assert "bria" in (model_router.resolve_model("outpaint") or "")
     assert "fill" in (model_router.resolve_model("inpaint") or "")
     # The enter op must resolve to an EDIT endpoint — refs are a no-op anywhere else.
     assert "/edit" in (model_router.resolve_model("enter_scene") or "")
@@ -46,7 +45,7 @@ def test_resolve_model_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FAL_CONTINUE_MODEL", "fal-ai/custom/kontext2")
     assert model_router.resolve_model("zoom_continue") == "fal-ai/custom/kontext2"
     monkeypatch.setenv("FAL_OUTPAINT_MODEL", "fal-ai/custom/expand2")
-    assert model_router.resolve_model("outpaint") == "fal-ai/custom/expand2"
+    assert model_router.resolve_model("outpaint_zoomout") == "fal-ai/custom/expand2"
     monkeypatch.setenv("FAL_ENTER_MODEL", "fal-ai/flux-pro/kontext")
     assert model_router.resolve_model("enter_scene") == "fal-ai/flux-pro/kontext"
 

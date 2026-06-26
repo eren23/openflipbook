@@ -1,3 +1,4 @@
+import { clamp01 } from "./clamp";
 import { objectContainRect, type ContainRect } from "./image-click";
 
 /** A drag-selected edit region, normalized 0..1 in natural-image space —
@@ -12,13 +13,6 @@ export interface EditRegionBox {
 
 /** Below this fraction per axis a "drag" is just a click — no selection. */
 const MIN_DRAG_FRAC = 0.02;
-
-function clamp01(n: number): number {
-  if (Number.isNaN(n)) return 0;
-  if (n < 0) return 0;
-  if (n > 1) return 1;
-  return n;
-}
 
 /**
  * Convert a drag (element-relative pixel start/end) into a normalized
