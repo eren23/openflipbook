@@ -10,6 +10,7 @@ import type {
 } from "@openflipbook/config";
 import { finerTier } from "@openflipbook/config";
 
+import { clamp01 } from "./clamp";
 import { routeClick, routeToFocus, type ClickPoint } from "./click-route";
 import {
   childrenOf,
@@ -393,7 +394,6 @@ export function frameCropToImageBox(
   crop: MapCrop,
   frame: MapCrop,
 ): { x: number; y: number; w: number; h: number } {
-  const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
   const x = clamp01((crop.x - frame.x) / frame.w);
   const y = clamp01((crop.y - frame.y) / frame.h);
   return {

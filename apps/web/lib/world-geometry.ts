@@ -9,6 +9,8 @@ import type {
   WorldVec2,
 } from "@openflipbook/config";
 
+import { clamp } from "./clamp";
+
 /**
  * Pure 2.5D projection: (world map + observer pose) → per-frame entity layout.
  *
@@ -209,8 +211,7 @@ const DEFAULT_HEIGHT = 4;
 // oblique map can't seed a building the size of a district (or smaller than a
 // floor tile). Relative units, matching MAP_IMAGE_FRAME's 100×60.
 const MAX_FOOTPRINT = 40;
-const clampFootprint = (v: number): number =>
-  Math.min(Math.max(v, 0.5), MAX_FOOTPRINT);
+const clampFootprint = (v: number): number => clamp(v, 0.5, MAX_FOOTPRINT);
 
 export function estimateGeoFromBBox(
   bbox: EntityBBox,

@@ -1,5 +1,7 @@
 "use client";
 
+import { clamp } from "./clamp";
+
 /**
  * Image conditioning — build the weighted reference stack that grounds a new
  * page in the world it came from. Order encodes weight: the region you came
@@ -13,10 +15,6 @@ export type ConditionRole = "region" | "parent" | "anchor" | "style";
 export interface ConditionRefs {
   urls: string[];
   roles: ConditionRole[];
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v;
 }
 
 /**

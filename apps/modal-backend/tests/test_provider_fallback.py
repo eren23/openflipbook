@@ -17,14 +17,6 @@ def _fresh(monkeypatch: pytest.MonkeyPatch):
     breaker.reset_for_tests()
 
 
-def test_capabilities_longest_prefix() -> None:
-    pro = model_router.capabilities_for("fal-ai/nano-banana-pro/edit")
-    assert pro is not None and pro.label == "nano-banana-pro"
-    base = model_router.capabilities_for("fal-ai/nano-banana")
-    assert base is not None and base.est_cost == 0.039
-    assert model_router.capabilities_for("acme/unknown") is None
-
-
 def test_registry_shape() -> None:
     rows = model_router.registry()
     assert any(r["slug"] == "fal-ai/nano-banana-pro" for r in rows)

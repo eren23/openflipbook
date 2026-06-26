@@ -1,6 +1,7 @@
 import type { WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
+import { clamp } from "./clamp";
 import { localExtent } from "./world-geometry";
 
 // B2 OUTWARD reparent — the one operation that inverts the frame tree: synthesize
@@ -23,7 +24,7 @@ export interface ReparentResult {
 // rung ratio or extent can't explode the frame.
 const SCALE_MIN = 1e-3;
 const SCALE_MAX = 10;
-const clampScale = (s: number): number => Math.min(Math.max(s, SCALE_MIN), SCALE_MAX);
+const clampScale = (s: number): number => clamp(s, SCALE_MIN, SCALE_MAX);
 
 // P's fine frame scale: the METRIC ratio meters(child)/meters(parent) =
 // `tierMetricMultiplier(parentTier, childTier)` (< 1: a city is a small part of a

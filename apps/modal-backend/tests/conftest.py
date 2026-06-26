@@ -74,7 +74,6 @@ _SCRUB = (
     "VLM_GROUNDING_REPAIR",
     "FAL_OUTPAINT_MODEL",
     "FAL_INPAINT_MODEL",
-    "FAL_UPSCALE_MODEL",
     "FAL_DETECTOR_MODEL",
     # world_bench eval gates — keep host-set run flags / judge pin out of tests.
     "LAYOUT_BENCH_RUN",
