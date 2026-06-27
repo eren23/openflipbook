@@ -229,6 +229,11 @@ class SceneView(BaseModel):
     scale_tier: str | None = None
     # The deliberate camera for this render (the view grammar). None ⇒ legacy.
     view: ViewSpec | None = None
+    # How many times this place has already been entered (the client's revisit
+    # count). >0 rotates the scene camera to another angle under
+    # ENTER_AZIMUTH_ROTATE; None/0 is byte-identical. Mirrors the optional TS
+    # `enter_index?` (schema-parity gated).
+    enter_index: int | None = None
 
 
 class ProjectedEntity(BaseModel):
@@ -553,6 +558,13 @@ def _view_spec_for(
         f = focus["footprint"]
         if f.get("w") and f.get("d"):
             fp = (float(f["w"]), float(f["d"]))
+    # Another-angle on re-enter (flag-gated OFF): the client's revisit count
+    # rotates a scene enter to a new side. Off ⇒ 0 ⇒ byte-identical.
+    enter_index = (
+        int(sv.enter_index)
+        if sv and sv.enter_index and env_flag("ENTER_AZIMUTH_ROTATE")
+        else 0
+    )
     return cast(
         "dict | None",
         view_policy.default_view(
@@ -568,6 +580,7 @@ def _view_spec_for(
             subject_context=subject_context,
             focus_kind=str(focus.get("kind") or "") if focus else None,
             focus_footprint=fp,
+            enter_index=enter_index,
         ),
     )
 

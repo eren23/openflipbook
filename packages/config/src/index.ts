@@ -684,6 +684,10 @@ export interface SceneView {
   // The deliberate camera for this render (the view grammar). Absent/null on
   // legacy nodes â the pre-grammar hardcoded behavior, byte-identical.
   view?: ViewSpec | null;
+  // How many times this place has already been entered (the client's revisit
+  // count). >0 rotates the scene camera to another angle under
+  // ENTER_AZIMUTH_ROTATE; absent/0 is byte-identical.
+  enter_index?: number | null;
 }
 
 // One entity's projected place in a rendered frame (geometry-engine output),
