@@ -15,6 +15,9 @@ interface Props {
   enterHintActionable?: boolean;
   /** Pre-first-page hint vs post-first-page tap/around pairing. Default post. */
   variant?: FirstRunCoachVariant;
+  /** When wired, renders a small × that retires the coach for good (persisted).
+   *  Absent → no dismiss control, so existing call sites are byte-unchanged. */
+  onDismiss?: () => void;
 }
 
 /**
@@ -29,6 +32,7 @@ export function FirstRunCoach({
   worldHint = false,
   enterHintActionable = false,
   variant = "post",
+  onDismiss,
 }: Props) {
   return (
     <div
@@ -85,6 +89,17 @@ export function FirstRunCoach({
             <span className="font-mono text-xs opacity-80">T</span>
             <span className="opacity-80">scrubber</span>
           </>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            aria-label="dismiss"
+            onClick={onDismiss}
+            className="ml-0.5 rounded-full px-1.5 leading-none opacity-50 hover:opacity-90"
+            title="Dismiss"
+          >
+            ×
+          </button>
         )}
       </div>
     </div>

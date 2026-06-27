@@ -24,6 +24,7 @@ import {
 } from "@/lib/image-click";
 import { entityAtPoint, padBox, type EntityHit } from "@/lib/entity-hit";
 import { applyPlanInstruction } from "@/lib/geo-to-edit";
+import { coachPreDefault } from "@/lib/coach";
 import {
   getWSUrl,
   startLTXStream,
@@ -343,15 +344,39 @@ export default function PlayPage() {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("q") ?? "";
   });
-  // Coach visibility: the build flag is the default, but a `?coach=0|1` URL
-  // param overrides it so the UX bench (and demos) can pin the coach on or off
-  // without a rebuild. Additive — absent param keeps the build-flag default.
+  // Coach visibility (the on-ramp): a `?coach=0|1` URL param or the build flag
+  // win when set; otherwise the PRE hint shows ONCE for a genuine first-timer
+  // (no prior `lastSession`, not dismissed) and stays out of a returning user's
+  // way — see lib/coach.coachPreDefault. Additive: existing overrides unchanged.
   const [coachEnabled] = useState(() => {
     if (typeof window === "undefined") return ON_RAMP_COACH_ENABLED;
-    const v = new URLSearchParams(window.location.search).get("coach");
-    if (v == null) return ON_RAMP_COACH_ENABLED;
-    return ["1", "true", "yes"].includes(v.toLowerCase());
+    let hadPriorUse = false;
+    let dismissed = false;
+    try {
+      hadPriorUse =
+        !!window.localStorage.getItem("openflipbook.lastSession") ||
+        !!window.localStorage.getItem("openflipbook.coachSeen");
+      dismissed = window.localStorage.getItem("openflipbook.coachSeen") === "1";
+    } catch {
+      /* privacy mode — treat as a first-timer, the hint is harmless */
+    }
+    return coachPreDefault({
+      urlParam: new URLSearchParams(window.location.search).get("coach"),
+      envValue: process.env.NEXT_PUBLIC_ON_RAMP_COACH ?? null,
+      hadPriorUse,
+      dismissed,
+    });
   });
+  // The × on the coach retires it for good (persisted) and hides it now.
+  const [coachDismissed, setCoachDismissed] = useState(false);
+  const dismissCoach = useCallback(() => {
+    setCoachDismissed(true);
+    try {
+      window.localStorage.setItem("openflipbook.coachSeen", "1");
+    } catch {
+      /* no-op */
+    }
+  }, []);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
@@ -3720,6 +3745,7 @@ export default function PlayPage() {
           It returns when the tray is closed. */}
       {!helpOpen &&
         !bloom &&
+        !coachDismissed &&
         ((coachEnabled &&
           history.items.length === 0 &&
           phase !== "generating") ||
@@ -3731,6 +3757,7 @@ export default function PlayPage() {
             variant={
               coachEnabled && history.items.length === 0 ? "pre" : "post"
             }
+            onDismiss={dismissCoach}
           />
         )}
 

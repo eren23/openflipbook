@@ -52,4 +52,16 @@ describe("FirstRunCoach", () => {
     // ...and it replaces the passive noun, not stacks with it.
     expect(/rings = enterable places/i.test(text)).toBe(false);
   });
+
+  it("offers a dismiss button only when onDismiss is wired (additive)", () => {
+    // no onDismiss → no dismiss control (existing call sites are untouched)
+    const { unmount } = render(<FirstRunCoach onShowHelp={() => {}} />);
+    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
+    unmount();
+
+    const onDismiss = vi.fn();
+    render(<FirstRunCoach onShowHelp={() => {}} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
 });
