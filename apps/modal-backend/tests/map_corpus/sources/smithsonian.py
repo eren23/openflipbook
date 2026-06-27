@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -115,7 +116,12 @@ def find_rows(query: str, limit: int = 8, tier: str = "closeup") -> list[dict[st
         "q": f'{query} AND online_media_type:"Images"',
         "rows": str(max(limit * 4, limit)),
     }
-    data = _get_json(f"{_BASE}/search?{urllib.parse.urlencode(params)}")
+    try:
+        data = _get_json(f"{_BASE}/search?{urllib.parse.urlencode(params)}")
+    except urllib.error.HTTPError as e:
+        hint = " — set SMITHSONIAN_API_KEY (DEMO_KEY is heavily rate-limited)" if e.code == 429 else ""
+        print(f"smithsonian: HTTP {e.code} {e.reason}{hint}")
+        return []
     records = ((data.get("response") or {}).get("rows")) or []
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()

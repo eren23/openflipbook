@@ -11,7 +11,7 @@
 /** Tri-state flag parse: explicit on / off, or null when unset or unrecognised. */
 export function parseCoachFlag(raw: string | null | undefined): boolean | null {
   if (raw == null) return null;
-  const v = raw.toLowerCase();
+  const v = raw.trim().toLowerCase();
   if (["1", "true", "yes"].includes(v)) return true;
   if (["0", "false", "no"].includes(v)) return false;
   return null;

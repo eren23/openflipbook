@@ -89,3 +89,40 @@ def test_rotated_enter_instruction_states_the_new_facing() -> None:
     )
     text = image_edit.build_enter_instruction("The Hall", ["a long table"], view=view).lower()
     assert "facing" in text and "east" in text
+
+
+def test_azimuth_wraps_past_a_full_turn() -> None:
+    """A user who keeps re-entering cycles the cardinals rather than running off
+    to 450°+."""
+    from providers.prompt_library import policy
+
+    assert policy.azimuth_for_enter_index(5) == 90.0  # 450 % 360
+    assert policy.azimuth_for_enter_index(8) == 0.0  # 720 % 360
+
+
+def test_enter_from_closeup_also_rotates_on_revisit() -> None:
+    """The from_closeup descent forces eye-level; a re-enter still rotates it to
+    a new side (the two signals compose)."""
+    from providers.prompt_library import policy
+
+    spec = policy.default_view(
+        render_mode="place_scene", world_mode=True, place_form="complex",
+        from_closeup=True, enter_index=1,
+    )
+    assert spec is not None and spec["projection"] == "eye_level"
+    assert spec["azimuth_deg"] == 90.0
+
+
+def test_rotated_oblique_enter_states_the_corner_it_is_viewed_from() -> None:
+    """Establishing (oblique) renders azimuth as the COMPLEMENTARY 'from the
+    <corner>' (az+180), not 'facing' — the projection-correct wording."""
+    from providers import image_edit
+    from providers.prompt_library import policy
+
+    view = policy.default_view(
+        render_mode="place_scene", world_mode=True, place_form="complex", enter_index=1
+    )
+    assert view is not None and view["projection"] == "oblique"
+    text = image_edit.build_enter_instruction("The Keep", ["a gatehouse"], view=view).lower()
+    assert "from the west" in text  # azimuth 90 (east) → viewed from the west
+    assert "facing" not in text

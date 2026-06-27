@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tests.map_corpus.sources.smithsonian import smithsonian_record_to_row
 
 _IMG = "https://ids.si.edu/ids/deliveryService?id=NMAH-AHB2019q012345"
@@ -96,3 +98,55 @@ def test_smithsonian_record_to_row_tier_override_and_genre_fallback() -> None:
     # with no object_type and no explicit genre, falls back to a generic label
     bare = smithsonian_record_to_row(_record(object_type=()))
     assert bare is not None and bare["genre"] == "object"
+
+
+def _multi_media(media: list[dict[str, Any]], meta_access: str | None = "CC0") -> dict[str, Any]:
+    dnr: dict[str, Any] = {
+        "title": {"content": "Orrery"},
+        "unit_code": "NMAH",
+        "online_media": {"mediaCount": len(media), "media": media},
+    }
+    if meta_access is not None:
+        dnr["metadata_usage"] = {"access": meta_access}
+    return {"id": "edanmdm-nmah_9", "content": {"descriptiveNonRepeating": dnr}}
+
+
+def test_smithsonian_record_to_row_skips_non_image_media_for_a_cc0_image() -> None:
+    # the first media is a (CC0) document scan; the image sits second
+    row = smithsonian_record_to_row(
+        _multi_media([
+            {"type": "Documents", "content": "https://ids.si.edu/d", "usage": {"access": "CC0"}},
+            {"type": "Images", "content": "https://ids.si.edu/img-A", "usage": {"access": "CC0"}},
+        ])
+    )
+    assert row is not None and row["source_url"] == "https://ids.si.edu/img-A"
+
+
+def test_smithsonian_record_to_row_picks_the_cc0_image_over_a_restricted_one() -> None:
+    # the first IMAGE is rights-restricted; the loop walks on to the CC0 one
+    row = smithsonian_record_to_row(
+        _multi_media(
+            [
+                {"type": "Images", "content": "https://ids.si.edu/restricted", "usage": {"access": "Restricted"}},
+                {"type": "Images", "content": "https://ids.si.edu/free", "usage": {"access": "CC0"}},
+            ],
+            meta_access=None,  # no record-level grant — only the per-media one counts
+        )
+    )
+    assert row is not None and row["source_url"] == "https://ids.si.edu/free"
+
+
+def test_find_rows_returns_empty_on_rate_limit_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # DEMO_KEY (and an over-quota real key) returns HTTP 429 — the live CLI must
+    # not stack-trace; find_rows swallows the HTTP error and returns nothing.
+    import urllib.error
+
+    from tests.map_corpus.sources import smithsonian as si
+
+    def _boom(_url: str) -> Any:
+        raise urllib.error.HTTPError("u", 429, "OVER_RATE_LIMIT", {}, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(si, "_get_json", _boom)
+    assert si.find_rows("vase", limit=3) == []
