@@ -53,6 +53,21 @@ _PERSPECTIVE_SEED_FOOTPRINT = (6.0, 6.0)  # A1: deriveGeo perspective constant �
 _MAP_FRAME_W = 100.0  # MAP_IMAGE_FRAME width (geo-tap.ts)
 _COMPLEX_FRAC, _TINY_FRAC = 0.10, 0.02
 
+# "Another angle" on re-enter: each repeat enter of the same place rotates the
+# scene camera one step, so a revisit is seen from a new side instead of the
+# same view redrawn. 90° → four cardinal views before it wraps.
+_AZIMUTH_STEP_DEG = 90.0
+
+
+def azimuth_for_enter_index(enter_index: int | None) -> float | None:
+    """The scene azimuth for the Nth enter of a place, or None to leave it
+    unstated. The first enter (0/None) keeps today's default facing — no azimuth
+    clause, byte-identical; each subsequent enter rotates one _AZIMUTH_STEP_DEG
+    step (wrapping at 360°), the only signal the 'another angle' feature adds."""
+    if not enter_index or enter_index <= 0:
+        return None
+    return (_AZIMUTH_STEP_DEG * float(enter_index)) % 360.0
+
 
 def _spec(
     projection: str,
@@ -108,12 +123,17 @@ def default_view(
     subject_context: str | None = None,
     focus_kind: str | None = None,
     focus_footprint: tuple[float, float] | None = None,
+    enter_index: int = 0,
 ) -> ViewSpec | None:
     """The deliberate camera for a render, or None (legacy bytes).
 
     enter_as is accepted but no cell branches on it — render_mode already
     encodes the same decision; a second switch for the same fact is how the
-    audit's dead gates were born."""
+    audit's dead gates were born.
+
+    enter_index > 0 rotates a SCENE enter to another angle (the 'another angle'
+    feature); 0 (the default) is byte-identical. Only place_scene consumes it —
+    maps stay north-locked."""
     del enter_as
     rmode = (render_mode or "").strip().lower()
     if rmode == "scale_parent":
@@ -131,6 +151,7 @@ def default_view(
             focus_kind,
             focus_footprint,
             from_closeup=from_closeup,
+            enter_index=enter_index,
         )
     if rmode == "place_closeup":
         # A closeup of something inside a SCENE: the reference pixels dictate
@@ -156,6 +177,39 @@ def default_view(
 
 
 def _scene_view(
+    level: str | None,
+    scale_tier: str | None,
+    place_form: str | None,
+    subject: str | None,
+    subject_context: str | None,
+    focus_kind: str | None,
+    focus_footprint: tuple[float, float] | None,
+    from_closeup: bool = False,
+    enter_index: int = 0,
+) -> ViewSpec | None:
+    """The scene camera, rotated to a new side on re-enter. The projection
+    cascade lives in _scene_base; this wrapper only stamps the 'another angle'
+    azimuth (eye_level + oblique scene specs carry none by default, so a first
+    enter is byte-identical)."""
+    base = _scene_base(
+        level,
+        scale_tier,
+        place_form,
+        subject,
+        subject_context,
+        focus_kind,
+        focus_footprint,
+        from_closeup=from_closeup,
+    )
+    if base is None:
+        return None
+    az = azimuth_for_enter_index(enter_index)
+    if az is not None:
+        base["azimuth_deg"] = az  # fresh dict from _spec each call — safe to stamp
+    return base
+
+
+def _scene_base(
     level: str | None,
     scale_tier: str | None,
     place_form: str | None,

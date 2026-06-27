@@ -54,7 +54,8 @@
       "focus_id",
       "scale_tier",
       "view",
-      "closeup"
+      "closeup",
+      "enter_index"
     ],
     "ProjectedEntity": [
       "id",
@@ -182,7 +183,8 @@
         "fov_deg": 90,
         "source": "user"
       },
-      "closeup": false
+      "closeup": false,
+      "enter_index": 0
     },
     "ProjectedEntity": {
       "id": "g1",
