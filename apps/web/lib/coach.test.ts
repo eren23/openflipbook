@@ -15,6 +15,12 @@ describe("parseCoachFlag", () => {
     expect(parseCoachFlag("")).toBe(null);
     expect(parseCoachFlag("maybe")).toBe(null);
   });
+
+  it("tolerates surrounding whitespace (a .env value with a trailing space)", () => {
+    expect(parseCoachFlag(" 1 ")).toBe(true);
+    expect(parseCoachFlag("\ttrue\n")).toBe(true);
+    expect(parseCoachFlag("  no  ")).toBe(false);
+  });
 });
 
 describe("coachPreDefault", () => {

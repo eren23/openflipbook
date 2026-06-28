@@ -537,6 +537,79 @@ async def test_view_loop_verify_false_takes_one_shot(
     assert any(e["type"] == "final" for e in events)
 
 
+def _enter_index_body(idx: int) -> GenerateBody:
+    return GenerateBody(
+        query="a low-beamed tavern interior",
+        session_id="s1",
+        render_mode="place_scene",
+        world_mode=True,
+        scene_view={
+            "node_id": "n1",
+            "level": "eye",  # → eye_level scene; rotation surfaces as "facing …"
+            "observer": None,
+            "map_crop": None,
+            "enter_index": idx,
+        },
+    )
+
+
+def test_azimuth_flag_on_rotates_a_revisit() -> None:
+    """ENTER_AZIMUTH_ROTATE=1 + scene_view.enter_index>0 → _view_spec_for stamps
+    the rotated azimuth on the scene camera (the another-angle contract)."""
+    import os
+
+    from generate import _view_spec_for
+
+    os.environ["ENTER_AZIMUTH_ROTATE"] = "1"
+    try:
+        spec = _view_spec_for(
+            _enter_index_body(1), "place_scene", world_mode=True, has_region=False,
+            subject="a tavern", subject_context="interior", place_form="interior",
+        )
+    finally:
+        del os.environ["ENTER_AZIMUTH_ROTATE"]
+    assert spec is not None and spec.get("azimuth_deg") == 90.0
+
+
+def test_azimuth_flag_off_leaves_enter_index_inert() -> None:
+    """Flag OFF (default): even with enter_index set, the scene camera carries
+    no azimuth — byte-identical to today."""
+    from generate import _view_spec_for
+
+    spec = _view_spec_for(
+        _enter_index_body(1), "place_scene", world_mode=True, has_region=False,
+        subject="a tavern", subject_context="interior", place_form="interior",
+    )
+    assert spec is not None and "azimuth_deg" not in spec
+
+
+def test_pinned_view_beats_enter_index_rotation() -> None:
+    """A user/persisted camera pin short-circuits policy — so even with the flag
+    on and enter_index set, the pinned view is returned verbatim, NOT rotated."""
+    import os
+
+    from generate import _view_spec_for
+
+    body = GenerateBody(
+        query="q", session_id="s1", render_mode="place_scene", world_mode=True,
+        scene_view={
+            "node_id": "n1", "level": "eye", "observer": None, "map_crop": None,
+            "enter_index": 2,  # would be azimuth 180 if policy ran
+            "view": {"projection": "eye_level", "azimuth_deg": 45.0, "source": "user"},
+        },
+    )
+    os.environ["ENTER_AZIMUTH_ROTATE"] = "1"
+    try:
+        spec = _view_spec_for(
+            body, "place_scene", world_mode=True, has_region=False,
+            subject="a tavern", subject_context="interior", place_form="interior",
+        )
+    finally:
+        del os.environ["ENTER_AZIMUTH_ROTATE"]
+    assert spec is not None
+    assert spec["source"] == "user" and spec["azimuth_deg"] == 45.0  # pinned, not 180
+
+
 async def test_view_loop_per_request_max_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

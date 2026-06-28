@@ -562,7 +562,7 @@ def _view_spec_for(
     # rotates a scene enter to a new side. Off ⇒ 0 ⇒ byte-identical.
     enter_index = (
         int(sv.enter_index)
-        if sv and sv.enter_index and env_flag("ENTER_AZIMUTH_ROTATE")
+        if sv and sv.enter_index and sv.enter_index > 0 and env_flag("ENTER_AZIMUTH_ROTATE")
         else 0
     )
     return cast(

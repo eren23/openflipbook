@@ -64,4 +64,13 @@ describe("FirstRunCoach", () => {
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
+
+  it("the first-timer PRE hint is dismissable too (the empty-form newcomer)", () => {
+    const onDismiss = vi.fn();
+    render(<FirstRunCoach onShowHelp={() => {}} variant="pre" onDismiss={onDismiss} />);
+    // it's still the PRE nudge, and it carries the × so a newcomer can wave it off
+    expect(/ask anything above/i.test(document.body.textContent ?? "")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
 });
