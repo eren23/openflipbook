@@ -360,10 +360,16 @@ async def generate_image(
         return generated
 
     model = _resolve_model(tier, model_override)
-    if not env_flag("PROVIDER_FALLBACK"):
+    # OpenRouter image models (the "pro" tier's riverflow) are the flaky ones —
+    # a soft-refusal/empty response or a slow hiccup. ALWAYS guard them with the
+    # fal failover chain, even when PROVIDER_FALLBACK is off, so a degraded fal
+    # page beats a slow timeout / "network error" / error frame. fal slugs are
+    # reliable and stay gated behind the flag.
+    force_failover = model.startswith(OPENROUTER_IMAGE_PREFIX)
+    if not force_failover and not env_flag("PROVIDER_FALLBACK"):
         return await _generate_with_slug(model, prompt, aspect_ratio, reference_urls)
 
-    # PROVIDER_FALLBACK: the resolved slug plus its registry chain, with
+    # Failover: the resolved slug plus its registry chain, with
     # circuit-open slugs skipped (three consecutive failures → cooldown).
     # A degraded page beats an error frame; the final's image_model says
     # honestly which model actually rendered. Fresh-gen only by design.
@@ -600,7 +606,10 @@ def _is_retryable(exc: BaseException) -> bool:
     types. Falls back to httpx exceptions for the post-fal CDN download path.
     """
     if isinstance(exc, _EmptyImageResponse):
-        return True  # a no-image response is a transient model hiccup — retry it
+        # A no-image response fails FAST (not retried in place) so generate_image's
+        # forced fal failover kicks in immediately — retrying a flaky/slow image
+        # model 3x in place is what blew the upstream timeout -> "network error".
+        return False
     if isinstance(exc, fal_client.FalClientHTTPError):
         code = exc.status_code
         return code == 429 or 500 <= code < 600
