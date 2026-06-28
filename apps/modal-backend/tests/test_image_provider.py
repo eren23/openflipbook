@@ -54,20 +54,19 @@ def test_resolve_model_legacy_env_falls_through() -> None:
     assert out == image.TIER_MODELS["balanced"]
 
 
-def test_pro_tier_defaults_to_a_reliable_fal_model_not_riverflow() -> None:
-    """The pro tier must default to a fal model — NOT the slow/flaky
-    `openrouter:` riverflow that broke fresh pro-tier map gen. Riverflow stays
-    opt-in via FAL_IMAGE_MODEL_PRO."""
-    resolved = image._resolve_model("pro", None)
-    assert resolved == "fal-ai/nano-banana-pro"
-    assert not resolved.startswith(image.OPENROUTER_IMAGE_PREFIX)
+def test_pro_tier_defaults_to_riverflow_the_quality_winner() -> None:
+    """Pro = riverflow (bakeoff quality winner — the dense, detailed maps). It's
+    slow/occasionally-empty but now reliable via the SSE heartbeat + fail-fast
+    fal failover. Trade detail for speed via FAL_IMAGE_MODEL_PRO."""
+    assert image._resolve_model("pro", None) == "openrouter:sourceful/riverflow-v2.5-pro"
+    assert image.TIER_MODELS["pro"].startswith(image.OPENROUTER_IMAGE_PREFIX)
 
 
-def test_pro_tier_can_opt_back_into_riverflow_via_env(
+def test_pro_tier_can_opt_into_fast_fal_via_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FAL_IMAGE_MODEL_PRO", "openrouter:sourceful/riverflow-v2.5-pro")
-    assert image._resolve_model("pro", None) == "openrouter:sourceful/riverflow-v2.5-pro"
+    monkeypatch.setenv("FAL_IMAGE_MODEL_PRO", "fal-ai/nano-banana-pro")
+    assert image._resolve_model("pro", None) == "fal-ai/nano-banana-pro"
 
 
 def test_resolve_model_legacy_env_used_for_unset_tier(
@@ -483,10 +482,7 @@ async def test_generate_image_routes_openrouter_prefix_without_fal_key(
         return sentinel
 
     monkeypatch.setattr(image, "_openrouter_image", fake_or)
-    # pro now defaults to fal, so drive the openrouter path via model_override
-    out = await image.generate_image(
-        "a map", "16:9", model_override="openrouter:sourceful/riverflow-v2.5-pro"
-    )
+    out = await image.generate_image("a map", "16:9", tier="pro")  # pro = riverflow
     assert out is sentinel
     assert seen["slug"] == "sourceful/riverflow-v2.5-pro"  # prefix stripped
     assert seen["aspect"] == "16:9"

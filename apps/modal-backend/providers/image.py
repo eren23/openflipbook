@@ -48,14 +48,15 @@ class _EmptyImageResponse(RuntimeError):
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
     "balanced": "fal-ai/nano-banana-pro",
-    # Pro = a RELIABLE fal model. The bakeoff quality winner (riverflow-v2.5-pro,
-    # docs/research/07) is ~150s/gen on OpenRouter and intermittently returns an
-    # empty response (content=None) — a bad production default that broke fresh
-    # pro-tier map gen ("no image" / a 300s proxy-timeout "network error"). Layout
-    # fidelity is saturated across the field, so the marginal quality wasn't worth
-    # the unreliability. Opt back into riverflow (now protected by the fal failover
-    # + SSE heartbeat) with FAL_IMAGE_MODEL_PRO=openrouter:sourceful/riverflow-v2.5-pro.
-    "pro":      "fal-ai/nano-banana-pro",
+    # Pro = the bakeoff QUALITY winner (docs/research/07: "richest detail", held
+    # the medium best — the dense, intricate maps). It's slow (~150-290s) and
+    # occasionally returns an empty response, but it is NOW reliable: a single
+    # slow gen survives the proxy's 300s body timeout via the SSE keepalive
+    # (generate._with_heartbeat), and a true empty FAILS FAST → fal failover
+    # (nano-banana-pro) in seconds (not the 5-min hang #104 caused). Override to a
+    # fast fal model with FAL_IMAGE_MODEL_PRO=fal-ai/nano-banana-pro if you'd rather
+    # trade detail for speed.
+    "pro":      "openrouter:sourceful/riverflow-v2.5-pro",
 }
 TIER_ENV_KEYS: dict[str, str] = {
     "fast":     "FAL_IMAGE_MODEL_FAST",
