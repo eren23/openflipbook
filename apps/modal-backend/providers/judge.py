@@ -122,10 +122,10 @@ async def score_place_match(image_a: bytes, image_b: bytes) -> JudgeResult:
         "place; image 2 is a candidate. IGNORE the artistic medium entirely: a "
         "photograph, an illustration, a painting and a 3D render of the SAME "
         "place must all score high. Ignore palette, lighting, line work and art "
-        "style. Score ONLY place identity. 10 = unmistakably the same place / "
-        "same kind of structured place (same layout, the same key features in "
-        "the same arrangement); 5 = the right KIND of place but a different "
-        "specific one; 0 = an unrelated place."
+        "style. Score ONLY place identity. 10 = unmistakably the same SPECIFIC "
+        "place: the same structural layout AND the same key features in the same "
+        "arrangement; 5 = the right KIND of place but a different specific one "
+        "(matching the type or layout alone is NOT a 10); 0 = an unrelated place."
         ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
     )
     user_text = (

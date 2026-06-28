@@ -126,3 +126,25 @@ def test_rotated_oblique_enter_states_the_corner_it_is_viewed_from() -> None:
     text = image_edit.build_enter_instruction("The Keep", ["a gatehouse"], view=view).lower()
     assert "from the west" in text  # azimuth 90 (east) → viewed from the west
     assert "facing" not in text
+
+
+def test_negative_enter_index_never_rotates() -> None:
+    """A garbage negative count must not spin the camera — defended at the policy
+    boundary so a future loosening of generate.py's guard can't leak."""
+    from providers.prompt_library import policy
+
+    assert policy.azimuth_for_enter_index(-1) is None
+    spec = policy.default_view(
+        render_mode="place_scene", world_mode=True, place_form="interior", enter_index=-1
+    )
+    assert spec is not None and "azimuth_deg" not in spec
+
+
+def test_astro_scene_stays_legacy_even_with_enter_index() -> None:
+    """Astronomical scale has no architectural register (_scene_base → None); a
+    stray enter_index must not conjure a rotated camera from it."""
+    from providers.prompt_library import policy
+
+    assert policy.default_view(
+        render_mode="place_scene", world_mode=True, scale_tier="universe", enter_index=2
+    ) is None

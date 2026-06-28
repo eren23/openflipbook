@@ -150,3 +150,55 @@ def test_find_rows_returns_empty_on_rate_limit_instead_of_crashing(
 
     monkeypatch.setattr(si, "_get_json", _boom)
     assert si.find_rows("vase", limit=3) == []
+
+
+def test_smithsonian_record_to_row_media_restriction_beats_record_cc0() -> None:
+    # a specific image marked restricted is NOT rescued by a record-level CC0 grant
+    assert smithsonian_record_to_row(_record(media_access="Usage conditions apply", meta_access="CC0")) is None
+
+
+def test_smithsonian_record_to_row_per_media_cc0_beats_record_restriction() -> None:
+    # the per-media CC0 grant is authoritative even when the record metadata isn't CC0
+    row = smithsonian_record_to_row(_record(media_access="CC0", meta_access="Not CC0"))
+    assert row is not None and "CC0" in row["license_note"]
+
+
+def test_smithsonian_attribution_omits_the_dash_when_no_record_link() -> None:
+    # _multi_media carries no record_link → the " — <url>" suffix must not appear
+    row = smithsonian_record_to_row(
+        _multi_media([{"type": "Images", "content": "https://ids.si.edu/x", "usage": {"access": "CC0"}}])
+    )
+    assert row is not None and " — " not in row["attribution"]
+
+
+def test_find_rows_429_prints_an_actionable_hint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # the hint message is the whole UX point of the 429 guard — assert it prints
+    import urllib.error
+
+    from tests.map_corpus.sources import smithsonian as si
+
+    def _boom(_url: str) -> Any:
+        raise urllib.error.HTTPError("u", 429, "OVER_RATE_LIMIT", {}, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(si, "_get_json", _boom)
+    si.find_rows("vase", limit=3)
+    err = capsys.readouterr().err
+    assert "429" in err and "SMITHSONIAN_API_KEY" in err
+
+
+def test_find_rows_403_hints_at_a_bad_key_not_rate_limit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import urllib.error
+
+    from tests.map_corpus.sources import smithsonian as si
+
+    def _boom(_url: str) -> Any:
+        raise urllib.error.HTTPError("u", 403, "Forbidden", {}, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(si, "_get_json", _boom)
+    assert si.find_rows("vase", limit=3) == []
+    err = capsys.readouterr().err
+    assert "403" in err and "valid" in err and "rate-limited" not in err

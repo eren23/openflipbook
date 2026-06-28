@@ -350,12 +350,13 @@ export default function PlayPage() {
   // way — see lib/coach.coachPreDefault. Additive: existing overrides unchanged.
   const [coachEnabled] = useState(() => {
     if (typeof window === "undefined") return ON_RAMP_COACH_ENABLED;
+    // `hadPriorUse` = actual prior navigation (a past session); `dismissed` =
+    // an explicit × earlier. They're independent signals — a newcomer who
+    // dismisses before ever generating sets coachSeen but no lastSession.
     let hadPriorUse = false;
     let dismissed = false;
     try {
-      hadPriorUse =
-        !!window.localStorage.getItem("openflipbook.lastSession") ||
-        !!window.localStorage.getItem("openflipbook.coachSeen");
+      hadPriorUse = !!window.localStorage.getItem("openflipbook.lastSession");
       dismissed = window.localStorage.getItem("openflipbook.coachSeen") === "1";
     } catch {
       /* privacy mode — treat as a first-timer, the hint is harmless */
@@ -377,6 +378,12 @@ export default function PlayPage() {
       /* no-op */
     }
   }, []);
+  // `coachEnabled` resolves to a CLIENT-only value (the first-timer heuristic
+  // reads localStorage), so the coach must not render during SSR or it triggers
+  // a hydration mismatch. Gate it on mount: server + first client render agree
+  // (no coach), then the effect reveals it. It was never in the SSR HTML anyway.
+  const [coachMounted, setCoachMounted] = useState(false);
+  useEffect(() => setCoachMounted(true), []);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
@@ -3743,7 +3750,8 @@ export default function PlayPage() {
       {/* Hide the coach while the Around tray is open — both are pinned to
           bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
           It returns when the tray is closed. */}
-      {!helpOpen &&
+      {coachMounted &&
+        !helpOpen &&
         !bloom &&
         !coachDismissed &&
         ((coachEnabled &&

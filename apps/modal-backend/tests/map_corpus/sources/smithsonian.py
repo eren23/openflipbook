@@ -114,13 +114,18 @@ def find_rows(query: str, limit: int = 8, tier: str = "closeup") -> list[dict[st
     params = {
         "api_key": _api_key(),
         "q": f'{query} AND online_media_type:"Images"',
-        "rows": str(max(limit * 4, limit)),
+        "rows": str(min(max(limit * 4, 10), 100)),  # over-fetch (CC0 yield is low), API caps at 100
     }
     try:
         data = _get_json(f"{_BASE}/search?{urllib.parse.urlencode(params)}")
     except urllib.error.HTTPError as e:
-        hint = " — set SMITHSONIAN_API_KEY (DEMO_KEY is heavily rate-limited)" if e.code == 429 else ""
-        print(f"smithsonian: HTTP {e.code} {e.reason}{hint}")
+        if e.code == 429:
+            hint = " — set SMITHSONIAN_API_KEY (DEMO_KEY is heavily rate-limited)"
+        elif e.code in (401, 403):
+            hint = " — check that SMITHSONIAN_API_KEY is valid"
+        else:
+            hint = ""
+        print(f"smithsonian: HTTP {e.code} {e.reason}{hint}", file=sys.stderr)
         return []
     records = ((data.get("response") or {}).get("rows")) or []
     rows: list[dict[str, Any]] = []
@@ -130,11 +135,15 @@ def find_rows(query: str, limit: int = 8, tier: str = "closeup") -> list[dict[st
             break
         try:
             row = smithsonian_record_to_row(rec, tier=tier)
-        except Exception:
+        except Exception as e:  # malformed record — surface it, don't silently shrink the result
+            print(f"smithsonian: skipping record {rec.get('id', '?')}: {e!r}", file=sys.stderr)
             continue
         if row and row["id"] not in seen:
             seen.add(row["id"])
             rows.append(row)
+    if len(rows) < limit:
+        print(f"smithsonian: only {len(rows)}/{limit} CC0 rows for {query!r} "
+              "(API cap or low CC0 yield — try a more image-rich subject)", file=sys.stderr)
     return rows
 
 
