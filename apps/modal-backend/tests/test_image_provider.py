@@ -54,6 +54,22 @@ def test_resolve_model_legacy_env_falls_through() -> None:
     assert out == image.TIER_MODELS["balanced"]
 
 
+def test_pro_tier_defaults_to_a_reliable_fal_model_not_riverflow() -> None:
+    """The pro tier must default to a fal model — NOT the slow/flaky
+    `openrouter:` riverflow that broke fresh pro-tier map gen. Riverflow stays
+    opt-in via FAL_IMAGE_MODEL_PRO."""
+    resolved = image._resolve_model("pro", None)
+    assert resolved == "fal-ai/nano-banana-pro"
+    assert not resolved.startswith(image.OPENROUTER_IMAGE_PREFIX)
+
+
+def test_pro_tier_can_opt_back_into_riverflow_via_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAL_IMAGE_MODEL_PRO", "openrouter:sourceful/riverflow-v2.5-pro")
+    assert image._resolve_model("pro", None) == "openrouter:sourceful/riverflow-v2.5-pro"
+
+
 def test_resolve_model_legacy_env_used_for_unset_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -448,12 +464,6 @@ def test_args_for_gpt_image_uses_image_size_and_never_refs() -> None:
     assert "image_urls" not in args
 
 
-def test_pro_tier_defaults_to_riverflow_on_openrouter() -> None:
-    # The bakeoff pick is the LIVE default, not a recommendation in a doc.
-    assert image._resolve_model("pro", None) == "openrouter:sourceful/riverflow-v2.5-pro"
-    assert image.TIER_MODELS["pro"].startswith(image.OPENROUTER_IMAGE_PREFIX)
-
-
 async def test_generate_image_routes_openrouter_prefix_without_fal_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -473,7 +483,10 @@ async def test_generate_image_routes_openrouter_prefix_without_fal_key(
         return sentinel
 
     monkeypatch.setattr(image, "_openrouter_image", fake_or)
-    out = await image.generate_image("a map", "16:9", tier="pro")
+    # pro now defaults to fal, so drive the openrouter path via model_override
+    out = await image.generate_image(
+        "a map", "16:9", model_override="openrouter:sourceful/riverflow-v2.5-pro"
+    )
     assert out is sentinel
     assert seen["slug"] == "sourceful/riverflow-v2.5-pro"  # prefix stripped
     assert seen["aspect"] == "16:9"
@@ -560,12 +573,36 @@ def test_retryable_openai_connection_error() -> None:
     assert image._is_retryable(err) is True
 
 
-def test_retryable_empty_openrouter_image_response() -> None:
-    # An empty image response (riverflow hiccup / soft refusal — the "pro" tier's
-    # `content='None'` error) is TRANSIENT: it must RETRY inside _openrouter_image
-    # rather than fail straight to the user's red banner.
+def test_empty_openrouter_image_response_fails_fast_not_retried() -> None:
+    # An empty image response (the "pro" tier's `content='None'`) must FAIL FAST,
+    # not retry the flaky/slow model 3x in place (that blew the upstream timeout,
+    # "network error"). generate_image's forced fal failover handles it instead.
     exc = image._EmptyImageResponse("returned no image (content='None')")
-    assert image._is_retryable(exc) is True
-    # …but it stays a RuntimeError, so anything catching RuntimeError (and the
-    # after-3-retries reraise) behaves exactly as before.
-    assert isinstance(exc, RuntimeError)
+    assert image._is_retryable(exc) is False
+    assert isinstance(exc, RuntimeError)  # still a RuntimeError for callers
+
+
+async def test_openrouter_image_failure_falls_back_to_fal_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The "pro" tier (openrouter riverflow) must auto-fall-back to fal even with
+    # PROVIDER_FALLBACK OFF — a degraded fal page beats a slow timeout / banner.
+    monkeypatch.delenv("PROVIDER_FALLBACK", raising=False)
+    monkeypatch.setattr(
+        image, "_resolve_model",
+        lambda tier, override: "openrouter:sourceful/riverflow-v2.5-pro",
+    )
+    seen: list[str] = []
+
+    async def fake_slug(model: str, prompt: str, aspect: str, refs: object) -> image.GeneratedImage:
+        seen.append(model)
+        if model.startswith(image.OPENROUTER_IMAGE_PREFIX):
+            raise image._EmptyImageResponse("no image (content='None')")
+        return image.GeneratedImage(b"jpeg", "image/jpeg", model, "r")
+
+    monkeypatch.setattr(image, "_generate_with_slug", fake_slug)
+    result = await image.generate_image("a map", "16:9", tier="pro")
+
+    assert seen[0].startswith(image.OPENROUTER_IMAGE_PREFIX)  # tried riverflow first
+    assert result.model == "fal-ai/nano-banana-pro"  # …then fell over to fal
+

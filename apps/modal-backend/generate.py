@@ -774,6 +774,37 @@ def _sse(data: dict, trace_id: str | None = None) -> bytes:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
+async def _with_heartbeat(
+    stream: AsyncIterator[bytes], interval_s: float = 15.0
+) -> AsyncIterator[bytes]:
+    """Keep a long, SILENT SSE generation alive. While the underlying stream is
+    mid-await — e.g. a 2-3 min riverflow image gen with no frames — emit an SSE
+    keepalive comment every `interval_s` so an intermediary's idle/body timeout
+    (the Next proxy's undici 300s UND_ERR_BODY_TIMEOUT, nginx, a load balancer)
+    doesn't guillotine the connection. Comment lines (`:`) are ignored by SSE
+    clients (the play page parser skips any chunk not starting with `data:`)."""
+    pending = _asyncio.ensure_future(stream.__anext__())
+    try:
+        while True:
+            done, _ = await _asyncio.wait({pending}, timeout=interval_s)
+            if not done:
+                yield b": keepalive\n\n"
+                continue
+            try:
+                item = pending.result()
+            except StopAsyncIteration:
+                return
+            yield item
+            pending = _asyncio.ensure_future(stream.__anext__())
+    finally:
+        if not pending.done():
+            pending.cancel()
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(Exception):
+                await aclose()
+
+
 _FRAME_DIMS: dict[str, tuple[int, int]] = {
     "16:9": (1600, 900), "9:16": (900, 1600), "1:1": (1024, 1024),
     "4:3": (1280, 960), "3:4": (960, 1280),
@@ -2321,7 +2352,9 @@ async def sse_generate(req: Request):
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
 
     return StreamingResponse(
-        _event_stream(body, trace_id, is_disconnected=req.is_disconnected),
+        _with_heartbeat(
+            _event_stream(body, trace_id, is_disconnected=req.is_disconnected)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
