@@ -558,3 +558,14 @@ def test_retryable_openai_connection_error() -> None:
     req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
     err = openai.APIConnectionError(request=req)
     assert image._is_retryable(err) is True
+
+
+def test_retryable_empty_openrouter_image_response() -> None:
+    # An empty image response (riverflow hiccup / soft refusal — the "pro" tier's
+    # `content='None'` error) is TRANSIENT: it must RETRY inside _openrouter_image
+    # rather than fail straight to the user's red banner.
+    exc = image._EmptyImageResponse("returned no image (content='None')")
+    assert image._is_retryable(exc) is True
+    # …but it stays a RuntimeError, so anything catching RuntimeError (and the
+    # after-3-retries reraise) behaves exactly as before.
+    assert isinstance(exc, RuntimeError)

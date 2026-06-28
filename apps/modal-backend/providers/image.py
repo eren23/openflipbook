@@ -36,6 +36,15 @@ from tenacity import (
 # provider provenance in final.image_model.
 OPENROUTER_IMAGE_PREFIX = "openrouter:"
 
+
+class _EmptyImageResponse(RuntimeError):
+    """An OpenRouter image model answered with no image (empty `images`,
+    `content=None`). Empirically TRANSIENT for riverflow/recraft — a soft refusal
+    or a backend hiccup that clears on a retry — so _is_retryable treats it as
+    retryable. Stays a RuntimeError so the after-3-retries reraise and any
+    RuntimeError-catching caller behave exactly as before."""
+
+
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
     "balanced": "fal-ai/nano-banana-pro",
@@ -556,10 +565,11 @@ async def _openrouter_image(
             msg = (resp.model_dump().get("choices") or [{}])[0].get("message") or {}
             images = msg.get("images") or []
             if not images:
-                # Malformed/empty responses fail fast (RuntimeError is not
-                # retryable) — mirrors _first_image on the fal path.
+                # Empty responses are TRANSIENT for these models — retry within
+                # this loop (_EmptyImageResponse is retryable); only the 3rd
+                # empty in a row reraises to the caller's failover / error frame.
                 content = str(msg.get("content"))[:160]
-                raise RuntimeError(
+                raise _EmptyImageResponse(
                     f"openrouter image model returned no image (content={content!r})"
                 )
             url = str((images[0].get("image_url") or {}).get("url") or "")
@@ -589,6 +599,8 @@ def _is_retryable(exc: BaseException) -> bool:
     `openrouter:` image path) likewise wraps transport errors in its own
     types. Falls back to httpx exceptions for the post-fal CDN download path.
     """
+    if isinstance(exc, _EmptyImageResponse):
+        return True  # a no-image response is a transient model hiccup — retry it
     if isinstance(exc, fal_client.FalClientHTTPError):
         code = exc.status_code
         return code == 429 or 500 <= code < 600
