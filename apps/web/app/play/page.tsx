@@ -61,6 +61,7 @@ import { useTraceEmitter } from "@/hooks/useTraceEmitter";
 import { QueryToolbar } from "@/components/PlayPage/QueryToolbar";
 import { StyleGallery } from "@/components/PlayPage/StyleGallery";
 import { FirstRunCoach } from "@/components/PlayPage/FirstRunCoach";
+import { TapHint } from "@/components/PlayPage/TapHint";
 import { BloomGlyph } from "@/components/PlayPage/BloomGlyph";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
@@ -3668,11 +3669,7 @@ export default function PlayPage() {
                 style={editFormStyle}
               />
             ) : (
-              <figcaption className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-sm text-white">
-                <span className="max-w-[60%] truncate rounded-full bg-black/55 px-3 py-1 backdrop-blur">
-                  {t.tapHint}
-                </span>
-              </figcaption>
+              <TapHint text={t.tapHint} />
             )}
           </div>
         </figure>
