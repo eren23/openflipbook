@@ -3668,8 +3668,10 @@ export default function PlayPage() {
                 style={editFormStyle}
               />
             ) : (
-              <figcaption className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-2 text-sm text-white">
-                {t.tapHint}
+              <figcaption className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-sm text-white">
+                <span className="max-w-[60%] truncate rounded-full bg-black/55 px-3 py-1 backdrop-blur">
+                  {t.tapHint}
+                </span>
               </figcaption>
             )}
           </div>
