@@ -97,11 +97,12 @@ def test_args_for_nano_banana_passes_aspect() -> None:
 # --- image conditioning (multi-reference) -----------------------------------
 
 
-def test_args_for_nano_banana_includes_reference_urls() -> None:
+def test_args_for_nano_banana_ignores_reference_urls() -> None:
+    # Fresh-gen is a no-op for refs: the nano text-to-image endpoint ignores
+    # image_urls, so _args_for must never emit it (see image.py comment).
     args = image._args_for("fal-ai/nano-banana-pro", "p", "16:9", ["u1", "u2"])
-    assert args["prompt"] == "p"
-    assert args["aspect_ratio"] == "16:9"
-    assert args["image_urls"] == ["u1", "u2"]
+    assert args == {"prompt": "p", "aspect_ratio": "16:9"}
+    assert "image_urls" not in args
 
 
 def test_args_for_seedream_ignores_reference_urls() -> None:
@@ -120,13 +121,17 @@ def test_args_for_nano_banana_empty_refs_unchanged() -> None:
     }
 
 
-async def test_generate_image_uploads_and_passes_reference_urls(
+async def test_generate_image_ignores_reference_urls_on_fresh_gen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Fresh-gen no longer uploads refs to fal nor passes image_urls (the nano
+    # text-to-image endpoint ignores them). Refs supplied -> still text-only.
     monkeypatch.setenv("FAL_KEY", "fk")
     captured: dict = {}
+    uploaded: list[str] = []
 
     async def fake_to_fal(data_url: str) -> str:
+        uploaded.append(data_url)
         return f"fal://{data_url[-1]}"
 
     async def fake_sub(model: str, args: dict) -> dict:
@@ -144,8 +149,8 @@ async def test_generate_image_uploads_and_passes_reference_urls(
         "a cat", "16:9", reference_urls=["data:a", "data:b"]
     )
     assert out.jpeg_bytes == b"jpeg"
-    # Data URLs uploaded to fal storage, the resulting URLs passed as image_urls.
-    assert captured["args"]["image_urls"] == ["fal://a", "fal://b"]
+    assert uploaded == []  # no wasted fal upload on fresh-gen
+    assert "image_urls" not in captured["args"]
 
 
 def test_conditioning_preamble_orders_signals_for_tap() -> None:

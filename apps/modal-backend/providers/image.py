@@ -147,20 +147,20 @@ def _args_for(
             "prompt": prompt,
             "image_size": SEEDREAM_SIZE_MAP.get(aspect_ratio, "landscape_16_9"),
         }
-    # nano-banana + nano-banana-pro accept aspect_ratio directly, plus an optional
-    # `image_urls` list. NOTE (verified via scripts/verify-fal-models.py): NO image
-    # model in use accepts `negative_prompt` (nano-banana, nano-banana-pro and
-    # flux-pro/kontext all omit it) — so we never send one; the MEDIUM LOCK in the
-    # prompt text is the model-agnostic style guard. And the text-to-image nano
-    # endpoints accept `image_urls` but IGNORE it — an empirical test (a photoreal
-    # prompt + an engraving ref came back still-photoreal) confirms fresh-gen image
-    # conditioning is a no-op here; refs only bite on the edit/continue endpoints
-    # (nano-banana/edit takes image_urls, kontext a singular image_url). We still
-    # pass them (harmless, future-proof), but the prompt TEXT does the real work.
-    args: dict[str, Any] = {"prompt": prompt, "aspect_ratio": aspect_ratio}
-    if reference_urls and "nano-banana" in model:
-        args["image_urls"] = reference_urls
-    return args
+    # nano-banana + nano-banana-pro accept aspect_ratio directly. NOTE (verified
+    # via scripts/verify-fal-models.py): NO image model in use accepts
+    # `negative_prompt` (nano-banana, nano-banana-pro and flux-pro/kontext all
+    # omit it) — so we never send one; the MEDIUM LOCK in the prompt text is the
+    # model-agnostic style guard. The text-to-image nano endpoints DO accept
+    # `image_urls`, but they IGNORE it — an empirical test (a photoreal prompt +
+    # an engraving ref came back still-photoreal) proved fresh-gen image
+    # conditioning is a no-op. So fresh-gen never sends image_urls (and never
+    # uploads refs — see _generate_with_slug); `reference_urls` is kept on the
+    # signature for parity with callers but is unused here. Real reference
+    # conditioning lives only on the edit/continue endpoints in image_edit.py
+    # (nano-banana/edit takes image_urls, kontext a singular image_url); on this
+    # path the prompt TEXT does all the work.
+    return {"prompt": prompt, "aspect_ratio": aspect_ratio}
 
 
 def conditioning_preamble(roles: list[str], mode: str) -> str:
@@ -306,23 +306,21 @@ async def _generate_with_slug(
         return generated
 
     _ensure_fal_key()
-    # Reference conditioning: upload each data URL to fal storage (queue
-    # endpoints choke on multi-MB inline data URLs) and pass them as image_urls.
-    # Only nano-banana accepts refs; other fal models stay text-only.
-    fal_refs: list[str] | None = None
-    if reference_urls and "nano-banana" in model:
-        from ._common import to_fal_url
-
-        fal_refs = [await to_fal_url(u) for u in reference_urls]
+    # Fresh-gen is text-to-image only: the nano text-to-image endpoints accept
+    # `image_urls` but IGNORE it (empirically verified — see _args_for), so we
+    # neither upload the refs to fal storage nor pass them. `reference_urls` is
+    # still accepted (callers thread it through generate_image) but is a no-op
+    # here; genuine reference conditioning lives on the edit/continue endpoints
+    # in image_edit.py. The prompt TEXT carries style/continuity on this path.
     async with span(
         "image.generate",
         model=model,
         prompt_len=len(prompt),
         provider="fal",
-        refs=len(fal_refs or []),
+        refs=0,
     ) as ctx:
         result = await _fal_subscribe(
-            model, _args_for(model, prompt, aspect_ratio, fal_refs)
+            model, _args_for(model, prompt, aspect_ratio)
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
