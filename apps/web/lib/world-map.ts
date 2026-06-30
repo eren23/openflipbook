@@ -194,8 +194,16 @@ export function applyEntityEdit(
   nowIso: string,
 ): WorldEntityGeo[] {
   if (edit.op === "add") {
+    // Unique id: applyGeoUpsert / getWorldMap key entities by id (Map-by-id), so
+    // a duplicate id silently drops one entity — and these are source:"user" adds
+    // we must never clobber. Two slug-colliding labels ("North Gate" vs
+    // "north-gate"), or re-adding an existing one, get a numeric suffix instead.
+    const baseId = `geo_user_${slugLabel(edit.label)}`;
+    const takenIds = new Set(entities.map((e) => e.id));
+    let uniqueId = baseId;
+    for (let n = 2; takenIds.has(uniqueId); n += 1) uniqueId = `${baseId}_${n}`;
     const added: WorldEntityGeo = {
-      id: `geo_user_${slugLabel(edit.label)}`,
+      id: uniqueId,
       entity_id: null,
       kind: "place",
       label: edit.label,

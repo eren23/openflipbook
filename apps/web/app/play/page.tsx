@@ -2012,10 +2012,9 @@ export default function PlayPage() {
       inflight.clear();
       const ac = new AbortController();
       inflight.set(key, ac);
-      pageBucketCounts.set(
-        pageScope,
-        (pageBucketCounts.get(pageScope) ?? 0) + 1
-      );
+      // The per-page budget is consumed only on a SUCCESSFUL cache write below
+      // (mirroring the precompute path). Counting it up-front would let a few
+      // empty/failed resolves exhaust the budget and kill prefetch for the page.
       void (async () => {
         try {
           const res = await fetch("/api/resolve-click", {
@@ -2055,6 +2054,10 @@ export default function PlayPage() {
               ...(data.point ? { point: data.point } : {}),
               ...(data.bbox ? { bbox: data.bbox } : {}),
             });
+            pageBucketCounts.set(
+              pageScope,
+              (pageBucketCounts.get(pageScope) ?? 0) + 1
+            );
             // Bound the cache so a long session doesn't grow Map<> forever.
             // FIFO eviction is fine — cache entries are independent.
             while (cache.size > PREFETCH_LRU_MAX) {
