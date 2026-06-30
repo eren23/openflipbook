@@ -1387,6 +1387,9 @@ async def _event_stream(
             data_url = await _asyncio.to_thread(
                 image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
             )
+            # Spend accounting: this OUTWARD hop made a real paid image call —
+            # record it (like the tap/draft paths) so the cap actually counts it.
+            spend.record_generation(body.session_id, img.model)
             yield _sse(
                 {
                     "type": "ascend_ready",
@@ -1462,6 +1465,9 @@ async def _event_stream(
                         data_url = await _asyncio.to_thread(
                             image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
                         )
+                        # Spend accounting: each map-pan tile is a real paid image
+                        # edit — record it so the cap counts these concurrent calls.
+                        spend.record(body.session_id, spend.estimate_image(img.model))
                         emitted += 1
                         yield _sse(
                             {
@@ -1572,6 +1578,9 @@ async def _event_stream(
                     data_url = await _asyncio.to_thread(
                         image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
                     )
+                    # Spend accounting: each bloom neighbour is a real plan+image
+                    # generation — record it so the cap counts the concurrent fan-out.
+                    spend.record_generation(body.session_id, img.model)
                     emitted += 1
                     yield _sse(
                         {

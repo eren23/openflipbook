@@ -152,6 +152,19 @@ describe("applyEntityEdit (P5 structured geo edits)", () => {
     expect(added.height).toBeGreaterThan(0);
   });
 
+  it("add gives a unique id on slug collision so no user entity is dropped", () => {
+    // applyGeoUpsert / getWorldMap key entities by id (Map), so two adds that
+    // slug to the same base id used to collapse to one — silently dropping a
+    // source:"user" placement. Each add must now get a distinct id.
+    const a = applyEntityEdit([], { op: "add", label: "North Gate", pos: { x: 0, y: 0 } }, "t");
+    const b = applyEntityEdit(a, { op: "add", label: "north-gate", pos: { x: 9, y: 9 } }, "t");
+    const ids = b.map((e) => e.id);
+    expect(ids).toEqual(["geo_user_north_gate", "geo_user_north_gate_2"]);
+    expect(new Set(ids).size).toBe(2);
+    // Both survive the Map-by-id merge that used to drop one.
+    expect(applyGeoUpsert([], b, "t2")).toHaveLength(2);
+  });
+
   it("an edit targeting an unknown id is a no-op (never throws)", () => {
     const before = base();
     expect(applyEntityEdit(before, { op: "move", target: "nope", dx: 1, dy: 1 }, "t")).toEqual(before);

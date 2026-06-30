@@ -11,9 +11,10 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections import OrderedDict
 
 _lock = threading.Lock()
-_buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last_ts)
+_buckets: OrderedDict[str, tuple[float, float]] = OrderedDict()  # ip -> (tokens, last_ts)
 _MAX_BUCKETS = 4096
 
 
@@ -36,10 +37,15 @@ def allow(ip: str) -> bool:
         tokens = min(capacity, tokens + (now - last) * refill_per_s)
         if tokens < 1.0:
             _buckets[ip] = (tokens, now)
+            _buckets.move_to_end(ip)
             return False
         _buckets[ip] = (tokens - 1.0, now)
+        _buckets.move_to_end(ip)
         if len(_buckets) > _MAX_BUCKETS:
-            _buckets.pop(next(iter(_buckets)))
+            # Evict the least-recently-touched IP (LRU), not the oldest-inserted.
+            # A plain dict value-update keeps insertion order, so the old FIFO pop
+            # could evict (and full-reset) a heavy hitter still being limited.
+            _buckets.popitem(last=False)
         return True
 
 

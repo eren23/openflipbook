@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -97,3 +98,35 @@ async def test_duplicate_generate_logged_not_blocked(
     events = await _collect(_event_stream(_query_body(), "t2"))
     assert any(e["type"] == "final" for e in events)  # second run still works
     assert gen.await_count == 2
+
+
+async def test_expand_records_spend_per_neighbour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: the expand bloom fans out real paid image generations but used
+    # to record ZERO spend, so the daily/session cap never counted the priciest
+    # (multi-image, concurrent) path.
+    _mock_providers(monkeypatch)
+    monkeypatch.setattr(
+        llm_mod,
+        "propose_neighbors",
+        AsyncMock(
+            return_value=[
+                SimpleNamespace(subject="a peer town", scale="peer"),
+                SimpleNamespace(subject="the region", scale="container"),
+            ]
+        ),
+    )
+    body = GenerateBody(
+        query="x",
+        session_id="s1",
+        web_search=False,
+        mode="expand",
+        image="data:image/jpeg;base64,AAAA",
+    )
+
+    events = await _collect(_event_stream(body, "t1"))
+
+    assert sum(1 for e in events if e["type"] == "neighbor") == 2
+    # Two neighbours, each = one nano-banana-pro image ($0.15) + the VLM flat.
+    assert spend.session_total("s1") == pytest.approx(2 * (0.15 + spend.VLM_STACK_FLAT))
