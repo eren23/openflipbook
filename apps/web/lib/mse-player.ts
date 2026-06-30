@@ -25,6 +25,9 @@ export function attachMSE(video: HTMLVideoElement): MSEController {
   let sourceBuffer: SourceBuffer | null = null;
   const pending: Uint8Array[] = [];
   let destroyed = false;
+  // Init mime stashed so sourceopen can create the SourceBuffer if the init
+  // packet raced ahead of it (readyState still "closed" at append time).
+  let initMime: string | null = null;
 
   const drain = (): void => {
     if (destroyed || !sourceBuffer) return;
@@ -47,6 +50,9 @@ export function attachMSE(video: HTMLVideoElement): MSEController {
   };
 
   mediaSource.addEventListener("sourceopen", () => {
+    // If the init packet arrived before sourceopen, readyState was "closed"
+    // then and the SourceBuffer was never created — create it now, then drain.
+    if (initMime) ensureSourceBuffer(initMime);
     drain();
   });
 
@@ -55,6 +61,7 @@ export function attachMSE(video: HTMLVideoElement): MSEController {
       if (destroyed) return;
       if (packet.header.is_init_segment) {
         const mime = `${packet.header.media_type}; codecs="${codecsFromHeader(packet.header)}"`;
+        initMime = mime;
         ensureSourceBuffer(mime);
       }
       pending.push(packet.payload);

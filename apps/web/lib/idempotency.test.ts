@@ -14,6 +14,10 @@ const fakeCollection = {
   async findOne(f: { _id: string }) {
     return store.get(f._id) ?? null;
   },
+  async deleteOne(f: { _id: string }) {
+    const had = store.delete(f._id);
+    return { deletedCount: had ? 1 : 0 };
+  },
   async updateOne(
     f: { _id: string },
     update: { $set?: Record<string, unknown> },
@@ -37,6 +41,7 @@ vi.mock("./db", () => ({
 import {
   claimIdempotencyKey,
   getIdempotentResult,
+  releaseIdempotencyKey,
   saveIdempotentResult,
 } from "./idempotency";
 
@@ -55,6 +60,13 @@ describe("idempotency", () => {
   it("first claim is fresh, a replay is a duplicate", async () => {
     expect(await claimIdempotencyKey("gen:abc")).toBe("fresh");
     expect(await claimIdempotencyKey("gen:abc")).toBe("duplicate");
+  });
+
+  it("a released key can be claimed fresh again", async () => {
+    expect(await claimIdempotencyKey("gen:abc")).toBe("fresh");
+    expect(await claimIdempotencyKey("gen:abc")).toBe("duplicate");
+    await releaseIdempotencyKey("gen:abc"); // a failed gen frees the key
+    expect(await claimIdempotencyKey("gen:abc")).toBe("fresh");
   });
 
   it("result cache round-trips for replays", async () => {

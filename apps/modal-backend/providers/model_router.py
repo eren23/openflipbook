@@ -149,9 +149,12 @@ class ModelCaps:
 
 
 CAPABILITIES: tuple[tuple[str, ModelCaps], ...] = (
-    ("fal-ai/nano-banana-pro", ModelCaps("nano-banana-pro", True, True, True, 0.15, 25)),
-    ("fal-ai/nano-banana-2", ModelCaps("nano-banana-2", True, True, True, 0.08, 18)),
-    ("fal-ai/nano-banana", ModelCaps("nano-banana", True, True, False, 0.039, 10)),
+    # nano-banana text-to-image ACCEPTS but IGNORES image_urls on fresh gen
+    # (verified no-op; PR #109 removed the inert ref-upload) -> supports_refs=False.
+    # Real reference conditioning lives only on the /edit + continue endpoints.
+    ("fal-ai/nano-banana-pro", ModelCaps("nano-banana-pro", True, False, True, 0.15, 25)),
+    ("fal-ai/nano-banana-2", ModelCaps("nano-banana-2", True, False, True, 0.08, 18)),
+    ("fal-ai/nano-banana", ModelCaps("nano-banana", True, False, False, 0.039, 10)),
     ("fal-ai/flux-pro/kontext", ModelCaps("flux kontext", True, False, True, 0.04, 20)),
     ("fal-ai/flux-pro/v1/fill", ModelCaps("flux fill (inpaint)", True, False, True, 0.10, 25)),
     ("fal-ai/bria", ModelCaps("bria expand", True, False, True, 0.04, 15)),
