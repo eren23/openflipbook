@@ -37,8 +37,13 @@ test("pinning style propagates style_anchor to next /api/generate-page request",
   expect(raw, "POST /api/generate-page must carry a body").not.toBeNull();
   const body = JSON.parse(raw!);
 
-  // The style anchor field name is `style_anchor` (snake-case) on the wire —
-  // see apps/modal-backend/generate.py GenerateRequestBody.
-  expect(body.style_anchor).toBeTruthy();
-  expect(typeof body.style_anchor).toBe("object");
+  // The pinned style rides on `session_style_anchor` (a STRING) — set from
+  // `styleAnchor.style` in app/play/page.tsx, consumed by
+  // generate.py GenerateRequestBody.session_style_anchor: str. (The old
+  // `style_anchor` object field this test asserted no longer exists on the wire.)
+  expect(
+    body.session_style_anchor,
+    "pinning a style must ride on session_style_anchor",
+  ).toBeTruthy();
+  expect(typeof body.session_style_anchor).toBe("string");
 });
