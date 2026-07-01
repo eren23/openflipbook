@@ -1,0 +1,4 @@
+# Strip Co-authored-by: trailers (repo policy). `|| true`: grep exits 1 when it
+# selects zero lines (empty msg / trailer-only), which would abort under `sh -e`.
+grep -viE '^[[:space:]]*co-authored-by:' "$1" > "$1.tmp" || true
+mv "$1.tmp" "$1"
