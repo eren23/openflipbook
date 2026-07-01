@@ -54,6 +54,15 @@ export async function claimIdempotencyKey(
   }
 }
 
+/**
+ * Release a claimed key (delete the doc) so a request that did NOT complete its
+ * work frees the key for a legitimate retry. No-op when Mongo isn't configured.
+ */
+export async function releaseIdempotencyKey(key: string): Promise<void> {
+  if (!configured()) return;
+  await (await keys()).deleteOne({ _id: key });
+}
+
 /** The cached JSON result for a key, or null if none/unconfigured. */
 export async function getIdempotentResult<T>(key: string): Promise<T | null> {
   if (!configured()) return null;

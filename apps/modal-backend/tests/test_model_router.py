@@ -107,3 +107,12 @@ def test_select_enter_model_routes_steep_to_gpt(monkeypatch: pytest.MonkeyPatch)
     assert model_router.select_enter_model(None) == model_router.resolve_model("enter_scene")
     monkeypatch.setenv("FAL_ENTER_MODEL_STEEP", "fal-ai/custom/steep")
     assert model_router.select_enter_model("eye_level") == "fal-ai/custom/steep"
+
+
+def test_nano_text_to_image_does_not_support_refs() -> None:
+    # Fresh-gen nano endpoints accept-but-ignore image_urls (PR #109); the
+    # registry must report that so the picker never promises ref conditioning.
+    caps = {r["slug"]: r for r in model_router.registry()}
+    for slug in ("fal-ai/nano-banana", "fal-ai/nano-banana-2", "fal-ai/nano-banana-pro"):
+        assert caps[slug]["supports_refs"] is False, slug
+        assert caps[slug]["supports_edit"] is True, slug  # /edit variant unaffected
