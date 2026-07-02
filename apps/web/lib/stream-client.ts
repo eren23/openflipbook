@@ -41,6 +41,29 @@ export function reconnectDelayMs(attempt: number): number {
   return Math.min(4000, 500 * 2 ** attempt);
 }
 
+/** Decide what to do with an incoming packet given the last appended media
+ * sequence. After a resume the worker may replay segments we already
+ * appended — duplicates are skipped (re-appending confuses the SourceBuffer)
+ * but a duplicate carrying `final` still ends the stream. Init segments
+ * always append (a re-dial needs the codec init again) and never advance
+ * the sequence. Pure — pinned by tests. */
+export function packetPlan(
+  header: { is_init_segment?: boolean; sequence: number; final?: boolean },
+  lastSequence: number
+): { append: boolean; end: boolean; nextLastSequence: number } {
+  const end = header.final === true;
+  if (!header.is_init_segment && header.sequence <= lastSequence) {
+    return { append: false, end, nextLastSequence: lastSequence };
+  }
+  return {
+    append: true,
+    end,
+    nextLastSequence: header.is_init_segment
+      ? lastSequence
+      : Math.max(lastSequence, header.sequence),
+  };
+}
+
 function newStreamId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `ltx_stream_${crypto.randomUUID()}`;
@@ -112,28 +135,18 @@ export function startLTXStream(config: StreamConfig): StreamClient {
       if (!(event.data instanceof ArrayBuffer)) return;
       try {
         const packet = parseLTXF(event.data);
-        const seq = packet.header.sequence;
-        // After a resume the worker may replay segments we already appended
-        // — drop duplicates (re-appending confuses the SourceBuffer); init
-        // segments always pass (a re-dial needs the codec init again).
-        if (!packet.header.is_init_segment && seq <= lastSequence) {
-          if (packet.header.final) {
-            gotFinal = true;
-            endStream();
+        const plan = packetPlan(packet.header, lastSequence);
+        if (plan.append) {
+          await controller.appendPacket(packet);
+          lastSequence = plan.nextLastSequence;
+          if (statusRef.current !== "playing") {
+            setStatus("playing");
+            void config.video.play().catch(() => {
+              // Autoplay may be blocked; user must click the video. Non-fatal.
+            });
           }
-          return;
         }
-        await controller.appendPacket(packet);
-        if (!packet.header.is_init_segment) {
-          lastSequence = Math.max(lastSequence, seq);
-        }
-        if (statusRef.current !== "playing") {
-          setStatus("playing");
-          void config.video.play().catch(() => {
-            // Autoplay may be blocked; user must click the video. Non-fatal.
-          });
-        }
-        if (packet.header.final) {
+        if (plan.end) {
           gotFinal = true;
           endStream();
         }

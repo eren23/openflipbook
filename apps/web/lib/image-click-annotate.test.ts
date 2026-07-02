@@ -99,8 +99,10 @@ afterEach(() => {
 describe("annotateClickPoint", () => {
   it("returns the original dataUrl when canvas 2D context is unavailable", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const out = await annotateClickPoint(ORIGINAL_DATA_URL, 0.5, 0.5);
     expect(out).toBe(ORIGINAL_DATA_URL);
+    expect(warn).toHaveBeenCalled(); // degradation must be loud
   });
 
   it("paints crosshair primitives onto the canvas and returns the encoded data URL", async () => {
@@ -158,8 +160,10 @@ describe("annotateStroke", () => {
 
   it("returns the original dataUrl when canvas 2D context is unavailable", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const out = await annotateStroke(ORIGINAL_DATA_URL, realStroke);
     expect(out).toBe(ORIGINAL_DATA_URL);
+    expect(warn).toHaveBeenCalled(); // degradation must be loud
   });
 
   it("draws moveTo + lineTo for each stroke point and returns the encoded data URL", async () => {

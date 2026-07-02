@@ -720,8 +720,10 @@ async def _run_grounding(
                         cast("list[dict[str, Any]]", segs),
                     ),
                 )
-            except Exception:  # best-effort: a SAM3 failure keeps the detector boxes
-                pass
+            except Exception as exc:  # best-effort: a SAM3 failure keeps the detector boxes
+                from obs import log
+
+                log("warn", "grounding.sam3_failed", error=f"{type(exc).__name__}: {exc}")
         return grounding.diff(expected, observed)
 
     async def _repair(img: Any, report: Any) -> Any | None:
@@ -751,7 +753,7 @@ async def _run_grounding(
         # never break generation, so any error degrades to (original, no summary).
         from obs import log
 
-        log("info", "grounding.failed", error=f"{type(exc).__name__}: {exc}")
+        log("warn", "grounding.failed", error=f"{type(exc).__name__}: {exc}")
         return result, None
     # `repaired` = the kept image differs from what we rendered (a corrective edit
     # actually survived), not merely that a repair was attempted.
@@ -2224,15 +2226,20 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                             "extract.segment_failed",
                             error=f"{type(exc).__name__}: {exc}",
                         )
+            located = sum(1 for e in result.added if e.bbox) + sum(
+                1 for u in result.updated if u.bbox
+            )
+            total = len(result.added) + len(result.updated)
+            # Zero located out of a non-empty catalogue means the overlay and
+            # the world map get nothing this pass — that's a warn, not a stat.
             log(
-                "info",
+                "warn" if total and not located else "info",
                 "extract.localized",
-                located=sum(1 for e in result.added if e.bbox)
-                + sum(1 for u in result.updated if u.bbox),
-                total=len(result.added) + len(result.updated),
+                located=located,
+                total=total,
             )
         except Exception as exc:  # best-effort — geometry localization is optional
-            log("info", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
+            log("warn", "extract.localize_failed", error=f"{type(exc).__name__}: {exc}")
 
     # Estimate the camera instead of assuming top-down (maps are often 2.5D).
     # Returned on the response so the web side can store it on the node and
@@ -2249,7 +2256,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                 pitch_deg=view["pitch_deg"],
             )
         except Exception as exc:
-            log("info", "extract.view_failed", error=f"{type(exc).__name__}: {exc}")
+            log("warn", "extract.view_failed", error=f"{type(exc).__name__}: {exc}")
 
     def _entity_payload(e: llm_provider.ExtractedEntity) -> dict:
         return {

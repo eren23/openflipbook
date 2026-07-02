@@ -3,7 +3,25 @@ from __future__ import annotations
 
 import pytest
 
+import obs
 from providers import ratelimit
+
+
+def test_malformed_rpm_warns_once_and_disables(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A typo'd RATE_LIMIT_RPM used to silently turn the limiter OFF — it still
+    # degrades to off (never blocks traffic on a config error) but now says so,
+    # once per container, not per request.
+    monkeypatch.setenv("RATE_LIMIT_RPM", "sixty")
+    ratelimit.reset_for_tests()
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        obs, "log", lambda level, event, **kw: events.append((level, event))
+    )
+    assert ratelimit.rpm() == 0.0
+    assert ratelimit.allow("A")  # limiter off, requests pass
+    assert ratelimit.rpm() == 0.0  # second read: no second warn
+    assert events.count(("warn", "ratelimit.bad_rpm")) == 1
+    ratelimit.reset_for_tests()
 
 
 def test_eviction_is_lru_not_fifo(monkeypatch: pytest.MonkeyPatch) -> None:
