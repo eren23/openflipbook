@@ -34,6 +34,9 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
 - **Time-scrubber (`T`).** Linear film-strip of every page in your trail; drag the scrubber to time-travel through your own exploration.
 - **Faster clicks.** As soon as a page renders, the VLM precomputes the 3–4 most clickable regions in the background, so most taps skip the resolve round-trip.
 - **Progressive render.** On the balanced/pro tiers the cheap fast model paints a draft in parallel, so you get something on screen seconds before the final lands. Toggle off with `PROGRESSIVE_DRAFT=false` if you'd rather save the extra fal call.
+- **Edit a page in place.** Describe a change and the page revises itself instead of spawning a child. With `EDIT_REGION` on you drag the exact region, the mask rides the edit, and a judge scores the result — verdict chip + one-click revert included.
+- **World Mode (off by default).** Flip `WORLD_MODE` and pages become places: tap a glowing region to *enter* it as a scene, go deeper, ascend back out, or pan to a logical neighbour — all rungs on one metric scale ladder. Every page gets its entities and camera extracted into a live geo overlay and a persistent world map, so revisiting a place brings back *that* place.
+- **Critic loop.** Long renders (entering a scene, masked edits) are judged by a panel of VLM critics — wrong camera, wrong place, or wrong art medium gets rejected and retried with the critic's rationale folded into the prompt. You watch it self-correct instead of staring at a spinner.
 - **BYO keys.** No hosted backend. Clone it, run it, pay your own bills.
 
 ```
@@ -79,6 +82,8 @@ make demo                     # → http://localhost:3000/play
 ```
 
 That's it. Mongo, Minio, backend, and web all come up wired together. Open [`/status`](http://localhost:3000/status) for a live env check. Full compose reference: [`docs/DOCKER.md`](docs/DOCKER.md).
+
+**Want the world stuff?** `make demo-world` is the same two-key stack with World Mode + scale-ladder navigation switched on: taps *enter* places, you can go deeper, ascend back out, and pan to neighbours. (It's the same code, just flags — kept off in `make demo` so the classic flow stays untouched.)
 
 **Images-only cloud:** `make demo-local` runs the planner + click VLM on local Ollama — only `FAL_KEY` needed (first run pulls multi-GB models; CPU-slow).
 
@@ -133,6 +138,7 @@ docs/
 - **[docs/BYO-KEYS.md](docs/BYO-KEYS.md)** — credential + deploy walkthrough.
 - **[docs/DOCKER.md](docs/DOCKER.md)** — compose stack reference.
 - **[docs/LOCAL_DEV.md](docs/LOCAL_DEV.md)** — running without Docker.
+- **[docs/TESTING.md](docs/TESTING.md)** — the free gates + the paid eval benches (scenario lab, layout/style A/Bs, reconstruction bench).
 - **[infra/MONGO.md](infra/MONGO.md)** — document shape + index layout.
 
 ## Contributing

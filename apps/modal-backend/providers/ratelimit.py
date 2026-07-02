@@ -18,10 +18,22 @@ _buckets: OrderedDict[str, tuple[float, float]] = OrderedDict()  # ip -> (tokens
 _MAX_BUCKETS = 4096
 
 
+_warned_bad_rpm = False
+
+
 def rpm() -> float:
+    raw = os.environ.get("RATE_LIMIT_RPM", "")
     try:
-        return max(0.0, float(os.environ.get("RATE_LIMIT_RPM", "") or 0.0))
+        return max(0.0, float(raw or 0.0))
     except ValueError:
+        # A typo'd RATE_LIMIT_RPM used to silently disarm the limiter — say so
+        # once instead of never (warn-per-container, not per-request).
+        global _warned_bad_rpm
+        if not _warned_bad_rpm:
+            _warned_bad_rpm = True
+            from obs import log
+
+            log("warn", "ratelimit.bad_rpm", value=raw)
         return 0.0
 
 
@@ -50,5 +62,7 @@ def allow(ip: str) -> bool:
 
 
 def reset_for_tests() -> None:
+    global _warned_bad_rpm
     with _lock:
         _buckets.clear()
+    _warned_bad_rpm = False

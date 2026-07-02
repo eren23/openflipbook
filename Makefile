@@ -3,12 +3,18 @@
 #   cp .env.example .env   # add FAL_KEY (+ OPENROUTER_API_KEY)
 #   make demo              # → http://localhost:3000/play
 #
-.PHONY: demo demo-mock demo-local demo-down demo-clean demo-logs
+.PHONY: demo demo-world demo-mock demo-local demo-down demo-clean demo-logs
 
 # Local stores (Mongo + Minio) + backend + web, with cloud AI.
 # Needs FAL_KEY + OPENROUTER_API_KEY in .env (see .env.example).
 demo:
 	docker compose up --build
+
+# Same stack with World Mode + scale-ladder nav on (tap to ENTER places, go
+# deeper, ascend back out, pan to neighbours). Same two keys; rebuilds the web
+# image because the NEXT_PUBLIC_* flags are baked at build time.
+demo-world:
+	docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
 
 # Zero-key on-ramp: stubbed providers (MOCK_PROVIDERS=1) — no FAL/OpenRouter
 # keys needed. The whole stack boots and serves mocked generations so a

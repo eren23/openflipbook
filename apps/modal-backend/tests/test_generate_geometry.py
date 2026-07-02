@@ -192,11 +192,18 @@ async def test_run_grounding_degrades_on_detector_error(
         raise RuntimeError("vlm 429")
 
     monkeypatch.setattr(detector, "detect", boom)
+    import obs
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        obs, "log", lambda level, event, **kw: events.append((level, event))
+    )
     img = _fake_img()
     out_img, summary = await generate._run_grounding(
         img, _EXP, repair_on=False, abort=_noop_abort
     )
     assert out_img is img and summary is None  # best-effort: never breaks gen
+    assert ("warn", "grounding.failed") in events  # ...but never silently
 
 
 async def test_run_grounding_verify_only_low_score_not_repaired(
@@ -295,6 +302,81 @@ async def test_extract_localizes_missing_bboxes(
     assert bb["w_pct"] == pytest.approx(0.2)
     # FIX 1b: the estimated camera rides on the response (no more top-down assumption)
     assert payload["view"] == {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
+
+
+async def test_extract_view_overlaps_extract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The view estimate must run CONCURRENTLY with entity extraction (it only
+    # needs pixels + caption). Sequential execution deadlocks this pairing:
+    # the extractor blocks until the view stage has started.
+    import asyncio
+
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+    from providers import view_estimator as _ve
+
+    view_started = asyncio.Event()
+
+    async def fake_view(_bytes, _caption=""):
+        view_started.set()
+        return {"level": "map", "projection": "top_down", "pitch_deg": -90.0}
+
+    async def fake_extract(**_kwargs):
+        await asyncio.wait_for(view_started.wait(), 2.0)
+        return _llm.EntityExtractionResult(added=[], updated=[])
+
+    monkeypatch.setattr(_ve, "estimate_view", fake_view)
+    monkeypatch.setattr(_llm, "extract_entities", fake_extract)
+    body = generate.ExtractEntitiesBody(
+        session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
+    )
+    resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
+    payload = _json.loads(resp.body)
+    assert payload["view"]["projection"] == "top_down"
+
+
+async def test_extract_detector_failure_degrades_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Localization stays best-effort — a detector blow-up never blocks the
+    # extract response — but the degradation must leave a warn, not silence.
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+    import obs
+    from providers import detector as _det
+    from providers import view_estimator as _ve
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        obs, "log", lambda level, event, **kw: events.append((level, event))
+    )
+
+    async def fake_view(_bytes, _caption=""):
+        return {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
+
+    async def fake_extract(**_kwargs):
+        return _llm.EntityExtractionResult(
+            added=[
+                _llm.ExtractedEntity(
+                    kind="place", name="Unseen University", appearance="tower",
+                    aliases=[], facts=[], state={}, confidence=0.9, bbox=None,
+                )
+            ],
+            updated=[],
+        )
+
+    async def boom_detect(_bytes, _labels):
+        raise RuntimeError("vlm 429")
+
+    monkeypatch.setattr(_ve, "estimate_view", fake_view)
+    monkeypatch.setattr(_llm, "extract_entities", fake_extract)
+    monkeypatch.setattr(_det, "detect", boom_detect)
+    body = generate.ExtractEntitiesBody(
+        session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
+    )
+    resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
+    payload = _json.loads(resp.body)
+    assert payload["result"]["added"][0]["bbox"] is None  # degraded, not broken
+    assert ("warn", "extract.localize_failed") in events
 
 
 async def test_edit_entities_endpoint_returns_plan(

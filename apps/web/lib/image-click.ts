@@ -135,7 +135,11 @@ export async function annotateClickPoint(
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return dataUrl;
+  if (!ctx) {
+    // The VLM gets an unannotated image — click resolution degrades. Say so.
+    console.warn("annotateClickPoint: no 2D canvas context, sending unannotated image");
+    return dataUrl;
+  }
 
   ctx.drawImage(img, 0, 0);
 
@@ -201,7 +205,11 @@ export async function annotateStroke(
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return dataUrl;
+  if (!ctx) {
+    // The VLM never sees the user's scribble — click resolution degrades.
+    console.warn("annotateStroke: no 2D canvas context, sending unannotated image");
+    return dataUrl;
+  }
 
   ctx.drawImage(img, 0, 0);
 
