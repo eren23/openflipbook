@@ -35,8 +35,9 @@ interface VisibleChip {
  * the bounding box so percentages map 1:1 to pixels.
  *
  * Pre-Phase-4 entities have no bbox in `appearance_bboxes` for the
- * current node and are silently skipped — the codex still lists them,
- * just without an on-image affordance.
+ * current node and get no dot; when NONE of the known entities are
+ * localized on this page a small corner note says so (UI_AUDIT #9) —
+ * chips-on with a silent empty layer read as "broken".
  */
 export function EntityHoverOverlay({
   nodeId,
@@ -63,7 +64,24 @@ export function EntityHoverOverlay({
     return out;
   }, [enabled, nodeId, entities]);
 
-  if (!enabled || visible.length === 0) return null;
+  // Entities the codex genuinely knows (same pruning as the chip loop).
+  const known = useMemo(
+    () => entities.filter((e) => e.appearance || e.facts.length > 0).length,
+    [entities],
+  );
+
+  if (!enabled || !nodeId) return null;
+  if (visible.length === 0) {
+    if (known === 0) return null;
+    return (
+      <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+        <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white/80 backdrop-blur-sm">
+          {known} {known === 1 ? "entity" : "entities"} known · not yet
+          localized on this page
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div

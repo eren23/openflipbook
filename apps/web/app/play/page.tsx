@@ -1803,6 +1803,7 @@ export default function PlayPage() {
     onOpenQuickbar: () => setQuickbarOpen(true),
     onToggleHelp: () => setHelpOpen((h) => !h),
     onToggleCodex: () => setCodexOpen((c) => !c),
+    onToggleGeoOverlay: () => setGeoOverlayOn((g) => !g),
     onExpandOutward: triggerExpand,
     onCloseOverlays: () => {
       setHelpOpen(false);
@@ -2012,6 +2013,7 @@ export default function PlayPage() {
       inflight.clear();
       const ac = new AbortController();
       inflight.set(key, ac);
+      hudEmit("prefetch:inflight", { n: inflight.size });
       // The per-page budget is consumed only on a SUCCESSFUL cache write below
       // (mirroring the precompute path). Counting it up-front would let a few
       // empty/failed resolves exhaust the budget and kill prefetch for the page.
@@ -2070,6 +2072,7 @@ export default function PlayPage() {
           // Best-effort. Click handler will fall back to the in-band VLM.
         } finally {
           inflight.delete(key);
+          hudEmit("prefetch:inflight", { n: inflight.size });
         }
       })();
     };
@@ -2308,6 +2311,12 @@ export default function PlayPage() {
         hint || worldEnabled
           ? undefined
           : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
+      // HUD visibility for the silent hover warming (UI_AUDIT #10): count
+      // only clicks where the shortcut was eligible — a deliberate skip
+      // (hint / world mode) is neither a hit nor a miss.
+      if (!hint && !worldEnabled) {
+        hudEmit(cached ? "prefetch:hit" : "prefetch:miss", {});
+      }
       // Image conditioning: build the weighted reference stack from the CLEAN
       // parent (not the marker-annotated one) — region crop at the tap → whole
       // parent → session root as the anti-drift anchor (skipped when this page
@@ -3319,7 +3328,9 @@ export default function PlayPage() {
               )}
 
               {editVerdictChip && (
-                <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-xs text-white">
+                // Toast corner (UI_AUDIT #12): the old top-centre nowrap pill
+                // overflowed narrow screens and overlapped the toolbar chips.
+                <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs text-white">
                   <span>{editVerdictChip.text}</span>
                   {editVerdictChip.revertTo && (
                     <button
@@ -3563,7 +3574,7 @@ export default function PlayPage() {
                   "rounded-full px-3 py-1 text-xs text-white disabled:opacity-50 " +
                   (geoOverlayOn ? "bg-emerald-600" : "bg-slate-600/85 hover:bg-slate-600")
                 }
-                title="Geometry layer — draw each entity's detected coordinate box on the image"
+                title="Geometry layer (G) — draw each entity's detected coordinate box on the image"
               >
                 ⊞ geo
               </button>

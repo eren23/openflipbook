@@ -68,18 +68,19 @@ is better at "what is this".
    guaranteed. Now only the 6 largest footprints carry names.
 7. ✅ **Breadcrumb overflow** on deep trails — collapses to root › … › last
    two with an expander.
-8. **`⊞ geo` and entity-chip toggles are buried** — discoverable only by
-   reading the toolbar; a keyboard shortcut (`G`) and a hint would help.
-9. **Entity chips need `appearance_bboxes[nodeId]`** — pre-Phase-4 extracts
-   show no on-image affordance even when the codex knows the entity; a
-   placeholder ("not yet localized") would close the gap.
-10. **Hover-prefetch is invisible** — silent VLM warming on hover has no
-    debug surface; a dev HUD toggle would make cost behaviour visible.
+8. ✅ **`⊞ geo` toggle discoverability** — `G` shortcut + button title hint +
+   HelpOverlay row (2026-07-02).
+9. ✅ **Entity chips need `appearance_bboxes[nodeId]`** — chips-on with a
+   known-but-unlocalized codex now shows a corner note ("N entities known ·
+   not yet localized on this page") instead of a silent empty layer.
+10. ✅ **Hover-prefetch is invisible** — the debug HUD already had
+    hit/miss/inflight counters but nothing emitted the events; the prefetch
+    fire/finish and the click-time shortcut read now emit them.
 11. **`view.layout_register_mismatch` silently suppresses layout steering**
     (backend) — logged but invisible to the user; the eval track
     (`tests/recon_bench`) is the right place to measure how much it costs.
-12. **Edit-verdict chip can overlap narrow screens** — toast-corner
-    placement would be safer.
+12. ✅ **Edit-verdict chip can overlap narrow screens** — moved to the
+    bottom-left toast corner, wraps, max-width capped.
 13. **Mobile pass** — breadcrumbs, codex panel and the geo inset all want a
     ≤390px audit; only the coach and breadcrumb were touched here.
 
