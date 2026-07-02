@@ -1452,8 +1452,12 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             # Localize NEW *and* recurring entities: a re-appearance must keep a
             # per-node box or it drops out of geometry + the overlay every time
             # it's seen again. One detector call covers both lists.
-            need_added = [e for e in result.added if not e.bbox]
-            need_updated = [u for u in result.updated if not u.bbox]
+            # The detector localizes EVERY entity — the extractor's own bbox is
+            # anchor-unreliable (Gemini returns centre-anchored boxes despite
+            # the top-left prompt: the displaced-overlay-box bug) and survives
+            # only as a fallback when the detector misses the label.
+            need_added = list(result.added)
+            need_updated = list(result.updated)
             labels = [e.name for e in need_added] + [
                 u.match_name for u in need_updated
             ]

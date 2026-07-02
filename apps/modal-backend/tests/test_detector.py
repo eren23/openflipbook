@@ -46,3 +46,29 @@ def test_garbage_is_empty() -> None:
     assert parse_detections({}) == []
     assert parse_detections({"detections": "x"}) == []
     assert parse_detections([1, 2, "x"]) == []
+
+
+async def test_truncated_reply_returns_empty_and_warns(monkeypatch) -> None:
+    # A max_tokens-truncated reply (finish_reason=length) cuts the JSON
+    # mid-array — detect() must degrade to [] LOUDLY, not silently (the
+    # located=0 bug: every entity then kept the extractor's mis-anchored
+    # fallback bbox).
+    from types import SimpleNamespace
+
+    import obs
+    from providers import detector, llm
+
+    truncated = '{\n  "detections": [\n    {"label": "a", "x": 0.1, "y": 0.1, "w": 0.1, "h": 0.1, "score": 0.9},\n    {"label": "b", "x": 0.2'
+
+    async def fake_create(_client, **_kw):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=truncated), finish_reason="length")]
+        )
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(llm, "_create_with_retry", fake_create)
+    monkeypatch.setattr(llm, "_client", lambda: object())
+    monkeypatch.setattr(obs, "log", lambda level, event, **kw: events.append((level, event)))
+    out = await detector.detect(b"jpegbytes", ["a", "b"])
+    assert out == []
+    assert ("warn", "detector.parse_failed") in events
