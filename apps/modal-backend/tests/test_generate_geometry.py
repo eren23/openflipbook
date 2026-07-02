@@ -304,6 +304,37 @@ async def test_extract_localizes_missing_bboxes(
     assert payload["view"] == {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
 
 
+async def test_extract_view_overlaps_extract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The view estimate must run CONCURRENTLY with entity extraction (it only
+    # needs pixels + caption). Sequential execution deadlocks this pairing:
+    # the extractor blocks until the view stage has started.
+    import asyncio
+
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+    from providers import view_estimator as _ve
+
+    view_started = asyncio.Event()
+
+    async def fake_view(_bytes, _caption=""):
+        view_started.set()
+        return {"level": "map", "projection": "top_down", "pitch_deg": -90.0}
+
+    async def fake_extract(**_kwargs):
+        await asyncio.wait_for(view_started.wait(), 2.0)
+        return _llm.EntityExtractionResult(added=[], updated=[])
+
+    monkeypatch.setattr(_ve, "estimate_view", fake_view)
+    monkeypatch.setattr(_llm, "extract_entities", fake_extract)
+    body = generate.ExtractEntitiesBody(
+        session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
+    )
+    resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
+    payload = _json.loads(resp.body)
+    assert payload["view"]["projection"] == "top_down"
+
+
 async def test_extract_detector_failure_degrades_loudly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

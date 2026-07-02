@@ -46,6 +46,11 @@ from _env import env_flag
 
 APP_NAME = "openflipbook-generate"
 
+# Modal kills the container at this wall-clock limit — the render/edit loops
+# derive their cumulative deadline from it so a long critic-retry enter always
+# finishes with its best attempt instead of dying at the edge as a 502.
+INGRESS_TIMEOUT_S = 900
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install_from_requirements("requirements.txt")
@@ -1538,6 +1543,13 @@ async def _event_stream(
                     )
 
                 loop_cfg = render_loop.loop_config_from_env(body.max_attempts)
+                # Leave 180s for the final attempt's judge tail + post-loop
+                # grounding/encode; floor of 60s so one slow planner can't
+                # zero the render budget.
+                loop_deadline = _time.monotonic() + max(
+                    60.0,
+                    INGRESS_TIMEOUT_S - 180.0 - (_time.perf_counter() - started),
+                )
                 loop_attempts: list[Attempt] = []
                 async for loop_att in render_loop.iter_attempts(
                     _render_enter,
@@ -1552,6 +1564,7 @@ async def _event_stream(
                     judge_medium=judge.score_style_pair,
                     family=enter_family,
                     abort=_abort_if_disconnected,
+                    deadline_s=loop_deadline,
                 ):
                     loop_attempts.append(loop_att)
                     # Stream only verdict-REJECTED attempts (a correction is
@@ -2089,6 +2102,25 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         scene_desc_len=len(body.scene_description or ""),
         image_kb=img_size_kb,
     )
+    # Decode the image once for both geometry passes (localize + view-estimate)
+    # and start the camera estimate NOW — it needs only pixels + caption, so it
+    # overlaps the whole extract→detect→segment chain instead of tailing it
+    # (the geo overlay used to lag the image by the full sequential sum).
+    geo_img_bytes = b""
+    if _geometric_world_on():
+        try:
+            _, _, _gb64 = body.image_data_url.partition(",")
+            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
+        except Exception:
+            geo_img_bytes = b""
+    view_task: _asyncio.Task[ViewEstimate] | None = None
+    if geo_img_bytes:
+        from providers import view_estimator as _view
+
+        view_task = _asyncio.create_task(
+            _view.estimate_view(geo_img_bytes, body.caption)
+        )
+
     try:
         result = await llm_provider.extract_entities(
             image_data_url=body.image_data_url,
@@ -2098,6 +2130,8 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         )
     except Exception as exc:
         record_error("extract_entities", exc, node_id=body.node_id)
+        if view_task is not None:
+            view_task.cancel()
         return _err_json(exc, trace_id)
 
     # Localize the catalogued entities so the world map can seed and the overlay
@@ -2105,15 +2139,6 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # images; the purpose-built detector reliably returns one box per label.
     # Detector boxes are centre-based → store top-left for the EntityBBox shape.
     # Gated + best-effort: a failure here never blocks the extract response.
-    # Decode the image once for both geometry passes (localize + view-estimate).
-    geo_img_bytes = b""
-    if _geometric_world_on():
-        try:
-            _, _, _gb64 = body.image_data_url.partition(",")
-            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
-        except Exception:
-            geo_img_bytes = b""
-
     if geo_img_bytes and (result.added or result.updated):
         try:
             from providers import detector as _detector
@@ -2220,11 +2245,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # Returned on the response so the web side can store it on the node and
     # back-project the localized boxes at the right angle. Best-effort.
     view: ViewEstimate | None = None
-    if geo_img_bytes:
+    if view_task is not None:
         try:
-            from providers import view_estimator as _view
-
-            view = await _view.estimate_view(geo_img_bytes, body.caption)
+            view = await view_task
             log(
                 "info",
                 "extract.view",
@@ -2458,7 +2481,7 @@ async def trace_abort_stats(limit: int = 100) -> dict:
     return {"ok": True, "service": APP_NAME, **abort_stats(clamped)}
 
 
-@app.function(secrets=secrets, min_containers=0, timeout=600)
+@app.function(secrets=secrets, min_containers=0, timeout=INGRESS_TIMEOUT_S)
 @modal.asgi_app()
 def fastapi_ingress():
     return fastapi_app
