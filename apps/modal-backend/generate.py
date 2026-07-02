@@ -46,6 +46,11 @@ from _env import env_flag
 
 APP_NAME = "openflipbook-generate"
 
+# Modal kills the container at this wall-clock limit — the render/edit loops
+# derive their cumulative deadline from it so a long critic-retry enter always
+# finishes with its best attempt instead of dying at the edge as a 502.
+INGRESS_TIMEOUT_S = 900
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install_from_requirements("requirements.txt")
@@ -1536,6 +1541,13 @@ async def _event_stream(
                     )
 
                 loop_cfg = render_loop.loop_config_from_env(body.max_attempts)
+                # Leave 180s for the final attempt's judge tail + post-loop
+                # grounding/encode; floor of 60s so one slow planner can't
+                # zero the render budget.
+                loop_deadline = _time.monotonic() + max(
+                    60.0,
+                    INGRESS_TIMEOUT_S - 180.0 - (_time.perf_counter() - started),
+                )
                 loop_attempts: list[Attempt] = []
                 async for loop_att in render_loop.iter_attempts(
                     _render_enter,
@@ -1550,6 +1562,7 @@ async def _event_stream(
                     judge_medium=judge.score_style_pair,
                     family=enter_family,
                     abort=_abort_if_disconnected,
+                    deadline_s=loop_deadline,
                 ):
                     loop_attempts.append(loop_att)
                     # Stream only verdict-REJECTED attempts (a correction is
@@ -2451,7 +2464,7 @@ async def trace_abort_stats(limit: int = 100) -> dict:
     return {"ok": True, "service": APP_NAME, **abort_stats(clamped)}
 
 
-@app.function(secrets=secrets, min_containers=0, timeout=600)
+@app.function(secrets=secrets, min_containers=0, timeout=INGRESS_TIMEOUT_S)
 @modal.asgi_app()
 def fastapi_ingress():
     return fastapi_app

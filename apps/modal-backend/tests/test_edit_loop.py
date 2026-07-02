@@ -108,6 +108,28 @@ async def _drain(render: _Render, *, alignment: object, medium: object) -> list[
     return attempts
 
 
+async def test_cumulative_deadline_stops_retry() -> None:
+    # Mirror of render_loop's guard: a 100s attempt predicts 200 > 150.
+    ticks = iter([0.0, 100.0, 100.0])
+    render = _Render([_inside_edit(), _inside_edit()])
+    attempts = []
+    async for a in edit_loop.iter_edit_attempts(
+        render,
+        source_bytes=_jpg(_base()),
+        mask_png=_mask_png(),
+        region_box=_BOX,
+        judge_alignment=_judge(3.0, 9.0),  # type: ignore[arg-type]
+        judge_medium=_judge(9.0),  # type: ignore[arg-type]
+        instruction="a red panel",
+        config=_CFG,
+        clock=lambda: next(ticks),
+        deadline_s=150.0,
+    ):
+        attempts.append(a)
+    assert len(attempts) == 1 and not attempts[0].accepted
+    assert render.suffixes == [""]  # no retry spent
+
+
 async def test_accept_at_one_spends_one_render() -> None:
     render = _Render([_inside_edit()])
     attempts = await _drain(render, alignment=_judge(9.0), medium=_judge(9.0))
