@@ -12,6 +12,7 @@ function makeHandlers(overrides: Partial<KeyboardShortcutHandlers> = {}): Keyboa
     onOpenQuickbar: vi.fn(),
     onToggleHelp: vi.fn(),
     onToggleCodex: vi.fn(),
+    onToggleGeoOverlay: vi.fn(),
     onExpandOutward: vi.fn(),
     onCloseOverlays: vi.fn(),
     anyOverlayOpen: false,
@@ -77,6 +78,14 @@ describe("useKeyboardShortcuts", () => {
     press({ key: "E" });
     press({ key: "e" });
     expect(handlers.onExpandOutward).toHaveBeenCalledTimes(2);
+  });
+
+  it("G toggles the geo overlay (case-insensitive)", () => {
+    const handlers = makeHandlers();
+    cleanup = renderHook(() => useKeyboardShortcuts(handlers)).unmount;
+    press({ key: "G" });
+    press({ key: "g" });
+    expect(handlers.onToggleGeoOverlay).toHaveBeenCalledTimes(2);
   });
 
   it("Esc only fires close when an overlay is open", () => {

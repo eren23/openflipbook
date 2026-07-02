@@ -10,6 +10,8 @@ export interface KeyboardShortcutHandlers {
   onOpenQuickbar: () => void;
   onToggleHelp: () => void;
   onToggleCodex: () => void;
+  /** Toggle the ⊞ geo overlay (entity boxes/borders on the image). */
+  onToggleGeoOverlay: () => void;
   /** Bloom the world around the current page (mode:"expand"). */
   onExpandOutward: () => void;
   onCloseOverlays: () => void;
@@ -34,6 +36,7 @@ export interface KeyboardShortcutHandlers {
  *   M / m    Toggle map view
  *   T / t    Toggle time-scrubber
  *   K / k    Toggle codex panel
+ *   G / g    Toggle the ⊞ geo overlay
  *   E / e    Expand outward (bloom neighbours)
  *   /        Open quickbar
  *   ?        Toggle help overlay
@@ -48,6 +51,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onOpenQuickbar,
     onToggleHelp,
     onToggleCodex,
+    onToggleGeoOverlay,
     onExpandOutward,
     onCloseOverlays,
     anyOverlayOpen,
@@ -93,6 +97,9 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
       } else if (e.key.toLowerCase() === "k") {
         e.preventDefault();
         onToggleCodex();
+      } else if (e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        onToggleGeoOverlay();
       } else if (e.key.toLowerCase() === "e") {
         e.preventDefault();
         onExpandOutward();
@@ -116,6 +123,7 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     onOpenQuickbar,
     onToggleHelp,
     onToggleCodex,
+    onToggleGeoOverlay,
     onExpandOutward,
     onCloseOverlays,
   ]);

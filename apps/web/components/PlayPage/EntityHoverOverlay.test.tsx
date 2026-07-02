@@ -59,7 +59,9 @@ describe("EntityHoverOverlay", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("skips entities with no bbox for the current node", () => {
+  it("shows the not-yet-localized note when known entities have no bbox here", () => {
+    // UI_AUDIT #9: chips on + a silent empty layer read as "broken" — a
+    // known-but-unlocalized codex now gets a corner note instead of nothing.
     const { container } = render(
       <EntityHoverOverlay
         nodeId="n1"
@@ -67,10 +69,9 @@ describe("EntityHoverOverlay", () => {
         enabled
       />
     );
-    // Overlay container DOES NOT render at all when there's nothing to
-    // show — keeps the DOM clean and avoids an empty z-index layer
-    // intercepting nothing on top of the image.
-    expect(container.firstChild).toBeNull();
+    expect(container.textContent).toContain("not yet localized");
+    // Still a pass-through layer — never intercepts image clicks.
+    expect(container.querySelector("button")).toBeNull();
   });
 
   it("renders a chip per entity with a bbox on the current node", () => {

@@ -28,6 +28,7 @@ export function HelpOverlay({ onClose }: Props) {
           <Row k="M" v="Toggle map view" />
           <Row k="T" v="Toggle time-scrubber" />
           <Row k="K" v="Toggle codex" />
+          <Row k="G" v="Toggle the geometry layer (⊞ geo)" />
           <Row k="E" v="Look around (bloom neighbours)" />
           <Row k="/" v="Jump to page…" />
           <Row k="?" v="This help" />
