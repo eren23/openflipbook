@@ -1393,19 +1393,19 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         scene_desc_len=len(body.scene_description or ""),
         image_kb=img_size_kb,
     )
-    # Decode the image once for both geometry passes (localize + view-estimate)
-    # and start the camera estimate NOW — it needs only pixels + caption, so it
-    # overlaps the whole extract→detect→segment chain instead of tailing it
-    # (the geo overlay used to lag the image by the full sequential sum).
+    # Decode the image once for the localize + view-estimate passes. Detector
+    # localization runs in BOTH modes (chips exist without the geo world);
+    # only the camera estimate is geometry-gated. Start the estimate NOW —
+    # it needs only pixels + caption, so it overlaps the whole
+    # extract→detect→segment chain instead of tailing it.
     geo_img_bytes = b""
-    if _geometric_world_on():
-        try:
-            _, _, _gb64 = body.image_data_url.partition(",")
-            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
-        except Exception:
-            geo_img_bytes = b""
+    try:
+        _, _, _gb64 = body.image_data_url.partition(",")
+        geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
+    except Exception:
+        geo_img_bytes = b""
     view_task: _asyncio.Task[ViewEstimate] | None = None
-    if geo_img_bytes:
+    if geo_img_bytes and _geometric_world_on():
         from providers import view_estimator as _view
 
         view_task = _asyncio.create_task(
@@ -1425,11 +1425,21 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             view_task.cancel()
         return _err_json(exc, trace_id)
 
+    # A stored bbox is DETECTOR-verified or absent — discard the extractor's
+    # self-reported boxes up front so no code path (including the detector-
+    # failure degrade below) can store an unverified anchor. Gemini returns
+    # centre-anchored boxes despite the top-left prompt; a wrong box poisons
+    # the overlay and the geo seeding, a missing one just shows the "not yet
+    # localized" note until a later pass lands.
+    for _e in result.added:
+        _e.bbox = None
+    for _u in result.updated:
+        _u.bbox = None
+
     # Localize the catalogued entities so the world map can seed and the overlay
-    # can draw. The extractor's bbox is best-effort and often empty on dense
-    # images; the purpose-built detector reliably returns one box per label.
+    # can draw. The purpose-built detector reliably returns one box per label.
     # Detector boxes are centre-based → store top-left for the EntityBBox shape.
-    # Gated + best-effort: a failure here never blocks the extract response.
+    # Best-effort: a failure here never blocks the extract response.
     if geo_img_bytes and (result.added or result.updated):
         try:
             from providers import detector as _detector
@@ -1452,10 +1462,13 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             # Localize NEW *and* recurring entities: a re-appearance must keep a
             # per-node box or it drops out of geometry + the overlay every time
             # it's seen again. One detector call covers both lists.
-            # The detector localizes EVERY entity — the extractor's own bbox is
-            # anchor-unreliable (Gemini returns centre-anchored boxes despite
-            # the top-left prompt: the displaced-overlay-box bug) and survives
-            # only as a fallback when the detector misses the label.
+            # A stored bbox comes from the DETECTOR or not at all: the extractor
+            # VLM's self-reported boxes are anchor-unreliable (Gemini returns
+            # centre-anchored despite the top-left prompt — the displaced-
+            # overlay-box bug), and a wrong box poisons the overlay AND the geo
+            # seeding, while a missing one just shows the "not yet localized"
+            # note and re-tries on the client's next extract pass. A detector
+            # miss sets bbox=None, which the web merge treats as keep-existing.
             need_added = list(result.added)
             need_updated = list(result.updated)
             labels = [e.name for e in need_added] + [
@@ -1474,13 +1487,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     return _box_from_det(d) if d else None
 
                 for e in need_added:
-                    box = _match(e.name)
-                    if box:
-                        e.bbox = box
+                    e.bbox = _match(e.name)
                 for u in need_updated:
-                    box = _match(u.match_name)
-                    if box:
-                        u.bbox = box
+                    u.bbox = _match(u.match_name)
 
                 # SAM3 outline pass (best-effort, flag-gated): one segment call
                 # box-prompted with the detector boxes -> a tight border polygon

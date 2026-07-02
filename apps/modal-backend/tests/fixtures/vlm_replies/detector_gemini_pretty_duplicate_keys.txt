@@ -1,0 +1,44 @@
+{
+  "detections": [
+    {
+      "label": "The Crystal Lighthouse",
+      "x": 0.135,
+      "y": 0.288,
+      "w": 0.085,
+      "width": 0.085,
+      "h": 0.405,
+      "height": 0.405,
+      "score": 0.98
+    },
+    {
+      "label": "Aethelgard Harbor",
+      "x": 0.455,
+      "y": 0.585,
+      "w": 0.42,
+      "width": 0.42,
+      "h": 0.45,
+      "height": 0.45,
+      "score": 0.95
+    },
+    {
+      "label": "Aethelgard Marketplace",
+      "x": 0.655,
+      "y": 0.365,
+      "w": 0.14,
+      "width": 0.14,
+      "h": 0.18,
+      "height": 0.18,
+      "score": 0.92
+    },
+    {
+      "label": "Aethelgard Trade Ships",
+      "x": 0.445,
+      "y": 0.655,
+      "w": 0.41,
+      "width": 0.41,
+      "h": 0.62,
+      "height": 0.62,
+      "score": 0.96
+    }
+  ]
+}

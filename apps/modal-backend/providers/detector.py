@@ -9,7 +9,6 @@ its slug needs verifying first. Boxes are centre-based, 0..1
 from __future__ import annotations
 
 import base64
-import json
 import os
 from typing import Any, TypedDict
 
@@ -116,9 +115,11 @@ async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
         **llm._maybe_response_format(model),
     )
     raw = resp.choices[0].message.content or "{}"
-    try:
-        payload = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
-    except Exception as exc:
+    payload, failure = llm.salvage_json(raw)
+    if failure is not None:
+        # A truncated reply still yields its complete leading detections
+        # (salvage_json); only a fully unparseable one degrades to [] — and
+        # either way it is LOUD, not the silent located=0 of old.
         from obs import log
 
         log(
@@ -126,7 +127,6 @@ async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
             "detector.parse_failed",
             finish_reason=getattr(resp.choices[0], "finish_reason", None),
             labels=len(labels),
-            error=f"{type(exc).__name__}: {exc}",
+            failure=failure,
         )
-        return []
     return parse_detections(payload)

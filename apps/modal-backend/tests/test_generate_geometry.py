@@ -260,13 +260,24 @@ async def test_edit_entities_endpoint_403_when_flag_off(
     assert resp.status_code == 403
 
 
+def _assert_bbox_sane(bb: dict) -> None:
+    """The stored-EntityBBox contract: TOP-LEFT anchored inside the unit
+    frame. A centre-anchored box smuggled through shows up here as x+w or
+    y+h past 1.0 on any subject in the outer half of the image."""
+    assert 0.0 <= bb["x_pct"] <= 1.0 and 0.0 <= bb["y_pct"] <= 1.0
+    assert 0.0 < bb["w_pct"] <= 1.0 and 0.0 < bb["h_pct"] <= 1.0
+    assert bb["x_pct"] + bb["w_pct"] <= 1.0 + 1e-9
+    assert bb["y_pct"] + bb["h_pct"] <= 1.0 + 1e-9
+
+
 async def test_extract_detector_overrides_extractor_bbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The extractor VLM's self-reported bbox is anchor-unreliable (Gemini
     # returns CENTRE-anchored boxes despite the top-left prompt — the
-    # displaced-overlay-box bug). A detector hit must overwrite it; only a
-    # detector MISS falls back to whatever the extractor said.
+    # displaced-overlay-box bug). A stored bbox is DETECTOR-verified or
+    # absent: a hit overwrites the extractor's box, a miss stores None
+    # (never the unverified anchor — the web merge keeps any prior good box).
     monkeypatch.setenv("GEOMETRIC_WORLD", "true")
     from providers import detector as _det
     from providers import view_estimator as _ve
@@ -311,8 +322,9 @@ async def test_extract_detector_overrides_extractor_bbox(
     # Detector hit wins: centre-based detection stored top-left.
     assert harbor["bbox"]["x_pct"] == pytest.approx(0.4)
     assert harbor["bbox"]["y_pct"] == pytest.approx(0.25)
-    # Detector miss: the extractor's box survives as the fallback.
-    assert pier["bbox"] == centre_anchored
+    _assert_bbox_sane(harbor["bbox"])
+    # Detector miss: NO box — the unverified extractor anchor never survives.
+    assert pier["bbox"] is None
 
 
 async def test_extract_localizes_missing_bboxes(
@@ -355,6 +367,7 @@ async def test_extract_localizes_missing_bboxes(
     assert bb["x_pct"] == pytest.approx(0.4)  # centre 0.5 minus w/2 0.1
     assert bb["y_pct"] == pytest.approx(0.25)  # centre 0.4 minus h/2 0.15
     assert bb["w_pct"] == pytest.approx(0.2)
+    _assert_bbox_sane(bb)
     # FIX 1b: the estimated camera rides on the response (no more top-down assumption)
     assert payload["view"] == {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
 

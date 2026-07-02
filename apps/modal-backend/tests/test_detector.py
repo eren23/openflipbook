@@ -48,11 +48,12 @@ def test_garbage_is_empty() -> None:
     assert parse_detections([1, 2, "x"]) == []
 
 
-async def test_truncated_reply_returns_empty_and_warns(monkeypatch) -> None:
+async def test_truncated_reply_salvages_leading_detections_and_warns(monkeypatch) -> None:
     # A max_tokens-truncated reply (finish_reason=length) cuts the JSON
-    # mid-array — detect() must degrade to [] LOUDLY, not silently (the
-    # located=0 bug: every entity then kept the extractor's mis-anchored
-    # fallback bbox).
+    # mid-array — the complete leading elements are SALVAGED (partial
+    # detections beat none) and the truncation is logged LOUDLY, not the
+    # silent located=0 of old (which let the extractor's mis-anchored
+    # fallback bboxes win every time).
     from types import SimpleNamespace
 
     import obs
@@ -70,5 +71,25 @@ async def test_truncated_reply_returns_empty_and_warns(monkeypatch) -> None:
     monkeypatch.setattr(llm, "_client", lambda: object())
     monkeypatch.setattr(obs, "log", lambda level, event, **kw: events.append((level, event)))
     out = await detector.detect(b"jpegbytes", ["a", "b"])
+    assert [d["label"] for d in out] == ["a"]  # the complete element survives
+    assert ("warn", "detector.parse_failed") in events
+
+
+async def test_unparseable_reply_returns_empty_and_warns(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import obs
+    from providers import detector, llm
+
+    async def fake_create(_client, **_kw):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."), finish_reason="stop")]
+        )
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(llm, "_create_with_retry", fake_create)
+    monkeypatch.setattr(llm, "_client", lambda: object())
+    monkeypatch.setattr(obs, "log", lambda level, event, **kw: events.append((level, event)))
+    out = await detector.detect(b"jpegbytes", ["a"])
     assert out == []
     assert ("warn", "detector.parse_failed") in events

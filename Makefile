@@ -71,6 +71,12 @@ eval-grounding:
 # zero fal). Override images: SEGMENT_SMOKE_IMAGES=/path/a.jpg,...
 eval-segment-smoke:
 	cd apps/modal-backend && SEGMENT_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.segment_smoke
+# Detector canary: the real detector on a committed synthetic image with a
+# 10-label ask (the size class that used to truncate + silently return []).
+# Fails on any parse failure/salvage or zero detections — catches live-model
+# drift the free fixture tests can't. PAID (~$0.01, one Gemini call).
+eval-detector-smoke:
+	cd apps/modal-backend && DETECTOR_SMOKE_RUN=1 .venv/bin/python -m tests.world_bench.detector_smoke
 # Ground-truth map corpus: fetch the public-domain scans (free, a few MB;
 # --pin on first run records sha256s into the manifest) and VLM-draft a
 # description for human verification (PAID ~$0.015/map, Gemini only):

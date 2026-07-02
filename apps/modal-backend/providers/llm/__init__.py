@@ -69,6 +69,7 @@ from .client import (
     _web_plugin_extra,
     _web_search_enabled,
     _with_json_hint,
+    salvage_json,
 )
 from .extraction import (
     EXTRACTION_SCHEMA,

@@ -491,7 +491,7 @@ async def precompute_click_candidates(
             schema=CANDIDATES_SCHEMA,
             schema_name="click_candidates",
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=900,
             span_ctx=ctx,
         )
     items = parsed.get("candidates", [])

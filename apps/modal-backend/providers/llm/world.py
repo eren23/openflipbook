@@ -153,7 +153,7 @@ async def propose_neighbors(
             schema=NEIGHBORS_SCHEMA,
             schema_name="neighbors",
             temperature=0.4,
-            max_tokens=700,
+            max_tokens=1200,
             span_ctx=ctx,
         )
     return _build_neighbors(parsed, max_neighbors)
@@ -533,7 +533,7 @@ async def plan_world_from_description(description: str, answers: list[str] | Non
             schema=PLAN_WORLD_SCHEMA,
             schema_name="scene_graph",
             temperature=0.0,
-            max_tokens=1600,
+            max_tokens=2600,
             span_ctx=ctx,
         )
     return parse_scene_graph(parsed)

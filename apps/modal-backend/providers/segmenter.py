@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-import json
 import math
 import os
 from typing import Any, TypedDict
@@ -377,17 +376,27 @@ async def _segment_vlm(image_bytes: bytes, labels: list[str]) -> list[SegmentEnt
     ]
     # Via _create_with_retry so a transient 429/5xx retries instead of dropping
     # this label silently (the client now disables the SDK's own retries).
+    # Polygon replies are the biggest in the repo (up to 12 labels x 16-vertex
+    # point arrays, pretty-printed) — 1400 tokens truncated real replies and
+    # the old bare `except: return []` hid it completely.
     resp = await llm._create_with_retry(
         client,
         model=model,
         messages=messages,
         temperature=0.0,
-        max_tokens=1400,
+        max_tokens=4000,
         **llm._maybe_response_format(model),
     )
     raw = resp.choices[0].message.content or "{}"
-    try:
-        payload = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
-    except Exception:
-        return []
+    payload, failure = llm.salvage_json(raw)
+    if failure is not None:
+        from obs import log
+
+        log(
+            "warn",
+            "segmenter.parse_failed",
+            finish_reason=getattr(resp.choices[0], "finish_reason", None),
+            labels=len(labels),
+            failure=failure,
+        )
     return parse_segments(payload)

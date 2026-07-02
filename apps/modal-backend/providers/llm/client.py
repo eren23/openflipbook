@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import Any, cast
 
 from openai import (
@@ -440,21 +441,67 @@ def _coerce_json_dict(parsed: Any) -> dict[str, Any] | None:
     return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
 
 
-def _safe_json(raw: str) -> dict[str, Any]:
+def salvage_json(raw: str) -> tuple[Any, str | None]:
+    """Parse a VLM JSON reply, salvaging what a truncated reply left intact.
+
+    Returns (payload, failure). failure is None on a clean parse; otherwise a
+    short reason for the caller to LOG — silence is how the located=0 bug
+    hid. A max_tokens-truncated reply cuts mid-array, but every complete
+    element before the cut is still valid JSON: walk them with raw_decode
+    instead of collapsing the whole reply to {} (partial detections beat
+    none). Pure — no I/O, no logging."""
+    # Clean paths first: full parse, then the brace-slice (prose-wrapped JSON).
     try:
         coerced = _coerce_json_dict(json.loads(raw))
         if coerced is not None:
-            return coerced
+            return coerced, None
     except json.JSONDecodeError:
         pass
     start = raw.find("{")
     end = raw.rfind("}")
     if start >= 0 and end > start:
         try:
-            return _coerce_json_dict(json.loads(raw[start : end + 1])) or {}
+            coerced = _coerce_json_dict(json.loads(raw[start : end + 1]))
+            if coerced is not None:
+                return coerced, None
         except json.JSONDecodeError:
-            return {}
-    return {}
+            pass
+    # Salvage: locate the first top-level array — keyed ({"detections": [...)
+    # or bare ([...) — and decode complete elements until the cut.
+    m = re.search(r'"([^"\\]+)"\s*:\s*\[', raw)
+    key = m.group(1) if m else None
+    arr_start = m.end() if m else raw.find("[") + 1
+    if arr_start <= 0:
+        return {}, "unparseable"
+    decoder = json.JSONDecoder()
+    items: list[Any] = []
+    i = arr_start
+    n = len(raw)
+    while i < n:
+        while i < n and raw[i] in " \t\r\n,":
+            i += 1
+        if i >= n or raw[i] == "]":
+            break
+        try:
+            item, i = decoder.raw_decode(raw, i)
+        except json.JSONDecodeError:
+            break
+        items.append(item)
+    if not items:
+        return {}, "unparseable"
+    payload: Any = {key: items} if key else items
+    return payload, f"salvaged {len(items)} of truncated array {key or '<bare>'}"
+
+
+def _safe_json(raw: str) -> dict[str, Any]:
+    payload, failure = salvage_json(raw)
+    if failure is not None:
+        # Truncation/garbage used to collapse to {} in total silence here —
+        # every _complete_json caller then saw an empty diff and moved on.
+        _safe_log("warn", "llm.json_salvage", failure=failure, reply_chars=len(raw))
+    if isinstance(payload, dict):
+        return payload
+    return _coerce_json_dict(payload) or {}
 
 
 # Transient upstream failures worth a retry — NOT BadRequestError (a 400 means
