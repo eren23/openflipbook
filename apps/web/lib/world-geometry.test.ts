@@ -148,3 +148,31 @@ describe("projectTopDown (flat map, no observer)", () => {
     expect([b.h_pos, b.v_pos, b.size]).toEqual(["far-left", "top", "small"]);
   });
 });
+
+describe("toAbsoluteEntities (nested → absolute frame)", () => {
+  it("resolves nested pos + unit-scales footprint; top-level passes through", async () => {
+    const { toAbsoluteEntities } = await import("./world-geometry");
+    const all = [
+      {
+        id: "p",
+        parent_id: null,
+        pos: { x: 50, y: 30 },
+        scale: 0.005,
+        footprint: { w: 100, d: 60 },
+      },
+      // The post-ascend shape: parent-local coords in old-frame magnitudes.
+      {
+        id: "c",
+        parent_id: "p",
+        pos: { x: -8400, y: 0 },
+        footprint: { w: 4000, d: 2000 },
+      },
+    ];
+    const out = toAbsoluteEntities(all, all);
+    expect(out[0]).toBe(all[0]); // top-level: same reference, byte-identical
+    expect(out[1]!.pos.x).toBeCloseTo(8); // 50 + (-8400 × 0.005) — INV-1
+    expect(out[1]!.pos.y).toBeCloseTo(30);
+    expect(out[1]!.footprint.w).toBeCloseTo(20); // 4000 × 0.005
+    expect(out[1]!.footprint.d).toBeCloseTo(10);
+  });
+});

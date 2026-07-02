@@ -10,6 +10,7 @@ import {
   layoutLabels,
   type LabelInput,
 } from "@/lib/map-labels";
+import { toAbsoluteEntities } from "@/lib/world-geometry";
 
 interface Props {
   /** The page the labels overlay. */
@@ -56,10 +57,12 @@ export function MapLabelOverlay({
       }
     }
     if (fromBBoxes.length > 0) return layoutLabels(fromBBoxes);
-    // Fallback: top-level geo footprints through the seeded map frame.
+    // Fallback: geo anchors through the seeded map frame — nested entities
+    // resolved to absolute pos (anchorsFromGeo culls what lands outside).
     const frame = currentView?.map_crop ?? MAP_IMAGE_FRAME;
-    const topLevel = geoEntities.filter((e) => (e.parent_id ?? null) === null);
-    return layoutLabels(anchorsFromGeo(topLevel, frame));
+    return layoutLabels(
+      anchorsFromGeo(toAbsoluteEntities(geoEntities, geoEntities), frame),
+    );
   }, [nodeId, entities, geoEntities, currentView]);
 
   if (placed.length === 0) return null;

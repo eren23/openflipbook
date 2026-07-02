@@ -114,7 +114,7 @@ import { matchEntityLabel } from "@/lib/entity-label-match";
 import { focusOnMap } from "@/lib/click-route";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
-import { childrenOf, projectTopDown } from "@/lib/world-geometry";
+import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
@@ -2623,10 +2623,14 @@ export default function PlayPage() {
         const pointer = normalizeClickOnImage(evt, img);
         if (pointer) {
           const frame = page?.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
+          // Nested places resolve to their absolute map pos/footprint —
+          // post-ascend the whole map is nested, so the old top-level-only
+          // filter killed the enter ring everywhere.
           hoverEnterable =
             focusOnMap(
-              geoMap.entities.filter(
-                (e) => e.kind === "place" && (e.parent_id ?? null) === null,
+              toAbsoluteEntities(
+                geoMap.entities.filter((e) => e.kind === "place"),
+                geoMap.entities,
               ),
               frame,
               pointer,

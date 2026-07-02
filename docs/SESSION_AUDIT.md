@@ -95,10 +95,8 @@ tests. **Everything else in B2 is unbuilt** — see `PLAN_OUTWARD.md`.
    `providers/generate_modes/ascend.py`; see `PLAN_OUTWARD.md` Phase E notes).
 7. **Merged local branches** — `feat/consistency-fixes`, `feat/eval`, `feat/world-from-description`,
    `fix/centre-empty-region` are merged; tidy locally.
-8. **mypy coverage split (CI hygiene)** — `make eval` type-checks `generate.py` + 5 provider
-   files; CI type-checks `providers` but **not** `generate.py`. The union is covered, but neither
-   gate alone is complete (a `generate.py` type error passes CI; a `layout_solver.py` one passes
-   `make eval`). Cheap follow-up: align the two file lists.
+8. **mypy coverage split (CI hygiene)** — ~~align the two file lists~~ **already aligned**:
+   both `make eval` and CI run `mypy providers obs.py generate.py` (verified 2026-07-02).
 9. **Style ref on non-default edit paths** — the `pro`/`flux-pro/kontext` edit tier drops the
    style exemplar (singular `image_url`), and `continue_image` (World-Mode submap zoom) takes no
    style ref at all. Default edit tier is `balanced`=nano-banana-pro (which *does* use the ref),

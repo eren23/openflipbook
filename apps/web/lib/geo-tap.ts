@@ -17,6 +17,7 @@ import {
   cropEntities,
   projectScene,
   resolveAbsolutePos,
+  toAbsoluteEntities,
 } from "./world-geometry";
 
 // The image-world frame a top-down map is seeded in: estimateGeoFromBBox maps
@@ -216,15 +217,15 @@ export function geoTapRequest(
       ? currentView.focus_id ?? null
       : null;
   // The entities the tap can land on: the whole map at top level, else the
-  // current place's children (in their local frame). At map level, only
-  // TOP-LEVEL entities are hit-testable — children carry coords LOCAL to
-  // their parent's frame, and hit-testing those as world coords lets a
-  // child at local (50,30) shadow a real landmark (the hover affordance
-  // already filters this way; the tap path didn't).
+  // current place's children (in their local frame). At map level, nested
+  // entities are RESOLVED to their absolute pos + unit-scaled footprint
+  // before hit-testing — raw parent-local coords let a child at local
+  // (50,30) shadow a real landmark, and the old top-level-only filter made
+  // every entity untappable after an OUTWARD ascend reparented the roots.
   const candidates = insideId
     ? { entities: childrenOf(map.entities, insideId), bounds: map.bounds }
     : {
-        entities: map.entities.filter((e) => (e.parent_id ?? null) === null),
+        entities: toAbsoluteEntities(map.entities, map.entities),
         bounds: map.bounds,
       };
   if (candidates.entities.length === 0) return null;
