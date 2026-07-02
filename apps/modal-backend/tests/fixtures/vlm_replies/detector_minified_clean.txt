@@ -1,0 +1,1 @@
+{"detections":[{"label":"boiler","x":0.3,"y":0.5,"w":0.2,"h":0.3,"score":0.9},{"label":"chimney","x":0.7,"y":0.2,"w":0.1,"h":0.3,"score":0.85}]}

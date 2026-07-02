@@ -1,0 +1,15 @@
+{
+  "added": [
+    {
+      "kind": "place",
+      "name": "The Crystal Lighthouse",
+      "appearance": "a tall stone tower topped with a glowing blue crystal",
+      "aliases": [],
+      "facts": ["Sits on a rocky outcropping"],
+      "state": {"lit": true},
+      "confidence": 0.95
+    },
+    {
+      "kind": "item",
+      "name": "Aethelgard Trade Ships",
+      "appearance": "wooden sailing vessels with glowing blue sa

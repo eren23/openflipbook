@@ -260,6 +260,73 @@ async def test_edit_entities_endpoint_403_when_flag_off(
     assert resp.status_code == 403
 
 
+def _assert_bbox_sane(bb: dict) -> None:
+    """The stored-EntityBBox contract: TOP-LEFT anchored inside the unit
+    frame. A centre-anchored box smuggled through shows up here as x+w or
+    y+h past 1.0 on any subject in the outer half of the image."""
+    assert 0.0 <= bb["x_pct"] <= 1.0 and 0.0 <= bb["y_pct"] <= 1.0
+    assert 0.0 < bb["w_pct"] <= 1.0 and 0.0 < bb["h_pct"] <= 1.0
+    assert bb["x_pct"] + bb["w_pct"] <= 1.0 + 1e-9
+    assert bb["y_pct"] + bb["h_pct"] <= 1.0 + 1e-9
+
+
+async def test_extract_detector_overrides_extractor_bbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The extractor VLM's self-reported bbox is anchor-unreliable (Gemini
+    # returns CENTRE-anchored boxes despite the top-left prompt — the
+    # displaced-overlay-box bug). A stored bbox is DETECTOR-verified or
+    # absent: a hit overwrites the extractor's box, a miss stores None
+    # (never the unverified anchor — the web merge keeps any prior good box).
+    monkeypatch.setenv("GEOMETRIC_WORLD", "true")
+    from providers import detector as _det
+    from providers import view_estimator as _ve
+
+    async def fake_view(_bytes, _caption=""):
+        return {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
+
+    centre_anchored = {"x_pct": 0.5, "y_pct": 0.5, "w_pct": 0.5, "h_pct": 0.5}
+
+    async def fake_extract(**_kwargs):
+        return _llm.EntityExtractionResult(
+            added=[
+                _llm.ExtractedEntity(
+                    kind="place", name="Aethelgard Harbor", appearance="port",
+                    aliases=[], facts=[], state={}, confidence=0.9,
+                    bbox=dict(centre_anchored),
+                ),
+                _llm.ExtractedEntity(
+                    kind="place", name="Ghost Pier", appearance="mist",
+                    aliases=[], facts=[], state={}, confidence=0.6,
+                    bbox=dict(centre_anchored),
+                ),
+            ],
+            updated=[],
+        )
+
+    async def fake_detect(_bytes, labels):
+        assert "Aethelgard Harbor" in labels  # bbox-carrying entities re-localize
+        assert "Ghost Pier" in labels
+        return [{"label": "Aethelgard Harbor", "x_pct": 0.5, "y_pct": 0.4,
+                 "w_pct": 0.2, "h_pct": 0.3, "score": 0.9}]
+
+    monkeypatch.setattr(_ve, "estimate_view", fake_view)
+    monkeypatch.setattr(_llm, "extract_entities", fake_extract)
+    monkeypatch.setattr(_det, "detect", fake_detect)
+    body = generate.ExtractEntitiesBody(
+        session_id="s", node_id="n", image_data_url="data:image/jpeg;base64,QUJD"
+    )
+    resp = await generate.extract_entities_endpoint(SimpleNamespace(headers={}), body)
+    payload = _json.loads(resp.body)
+    harbor, pier = payload["result"]["added"]
+    # Detector hit wins: centre-based detection stored top-left.
+    assert harbor["bbox"]["x_pct"] == pytest.approx(0.4)
+    assert harbor["bbox"]["y_pct"] == pytest.approx(0.25)
+    _assert_bbox_sane(harbor["bbox"])
+    # Detector miss: NO box — the unverified extractor anchor never survives.
+    assert pier["bbox"] is None
+
+
 async def test_extract_localizes_missing_bboxes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -300,6 +367,7 @@ async def test_extract_localizes_missing_bboxes(
     assert bb["x_pct"] == pytest.approx(0.4)  # centre 0.5 minus w/2 0.1
     assert bb["y_pct"] == pytest.approx(0.25)  # centre 0.4 minus h/2 0.15
     assert bb["w_pct"] == pytest.approx(0.2)
+    _assert_bbox_sane(bb)
     # FIX 1b: the estimated camera rides on the response (no more top-down assumption)
     assert payload["view"] == {"level": "map", "projection": "oblique", "pitch_deg": -45.0}
 

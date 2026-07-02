@@ -1,0 +1,26 @@
+{
+  "detections": [
+    {
+      "label": "The Crystal Lighthouse",
+      "x": 0.135,
+      "y": 0.288,
+      "w": 0.085,
+      "width": 0.085,
+      "h": 0.405,
+      "height": 0.405,
+      "score": 0.98
+    },
+    {
+      "label": "Aethelgard Harbor",
+      "x": 0.455,
+      "y": 0.585,
+      "w": 0.42,
+      "width": 0.42,
+      "h": 0.45,
+      "height": 0.45,
+      "score": 0.95
+    },
+    {
+      "label": "Aethelgard Marketplace",
+      "x": 0.655,
+      "y": 0.3

@@ -9,7 +9,6 @@ its slug needs verifying first. Boxes are centre-based, 0..1
 from __future__ import annotations
 
 import base64
-import json
 import os
 from typing import Any, TypedDict
 
@@ -81,7 +80,8 @@ async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
         "for EACH label actually visible — one bounding box. Boxes are CENTRE-"
         "based, normalized 0..1: {label, x (centre), y (centre), w, h, score 0..1}. "
         "OMIT labels that are absent; do NOT invent them. Return JSON exactly: "
-        '{"detections":[{"label":..,"x":..,"y":..,"w":..,"h":..,"score":..}]}.'
+        '{"detections":[{"label":..,"x":..,"y":..,"w":..,"h":..,"score":..}]} — '
+        "COMPACT single-line JSON, exactly those keys, no duplicates."
     )
     user = "Target labels: " + ", ".join(labels) + ". Detect them in the image."
     model = _detector_model()
@@ -102,17 +102,31 @@ async def detect(image_bytes: bytes, labels: list[str]) -> list[Detection]:
     # Through _create_with_retry (not raw create) so a transient 429/5xx retries
     # with backoff instead of silently degrading grounding quality — the client
     # now disables the SDK's own retries.
+    # 700 tokens silently truncated real replies: Gemini pretty-prints AND
+    # duplicates fields (w+width, h+height), so ~8+ labels overflowed, the
+    # brace-slice below failed on the cut-off array, and detect() returned []
+    # — every entity then kept the extractor's mis-anchored fallback bbox.
     resp = await llm._create_with_retry(
         client,
         model=model,
         messages=messages,
         temperature=0.0,
-        max_tokens=700,
+        max_tokens=2000,
         **llm._maybe_response_format(model),
     )
     raw = resp.choices[0].message.content or "{}"
-    try:
-        payload = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
-    except Exception:
-        return []
+    payload, failure = llm.salvage_json(raw)
+    if failure is not None:
+        # A truncated reply still yields its complete leading detections
+        # (salvage_json); only a fully unparseable one degrades to [] — and
+        # either way it is LOUD, not the silent located=0 of old.
+        from obs import log
+
+        log(
+            "warn",
+            "detector.parse_failed",
+            finish_reason=getattr(resp.choices[0], "finish_reason", None),
+            labels=len(labels),
+            failure=failure,
+        )
     return parse_detections(payload)

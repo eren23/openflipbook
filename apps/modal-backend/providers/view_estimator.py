@@ -6,7 +6,6 @@ tolerant parse that falls back to a top-down map and never raises.
 from __future__ import annotations
 
 import base64
-import json
 import os
 from typing import Any, Literal, TypedDict, cast
 
@@ -141,11 +140,26 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
             model=model,
             messages=messages,
             temperature=0.0,
-            max_tokens=120,
+            max_tokens=300,
             **llm._maybe_response_format(model),
         )
-        raw = resp.choices[0].message.content or "{}"
-        payload = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
-    except Exception:
+    except Exception as exc:
+        # Network/upstream failure — degrade to the default view, loudly.
+        from obs import log
+
+        log("warn", "view.estimate_failed", error=f"{type(exc).__name__}: {exc}")
         return cast(ViewEstimate, dict(DEFAULT_VIEW))
+    raw = resp.choices[0].message.content or "{}"
+    payload, failure = llm.salvage_json(raw)
+    if failure is not None:
+        from obs import log
+
+        log(
+            "warn",
+            "view.parse_failed",
+            finish_reason=getattr(resp.choices[0], "finish_reason", None),
+            failure=failure,
+        )
+        if not isinstance(payload, dict) or not payload:
+            return cast(ViewEstimate, dict(DEFAULT_VIEW))
     return parse_view(payload)
