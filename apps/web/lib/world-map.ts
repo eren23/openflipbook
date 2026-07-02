@@ -20,11 +20,11 @@ import { envFlag } from "./env-flag";
 import { optimisticReplace } from "./optimistic-update";
 import {
   estimateGeoFromBBox,
+  localBounds,
   localExtent,
   mapPolygonToCrop,
-  resolveAbsolutePos,
   siblingsOf,
-  type FrameNode,
+  toAbsoluteEntities,
 } from "./world-geometry";
 
 // Per-session geometric world map (entity coordinates). Mirrors the world_state
@@ -132,27 +132,14 @@ export function applyGeoUpsert(
   return [...byId.values()];
 }
 
-/** The world bounds = the axis-aligned box covering every entity's footprint. */
+/** The world bounds = the axis-aligned box covering every entity's footprint.
+ *  Nested entities are resolved to the ABSOLUTE frame first — pos AND
+ *  footprint together (the old loop resolved pos but used the raw
+ *  parent-local footprint, so one post-ascend re-expressed root inflated the
+ *  stored bounds by 1/pScale — the "bounds 8000×6828" minimap blowup). */
 export function recomputeBounds(entities: WorldEntityGeo[]): MapCrop {
   if (entities.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
-  // Sub-entities carry a pos LOCAL to their place's frame — resolve up the
-  // parent chain so a child's small/negative local coords don't skew the world
-  // bounds (a top-level entity resolves to itself).
-  const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const e of entities) {
-    const p = resolveAbsolutePos(e.id, byId) ?? e.pos;
-    const hw = e.footprint.w / 2;
-    const hd = e.footprint.d / 2;
-    minX = Math.min(minX, p.x - hw);
-    maxX = Math.max(maxX, p.x + hw);
-    minY = Math.min(minY, p.y - hd);
-    maxY = Math.max(maxY, p.y + hd);
-  }
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  return localBounds(toAbsoluteEntities(entities, entities));
 }
 
 // ── Structured geo edits (natural-language-editable map) ─────────────────────

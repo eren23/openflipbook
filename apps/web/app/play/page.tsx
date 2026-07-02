@@ -3438,6 +3438,9 @@ export default function PlayPage() {
                 )}
               {worldEnabled &&
                 worldDomLabels &&
+                // The ⊞ geo debug layer already names every localized entity
+                // on its boxes — mounting both double-tags each place.
+                !geoOverlayOn &&
                 phase === "ready" &&
                 streamStatus === "off" &&
                 (!page?.sceneView || page.sceneView.level === "map") && (

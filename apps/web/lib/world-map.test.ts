@@ -106,6 +106,26 @@ describe("world-map merge core", () => {
     expect(b.x + b.w).toBeLessThanOrEqual(37);
     expect(b.y + b.h).toBeLessThanOrEqual(25);
   });
+
+  it("post-ascend re-expressed roots keep the bounds sane (the 8000×6828 blowup)", () => {
+    // The OUTWARD reparent shape: P at frame centre with scale=pScale; the old
+    // root re-expressed to parent-local pos AND footprint (÷0.005 = ×200). The
+    // resolved footprint (×unit) recovers the absolute 40×34 — bounds must be
+    // frame-sized, not 8000 wide (the raw-footprint bug the minimap exposed).
+    const p: WorldEntityGeo = {
+      ...geo("geo_p", "user", 50, 30),
+      footprint: { w: 100, d: 60 },
+      scale: 0.005,
+    };
+    const oldRoot: WorldEntityGeo = {
+      ...geo("geo_city", "user", -2000, 1000), // resolves to (40, 35)
+      parent_id: "geo_p",
+      footprint: { w: 8000, d: 6828 }, // 40×34.14 ÷ 0.005
+    };
+    const b = recomputeBounds([p, oldRoot]);
+    expect(b.w).toBeLessThanOrEqual(110); // P's own 100-wide footprint dominates
+    expect(b.h).toBeLessThanOrEqual(70);
+  });
 });
 
 describe("applyEntityEdit (P5 structured geo edits)", () => {

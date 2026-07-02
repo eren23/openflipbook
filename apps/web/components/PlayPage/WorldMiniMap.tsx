@@ -7,8 +7,7 @@ import {
   childrenOf,
   cropEntities,
   localBounds,
-  resolveAbsolutePos,
-  type FrameNode,
+  toAbsoluteEntities,
 } from "@/lib/world-geometry";
 import { worldToView, type ViewBox } from "@/lib/world-overlay";
 
@@ -64,14 +63,23 @@ export default function WorldMiniMap({
 
   const local = !!(kids && kids.length > 0);
   const submap = !local && !!crop;
+  // World views plot ABSOLUTE coords: resolve nested entities (post-ascend
+  // reparents, seeded interiors) once up front — pos + unit-scaled footprint
+  // — so the crop filter, the label budget, and the dots all agree. A local
+  // (inside-a-place) view IS the place's frame, so children plot raw.
+  const resolved = local
+    ? kids!
+    : toAbsoluteEntities(worldEntities, worldEntities);
   const entities = local
     ? kids!
     : submap
-      ? cropEntities(worldEntities, crop!)
-      : worldEntities;
+      ? cropEntities(resolved, crop!)
+      : resolved;
   if (entities.length === 0) return null;
   const bounds = local ? localBounds(kids!) : submap ? crop! : worldBounds;
-  const byId = new Map<string, FrameNode>(entities.map((e) => [e.id, e]));
+  // Parent lookups (tether lines) read from the full resolved set so a
+  // cropped-out parent still anchors its child's tether.
+  const byId = new Map(resolved.map((e) => [e.id, e]));
   // Label budget: tiny SVG text collides fast, so only the biggest
   // footprints get names — every entity keeps its dot. (A4 cheap fix.)
   const labelIds = new Set(
@@ -135,16 +143,14 @@ export default function WorldMiniMap({
         {/* centre of the frame */}
         <line x1={centre.x - 5} y1={centre.y} x2={centre.x + 5} y2={centre.y} stroke="#0f766e" strokeWidth={1} />
         <line x1={centre.x} y1={centre.y - 5} x2={centre.x} y2={centre.y + 5} stroke="#0f766e" strokeWidth={1} />
-        {/* entities at their (x,y). In the world view, sub-entities carry a pos
-            local to their place's frame → resolve up the parent chain + tether to
-            the parent. In a focused (local) view we ARE the place's frame, so plot
-            the children's local pos directly. */}
+        {/* entities at their (x,y) — already resolved to the view's frame
+            above (absolute for world views, local inside a place). Nested
+            entities keep a tether line to their parent. */}
         {entities.map((e) => {
-          const abs = local ? e.pos : (resolveAbsolutePos(e.id, byId) ?? e.pos);
-          const p = worldToView(abs, viewWindow, view);
+          const p = worldToView(e.pos, viewWindow, view);
           const nested = !local && !!(e.parent_id && byId.has(e.parent_id));
           const parentPos = nested
-            ? worldToView(resolveAbsolutePos(e.parent_id!, byId) ?? abs, viewWindow, view)
+            ? worldToView(byId.get(e.parent_id!)?.pos ?? e.pos, viewWindow, view)
             : null;
           return (
             <g key={e.id} data-testid="minimap-dot">
