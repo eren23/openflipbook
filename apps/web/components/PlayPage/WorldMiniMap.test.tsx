@@ -135,4 +135,21 @@ describe("WorldMiniMap", () => {
     expect(screen.queryAllByTestId("minimap-dot")).toHaveLength(0);
     expect(screen.queryByText(/world coords/i)).toBeNull();
   });
+
+  it("post-ascend: nested former roots still dot the world view with sane bounds", async () => {
+    // The OUTWARD reparent shape: P top-level with scale=pScale; old roots at
+    // parent-local coords/footprints. Dots resolve to absolutes; the stored
+    // (recomputed) bounds stay frame-sized — not the 8000-wide blowup.
+    const p = { ...ent("geo_p", "Region", 50, 30), footprint: { w: 100, d: 60 }, scale: 0.005 };
+    const cityA = { ...childEnt("a", "Harbor", 5000, 3000, "geo_p"), footprint: { w: 4000, d: 4000 } };
+    const cityB = { ...childEnt("b", "Lighthouse", -5900, 1260, "geo_p"), footprint: { w: 4000, d: 4000 } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ok(mapPayload([p, cityA, cityB]))) as unknown as typeof fetch,
+    );
+    render(<WorldMiniMap sessionId="s1" />);
+    await waitFor(() => expect(screen.getByTestId("world-minimap")).toBeTruthy());
+    expect(screen.getAllByTestId("minimap-dot")).toHaveLength(3); // nobody vanishes
+    expect(screen.getByText(/world coords · 3 entities · bounds 100×60/)).toBeTruthy();
+  });
 });
