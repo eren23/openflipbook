@@ -183,6 +183,34 @@ async def test_retry_budget_guard() -> None:
     assert len(attempts2) == 2
 
 
+async def test_cumulative_deadline_stops_retry() -> None:
+    # Attempt 0 takes 100s (render+judges); predicting another 100s attempt
+    # would land at 200 > deadline 150 — stop with keep-best, no retry.
+    ticks = iter([0.0, 100.0, 100.0])
+    render = AsyncMock(return_value=_Img(b"a"))
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(3.0)),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        config=_cfg(retry_budget_s=0.0), clock=lambda: next(ticks),
+        deadline_s=150.0,
+    )
+    assert len(attempts) == 1
+    render.assert_awaited_once()
+    assert conclude(attempts).image.jpeg_bytes == b"a"
+    # A far deadline lets the retry proceed.
+    ticks2 = iter([0.0, 100.0, 100.0, 101.0, 101.0])
+    render2 = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    attempts2 = await _drain(
+        render=render2, projection="top_down", region_bytes=b"r",
+        judge_conformance=AsyncMock(side_effect=[_j(3.0), _j(9.0)]),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        config=_cfg(retry_budget_s=0.0), clock=lambda: next(ticks2),
+        deadline_s=10_000.0,
+    )
+    assert len(attempts2) == 2
+
+
 def test_data_url_bytes() -> None:
     import base64
 

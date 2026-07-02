@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio as _asyncio
 import base64
+import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -116,6 +117,10 @@ async def stream_edit(
             inp_result = await _render_inpaint("")
         else:
             edit_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
+            # generate.INGRESS_TIMEOUT_S (900) minus a 180s tail for the
+            # final attempt's judges + encode — the loop must finish with
+            # its best attempt before Modal kills the container.
+            edit_deadline = _time.monotonic() + 720.0
             edit_attempts: list[EditAttempt] = []
             # The alignment judge checks the inside crop against the
             # fill DESCRIPTION (the region's expected final content) —
@@ -131,6 +136,7 @@ async def stream_edit(
                 instruction=described,
                 config=edit_cfg,
                 abort=_abort_if_disconnected,
+                deadline_s=edit_deadline,
             ):
                 edit_attempts.append(edit_att)
                 # Stream only verdict-REJECTED attempts (a correction

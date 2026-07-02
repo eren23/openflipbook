@@ -175,6 +175,7 @@ async def iter_attempts[ImageT: Rendered](
     feedback: Callable[..., str] = retry_feedback_clause,
     abort: Callable[[str], Awaitable[None]] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    deadline_s: float | None = None,
 ) -> AsyncIterator[Attempt]:
     """Yield attempts until acceptance / budget / max attempts. The caller
     (the SSE generator) can emit a progress frame between yields. Attempt-0
@@ -254,6 +255,14 @@ async def iter_attempts[ImageT: Rendered](
         if config.retry_budget_s > 0 and latency > config.retry_budget_s:
             log("info", "view.loop.budget_stop", attempt=index, latency_s=round(latency, 1))
             return
+        if deadline_s is not None:
+            # Cumulative wall-clock guard: this attempt's total (render+judges)
+            # is the estimate for the next one — never start an attempt that
+            # would blow past the container deadline; keep-best still applies.
+            now = clock()
+            if now + (now - started) > deadline_s:
+                log("info", "view.loop.deadline_stop", attempt=index)
+                return
         suffix = feedback(
             projection,
             conformance_rationale=(

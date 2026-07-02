@@ -155,6 +155,7 @@ async def iter_edit_attempts[ImageT: Rendered](
     feedback: Callable[..., str] = edit_retry_feedback_clause,
     abort: Callable[[str], Awaitable[None]] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    deadline_s: float | None = None,
 ) -> AsyncIterator[EditAttempt]:
     """Yield attempts until acceptance / budget / max attempts. Attempt-0
     render exceptions PROPAGATE (the caller's error path); retry-render
@@ -235,6 +236,14 @@ async def iter_edit_attempts[ImageT: Rendered](
         if config.retry_budget_s > 0 and latency > config.retry_budget_s:
             log("info", "edit.loop.budget_stop", attempt=index, latency_s=round(latency, 1))
             return
+        if deadline_s is not None:
+            # Cumulative wall-clock guard — mirror of render_loop: this
+            # attempt's total predicts the next; stop before the container
+            # deadline and keep the best attempt so far.
+            now = clock()
+            if now + (now - started) > deadline_s:
+                log("info", "edit.loop.deadline_stop", attempt=index)
+                return
         suffix = feedback(
             alignment_rationale=(
                 alignment.rationale
