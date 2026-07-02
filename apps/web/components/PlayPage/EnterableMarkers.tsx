@@ -5,7 +5,7 @@ import type { MapCrop, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
-import { cropEntities } from "@/lib/world-geometry";
+import { cropEntities, toAbsoluteEntities } from "@/lib/world-geometry";
 
 interface Props {
   /** The geo world map's entities (all of them; this component scopes). */
@@ -40,10 +40,13 @@ export function EnterableMarkers({
     // Inside an entered place the frame is a scene, not the map — no rings.
     if (currentView && currentView.level !== "map") return [];
     const frame: MapCrop = currentView?.map_crop ?? MAP_IMAGE_FRAME;
-    // Top-level places only: nested children live in their parent's frame
-    // and would project to the wrong spot on the city map.
-    const places = entities.filter(
-      (e) => e.kind === "place" && (e.parent_id ?? null) === null,
+    // Nested places resolve through their parent chain to the absolute map
+    // frame (after an OUTWARD ascend every former root is nested — the old
+    // top-level-only filter blanked the whole map); the crop culls whatever
+    // resolves outside the displayed window.
+    const places = toAbsoluteEntities(
+      entities.filter((e) => e.kind === "place"),
+      entities,
     );
     return cropEntities(places, frame).map((e) => ({
       id: e.id,

@@ -59,8 +59,8 @@ baseline; no regression elsewhere.
 - **In-session expand connectors**: `relation` ("expand" vs "descend") isn't on the in-session
   `Page` type, so the atlas can't distinguish breadth from depth. Also `relation` is never set
   on `persistNode` (all default "descend"). Thread it through `WorldMap` + `SessionMinimap`.
-- **mypy coverage split (CI hygiene)**: `make eval` checks `generate.py` + 5 files; CI checks
-  `providers` but not `generate.py`. Align the two lists.
+- ~~**mypy coverage split (CI hygiene)**~~ — already aligned: both `make eval` and CI run
+  `mypy providers obs.py generate.py` (verified 2026-07-02).
 - **UI discoverability** (`docs/UI_AUDIT.md`): `⊞ geo` / entity-chip toggles are buried — add a
   `G` shortcut + hint. Hover-prefetch + suppressed layout steering have no debug surface.
 - **Mobile pass**: ≤390px audit for breadcrumbs, codex panel, geo inset.

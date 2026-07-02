@@ -4,7 +4,11 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
 import { reparent, reparentRoots } from "./scale-tree";
-import { type FrameNode, resolveAbsolutePos } from "./world-geometry";
+import {
+  type FrameNode,
+  resolveAbsoluteFrame,
+  resolveAbsolutePos,
+} from "./world-geometry";
 
 // Build a WorldEntityGeo with sensible defaults; override what a test cares about.
 function geo(over: Partial<WorldEntityGeo> & Pick<WorldEntityGeo, "id">): WorldEntityGeo {
@@ -73,6 +77,36 @@ describe("scale-tree reparent (B2 OUTWARD)", () => {
     for (const id of ["c", "a", "b", "a1"]) {
       expect(afterAbs.get(id)!.x).toBeCloseTo(beforeAbs.get(id)!.x, 9);
       expect(afterAbs.get(id)!.y).toBeCloseTo(beforeAbs.get(id)!.y, 9);
+    }
+  });
+
+  it("INV-1 extends to footprints: absolute extents are conserved too", () => {
+    // reExpressUnder divides the footprint by pScale alongside pos, so
+    // pos + footprint stay ONE consistent parent-local frame — resolving
+    // (footprint × unit) recovers the original absolute extent.
+    const absFootprints = (geos: WorldEntityGeo[]) => {
+      const byId = new Map<string, FrameNode>(geos.map((g) => [g.id, g]));
+      const out = new Map<string, { w: number; d: number }>();
+      for (const g of geos) {
+        const f = resolveAbsoluteFrame(g.id, byId);
+        if (f) out.set(g.id, { w: g.footprint.w * f.unit, d: g.footprint.d * f.unit });
+      }
+      return out;
+    };
+    const before = cityTree();
+    const beforeFp = absFootprints(before);
+    const region = geo({
+      id: "p",
+      pos: { x: 50, y: 30 },
+      footprint: { w: 90, d: 60 },
+      scale_tier: "region",
+      source: "user",
+    });
+    const { geos: after } = reparent(before, "c", region, NOW);
+    const afterFp = absFootprints(after);
+    for (const id of ["c", "a", "b", "a1"]) {
+      expect(afterFp.get(id)!.w).toBeCloseTo(beforeFp.get(id)!.w, 9);
+      expect(afterFp.get(id)!.d).toBeCloseTo(beforeFp.get(id)!.d, 9);
     }
   });
 

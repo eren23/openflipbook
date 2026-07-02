@@ -354,6 +354,23 @@ export function resolveAbsolutePos(
   id: string,
   byId: Map<string, FrameNode>,
 ): WorldVec2 | null {
+  return resolveAbsoluteFrame(id, byId)?.pos ?? null;
+}
+
+export interface AbsoluteFrame {
+  pos: WorldVec2;
+  // The multiplier converting the node's parent-frame units (the units its
+  // own pos and footprint are expressed in) to absolute units — the product
+  // of the ancestor scales ABOVE it. 1 for a top-level entity.
+  unit: number;
+}
+
+/** resolveAbsolutePos plus the frame unit — for consumers that must
+ *  re-express extents (footprints, hit boxes) alongside positions. */
+export function resolveAbsoluteFrame(
+  id: string,
+  byId: Map<string, FrameNode>,
+): AbsoluteFrame | null {
   // Collect self → root (cycle-guarded), then compose root → down.
   const chain: FrameNode[] = [];
   const seen = new Set<string>();
@@ -368,13 +385,38 @@ export function resolveAbsolutePos(
   let x = 0;
   let y = 0;
   let scaleAccum = 1;
+  let unit = 1;
   for (let i = chain.length - 1; i >= 0; i--) {
     const n = chain[i]!;
     x += n.pos.x * scaleAccum;
     y += n.pos.y * scaleAccum;
+    unit = scaleAccum;
     scaleAccum *= n.scale ?? 1;
   }
-  return { x, y };
+  return { pos: { x, y }, unit };
+}
+
+/** Re-express entities in the ABSOLUTE (root map) frame: compose each nested
+ *  entity's parent chain for pos and scale its footprint by the same unit.
+ *  After an OUTWARD ascend every former root is nested under the synthesized
+ *  parent, so consumers that filtered to `parent_id === null` and read raw
+ *  pos saw an empty map (the -8400 demo bug). Top-level entities pass through
+ *  untouched — pre-nesting data stays byte-identical. `all` supplies the
+ *  parent chains: pass the full map, not the filtered subset. */
+export function toAbsoluteEntities<
+  T extends FrameNode & { footprint: { w: number; d: number } },
+>(subset: T[], all: FrameNode[]): T[] {
+  const byId = new Map(all.map((e) => [e.id, e]));
+  return subset.map((e) => {
+    if ((e.parent_id ?? null) === null) return e;
+    const f = resolveAbsoluteFrame(e.id, byId);
+    if (!f) return e;
+    return {
+      ...e,
+      pos: f.pos,
+      footprint: { w: e.footprint.w * f.unit, d: e.footprint.d * f.unit },
+    };
+  });
 }
 
 /** Axis-aligned bounds over entities' OWN pos+footprint (no parent resolve) —

@@ -34,18 +34,36 @@ function markerIds(container: HTMLElement): string[] {
 }
 
 describe("EnterableMarkers (W3 idle enter affordance)", () => {
-  it("rings top-level places on the map; items and nested children stay quiet", () => {
+  it("rings places on the map; items and out-of-crop children stay quiet", () => {
     const { container } = render(
       <EnterableMarkers
         entities={[
           geo("palace", 50, 30),
           geo("sword", 40, 20, { kind: "item" }),
+          // Resolves to (110, 60) — outside the 100×60 frame → culled.
           geo("hall", 60, 30, { parent_id: "palace" }),
         ]}
         currentView={null}
       />,
     );
     expect(markerIds(container)).toEqual(["palace"]);
+  });
+
+  it("nested places ring at their RESOLVED absolute position (post-ascend map)", () => {
+    // After an OUTWARD ascend every former root is nested under P at
+    // parent-local coords (the -8400 shape); it must still ring at its
+    // conserved absolute spot instead of vanishing with the old
+    // top-level-only filter.
+    const { container } = render(
+      <EnterableMarkers
+        entities={[
+          geo("p", 50, 30, { scale: 0.005, footprint: { w: 100, d: 60 } }),
+          geo("palace", -2000, 0, { parent_id: "p" }), // → absolute (40, 30)
+        ]}
+        currentView={null}
+      />,
+    );
+    expect(markerIds(container).sort()).toEqual(["p", "palace"]);
   });
 
   it("inside an entered place (scene frame) → renders nothing", () => {

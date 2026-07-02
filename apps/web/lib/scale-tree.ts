@@ -62,6 +62,10 @@ function reExpressUnder(
     parent_id: parentId,
     pos: { x: (node.pos.x - parentPos.x) / pScale, y: (node.pos.y - parentPos.y) / pScale },
     scale: (node.scale ?? 1) / pScale,
+    // The footprint rides the same affine inverse so pos + footprint stay one
+    // consistent parent-local frame (INV-1 for extents too): resolving back
+    // to absolute multiplies both by the same unit and recovers the original.
+    footprint: { w: node.footprint.w / pScale, d: node.footprint.d / pScale },
     source: "user", // protect the new edge from a later derived re-seed (SOURCE_RANK)
     updated_at: nowIso,
   };
