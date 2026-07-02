@@ -6,3 +6,4 @@ this package never reaches back into generate.py's module globals.
 """
 from providers.generate_modes.edit import stream_edit as stream_edit
 from providers.generate_modes.expand import stream_expand as stream_expand
+from providers.generate_modes.tap import stream_tap as stream_tap
