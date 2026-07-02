@@ -2087,6 +2087,25 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         scene_desc_len=len(body.scene_description or ""),
         image_kb=img_size_kb,
     )
+    # Decode the image once for both geometry passes (localize + view-estimate)
+    # and start the camera estimate NOW — it needs only pixels + caption, so it
+    # overlaps the whole extract→detect→segment chain instead of tailing it
+    # (the geo overlay used to lag the image by the full sequential sum).
+    geo_img_bytes = b""
+    if _geometric_world_on():
+        try:
+            _, _, _gb64 = body.image_data_url.partition(",")
+            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
+        except Exception:
+            geo_img_bytes = b""
+    view_task: _asyncio.Task[ViewEstimate] | None = None
+    if geo_img_bytes:
+        from providers import view_estimator as _view
+
+        view_task = _asyncio.create_task(
+            _view.estimate_view(geo_img_bytes, body.caption)
+        )
+
     try:
         result = await llm_provider.extract_entities(
             image_data_url=body.image_data_url,
@@ -2096,6 +2115,8 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
         )
     except Exception as exc:
         record_error("extract_entities", exc, node_id=body.node_id)
+        if view_task is not None:
+            view_task.cancel()
         return _err_json(exc, trace_id)
 
     # Localize the catalogued entities so the world map can seed and the overlay
@@ -2103,15 +2124,6 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # images; the purpose-built detector reliably returns one box per label.
     # Detector boxes are centre-based → store top-left for the EntityBBox shape.
     # Gated + best-effort: a failure here never blocks the extract response.
-    # Decode the image once for both geometry passes (localize + view-estimate).
-    geo_img_bytes = b""
-    if _geometric_world_on():
-        try:
-            _, _, _gb64 = body.image_data_url.partition(",")
-            geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
-        except Exception:
-            geo_img_bytes = b""
-
     if geo_img_bytes and (result.added or result.updated):
         try:
             from providers import detector as _detector
@@ -2213,11 +2225,9 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     # Returned on the response so the web side can store it on the node and
     # back-project the localized boxes at the right angle. Best-effort.
     view: ViewEstimate | None = None
-    if geo_img_bytes:
+    if view_task is not None:
         try:
-            from providers import view_estimator as _view
-
-            view = await _view.estimate_view(geo_img_bytes, body.caption)
+            view = await view_task
             log(
                 "info",
                 "extract.view",
