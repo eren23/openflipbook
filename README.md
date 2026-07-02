@@ -80,6 +80,8 @@ make demo                     # → http://localhost:3000/play
 
 That's it. Mongo, Minio, backend, and web all come up wired together. Open [`/status`](http://localhost:3000/status) for a live env check. Full compose reference: [`docs/DOCKER.md`](docs/DOCKER.md).
 
+**Want the world stuff?** `make demo-world` is the same two-key stack with World Mode + scale-ladder navigation switched on: taps *enter* places, you can go deeper, ascend back out, and pan to neighbours. (It's the same code, just flags — kept off in `make demo` so the classic flow stays untouched.)
+
 **Images-only cloud:** `make demo-local` runs the planner + click VLM on local Ollama — only `FAL_KEY` needed (first run pulls multi-GB models; CPU-slow).
 
 **Without Docker:** see [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md).

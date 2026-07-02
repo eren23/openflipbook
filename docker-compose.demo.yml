@@ -1,9 +1,34 @@
-# THROWAWAY demo override (untracked) — turns World Mode on and swaps the
-# planner off the rate-limited qwen VLM onto Gemini for a clean live run.
-#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+# World-on demo override — `make demo` stays untouched; layer this file
+# (`make demo-world`) to turn on the live-proven world/scale-nav set and pin
+# the planner to Gemini (the rate-limited qwen VLM was the old demo trap).
+#
+#   make demo-world
+#   # or: docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+#
+# Deliberately still OFF here (cost / extra setup): WORLD_SEGMENT_BORDERS,
+# GROUNDING_SAM3, VLM_GROUNDING(_REPAIR), WORLD_TOPDOWN_MAPS, EXPAND_MAP_PAN.
 services:
   backend:
     environment:
       WORLD_MODE: "true"
+      GEOMETRIC_WORLD: "true"
+      SCALE_LADDER_NAV: "true"
+      SCALE_OUTWARD: "true"
+      SCALE_AROUND_LOGICAL: "true"
+      ENTER_AZIMUTH_ROTATE: "true"
       OPENROUTER_VLM_MODEL: google/gemini-3-flash-preview
       OPENROUTER_TEXT_MODEL: google/gemini-3-flash-preview
+  web:
+    build:
+      args:
+        # NEXT_PUBLIC_* are baked at BUILD time — without these the web image
+        # ships the flag-off bundle even though the backend is world-on.
+        NEXT_PUBLIC_WORLD_MODE: "true"
+        NEXT_PUBLIC_DOM_LABELS: "true"
+    environment:
+      # The web's server routes gate geometry seeding + scale-nav on these.
+      WORLD_MODE: "true"
+      GEOMETRIC_WORLD: "true"
+      SCALE_LADDER_NAV: "true"
+      SCALE_OUTWARD: "true"
+      SCALE_AROUND_LOGICAL: "true"

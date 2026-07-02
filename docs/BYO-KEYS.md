@@ -13,6 +13,8 @@ The Docker stack runs Mongo + Minio locally and wires everything for you. Only t
 
 Want the LLM local too? `make demo-local` — only `FAL_KEY` needed (Ollama handles planner + click VLM; first run pulls multi-GB models).
 
+Want World Mode? `make demo-world` — same two keys, but taps *enter* places and you get the scale-ladder navigation (deeper / ascend / around) plus the geo overlay. It's the classic stack with the proven flag set switched on (`docker-compose.demo.yml`); `make demo` itself never changes.
+
 ---
 
 ## Hosted production path
