@@ -81,13 +81,18 @@ tests. **Everything else in B2 is unbuilt** — see `PLAN_OUTWARD.md`.
 ## Deferred / tech-debt (carry forward)
 
 1. **`origin/backup/pre-purge`** — delete once a fresh clone is confirmed lean.
-2. **B1 `expected_layout` steering** — wire `projectScene` so the render reflects the solved
-   positions (today it's description-driven; the geos hold the layout).
+2. **B1 `expected_layout` steering** — ~~wire `projectScene` so the render reflects the solved
+   positions~~ **DONE since**: `projectScene`/`projectTopDown` output rides
+   `GenerateBody.expected_layout` and steers the prompt via `_layout_clause_for` →
+   `geometry_prompt.layout_constraints` (+0.33 layout fidelity in the A/B; on iff world mode /
+   `WORLD_GEOMETRY_GEN`).
 3. **B1 `inside` flat-nesting** — sub-frame nesting deferred.
-4. **A2 fresh-gen ref upload** — inert (fal ignores it); stop uploading to save cost.
+4. **A2 fresh-gen ref upload** — ~~inert (fal ignores it); stop uploading to save cost~~
+   **DONE** (PR #109 dropped the upload; the text medium-lock still carries style).
 5. **Flagged Kontext-scene path** — not built (intentional; the audit cautions it for map→scene).
-6. **B2 integration** — OUTWARD / AROUND / DEEPER / UI + the `scale_tier` plumbing through
-   `db`/`SceneView`/Pydantic + the parity fixture (the whole of `PLAN_OUTWARD.md`).
+6. **B2 integration** — ~~OUTWARD / AROUND / DEEPER / UI + the `scale_tier` plumbing~~
+   **DONE** (PRs #20–#26 shipped the whole ladder: OUTWARD/ascend now lives in
+   `providers/generate_modes/ascend.py`; see `PLAN_OUTWARD.md` Phase E notes).
 7. **Merged local branches** — `feat/consistency-fixes`, `feat/eval`, `feat/world-from-description`,
    `fix/centre-empty-region` are merged; tidy locally.
 8. **mypy coverage split (CI hygiene)** — `make eval` type-checks `generate.py` + 5 provider

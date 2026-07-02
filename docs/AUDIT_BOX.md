@@ -22,18 +22,15 @@ existing users.
 **Acceptance:** a clean machine reaches a first generated page following only the docs;
 existing flow byte-identical; voice stays chill/first-person.
 
-## 2. Wire `expected_layout` → render  — priority: MEDIUM (closes a documented no-op)
-**Goal:** B1's solved geometry currently seeds `world_map` geos (tap-routable, overlay-visible)
-but does **not** steer the rendered pixels — the first render is description-driven. Make
-`projectScene` actually drive the render.
-**Files:** `apps/modal-backend/generate.py` (`_layout_clause_for`, `GenerateBody.expected_layout`),
-`apps/modal-backend/providers/geometry_prompt.py` (`layout_constraints`),
-`apps/modal-backend/providers/prompt_library/layout.py`. Doc: `docs/SESSION_AUDIT.md`
-(Simplification 1).
-**Acceptance:** with the flag on, solved positions visibly steer layout; `make eval-layout`
-(P3 layout-fidelity A/B) shows no regression vs baseline; flag off = byte-identical.
+## 2. ✅ Wire `expected_layout` → render  — DONE (the doc lagged the code)
+`projectScene`/`projectTopDown` (web `lib/world-geometry.ts`) ride
+`GenerateBody.expected_layout` and steer the prompt via `_layout_clause_for` →
+`geometry_prompt.layout_constraints`, gated by `WORLD_GEOMETRY_GEN` (default ON under an
+active world mode). Measured +0.33 layout fidelity in the A/B; the VLM-grounding verify
+checks the render against it. Suppressed only on a camera-register mismatch
+(`_layout_register_mismatch` — surfacing that suppression is UI_AUDIT debt #11).
 
-## 3. Harden silent failures  — priority: MEDIUM (reliability / observability)
+## 3. ✅ Harden silent failures  — DONE (PR #119)
 **Goal:** several degradation paths fail silently — surface a signal and add tests so they stop
 hiding. Each is small and independent; do them as separate flagged/observable changes.
 - Geometry localization best-effort drop (`generate.py:~2567-2650`): detector/view-estimate
@@ -67,4 +64,4 @@ baseline; no regression elsewhere.
 - **UI discoverability** (`docs/UI_AUDIT.md`): `⊞ geo` / entity-chip toggles are buried — add a
   `G` shortcut + hint. Hover-prefetch + suppressed layout steering have no debug surface.
 - **Mobile pass**: ≤390px audit for breadcrumbs, codex panel, geo inset.
-- **Cost**: stop uploading the inert fresh-gen reference image (ignored by the model anyway).
+- ~~**Cost**: stop uploading the inert fresh-gen reference image~~ — DONE (PR #109).
