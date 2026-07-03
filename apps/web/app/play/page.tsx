@@ -116,6 +116,13 @@ import { selectNeighbors } from "@/lib/scale-neighbors";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
+// The in-session page graph node — lives in lib/session-pages.ts so the
+// ?continue= hydration mapper (nodeToPage) is a testable pure function.
+import {
+  nodeToPage,
+  type Page,
+  type SessionNodeWire,
+} from "@/lib/session-pages";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
   PREFETCH_LRU_MAX,
@@ -150,32 +157,6 @@ const ON_RAMP_COACH_ENABLED = ["1", "true", "yes"].includes(
 const ENTER_COACH_ENABLED = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_ENTER_COACH ?? "").toLowerCase(),
 );
-
-interface Page {
-  nodeId: string | null;
-  sessionId: string;
-  query: string;
-  title: string;
-  imageDataUrl: string | null;
-  // Set when this page was generated as a child of another via a tap.
-  parentId?: string | null;
-  // Where the user clicked on the parent page (0..1). Used by the map
-  // view to position the child tile inside the parent's rect.
-  clickInParent?: { xPct: number; yPct: number };
-  // Web-search citations the planner used. Hydrated from the SSE final
-  // event and from /api/nodes/[id] on permalink replay. Empty when web
-  // search returned nothing or is disabled.
-  sources?: Citation[];
-  // The view this page was entered from (geo tap). Its focus_id scopes the
-  // minimap to the place you're inside; null/absent on the world map + classic
-  // pages → the minimap shows the whole world frame.
-  sceneView?: SceneView | null;
-  // Whether entity extraction has already run for this node (read back from
-  // Mongo on revisit/reload). Gates the auto-localize effect so a revisit never
-  // silently re-runs the non-deterministic VLM pass. Absent on freshly-created
-  // pages this session → the in-memory attempt guard covers them instead.
-  geoExtracted?: boolean;
-}
 
 function newSessionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -909,6 +890,9 @@ export default function PlayPage() {
                 title: evt.page_title,
                 imageDataUrl: evt.image_data_url,
                 sources: evtSources,
+                // Mirror the persist body: an edit is a REVISION. Tap/fresh
+                // stay absent = descend.
+                ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
               });
               // Flip the morph gate so the decode-then-reveal effect runs
               // ONLY on the final image, not on streamed progress partials.
@@ -973,6 +957,9 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     parentId: body.current_node_id || null,
                     sources: evtSources,
+                    // Same relation the persist body sent — so the in-session
+                    // map reads this page like the atlas will after a reload.
+                    ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
                     sceneView: body.scene_view
                       ? { ...body.scene_view, node_id: saved.id }
                       : null,
@@ -1767,6 +1754,9 @@ export default function PlayPage() {
         imageDataUrl: a.imageDataUrl,
         parentId: null,
         sceneView: a.sceneView,
+        // The ascend route inserts the container node as relation:"ascend" —
+        // carry the same on the live Page so map chrome reads it correctly.
+        relation: "ascend",
       };
       setHistory((prev) => {
         const items = prev.items.map((p) =>
@@ -1853,41 +1843,12 @@ export default function PlayPage() {
           { headers: { [TRACE_HEADER]: hydrationTrace } }
         );
         if (!res.ok) return;
-        const data = (await res.json()) as {
-          nodes: Array<{
-            id: string;
-            parent_id: string | null;
-            session_id: string;
-            query: string;
-            page_title: string;
-            image_url: string;
-            click_in_parent: { x_pct: number; y_pct: number } | null;
-            sources?: { url: string; title: string | null }[] | null;
-            scene_view?: SceneView | null;
-            geo_extracted?: boolean;
-          }>;
-        };
+        const data = (await res.json()) as { nodes: SessionNodeWire[] };
         if (cancelled) return;
         if (!data.nodes?.length) return;
-        const items: Page[] = data.nodes.map((n) => ({
-          nodeId: n.id,
-          sessionId: n.session_id,
-          query: n.query,
-          title: n.page_title,
-          imageDataUrl: n.image_url,
-          parentId: n.parent_id,
-          sources: Array.isArray(n.sources) ? n.sources : [],
-          sceneView: n.scene_view ?? null,
-          geoExtracted: n.geo_extracted ?? false,
-          ...(n.click_in_parent
-            ? {
-                clickInParent: {
-                  xPct: n.click_in_parent.x_pct,
-                  yPct: n.click_in_parent.y_pct,
-                },
-              }
-            : {}),
-        }));
+        // Node rows carry `relation` (expand/edit/ascend/descend) — nodeToPage
+        // rides it onto each Page so the map views keep breadth vs depth.
+        const items: Page[] = data.nodes.map(nodeToPage);
         const last = items[items.length - 1];
         const trail = last && last.nodeId ? [last.nodeId] : [];
         setHistory({ items, trail, trailIdx: trail.length - 1 });
@@ -3195,6 +3156,7 @@ export default function PlayPage() {
               imageDataUrl: p.imageDataUrl,
               title: p.title,
               ...(p.clickInParent ? { clickInParent: p.clickInParent } : {}),
+              ...(p.relation ? { relation: p.relation } : {}),
             }))}
           activeNodeId={page?.nodeId ?? null}
           onSelect={selectFromMap}
@@ -3918,6 +3880,7 @@ export default function PlayPage() {
               imageDataUrl: p.imageDataUrl,
               title: p.title,
               ...(p.clickInParent ? { clickInParent: p.clickInParent } : {}),
+              ...(p.relation ? { relation: p.relation } : {}),
             }))}
           activeNodeId={page?.nodeId ?? null}
           onExpand={() => setViewMode("map")}
