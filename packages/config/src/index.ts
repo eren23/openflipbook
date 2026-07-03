@@ -332,6 +332,10 @@ export interface GenerateFinalEvent {
   grounding?: GroundingSummary;
   // Judged mask-scoped edit verdict — present only on the EDIT_REGION path.
   edit_verdict?: EditVerdict;
+  // A JUDGED render path degraded (critics unavailable — e.g. an upstream
+  // flap): the kept image shipped without a verdict. Additive; absent on
+  // paths that are unjudged by design (fresh, zoom_continue).
+  render_unjudged?: boolean;
   // Running estimated spend ($) for this session — coarse, mirrors
   // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
   // backends.
@@ -411,6 +415,9 @@ export interface GenerateAscendReadyEvent {
   scale_tier: ScaleTier;
   from_tier: ScaleTier;
   session_id: string;
+  // The container render shipped without a critic verdict (judge failure /
+  // remote-ref source). Additive — see GenerateFinalEvent.render_unjudged.
+  render_unjudged?: boolean;
   trace_id?: string;
 }
 

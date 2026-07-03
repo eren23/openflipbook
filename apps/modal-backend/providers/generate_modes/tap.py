@@ -320,6 +320,10 @@ async def stream_tap(
     # generation billed — judged loops overwrite with their attempt count,
     # the draft records itself at emission.
     billed_images = 1
+    # A JUDGED path that degraded (judge failure → the kept attempt shipped
+    # with no critic verdict) flags the final so the UI can mark the render.
+    # Paths that are unjudged BY DESIGN (fresh, zoom_continue) never set it.
+    render_unjudged = False
 
     # The deliberate camera (view grammar): user/persisted pin > policy >
     # None (legacy bytes). Resolved once; consumed by the layout clause,
@@ -626,6 +630,8 @@ async def stream_tap(
                     )
             result = render_loop.conclude(loop_attempts).image
             billed_images = max(1, len(loop_attempts))
+            kept = next((a for a in loop_attempts if a.image is result), None)
+            render_unjudged = kept is not None and kept.conformance is None
         else:
             main_task = _asyncio.create_task(
                 image_edit_provider.edit_image(
@@ -781,6 +787,11 @@ async def stream_tap(
     # off → key absent → unchanged wire shape).
     if grounding_summary is not None:
         final_payload["grounding"] = grounding_summary
+    if render_unjudged:
+        # Additive: only when a judged path degraded (critics unavailable) —
+        # the UI shows an "unverified render" chip so flap-era style drift
+        # is visible instead of silent.
+        final_payload["render_unjudged"] = True
     yield _sse(final_payload, trace_id)
     log(
         "info",

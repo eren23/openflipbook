@@ -18,6 +18,13 @@ export interface AscendRoot {
   imageDataUrl: string;
   aspectRatio: string;
   sceneView?: SceneView | null;
+  // The session style lock — the ascend used to be the ONE generate that
+  // didn't send it, so the container render only had the weak "same style
+  // as the centre" fallback holding the medium.
+  styleAnchor?: string | null;
+  // DOM-labels mode: ask for a label-free container map like every other
+  // map render (the un-suppressed ascend baked hallucinated title lettering).
+  suppressMapLabels?: boolean;
 }
 
 export interface Ascended {
@@ -27,6 +34,9 @@ export interface Ascended {
   imageDataUrl: string;
   sceneView: SceneView;
   scaleTier: ScaleTier;
+  // The container shipped without a critic verdict (judge failure) — the
+  // page surfaces an "unverified render" chip.
+  renderUnjudged: boolean;
 }
 
 // Drain the SSE stream until the single `ascend_ready` lands (or an error).
@@ -98,6 +108,10 @@ export function useAscend(onAscended: (a: Ascended) => void): {
               scene_view: root.sceneView ?? null,
               aspect_ratio: root.aspectRatio,
               web_search: false,
+              ...(root.styleAnchor
+                ? { session_style_anchor: root.styleAnchor }
+                : {}),
+              ...(root.suppressMapLabels ? { suppress_map_labels: true } : {}),
               trace_id: traceId,
             }),
             signal: ac.signal,
@@ -136,6 +150,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
             pageTitle: ready.page_title,
             imageDataUrl: ready.image_data_url,
             scaleTier: ready.scale_tier,
+            renderUnjudged: ready.render_unjudged === true,
             sceneView: {
               node_id: saved.parent_node_id,
               level: "map",

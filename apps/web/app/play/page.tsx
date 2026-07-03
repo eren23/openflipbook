@@ -921,6 +921,14 @@ export default function PlayPage() {
                   revertTo:
                     body.mode === "edit" ? body.current_node_id || null : null,
                 });
+              } else if (evt.render_unjudged) {
+                // A judged path shipped without a critic verdict (upstream
+                // flap killed the judges) — say so instead of letting style
+                // drift pass as verified. Same chip surface as edit verdicts.
+                setEditVerdictChip({
+                  text: "⚠ unverified render — critics were unavailable",
+                  revertTo: null,
+                });
               }
               void persistNode(
                 {
@@ -1770,6 +1778,12 @@ export default function PlayPage() {
       setPage(parentPage);
       setPhase("ready");
       setViewMode("page");
+      if (a.renderUnjudged) {
+        setEditVerdictChip({
+          text: "⚠ unverified render — critics were unavailable",
+          revertTo: null,
+        });
+      }
       const url = new URL(window.location.href);
       url.pathname = `/n/${a.parentNodeId}`;
       window.history.replaceState({}, "", url.toString());
@@ -1792,8 +1806,10 @@ export default function PlayPage() {
       imageDataUrl: page.imageDataUrl,
       aspectRatio: "16:9",
       sceneView: page.sceneView ?? null,
+      styleAnchor: styleAnchor?.style ?? null,
+      suppressMapLabels: worldEnabled && worldDomLabels,
     });
-  }, [page, sessionId, startAscend]);
+  }, [page, sessionId, startAscend, styleAnchor, worldEnabled, worldDomLabels]);
 
   useKeyboardShortcuts({
     onBack: goBack,

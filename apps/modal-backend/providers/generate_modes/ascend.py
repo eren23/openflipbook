@@ -11,8 +11,9 @@ generate.py's stream helpers (`_sse`, `_frame_dims`, `_view_grammar_on`,
 from __future__ import annotations
 
 import asyncio as _asyncio
+import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from _env import env_flag
 from obs import log, record_error
@@ -22,6 +23,7 @@ from providers import llm, model_router, spend
 
 if TYPE_CHECKING:
     from generate import GenerateBody
+    from providers.edit_loop import EditAttempt
 
 
 async def stream_ascend(
@@ -83,6 +85,16 @@ async def stream_ascend(
     outward_rider = instructions_lib.outward_clause(
         cast("ViewSpecDict | None", src_view)
     )
+    # DOM-labels mode: the container is a map too — render it label-free like
+    # every other map path (the un-suppressed ascend hallucinated big baked
+    # title lettering, e.g. "THE LAND OF IMAGINATION").
+    no_lettering = ""
+    if body.suppress_map_labels:
+        from providers.prompt_library.style import NO_LETTERING
+
+        no_lettering = NO_LETTERING
+    render_unjudged = False
+    billed_images = 1
     try:
         if use_outpaint:
             medium = style_lock or "the same hand-drawn art style as the centre"
@@ -93,6 +105,8 @@ async def stream_ascend(
             )
             if outward_rider:
                 margin += ". " + outward_rider
+            if no_lettering:
+                margin += ". " + no_lettering
             img = await image_edit_provider.expand_image_zoomout(
                 body.image, 3.0, pw, ph, prompt=margin
             )
@@ -122,13 +136,70 @@ async def stream_ascend(
                 )
                 if outward_rider:
                     ascend_instr += " " + outward_rider
-                img = await image_edit_provider.edit_image(
-                    body.image, ascend_instr
-                )
+                if no_lettering:
+                    ascend_instr += " " + no_lettering
+                # The container hop IS a whole-image judged edit: nano-banana
+                # edit follows refs loosely, and the un-judged ascend shipped
+                # a full medium break (painterly session → antique chart).
+                # Same harness as EDIT_REGION's whole-image arm: alignment
+                # (did it zoom out as asked) + medium (same hand as the
+                # source), keep-best, critic feedback folded into the retry,
+                # deadline mirroring generate.INGRESS_TIMEOUT_S - 180s.
+                from providers import edit_loop, judge
+                from providers.render_loop import data_url_bytes
+
+                source_bytes = data_url_bytes(body.image)
+                if source_bytes is None:
+                    # Remote-ref source can't feed the medium judge — render
+                    # once and say so instead of pretending it was verified.
+                    img = await image_edit_provider.edit_image(
+                        body.image, ascend_instr
+                    )
+                    render_unjudged = True
+                else:
+                    ascend_cfg = edit_loop.edit_loop_config_from_env(
+                        body.max_attempts
+                    )
+                    ascend_deadline = _time.monotonic() + 720.0
+                    captured_instr = ascend_instr
+                    source_url: str = body.image
+
+                    async def _render_ascend(suffix: str) -> Any:
+                        instr = (
+                            captured_instr
+                            if not suffix
+                            else f"{captured_instr}\n\n{suffix}"
+                        )
+                        return await image_edit_provider.edit_image(
+                            source_url, instr
+                        )
+
+                    ascend_attempts: list[EditAttempt] = []
+                    async for asc_att in edit_loop.iter_edit_attempts(
+                        _render_ascend,
+                        source_bytes=source_bytes,
+                        mask_png=None,
+                        region_box=None,
+                        judge_alignment=judge.score_prompt_alignment,
+                        judge_medium=judge.score_style_pair,
+                        instruction=ascend_instr,
+                        config=ascend_cfg,
+                        abort=_abort_if_disconnected,
+                        deadline_s=ascend_deadline,
+                    ):
+                        ascend_attempts.append(asc_att)
+                    asc_res = edit_loop.conclude_edit(ascend_attempts)
+                    img = cast("Any", asc_res.best.image)
+                    billed_images = max(1, len(ascend_attempts))
+                    # Critic degraded (judge failure → single blind attempt):
+                    # the render shipped without a verdict — flag it.
+                    render_unjudged = asc_res.best.alignment is None
             else:
                 # Fresh container = a NEW map: state the deliberate
                 # top-down camera (None on astro rungs → legacy bytes).
                 ascend_prompt = plan.prompt
+                if no_lettering:
+                    ascend_prompt += f"\n\n{no_lettering}"
                 if _view_grammar_on():
                     asc_view = view_policy.default_view(
                         render_mode="scale_parent",
@@ -153,21 +224,24 @@ async def stream_ascend(
     data_url = await _asyncio.to_thread(
         image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
     )
-    # Spend accounting: this OUTWARD hop made a real paid image call —
-    # record it (like the tap/draft paths) so the cap actually counts it.
-    spend.record_generation(body.session_id, img.model)
-    yield _sse(
-        {
-            "type": "ascend_ready",
-            "page_title": page_title,
-            "image_data_url": data_url,
-            "image_model": img.model,
-            "prompt_author_model": "",
-            "final_prompt": final_prompt,
-            "scale_tier": to_tier,
-            "from_tier": from_tier,
-            "session_id": body.session_id,
-        },
-        trace_id,
-    )
+    # Spend accounting: this OUTWARD hop made real paid image calls (one per
+    # judged attempt) — record them so the cap actually counts them.
+    spend.record_generation(body.session_id, img.model, images=billed_images)
+    ascend_payload: dict[str, Any] = {
+        "type": "ascend_ready",
+        "page_title": page_title,
+        "image_data_url": data_url,
+        "image_model": img.model,
+        "prompt_author_model": "",
+        "final_prompt": final_prompt,
+        "scale_tier": to_tier,
+        "from_tier": from_tier,
+        "session_id": body.session_id,
+    }
+    if render_unjudged:
+        # Additive: present only when the critics could not gate this render
+        # (judge failure / remote-ref source) — the UI shows an "unverified
+        # render" chip instead of letting flap-era drift ship silently.
+        ascend_payload["render_unjudged"] = True
+    yield _sse(ascend_payload, trace_id)
     return
