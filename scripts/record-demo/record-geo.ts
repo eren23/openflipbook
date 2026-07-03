@@ -91,7 +91,11 @@ async function main(): Promise<void> {
 
   // ── 1. A world from scratch ────────────────────────────────────────────────
   console.log("[geo] opening play");
-  await page.goto(`${BASE}/play`, { waitUntil: "networkidle" });
+  // domcontentloaded, NOT networkidle: /play holds a persistent Mongo
+  // change-stream SSE open, so networkidle never fires (the record-ankh
+  // lesson) — wait for the query box instead.
+  await page.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("textbox").first().waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1200);
   await page.getByRole("button", { name: "Vintage" }).click().catch(() => {});
   await page.waitForTimeout(400);
@@ -108,13 +112,18 @@ async function main(): Promise<void> {
   const mapSrc = await waitStable(page, GEN_TIMEOUT);
   await page.waitForTimeout(2500);
 
-  // Session id (for the atlas leg) — retry until the "↗ atlas" link is present.
+  // Session id (for the atlas leg) — the atlas link is persist-gated and can
+  // land ~10s after the image stabilizes, so poll long and fall back to the
+  // localStorage session key the play page maintains.
   let session: string | null = null;
-  for (let i = 0; i < 12 && !session; i++) {
+  for (let i = 0; i < 30 && !session; i++) {
     session = await page.evaluate(() => {
       const a = document.querySelector('a[href*="/atlas/"]');
       const m = (a?.getAttribute("href") ?? "").match(/\/atlas\/(session_[a-z0-9-]+)/i);
-      return m ? m[1] : null;
+      if (m) return m[1];
+      const ls = window.localStorage.getItem("openflipbook.lastSession") ?? "";
+      const lm = ls.match(/session_[a-z0-9-]+/i);
+      return lm ? lm[0] : null;
     });
     if (!session) await page.waitForTimeout(800);
   }
@@ -133,6 +142,14 @@ async function main(): Promise<void> {
   await tap(page, 0.16, 0.42);
   await waitChanged(page, mapSrc, GEN_TIMEOUT);
   await page.waitForTimeout(3500); // linger on the entered place
+
+  // ── 3b. Step back OUT — the spatial breadcrumb takes you home ───────────────
+  console.log("[geo] step back out");
+  const back = page.getByRole("button", { name: "← back" }).first();
+  if (await back.count()) {
+    await back.click().catch(() => {});
+    await page.waitForTimeout(3000); // linger back on the map (overlay persists)
+  }
 
   // ── 4. Levels up/down + zoom — the atlas nested chain ───────────────────────
   if (session) {
