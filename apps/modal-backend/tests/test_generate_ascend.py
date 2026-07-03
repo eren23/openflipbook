@@ -275,3 +275,82 @@ async def test_ascend_outpaint_margin_carries_the_source_view_rider(
     margin = outpaint.await_args.kwargs.get("prompt") or ""
     assert "flat top-down overhead perspective" in margin
     assert "the camera simply rises" in margin
+
+
+def _mock_judges(monkeypatch: pytest.MonkeyPatch, ok: bool) -> None:
+    import providers.judge as judge_mod
+    from providers.judge import JudgeResult
+
+    if ok:
+        fn = AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw=""))
+    else:
+        fn = AsyncMock(side_effect=RuntimeError("judge down"))
+    monkeypatch.setattr(judge_mod, "score_prompt_alignment", fn)
+    monkeypatch.setattr(judge_mod, "score_style_pair", fn)
+
+
+# A decodable data-URL source (the "abc" in _ascend_body is invalid base64 and
+# routes to the remote-ref fallback) — required to arm the judged edit loop.
+_DECODABLE = "data:image/jpeg;base64,QUJD"
+
+
+async def test_ascend_edit_container_is_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The container hop runs the whole-image edit loop: accepting critics →
+    # one render, NO render_unjudged on the wire (the un-judged ascend was
+    # how a full medium break shipped silently).
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    _mock_judges(monkeypatch, ok=True)
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert "render_unjudged" not in ready
+    edit.assert_awaited_once()  # accepted at one — no retry spend
+
+
+async def test_ascend_degraded_critics_flag_render_unjudged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Judge failure (an upstream flap) → single blind attempt, kept, but the
+    # wire says so: render_unjudged rides ascend_ready for the UI chip.
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    _mock_judges(monkeypatch, ok=False)
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["render_unjudged"] is True
+    edit.assert_awaited_once()  # no blind re-roll without a critic
+
+
+async def test_ascend_suppresses_lettering_in_dom_labels_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # DOM-labels mode: the container map renders label-free like every other
+    # map path (the un-suppressed ascend hallucinated big baked title text).
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    _mock_judges(monkeypatch, ok=True)
+    from providers.prompt_library.style import NO_LETTERING
+
+    events = await _collect(
+        _event_stream(_ascend_body(image=_DECODABLE, suppress_map_labels=True), "t1")
+    )
+    assert next(e for e in events if e["type"] == "ascend_ready")
+    instr = edit.await_args.args[1]
+    assert NO_LETTERING in instr
