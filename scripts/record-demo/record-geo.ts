@@ -56,17 +56,6 @@ async function waitStable(page: Page, timeout: number): Promise<string> {
   throw new Error("image never stabilized");
 }
 
-async function waitChanged(page: Page, prev: string, timeout: number): Promise<string> {
-  await page.waitForFunction(
-    (p) => {
-      const el = document.querySelector('img[alt^="Generated illustration"]');
-      return !!el && el.getAttribute("src") !== p;
-    },
-    prev,
-    { timeout },
-  );
-  return waitStable(page, timeout);
-}
 
 async function tap(page: Page, xPct: number, yPct: number): Promise<void> {
   const box = await img(page).boundingBox();
@@ -109,7 +98,7 @@ async function main(): Promise<void> {
   await page.waitForTimeout(400);
   console.log("[geo] generating the map");
   await page.getByRole("button", { name: "Go" }).click();
-  const mapSrc = await waitStable(page, GEN_TIMEOUT);
+  await waitStable(page, GEN_TIMEOUT);
   await page.waitForTimeout(2500);
 
   // Session id (for the atlas leg) — the atlas link is persist-gated and can
@@ -130,17 +119,54 @@ async function main(): Promise<void> {
   console.log("[geo] session:", session);
 
   // ── 2. The numeric world — coordinate overlay + minimap ─────────────────────
+  // Extraction (entity boxes/polygons/labels + the enter rings) lands well
+  // AFTER the image stabilizes — toggling ⊞ geo early puts an EMPTY overlay
+  // on camera (take-2 lesson). Wait for the markers/labels to exist first.
+  console.log("[geo] waiting for extraction (rings/labels)");
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll("[data-entity-id], [data-label-id]").length >
+        0,
+      undefined,
+      { timeout: 90_000 },
+    )
+    .catch(() => console.log("[geo] extraction markers never appeared — continuing"));
   console.log("[geo] coordinate overlay");
   const geo = page.getByRole("button", { name: /geo$/ }).first();
   if ((await geo.count()) && (await geo.getAttribute("aria-pressed")) !== "true") {
     await geo.click();
   }
-  await page.waitForTimeout(3500); // linger on the coords + minimap
+  await page.waitForTimeout(4000); // linger on the populated coords + minimap
 
   // ── 3. Go IN — level down ───────────────────────────────────────────────────
-  console.log("[geo] go in (Unseen University)");
-  await tap(page, 0.16, 0.42);
-  await waitChanged(page, mapSrc, GEN_TIMEOUT);
+  // Tap a REAL enterable place: the centre of the first enter-ring marker
+  // (falls back to the historical hardcoded point when no ring rendered).
+  const ring = await page.evaluate(() => {
+    const m = document.querySelector("[data-entity-id]");
+    if (!m) return null;
+    const r = (m as HTMLElement).getBoundingClientRect();
+    const img = document
+      .querySelector('img[alt^="Generated illustration"]')
+      ?.getBoundingClientRect();
+    if (!img || !img.width) return null;
+    return {
+      x: (r.x + r.width / 2 - img.x) / img.width,
+      y: (r.y + r.height / 2 - img.y) / img.height,
+    };
+  });
+  console.log("[geo] go in", ring ? `(ring at ${ring.x.toFixed(2)},${ring.y.toFixed(2)})` : "(fallback point)");
+  await tap(page, ring?.x ?? 0.16, ring?.y ?? 0.42);
+  // Completion = the trail grew (persist-gated step counter) — NEVER the img
+  // src: the progressive draft swaps src long before the final lands (the
+  // take-2 bug: we "finished" mid-generation and the entered page never made
+  // it on camera).
+  await page.waitForFunction(
+    () => /step 2 of/.test(document.body.innerText),
+    undefined,
+    { timeout: GEN_TIMEOUT },
+  );
+  await waitStable(page, GEN_TIMEOUT);
   await page.waitForTimeout(3500); // linger on the entered place
 
   // ── 3b. Step back OUT — the spatial breadcrumb takes you home ───────────────
@@ -148,6 +174,13 @@ async function main(): Promise<void> {
   const back = page.getByRole("button", { name: "← back" }).first();
   if (await back.count()) {
     await back.click().catch(() => {});
+    await page
+      .waitForFunction(
+        () => /step 1 of 2/.test(document.body.innerText),
+        undefined,
+        { timeout: 15_000 },
+      )
+      .catch(() => {});
     await page.waitForTimeout(3000); // linger back on the map (overlay persists)
   }
 
@@ -155,6 +188,13 @@ async function main(): Promise<void> {
   if (session) {
     console.log("[geo] atlas: zoom out to the whole chain");
     await page.goto(`${BASE}/atlas/${session}`, { waitUntil: "load" });
+    // Both nodes must be on the board before the zoom choreography — the
+    // take-2 atlas showed "1 pages" because the child hadn't persisted yet.
+    await page
+      .waitForFunction(() => /2 pages/.test(document.body.innerText), undefined, {
+        timeout: 30_000,
+      })
+      .catch(() => console.log("[geo] atlas still shows 1 page — continuing"));
     await page.waitForTimeout(2800);
     const fit = page.getByRole("button", { name: /fit all/i }).first();
     if (await fit.count()) await fit.click().catch(() => {});
