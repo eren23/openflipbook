@@ -76,10 +76,15 @@ export default function SessionMinimap({
       >
         {laid.map((p) => {
           const isActive = p.nodeId === activeNodeId;
+          // Breadth (expand-bloomed) tiles read teal so they don't pass as
+          // tap-in (descend) ink. Same teal as the atlas / world-map expand
+          // edges — rgba(13,148,136,…), see components/atlas-view.tsx.
+          const isExpand = p.relation === "expand";
           return (
             <button
               key={p.nodeId}
               type="button"
+              data-relation={p.relation ?? "descend"}
               onClick={() => onJump(p.nodeId)}
               className={
                 "absolute rounded-sm transition-transform " +
@@ -92,7 +97,9 @@ export default function SessionMinimap({
                 height: Math.max(2, p.rect.h * box.scale),
                 background: isActive
                   ? "rgba(239,68,68,0.95)"
-                  : "rgba(15,15,15,0.55)",
+                  : isExpand
+                    ? "rgba(13,148,136,0.75)"
+                    : "rgba(15,15,15,0.55)",
                 outline: isActive
                   ? "2px solid rgba(239,68,68,0.6)"
                   : "none",

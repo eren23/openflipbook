@@ -56,9 +56,10 @@ recovery from arbitrary generated images. Treat as research, not a quick fix.
 baseline; no regression elsewhere.
 
 ## Smaller debt (pick up opportunistically)
-- **In-session expand connectors**: `relation` ("expand" vs "descend") isn't on the in-session
-  `Page` type, so the atlas can't distinguish breadth from depth. Also `relation` is never set
-  on `persistNode` (all default "descend"). Thread it through `WorldMap` + `SessionMinimap`.
+- ~~**In-session expand connectors**~~ — DONE (2026-07-03): `relation` now rides the in-session
+  `Page` (lib/session-pages.ts), the ?continue= hydration, and the `WorldMap`/`SessionMinimap`
+  mappings; minimap tints expand tiles teal. Note the persistNode half was stale: expand
+  (useExpandBloom) and edit already sent `relation`; ascend inserts server-side.
 - ~~**mypy coverage split (CI hygiene)**~~ — already aligned: both `make eval` and CI run
   `mypy providers obs.py generate.py` (verified 2026-07-02).
 - **UI discoverability** (`docs/UI_AUDIT.md`): `⊞ geo` / entity-chip toggles are buried — add a

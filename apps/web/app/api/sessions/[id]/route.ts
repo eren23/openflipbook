@@ -45,6 +45,11 @@ export async function GET(req: Request, { params }: Params) {
       aspect_ratio: row.aspect_ratio,
       click_in_parent: row.click_in_parent,
       sources: row.sources,
+      // How the node hangs off its parent (descend/expand/ascend/edit) — the
+      // ?continue= hydration rides it onto the in-session Page so the map
+      // views can render breadth vs depth like the atlas. Additive: old
+      // clients ignore it, and toRow defaults missing Mongo values "descend".
+      relation: row.relation,
       scene_view: row.scene_view,
       geo_extracted: row.geo_extracted,
       created_at: row.created_at,
