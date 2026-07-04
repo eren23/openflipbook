@@ -45,17 +45,22 @@ hiding. Each is small and independent; do them as separate flagged/observable ch
 **Acceptance:** each failure emits an observable signal (trace/log/HUD) without changing the
 happy path; new unit tests cover the corrupt/missing-input branches; `make eval` green.
 
-## 4. Register drift / metric fidelity  — priority: LOW / R&D (first lever SHIPPED 2026-07-04)
-**Shipped:** `LAYOUT_REGISTER_PIN` (default off; on in `make demo-world`) appends the
-strict-grid register sentence (the committed recon_base.v2 A/B winner) to the layout
+## 4. Register drift / metric fidelity  — priority: LOW / R&D (two levers SHIPPED)
+**Shipped (2026-07-04):** `LAYOUT_REGISTER_PIN` (default off; on in `make demo-world`) appends
+the strict-grid register sentence (the committed recon_base.v2 A/B winner) to the layout
 clause — bench-measured `pos_raw` **0.308 → 0.604** across the v1/v2 arms, every drifting
 cell fixed, none hurt, composite up (0.712 → 0.729). The recon sweep runs both arms
 permanently, every report carries the fitted per-cell alignment (`align_scale/tx/ty` —
 the 0.5-scale-clamp drift signature is now visible), and `recon_pos_raw` has its own
 baseline gate (0.45±0.15) so the drift can't hide behind the 0.05 composite weight again.
-Ledger nit: the `height_order` baseline (0.75) predates the mars map joining the sweep —
-mars scores 0 on heights in BOTH arms (astronomical map, no built heights); re-baseline or
-exclude when next touched.
+~~Ledger nit: the `height_order` baseline predates the mars map joining the sweep~~ — DONE
+(PR #133): height keys are omitted when the map has no built heights; baseline re-set 0.82±0.15.
+**Shipped (2026-07-04, PR #134):** plan→image registration at seeding — the solver's
+`geo_plan_*` plane historically sat in its own frame that never met the extraction seeds.
+`registerPlanToImage` (web `lib/world-map.ts`) label-matches plans to seeds, fits the same
+similarity the bench proves recoverable (`fitSimilarity`, TS twin of `_align.fit_alignment`
+with a parity suite), and re-expresses all plan geos into the image frame; the extract route
+runs it best-effort and reports the fit as the additive `plan_registration` field.
 **Goal (the remaining true R&D):** the #1 reconstruction failure — raw `pos` was ≈0.05 pre-pin:
 generated→coords stays *relative*, not metric. Explore metric pose
 recovery from arbitrary generated images. Treat as research, not a quick fix.
@@ -72,7 +77,8 @@ baseline; no regression elsewhere.
   (useExpandBloom) and edit already sent `relation`; ascend inserts server-side.
 - ~~**mypy coverage split (CI hygiene)**~~ — already aligned: both `make eval` and CI run
   `mypy providers obs.py generate.py` (verified 2026-07-02).
-- **UI discoverability** (`docs/UI_AUDIT.md`): `⊞ geo` / entity-chip toggles are buried — add a
-  `G` shortcut + hint. Hover-prefetch + suppressed layout steering have no debug surface.
-- **Mobile pass**: ≤390px audit for breadcrumbs, codex panel, geo inset.
+- ~~**UI discoverability** (`docs/UI_AUDIT.md`)~~ — DONE: `G` shortcut + hint (PR #125),
+  prefetch HUD wiring (PR #125), suppressed-steering live counter in the debug HUD (PR #133).
+- **Mobile pass**: ≤390px audit for breadcrumbs, codex panel, geo inset. (Figure toolbar
+  wrap at ≤390px done — PR #131; the rest unaudited.)
 - ~~**Cost**: stop uploading the inert fresh-gen reference image~~ — DONE (PR #109).
