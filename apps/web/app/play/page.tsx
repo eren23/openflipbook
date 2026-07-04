@@ -3535,7 +3535,11 @@ export default function PlayPage() {
                 </div>
               )}
 
-            <div className="absolute right-3 top-3 flex gap-2">
+            {/* Capped + wrapping: at ≤390px this row is wider than the frame
+                and used to hang off BOTH edges — Around/⊞ geo were fully
+                off-screen and untappable (UI_AUDIT #13). Right-anchored with
+                intrinsic width, so desktop renders identically. */}
+            <div className="absolute right-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={triggerExpand}

@@ -81,8 +81,12 @@ is better at "what is this".
     (`tests/recon_bench`) is the right place to measure how much it costs.
 12. ✅ **Edit-verdict chip can overlap narrow screens** — moved to the
     bottom-left toast corner, wraps, max-width capped.
-13. **Mobile pass** — breadcrumbs, codex panel and the geo inset all want a
-    ≤390px audit; only the coach and breadcrumb were touched here.
+13. ✅ **Mobile pass** — audited at 390×844 with DOM measurements (2026-07-04):
+    breadcrumbs (358px ✓), open codex drawer (384px ✓), geo inset (218px ✓),
+    query toolbar (wraps ✓), session panel (✓). One real bug found and fixed:
+    the figure toolbar (Around/⊞ geo/Codex/Edit/Animate) was 543px pinned
+    right — Around and ⊞ geo hung fully off-screen and were untappable. Now
+    capped at the frame width and wraps (desktop byte-identical).
 
 ## Where the eval system hooks in
 
