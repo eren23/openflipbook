@@ -115,6 +115,21 @@ def _depth_layers_clause(
     return text, used + occl
 
 
+# The register pin (AUDIT_BOX §4): the SCENE LAYOUT bins are honoured only up
+# to an arbitrary similarity transform — the model paints the feature cluster
+# inside margins/a disk instead of spanning the sheet (recon bench: pos_raw
+# ≈ 0.05 vs pos_aligned 0.7-0.84; the fitted scale hits the 0.5 clamp). This
+# exact wording is the committed recon_base.v2 A/B winner (matrix 2026-06-13:
+# +0.17…+0.56 pos_raw on the drifting cells, ~-0.1 style tax) — thirds
+# language only, per research/09's no-grid-refs rule.
+REGISTER_PIN_CLAUSE = (
+    "Compose to the stated layout EXACTLY: treat the SCENE LAYOUT lines as a "
+    "strict grid — each named feature sits at the named third of the sheet "
+    "(left/center/right, top/mid/bottom), at the stated relative size. Do not "
+    "re-center or re-balance the composition."
+)
+
+
 def layout_constraints(
     expected: list[ProjectedEntity],
     *,
@@ -122,6 +137,7 @@ def layout_constraints(
     depth_layers: bool = False,
     max_entity_lines: int | None = None,
     max_assertions: int = 12,
+    register_pin: bool = False,
 ) -> str:
     """A placement block from a projected layout (ProjectedEntity dicts,
     already depth-sorted nearest-first). Empty string when there's nothing to
@@ -165,6 +181,8 @@ def layout_constraints(
         clause = _heights_clause(heights, max_assertions - used)
         if clause:
             blocks.append(clause)
+    if register_pin:
+        blocks.append(REGISTER_PIN_CLAUSE)
     return "\n".join(blocks)
 
 

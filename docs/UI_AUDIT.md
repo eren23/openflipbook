@@ -79,6 +79,10 @@ is better at "what is this".
 11. **`view.layout_register_mismatch` silently suppresses layout steering**
     (backend) — logged but invisible to the user; the eval track
     (`tests/recon_bench`) is the right place to measure how much it costs.
+    _Bench half landed 2026-07-04: recon reports now persist the fitted
+    per-cell alignment (`align_scale/tx/ty/flip`, `unalignable`), so register
+    drift has a visible shape; the live suppression-frequency counter (a HUD
+    surface for the `view.layout_register_mismatch` log) remains open._
 12. ✅ **Edit-verdict chip can overlap narrow screens** — moved to the
     bottom-left toast corner, wraps, max-width capped.
 13. ✅ **Mobile pass** — audited at 390×844 with DOM measurements (2026-07-04):

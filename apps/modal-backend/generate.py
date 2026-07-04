@@ -400,10 +400,18 @@ def _layout_clause_for(body: GenerateBody, *, view_grammar: bool = False) -> str
     expected = cast(
         "list[ProjectedEntityDict]", [e.model_dump() for e in body.expected_layout]
     )
+    # LAYOUT_REGISTER_PIN (default off): append the strict-grid register
+    # sentence — the committed recon_base.v2 A/B winner against the pos_raw
+    # drift (AUDIT_BOX §4). Flag-gated until the recon bench blesses a
+    # default flip; off = byte-identical prompts.
+    pin = env_flag("LAYOUT_REGISTER_PIN")
     if not view_grammar:
-        return geometry_prompt.layout_constraints(expected)
+        return geometry_prompt.layout_constraints(expected, register_pin=pin)
     return geometry_prompt.layout_constraints(
-        expected, depth_layers=True, heights=_heights_for_view(body)
+        expected,
+        depth_layers=True,
+        heights=_heights_for_view(body),
+        register_pin=pin,
     )
 
 

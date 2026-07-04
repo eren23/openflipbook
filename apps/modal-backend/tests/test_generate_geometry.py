@@ -465,3 +465,17 @@ async def test_edit_entities_endpoint_returns_plan(
     payload = _json.loads(resp.body)
     assert payload["plan"]["edits"] == [{"op": "move", "target": "g1", "dx": 0.0, "dy": -5.0}]
     assert payload["plan"]["blast_radius"] == ["n1"]
+
+
+def test_layout_register_pin_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    # LAYOUT_REGISTER_PIN appends the strict-grid register sentence (the
+    # committed recon_base.v2 A/B winner vs the pos_raw drift); flag off is
+    # byte-identical to today's clause.
+    monkeypatch.setenv("WORLD_GEOMETRY_GEN", "true")
+    monkeypatch.delenv("LAYOUT_REGISTER_PIN", raising=False)
+    off = generate._layout_clause_for(_body([_proj("Tower")]))
+    assert "strict grid" not in off
+    monkeypatch.setenv("LAYOUT_REGISTER_PIN", "1")
+    on = generate._layout_clause_for(_body([_proj("Tower")]))
+    assert on.startswith(off)  # additive only — the base clause is untouched
+    assert "strict grid" in on and "strict grid" not in off

@@ -43,6 +43,13 @@
       "n_min": 4,
       "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
     },
+    "recon_pos_raw": {
+      "metric": "pos_raw_mean",
+      "baseline": 0.45,
+      "regression_band": 0.15,
+      "n_min": 4,
+      "source": "make eval-recon 2026-07-04 (12 cells, v1+v2 arms; the LAYOUT_REGISTER_PIN A/B: v1 mean 0.308 vs v2 0.604 — the strict-grid sentence doubles raw register fidelity, every drifting cell fixed). Pre-pin history: 0.242 over the 2026-06-24 v1 cells, fitted scale clamped at 0.5 on 4/5"
+    },
     "recon_closeup_fidelity": {
       "metric": "composite_mean",
       "baseline": 0.86,
