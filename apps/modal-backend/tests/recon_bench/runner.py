@@ -299,6 +299,17 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
             # judges arrive 0-10; composite consumes 0-1
             **{k: round(v / 10.0, 3) for k, v in judge_scores.items()},
         }
+        # Register instrumentation (UI_AUDIT #11's bench half): persist the
+        # fitted similarity per cell so every report shows the drift SHAPE
+        # (scale hitting the 0.5 clamp + translation is the signature) instead
+        # of one opaque pos_raw number. Flat floats, zero composite weight.
+        align = geo.get("alignment")  # geo_scores serializes it as a dict
+        if align is not None:
+            scores["align_scale"] = float(align["scale"])
+            scores["align_tx"] = round(float(align["tx"]), 1)
+            scores["align_ty"] = round(float(align["ty"]), 1)
+            scores["align_flip"] = 1.0 if align["flip_x"] else 0.0
+        scores["unalignable"] = 1.0 if geo.get("unalignable") else 0.0
         used = {k: w for k, w in weights.items() if k in scores and w > 0}
         if used:
             total = sum(used.values())
@@ -369,6 +380,10 @@ def main() -> int:
                 baselines = [(f"{_sweep_name()}_fidelity", "composite")]
                 if _sweep_name() == "recon":
                     baselines.append(("height_order", "height_order"))
+                    # The register-drift headline (AUDIT_BOX §4) gets its own
+                    # gate — pos_raw's 0.05 composite weight made a 10x drift
+                    # nearly invisible in the fidelity number.
+                    baselines.append(("recon_pos_raw", "pos_raw"))
                 for name, key in baselines:
                     vals = [c["scores"][key] for c in cells if key in c.get("scores", {})]
                     if vals:

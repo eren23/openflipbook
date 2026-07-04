@@ -16,6 +16,9 @@ services:
       SCALE_OUTWARD: "true"
       SCALE_AROUND_LOGICAL: "true"
       ENTER_AZIMUTH_ROTATE: "true"
+      # Register pin: bench-proven 2026-07-04 (pos_raw 0.308 -> 0.604, no
+      # cell hurt) — steered map renders compose to the stated register.
+      LAYOUT_REGISTER_PIN: "true"
       OPENROUTER_VLM_MODEL: google/gemini-3-flash-preview
       OPENROUTER_TEXT_MODEL: google/gemini-3-flash-preview
   web:
