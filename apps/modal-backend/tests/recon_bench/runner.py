@@ -290,15 +290,21 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
             "pos_raw": round(geo["pos_raw"], 3),
             "pos_aligned": round(geo["pos_aligned"], 3),
             "size": round(geo["size"], 3),
-            "height_order": round(
-                heights_lib.height_order_score(expected_h, observed_h), 3
-            ),
-            "height_abs": round(
-                heights_lib.height_abs_score(expected_h, observed_h), 3
-            ),
             # judges arrive 0-10; composite consumes 0-1
             **{k: round(v / 10.0, 3) for k, v in judge_scores.items()},
         }
+        # Height metrics only when the corpus map HAS heights — an
+        # astronomical map (mars) carries no built heights, and scoring it
+        # 0.0 on a metric it can't have dragged the sweep mean below the
+        # baseline in BOTH arms. Absent key = excluded from the composite
+        # (weights∩scores) and from the baseline mean, like an absent judge.
+        if expected_h:
+            scores["height_order"] = round(
+                heights_lib.height_order_score(expected_h, observed_h), 3
+            )
+            scores["height_abs"] = round(
+                heights_lib.height_abs_score(expected_h, observed_h), 3
+            )
         # Register instrumentation (UI_AUDIT #11's bench half): persist the
         # fitted similarity per cell so every report shows the drift SHAPE
         # (scale hitting the 0.5 clamp + translation is the signature) instead

@@ -336,6 +336,10 @@ export interface GenerateFinalEvent {
   // flap): the kept image shipped without a verdict. Additive; absent on
   // paths that are unjudged by design (fresh, zoom_continue).
   render_unjudged?: boolean;
+  // Layout steering was suppressed for this render (the expected-layout bins
+  // were projected for a different camera register). Additive — the debug
+  // HUD counts these (UI_AUDIT #11).
+  layout_suppressed?: boolean;
   // Running estimated spend ($) for this session — coarse, mirrors
   // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
   // backends.

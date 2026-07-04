@@ -39,7 +39,10 @@ export type HudEventName =
   | "morph:end"
   | "react:commit"
   | "world:extracted"
-  | "world:extract_error";
+  | "world:extract_error"
+  // Layout steering suppressed for a render (camera-register mismatch) —
+  // counted by the debug HUD (UI_AUDIT #11).
+  | "layout:suppressed";
 
 type Listener = (payload: unknown) => void;
 

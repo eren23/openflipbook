@@ -792,6 +792,11 @@ async def stream_tap(
         # the UI shows an "unverified render" chip so flap-era style drift
         # is visible instead of silent.
         final_payload["render_unjudged"] = True
+    if layout_suppressed:
+        # Additive (UI_AUDIT #11): layout steering was dropped because the
+        # bins were projected for a different camera register — the debug
+        # HUD counts these so suppression frequency is finally observable.
+        final_payload["layout_suppressed"] = True
     yield _sse(final_payload, trace_id)
     log(
         "info",
