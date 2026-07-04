@@ -51,6 +51,7 @@ export default function DebugHud() {
   const [prefetchHits, setPrefetchHits] = useState(0);
   const [prefetchMisses, setPrefetchMisses] = useState(0);
   const [prefetchInflight, setPrefetchInflight] = useState(0);
+  const [layoutSuppressed, setLayoutSuppressed] = useState(0);
   const [worldEntities, setWorldEntities] = useState<{
     total: number;
     recent: WorldEntry[];
@@ -111,6 +112,7 @@ export default function DebugHud() {
       const n = (p as { n?: number })?.n;
       if (typeof n === "number") setPrefetchInflight(n);
     });
+    sub("layout:suppressed", () => setLayoutSuppressed((n) => n + 1));
     sub("world:extracted", (p: unknown) => {
       const v = p as {
         added?: number;
@@ -194,7 +196,8 @@ export default function DebugHud() {
           prefetch {hitRate} ({prefetchHits}/{total})
         </div>
         <div>inflight {prefetchInflight}</div>
-        <div className="col-span-2">commits {commitCountRef.current}</div>
+        <div>steer-drop {layoutSuppressed}</div>
+        <div>commits {commitCountRef.current}</div>
       </div>
       {sse.length > 0 && (
         <div className="mt-1 border-t border-green-200/20 pt-1">

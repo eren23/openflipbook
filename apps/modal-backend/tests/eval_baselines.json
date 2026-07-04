@@ -73,10 +73,10 @@
     },
     "height_order": {
       "metric": "height_order_mean",
-      "baseline": 0.75,
+      "baseline": 0.82,
       "regression_band": 0.15,
       "n_min": 3,
-      "source": "recon_bench height_order sub-metric — tracks entity height ordering fidelity"
+      "source": "re-baselined 2026-07-04 over the HEIGHT-BEARING cells of the 12-cell v1+v2 run (mean 0.821, n=8) after the honesty fix: maps with no built heights (mars, astronomical) no longer score 0.0 on a metric they can't have — the key is absent, like an absent judge. One genuine 0 (treasure/direct/v1) stays in"
     },
     "continuity": {
       "metric": "hop2_step_in_mean",

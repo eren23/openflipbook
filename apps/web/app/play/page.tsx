@@ -914,6 +914,11 @@ export default function PlayPage() {
                   revertTo: null,
                 });
               }
+              if (evt.layout_suppressed) {
+                // Camera-register mismatch dropped layout steering — the
+                // debug HUD counts how often (UI_AUDIT #11's live half).
+                hudEmit("layout:suppressed", {});
+              }
               void persistNode(
                 {
                   parent_id: body.current_node_id || null,
