@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import type { ObserverPose } from "@openflipbook/config";
 
 import {
+  applySimilarity,
   cropEntities,
+  fitSimilarity,
   neighborsOf,
   project,
   projectScene,
@@ -174,5 +176,52 @@ describe("toAbsoluteEntities (nested → absolute frame)", () => {
     expect(out[1]!.pos.y).toBeCloseTo(30);
     expect(out[1]!.footprint.w).toBeCloseTo(20); // 4000 × 0.005
     expect(out[1]!.footprint.d).toBeCloseTo(10);
+  });
+});
+
+// TS twin of the python fit tests (tests/recon_bench/test_recon.py) — the two
+// implementations must agree; any drift fails one side or the other.
+describe("fitSimilarity (parity with recon_bench fit_alignment)", () => {
+  const PTS = [
+    { x: 10, y: 10 },
+    { x: 50, y: 30 },
+    { x: 90, y: 50 },
+    { x: 30, y: 45 },
+  ];
+  const pairs = (t: (p: { x: number; y: number }) => { x: number; y: number }) =>
+    PTS.map((p) => [p, t(p)] as [typeof p, typeof p]);
+
+  it("recovers a pure translation", () => {
+    const a = fitSimilarity(pairs((p) => ({ x: p.x + 7, y: p.y - 3 })))!;
+    expect(a.flipX).toBe(false);
+    expect(a.scale).toBeCloseTo(1.0, 6);
+    expect(a.tx).toBeCloseTo(7);
+    expect(a.ty).toBeCloseTo(-3);
+    expect(a.residual).toBeCloseTo(0, 6);
+  });
+
+  it("recovers scale and the x-flip register", () => {
+    const s = fitSimilarity(pairs((p) => ({ x: 1.5 * p.x - 10, y: 1.5 * p.y + 5 })))!;
+    expect(s.scale).toBeCloseTo(1.5);
+    expect(s.flipX).toBe(false);
+    const f = fitSimilarity(pairs((p) => ({ x: 100 - p.x, y: p.y })))!;
+    expect(f.flipX).toBe(true);
+    expect(f.residual).toBeCloseTo(0, 6);
+  });
+
+  it("clamps scale to 2 (residual stays honest) and needs two pairs", () => {
+    const a = fitSimilarity(pairs((p) => ({ x: 5 * p.x, y: 5 * p.y })))!;
+    expect(a.scale).toBe(2.0);
+    expect(a.residual).toBeGreaterThan(0);
+    expect(fitSimilarity([[PTS[0]!, PTS[0]!]])).toBeNull();
+  });
+
+  it("applySimilarity round-trips a known fit", () => {
+    const out = applySimilarity(
+      { scale: 1.5, tx: -10, ty: 5, flipX: false, residual: 0, matched: 4 },
+      { x: 10, y: 10 },
+    );
+    expect(out.x).toBeCloseTo(5);
+    expect(out.y).toBeCloseTo(20);
   });
 });

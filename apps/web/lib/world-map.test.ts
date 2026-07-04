@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EntityGeoEdit, WorldEntityGeo } from "@openflipbook/config";
 
-import { __test, ladderDisagreement } from "./world-map";
+import { __test, ladderDisagreement, registerPlanToImage } from "./world-map";
 
 const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
   __test;
@@ -262,5 +262,74 @@ describe("ladderDisagreement (INV-4: one ladder)", () => {
   it("never fires when a rung is unknown (back-compat)", () => {
     expect(ladderDisagreement(null, "city", 99)).toBeNull();
     expect(ladderDisagreement("city", undefined, 99)).toBeNull();
+  });
+});
+
+describe("registerPlanToImage (plan plane → image register)", () => {
+  // Plan geos (solver output): geo_plan_* ids, no codex link. Image seeds:
+  // extraction-derived, entity-linked. Labels are the join key.
+  const plan = (ref: string, label: string, x: number, y: number): WorldEntityGeo => ({
+    ...geo(`geo_plan_${ref}`, "derived", x, y),
+    label,
+    entity_id: null,
+  });
+  const img = (id: string, label: string, x: number, y: number): WorldEntityGeo => ({
+    ...geo(id, "derived", x, y),
+    label,
+  });
+
+  it("registers an offset+scaled plan onto its label-matched seeds", () => {
+    // True transform: scale 1.5, translate (+10, +10). Two anchors + one
+    // unmatched plan entity that must ride along on the fitted transform.
+    const geos = [
+      plan("tower", "The Tower", 10, 10),
+      plan("harbor", "Harbor", 30, 20),
+      plan("wood", "Dark Wood", 50, 40),
+      img("geo_tower", "the tower", 25, 25),
+      img("geo_harbor", "The old Harbor docks", 55, 40), // fuzzy label match
+    ];
+    const reg = registerPlanToImage(geos, "t9")!;
+    expect(reg.fit.scale).toBeCloseTo(1.5);
+    expect(reg.fit.tx).toBeCloseTo(10);
+    expect(reg.fit.ty).toBeCloseTo(10);
+    expect(reg.fit.flipX).toBe(false);
+    expect(reg.fit.matched).toBe(2);
+    expect(reg.updated).toHaveLength(3); // ALL plans move, matched or not
+    const wood = reg.updated.find((g) => g.id === "geo_plan_wood")!;
+    expect(wood.pos.x).toBeCloseTo(85); // 1.5·50 + 10
+    expect(wood.pos.y).toBeCloseTo(70);
+    expect(wood.footprint.w).toBeCloseTo(9); // 6 × 1.5 — sizes scale too
+    expect(wood.height).toBeCloseTo(6); // 4 × 1.5
+    expect(wood.updated_at).toBe("t9");
+  });
+
+  it("null when fewer than 2 label matches (nothing to anchor)", () => {
+    expect(
+      registerPlanToImage(
+        [plan("a", "Tower", 10, 10), plan("b", "Harbor", 30, 20), img("geo_x", "Tower", 40, 40)],
+        "t",
+      ),
+    ).toBeNull();
+  });
+
+  it("null when already in register (idempotent write path)", () => {
+    expect(
+      registerPlanToImage(
+        [plan("a", "Tower", 10, 10), plan("b", "Harbor", 30, 20),
+         img("geo_a", "Tower", 10, 10), img("geo_b", "Harbor", 30, 20)],
+        "t",
+      ),
+    ).toBeNull();
+  });
+
+  it("null without plans, and unlinked map props are not anchors", () => {
+    expect(registerPlanToImage([img("geo_a", "Tower", 1, 1)], "t")).toBeNull();
+    const prop = { ...img("geo_p", "Tower", 40, 40), entity_id: null };
+    expect(
+      registerPlanToImage(
+        [plan("a", "Tower", 10, 10), plan("b", "Harbor", 30, 20), prop],
+        "t",
+      ),
+    ).toBeNull();
   });
 });

@@ -19,12 +19,15 @@ import { getDb, recordError } from "./db";
 import { envFlag } from "./env-flag";
 import { optimisticReplace } from "./optimistic-update";
 import {
+  applySimilarity,
   estimateGeoFromBBox,
+  fitSimilarity,
   localBounds,
   localExtent,
   mapPolygonToCrop,
   siblingsOf,
   toAbsoluteEntities,
+  type SimilarityFit,
 } from "./world-geometry";
 
 // Per-session geometric world map (entity coordinates). Mirrors the world_state
@@ -499,6 +502,71 @@ export async function deriveGeoFromExtraction(
     }
   }
   return upsertEntityGeos(sessionId, geos);
+}
+
+// ── Plan→image register (AUDIT_BOX §4, the tractable half of metric pose) ────
+
+/** Register the B1 authored plane onto the image register. The solver's
+ *  `geo_plan_*` entities and the extraction-seeded `geo_*` entities describe
+ *  the same places in two frames that historically never met — the plan
+ *  where the description put things, the seeds where the model painted them.
+ *  This fits a similarity (same math the recon bench proves recoverable:
+ *  fitSimilarity, scale-clamped + optional x-flip) from plan positions to
+ *  their label-matched image seeds and re-expresses ALL plan geos into the
+ *  image frame — the one frame every consumer (taps, rings, labels, bounds)
+ *  already reads. Pure; returns null when there is nothing to do:
+ *  no plan geos, fewer than 2 label matches, or the fit is already ≈identity
+ *  (a prior registration — keeps the write path idempotent). */
+export function registerPlanToImage(
+  geos: WorldEntityGeo[],
+  nowIso: string,
+): { updated: WorldEntityGeo[]; fit: SimilarityFit } | null {
+  const plans = geos.filter(
+    (g) => g.id.startsWith("geo_plan_") && (g.parent_id ?? null) === null,
+  );
+  if (plans.length === 0) return null;
+  const images = geos.filter(
+    (g) =>
+      !g.id.startsWith("geo_plan_") &&
+      (g.parent_id ?? null) === null &&
+      g.entity_id !== null,
+  );
+  if (images.length === 0) return null;
+  const norm = (s: string) => s.toLowerCase().trim();
+  const byLabel = new Map(images.map((g) => [norm(g.label), g]));
+  const pairs: [WorldVec2, WorldVec2][] = [];
+  for (const p of plans) {
+    const key = norm(p.label);
+    const hit =
+      byLabel.get(key) ??
+      images.find((g) => {
+        const k = norm(g.label);
+        return k.length > 0 && (k.includes(key) || key.includes(k));
+      });
+    if (hit) pairs.push([p.pos, hit.pos]);
+  }
+  const fit = fitSimilarity(pairs);
+  if (fit === null) return null;
+  // Already registered (or trivially in register): skip the churn.
+  if (
+    !fit.flipX &&
+    Math.abs(fit.scale - 1) < 0.02 &&
+    Math.abs(fit.tx) < 0.5 &&
+    Math.abs(fit.ty) < 0.5
+  ) {
+    return null;
+  }
+  const updated = plans.map((p) => ({
+    ...p,
+    pos: applySimilarity(fit, p.pos),
+    footprint: {
+      w: p.footprint.w * fit.scale,
+      d: p.footprint.d * fit.scale,
+    },
+    height: p.height * fit.scale,
+    updated_at: nowIso,
+  }));
+  return { updated, fit };
 }
 
 export const __test = {

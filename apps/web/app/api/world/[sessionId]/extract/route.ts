@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { markNodeGeoExtracted, recordError, updateNodeEstimatedView } from "@/lib/db";
 import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
-import { deriveGeoFromExtraction } from "@/lib/world-map";
+import {
+  deriveGeoFromExtraction,
+  getWorldMap,
+  registerPlanToImage,
+  upsertEntityGeos,
+} from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
@@ -180,6 +185,9 @@ export async function POST(req: Request, { params }: Params) {
     // seeding FAILED is left un-stamped and a later visit retries — instead of
     // locking in a half-seeded map that disagrees with the codex forever.
     let geoSeedOk = true;
+    // Additive response field: the plan→image register fit when one was
+    // applied this pass (observability for AUDIT_BOX §4's seeding half).
+    let planRegistration: Record<string, number | boolean> | null = null;
     // Geometric world (GEOMETRIC_WORLD): seed derived map coordinates from the
     // entities localized on this node — the world map populates for free. Default
     // scene_view = a top-down map so each bbox maps straight into a normalized
@@ -278,6 +286,32 @@ export async function POST(req: Request, { params }: Params) {
               null,
               upstreamView?.scale_tier,
             );
+            // Register the B1 authored plane onto the image register: the
+            // solver's geo_plan_* entities historically coexisted with the
+            // extraction seeds as two planes that never met (AUDIT_BOX §4).
+            // With ≥2 label matches, fit the similarity plan→image and move
+            // the plan geos into the frame every consumer already reads.
+            // Best-effort — a failure never blocks the extraction response.
+            try {
+              const snap = await getWorldMap(sessionId);
+              const reg = registerPlanToImage(
+                snap.entities,
+                new Date().toISOString(),
+              );
+              if (reg) {
+                await upsertEntityGeos(sessionId, reg.updated);
+                planRegistration = {
+                  scale: Number(reg.fit.scale.toFixed(3)),
+                  tx: Number(reg.fit.tx.toFixed(1)),
+                  ty: Number(reg.fit.ty.toFixed(1)),
+                  flip_x: reg.fit.flipX,
+                  residual: Number(reg.fit.residual.toFixed(2)),
+                  matched: reg.fit.matched,
+                };
+              }
+            } catch {
+              // registration is strictly additive polish
+            }
           }
         }
       } catch (err) {
@@ -329,6 +363,7 @@ export async function POST(req: Request, { params }: Params) {
         updated_entities: merged.updated_ids
           .map(projectName)
           .filter((e): e is EntityDigest => e !== null),
+        ...(planRegistration ? { plan_registration: planRegistration } : {}),
         trace_id: traceId,
       },
       { headers: { [TRACE_HEADER]: traceId } }
