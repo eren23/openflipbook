@@ -419,6 +419,72 @@ export function toAbsoluteEntities<
   });
 }
 
+export interface SimilarityFit {
+  scale: number;
+  tx: number;
+  ty: number;
+  flipX: boolean;
+  residual: number; // RMS distance after transform, frame units
+  matched: number;
+}
+
+// The seeded map frame is 100 wide (MAP_IMAGE_FRAME) — the x-flip candidate
+// mirrors over it. Local const to avoid a geo-tap import cycle; the python
+// twin (tests/recon_bench/_align.py FRAME_W) uses the same value.
+const _FIT_FRAME_W = 100;
+
+/** Least-squares uniform scale + translation over (from, to) point pairs;
+ *  tries the x-flipped register too and keeps the lower residual. Scale
+ *  clamped [0.5, 2]; null when < 2 pairs (nothing to anchor). TS port of
+ *  tests/recon_bench/_align.fit_alignment — keep the two in lockstep. */
+export function fitSimilarity(
+  pairs: [WorldVec2, WorldVec2][],
+): SimilarityFit | null {
+  if (pairs.length < 2) return null;
+  let best: SimilarityFit | null = null;
+  for (const flip of [false, true]) {
+    const src = pairs.map(([f]) => ({
+      x: flip ? _FIT_FRAME_W - f.x : f.x,
+      y: f.y,
+    }));
+    const dst = pairs.map(([, t]) => t);
+    const n = pairs.length;
+    const sx = src.reduce((a, p) => a + p.x, 0) / n;
+    const sy = src.reduce((a, p) => a + p.y, 0) / n;
+    const dx = dst.reduce((a, p) => a + p.x, 0) / n;
+    const dy = dst.reduce((a, p) => a + p.y, 0) / n;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (src[i]!.x - sx) * (dst[i]!.x - dx) + (src[i]!.y - sy) * (dst[i]!.y - dy);
+      den += (src[i]!.x - sx) ** 2 + (src[i]!.y - sy) ** 2;
+    }
+    let s = den > 1e-9 ? num / den : 1.0;
+    s = Math.max(0.5, Math.min(2.0, s));
+    const tx = dx - s * sx;
+    const ty = dy - s * sy;
+    let sq = 0;
+    for (let i = 0; i < n; i++) {
+      sq += (s * src[i]!.x + tx - dst[i]!.x) ** 2 + (s * src[i]!.y + ty - dst[i]!.y) ** 2;
+    }
+    const cand: SimilarityFit = {
+      scale: s,
+      tx,
+      ty,
+      flipX: flip,
+      residual: Math.sqrt(sq / n),
+      matched: n,
+    };
+    if (best === null || cand.residual < best.residual) best = cand;
+  }
+  return best;
+}
+
+export function applySimilarity(f: SimilarityFit, p: WorldVec2): WorldVec2 {
+  const x = f.flipX ? _FIT_FRAME_W - p.x : p.x;
+  return { x: f.scale * x + f.tx, y: f.scale * p.y + f.ty };
+}
+
 /** Axis-aligned bounds over entities' OWN pos+footprint (no parent resolve) —
  *  the LOCAL frame of a place's interior, where each child's pos is local. */
 export function localBounds<
