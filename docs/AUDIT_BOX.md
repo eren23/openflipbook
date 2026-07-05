@@ -9,18 +9,16 @@ Run the **SUSPECT THIS FIRST** list in `.cursor/rules/openflipbook.mdc`. Most "r
 across past sessions were env/.env traps (qwen 429, fal model pin, docker build-time vars),
 not code. Rule out env before touching code.
 
-## 1. On-ramp milestone  — priority: HIGH (only remaining roadmap milestone)
-**Goal:** make openflipbook approachable for a first-time user without changing anything for
-existing users.
-- Sane default flags for a fresh clone / `make demo` (what's ON by default, what stays OFF).
-- A guided first session (passive, additive — a coach hint, not a gate). Existing
-  `FirstRunCoach` is the hook; do not add interstitials.
-- BYO-keys story: tighten `docs/BYO-KEYS.md` + `.env.example` so a newcomer gets to a
-  generated page with the fewest steps.
-**Files:** `docs/BYO-KEYS.md`, `apps/modal-backend/.env.example`, `Makefile` (`demo`),
-`apps/web/components/PlayPage/FirstRunCoach.tsx`, README's "why this exists" paragraph.
-**Acceptance:** a clean machine reaches a first generated page following only the docs;
-existing flow byte-identical; voice stays chill/first-person.
+## 1. ✅ On-ramp milestone  — DONE (fresh-clone acceptance run passed 2026-07-05)
+The acceptance test ran for real: fresh `git clone` from GitHub into a clean dir, README
+quickstart verbatim (`cp .env.example .env` + the two keys, `make demo`), `/status` green,
+first generated page reached ("How A Watt Steam Engine Operates" — pixels verified, codex
+extracted 5 entities, first-run coach chip showed), one tap → a coherent step-2 page in the
+same style. Coach shipped earlier (#100), sane defaults + `make demo-world` (#121).
+The run's one product find: the web Dockerfile never copied `public/` into the standalone
+runner, so `theme-init.js`/`og.png` 404'd on every docker-stack load (console error on a
+newcomer's first page) — fixed alongside the doc pass (Postgres→Mongo, `pip install modal`,
+table un-split, stale click-bench/step-8 futures).
 
 ## 2. ✅ Wire `expected_layout` → render  — DONE (the doc lagged the code)
 `projectScene`/`projectTopDown` (web `lib/world-geometry.ts`) ride

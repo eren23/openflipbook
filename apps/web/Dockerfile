@@ -47,6 +47,9 @@ RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/static ./apps/web/.next/static
+# Next standalone does NOT bundle public/ — without this copy every static
+# asset (theme-init.js, og.png, demo media) 404s on the docker stack.
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/public ./apps/web/public
 USER nextjs
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
