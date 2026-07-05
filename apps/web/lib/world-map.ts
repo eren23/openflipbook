@@ -533,17 +533,51 @@ export function registerPlanToImage(
   );
   if (images.length === 0) return null;
   const norm = (s: string) => s.toLowerCase().trim();
-  const byLabel = new Map(images.map((g) => [norm(g.label), g]));
-  const pairs: [WorldVec2, WorldVec2][] = [];
+  // The painter RENAMES features (live case, 2026-07-05 fishing village:
+  // plan "White Lighthouse" painted as "North Point Lighthouse", "Wooden
+  // Harbor" as "Old Harbor Piers") — exact/substring matching alone found 1
+  // anchor out of 5 and the registration never fired. So the tiers are:
+  // exact > substring > shared significant tokens (stop-worded, s-stemmed:
+  // "lighthouse"/"harbor"/"pine" anchor; "north"/"old"/"white" don't),
+  // greedily assigned unique on both sides.
+  const GENERIC = new Set([
+    "the", "and", "old", "new", "big", "small", "great", "little",
+    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
+    "central", "grand", "dark", "white", "black", "red", "blue", "green",
+    "golden", "silver", "point", "side", "shore", "ridge", "district",
+  ]);
+  const sig = (s: string) =>
+    new Set(
+      norm(s)
+        .split(/[^a-z0-9]+/)
+        .map((t) => t.replace(/s$/, ""))
+        .filter((t) => t.length > 2 && !GENERIC.has(t)),
+    );
+  const candidates: { p: WorldEntityGeo; g: WorldEntityGeo; score: number }[] =
+    [];
   for (const p of plans) {
-    const key = norm(p.label);
-    const hit =
-      byLabel.get(key) ??
-      images.find((g) => {
-        const k = norm(g.label);
-        return k.length > 0 && (k.includes(key) || key.includes(k));
-      });
-    if (hit) pairs.push([p.pos, hit.pos]);
+    const a = norm(p.label);
+    if (!a) continue;
+    const ta = sig(a);
+    for (const g of images) {
+      const b = norm(g.label);
+      if (!b) continue;
+      let score = 0;
+      if (a === b) score = Infinity;
+      else if (a.includes(b) || b.includes(a)) score = 100;
+      else for (const t of ta) if (sig(b).has(t)) score++;
+      if (score > 0) candidates.push({ p, g, score });
+    }
+  }
+  candidates.sort((x, y) => y.score - x.score);
+  const usedP = new Set<string>();
+  const usedG = new Set<string>();
+  const pairs: [WorldVec2, WorldVec2][] = [];
+  for (const c of candidates) {
+    if (usedP.has(c.p.id) || usedG.has(c.g.id)) continue;
+    usedP.add(c.p.id);
+    usedG.add(c.g.id);
+    pairs.push([c.p.pos, c.g.pos]);
   }
   const fit = fitSimilarity(pairs);
   if (fit === null) return null;
