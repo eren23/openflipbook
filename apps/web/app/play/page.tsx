@@ -3238,10 +3238,15 @@ export default function PlayPage() {
               type="button"
               onClick={() => setWorldEnabled(false)}
               title="World Mode is ON — a tap ENTERS the tapped place (classic explore explains it instead). Click to switch back."
+              aria-label="World Mode is on — tap enters places. Switch back to classic explore."
+              // Icon-only below sm: at ≤390px the full-text pill (~187px) sat
+              // UNDER the top-right toolbar and its z-10 stole clicks from
+              // Around/⊞ geo (UI_AUDIT #13; #131 wrapped the toolbar but not
+              // this collision). Desktop keeps the label (sm:inline) → identical.
               className="pointer-events-auto absolute start-3 top-3 z-10 flex select-none items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-50/85 px-2.5 py-1 text-xs font-medium text-emerald-900 backdrop-blur transition hover:bg-emerald-100"
             >
               <span aria-hidden>🌍</span>
-              <span>World — tap enters places</span>
+              <span className="hidden sm:inline">World — tap enters places</span>
             </button>
           )}
           <div className="relative aspect-[16/9] w-full">
@@ -3543,8 +3548,10 @@ export default function PlayPage() {
             {/* Capped + wrapping: at ≤390px this row is wider than the frame
                 and used to hang off BOTH edges — Around/⊞ geo were fully
                 off-screen and untappable (UI_AUDIT #13). Right-anchored with
-                intrinsic width, so desktop renders identically. */}
-            <div className="absolute right-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
+                intrinsic width, so desktop renders identically. z-10 matches
+                the World pill so, on any residual overlap at narrow widths,
+                this later-in-DOM toolbar wins the stack and stays tappable. */}
+            <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={triggerExpand}
