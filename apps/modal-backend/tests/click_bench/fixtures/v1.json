@@ -169,6 +169,66 @@
       "notes": "masted ships moored in the harbour basin"
     },
     {
+      "case_id": "harbor_sea_rocks",
+      "image_path": "images/real/harbor_aethelgard.jpg",
+      "x_pct": 0.085,
+      "y_pct": 0.825,
+      "parent_title": "The Bustling Fantasy Harbor of Aethelgard",
+      "parent_query": "a fantasy harbor town seen from above",
+      "expected_subject": "sea rocks",
+      "alternates": ["The Western Sea-Spray Rocks", "crystal rocks", "the rocks", "rocky shore", "reef"],
+      "groundable": true,
+      "notes": "glowing crystal rocks in the water, lower-left"
+    },
+    {
+      "case_id": "harbor_mana_crystal",
+      "image_path": "images/real/harbor_aethelgard.jpg",
+      "x_pct": 0.138,
+      "y_pct": 0.155,
+      "parent_title": "The Bustling Fantasy Harbor of Aethelgard",
+      "parent_query": "a fantasy harbor town seen from above",
+      "expected_subject": "floating crystal",
+      "alternates": ["The Floating Mana Crystal", "glowing crystal", "the crystal", "magic crystal"],
+      "groundable": true,
+      "notes": "glowing crystal floating above the lighthouse spire"
+    },
+    {
+      "case_id": "harbor_channel",
+      "image_path": "images/real/harbor_aethelgard.jpg",
+      "x_pct": 0.355,
+      "y_pct": 0.685,
+      "parent_title": "The Bustling Fantasy Harbor of Aethelgard",
+      "parent_query": "a fantasy harbor town seen from above",
+      "expected_subject": "harbor channel",
+      "alternates": ["The Harbor Entrance Channel", "harbor entrance", "the channel", "harbor water", "the harbor", "water"],
+      "groundable": true,
+      "notes": "open water at the harbour mouth between the piers — a hard 'named water' tap"
+    },
+    {
+      "case_id": "oasis_merchant_row",
+      "image_path": "images/real/oasis_town.jpg",
+      "x_pct": 0.496,
+      "y_pct": 0.584,
+      "parent_title": "Desert Oasis Town",
+      "parent_query": "a desert oasis town with a caravan bazaar at the heart",
+      "expected_subject": "buildings",
+      "alternates": ["Merchant's Row", "shops", "houses", "market street", "town buildings", "the stalls"],
+      "groundable": true,
+      "notes": "row of urban buildings west of the bazaar, labelled \"Merchant's Row\""
+    },
+    {
+      "case_id": "fishing_basin",
+      "image_path": "images/real/fishing_village.jpg",
+      "x_pct": 0.688,
+      "y_pct": 0.638,
+      "parent_title": "Crescent Bay Fishing Village",
+      "parent_query": "a fishing village on a crescent bay",
+      "expected_subject": "bay",
+      "alternates": ["Crescent Basin", "the basin", "the bay", "harbor water", "water", "the sea"],
+      "groundable": true,
+      "notes": "tap lands on the 'Crescent Basin' label over the open bay water"
+    },
+    {
       "case_id": "oasis_blank_bottomleft",
       "image_path": "images/real/oasis_town.jpg",
       "x_pct": 0.13,

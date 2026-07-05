@@ -301,6 +301,64 @@ def test_render_markdown_tolerates_missing_metrics() -> None:
     assert "broken" in md
 
 
+# ---------- multi-run aggregation (denoise, pure) -----------------------
+
+
+def test_aggregate_summaries_means_and_stdev() -> None:
+    runs = [
+        {"n": 15, "subject_pass_rate": 0.80, "composite_mean": 0.70, "latency_p50_ms": 100.0},
+        {"n": 15, "subject_pass_rate": 0.90, "composite_mean": 0.80, "latency_p50_ms": 200.0},
+    ]
+    agg = leaderboard.aggregate_summaries(runs)
+    assert agg["runs"] == 2
+    assert agg["n"] == 15  # counts carried, not averaged
+    assert agg["subject_pass_rate"] == pytest.approx(0.85)
+    assert agg["composite_mean"] == pytest.approx(0.75)
+    # sample stdev of {0.8, 0.9} = 0.0707…
+    assert agg["std"]["subject_pass_rate"] == pytest.approx(0.0707, abs=1e-3)
+    assert agg["std"]["latency_p50_ms"] == pytest.approx(70.71, abs=1e-2)
+
+
+def test_aggregate_summaries_single_run_zero_std() -> None:
+    agg = leaderboard.aggregate_summaries([{"n": 5, "subject_pass_rate": 0.6}])
+    assert agg["runs"] == 1
+    assert agg["subject_pass_rate"] == pytest.approx(0.6)
+    assert agg["std"]["subject_pass_rate"] == 0.0
+    assert leaderboard.aggregate_summaries([]) == {"runs": 0}
+
+
+def test_aggregate_summaries_skips_absent_metric() -> None:
+    # gemini-2.5-pro-style: some runs error and omit a metric entirely.
+    runs = [
+        {"n": 3, "subject_pass_rate": 0.5, "rejection_recall": 0.4},
+        {"n": 3, "subject_pass_rate": 0.7},  # no rejection_recall this run
+    ]
+    agg = leaderboard.aggregate_summaries(runs)
+    assert agg["subject_pass_rate"] == pytest.approx(0.6)
+    # single present value → mean of it, std 0 (not a crash)
+    assert agg["rejection_recall"] == pytest.approx(0.4)
+    assert agg["std"]["rejection_recall"] == 0.0
+
+
+def test_render_markdown_shows_pm_when_std_present() -> None:
+    agg = leaderboard.aggregate_summaries(
+        [
+            {"n": 15, "subject_pass_rate": 0.80, "composite_mean": 0.70},
+            {"n": 15, "subject_pass_rate": 0.90, "composite_mean": 0.80},
+        ]
+    )
+    md = leaderboard.render_markdown([{"model": "m", "summary": agg}])
+    assert "±" in md  # variance surfaced for a multi-run row
+
+
+def test_render_markdown_single_run_has_no_pm() -> None:
+    # Byte-compat: a plain single-run summary (no `std`) renders without ±.
+    md = leaderboard.render_markdown(
+        [_row("m", n=15, subject_pass_rate=0.8, composite_mean=0.7)]
+    )
+    assert "±" not in md
+
+
 # ---------- synthetic smoke fixtures ------------------------------------
 
 

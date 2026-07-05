@@ -33,18 +33,21 @@ OPENROUTER_API_KEY=... .venv/bin/python -m tests.click_bench.runner \
   --out tests/click_bench/reports/latest.json
 ```
 
-Multi-model leaderboard (the "which VLM should I use" table):
+Multi-model leaderboard (the "which VLM should I use" table). `--runs N`
+repeats each model N times and reports **mean ± stdev** — VLM click resolution
+is non-deterministic, so a single run can't rank models that sit close together:
 
 ```bash
 OPENROUTER_API_KEY=... .venv/bin/python -m tests.click_bench.leaderboard \
-  --fixtures tests/click_bench/fixtures/synthetic.json \
-  --models google/gemini-3-flash-preview,qwen/qwen3-vl-8b-instruct,openai/gpt-4o \
+  --fixtures tests/click_bench/fixtures/v1.json \
+  --runs 3 \
+  --models google/gemini-3-flash-preview,openai/gpt-4o,openai/gpt-4o-mini,qwen/qwen3-vl-8b-instruct \
   --out tests/click_bench/reports/leaderboard.md
 ```
 
-Both hit a real VLM (one call per case per model), so they need a key and are
-never run by the default `pytest`. With the multi-provider change you can bench
-a local model too — set `LLM_PROVIDER=custom` + `LLM_BASE_URL` first.
+Both hit a real VLM (one call per case per model per run), so they need a key and
+are never run by the default `pytest`. With the multi-provider change you can
+bench a local model too — set `LLM_PROVIDER=custom` + `LLM_BASE_URL` first.
 
 ## Fixtures
 
@@ -52,55 +55,58 @@ a local model too — set `LLM_PROVIDER=custom` + `LLM_BASE_URL` first.
   `_gen_synthetic.py`. They make the bench runnable from a cold start; they are
   **not** a real signal. Regenerate with
   `python -m tests.click_bench._gen_synthetic`.
-- `fixtures/v1.json` — **real illustrations**: 15 cases over three generated
-  fantasy maps from live sessions (`images/real/`), 12 groundable taps + 3
+- `fixtures/v1.json` — **real illustrations**: 20 cases over three generated
+  fantasy maps from live sessions (`images/real/`), 17 groundable taps + 3
   blank-parchment rejection cases. Tap points are detector-verified entity
   centroids, each eyeballed against the rendered map (several maps print the
   feature name in-image, so ground truth is human-checkable). See
   `_meta.how_to_add_cases` to extend it.
 
-## Latest leaderboard (2026-07-05, `fixtures/v1.json`, 15 cases)
+## Latest leaderboard (2026-07-05, `fixtures/v1.json`, 20 cases, **3 runs, mean±stdev**)
 
 Reports land in the gitignored `reports/`; this snapshot is the durable record.
-Single run per model — treat as **indicative, not definitive** (see caveat).
+Run cost: ~$0.71 for this 3-run × 4-model × 20-case pass. gemini-2.5-pro is
+excluded — an earlier run established it echoes the page title verbatim on every
+tap (0% pass, stable); running it three more times is wasted spend.
 
 | Model | Subject pass | Composite | Rejection recall | Groundable acc | p50 ms | ~$/tap |
 | --- | --- | --- | --- | --- | --- | --- |
-| google/gemini-3-flash-preview | 92% | 0.856 | 67% | 93% | 5372 | $0.0010 |
-| openai/gpt-4o-mini | 92% | 0.857 | 0% | 80% | 4339 | $0.0057 |
-| qwen/qwen3-vl-8b-instruct | 92% | 0.814 | 0% | 80% | 3495 | $0.0003 |
-| openai/gpt-4o | 83% | 0.775 | 0% | 80% | 6572 | $0.0047 |
-| google/gemini-2.5-pro | 0% | 0.223 | 0% | 80% | 7305 | $0.0037 |
+| openai/gpt-4o-mini | 78% ±3 | 0.749 ±0.026 | 0% | 85% | 4745 | $0.0057 |
+| google/gemini-3-flash-preview | 76% ±0 | 0.757 ±0.006 | 44% ±19 | 92% ±3 | 4530 | $0.0010 |
+| openai/gpt-4o | 75% ±3 | 0.752 ±0.025 | 0% | 85% | 5451 | $0.0047 |
+| qwen/qwen3-vl-8b-instruct | 73% ±3 | 0.697 ±0.029 | 0% | 85% | 2588 | $0.0003 |
 
 `~$/tap` = avg prompt tokens (incl. the image) × input price + ~60 output ×
 output price, at early-2026 OpenRouter rates.
 
-**What holds across runs (real signal):**
+**What the denoised run shows:**
 
-- **The top four cluster within noise.** gemini-3-flash, gpt-4o-mini, qwen3-vl-8b
-  and gpt-4o all land ~0.78–0.86 composite / 83–92% pass. Which one tops the
-  table flips between runs (an earlier run on the same fixtures had gpt-4o at 92%
-  and gemini-flash at 75%) — 15 cases × single run can't separate them. Don't
-  read the #1 row as a winner.
-- **A small open model holds up.** `qwen3-vl-8b-instruct` grounds as well as the
-  frontier models here and is **20× cheaper** than gpt-4o-mini per tap. For the
-  default click path it's a serious option — the README's central "does a small
-  VLM ground a tap" question answers *yes* on these maps.
-- **gemini-2.5-pro doesn't ground — it echoes the page title.** 0% pass, and its
-  prediction for every tap is the parent map's title verbatim ("Crescent Bay
-  Fishing Village"). A stable, reproducible failure mode; do not use it here.
-- **Almost nothing rejects a blank tap.** Rejection recall is 0% for four of five
-  models — tap empty parchment and the resolver confabulates a nearby named
-  feature instead of flagging `groundable=false`. Only gemini-flash rejects
-  (33–67% across runs). The groundability gate is the weakest link the product
-  rides on, and this bench now measures it.
+- **The four grounders are statistically tied on subject accuracy.** 73–78% pass
+  / 0.70–0.76 composite, all with overlapping ±stdev. Three runs confirm what a
+  single run couldn't: there is no meaningful gap between gpt-4o-mini, gemini-3-flash
+  and gpt-4o at grounding a tap on these maps. Don't read the #1 row as a winner.
+- **gemini-3-flash wins on *reliability*, not raw pass.** Identical subject-pass on
+  all three runs (±0), tightest composite (±0.006), the best groundable-accuracy
+  (92%), and the **only model that rejects a blank tap at all** (44% vs 0%). For a
+  click path where a wrong-but-confident subject spawns a garbage page, "stable +
+  knows when it's lost" beats a point of raw accuracy.
+- **A small open model holds up.** `qwen3-vl-8b-instruct` is within a few points of
+  the frontier and **20× cheaper per tap** than gpt-4o-mini, at the lowest latency
+  (2.6s). A serious default-click candidate — the bench's central "does a small VLM
+  ground a tap" question answers *yes*.
+- **Nothing rejects a blank tap except gemini-flash.** Rejection recall is 0% for
+  three of four models across all runs — tap empty parchment and the resolver
+  confabulates a nearby named feature instead of flagging `groundable=false`. The
+  groundability gate is the product's weakest link, now measured.
 - **gpt-4o-mini is secretly the costliest.** It bills ~37k tokens per tap — OpenAI
   mini models apply a ~33× image-token multiplier — versus ~1.7k for every other
   model. Despite the cheapest per-token price it lands at ~$0.0057/tap, pricier
   than full gpt-4o. Cheapest-looking ≠ cheapest on images.
 
-**Caveat:** VLM click resolution is non-deterministic and the set is small (15).
-For a ranking you'd act on, grow the fixtures and average ≥3 runs per model.
+**Still small (20 cases).** Three runs pin the variance (the ± columns), so the
+"they're tied" conclusion is trustworthy; a *finer* ranking would need more cases,
+not more runs. The five new v1 cases deliberately include hard "named water" taps
+(harbor channel, crescent basin) that pulled every model down from the 15-case set.
 
 ## Not covered yet
 
