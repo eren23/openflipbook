@@ -23,9 +23,9 @@ Endless Canvas has no hosted backend. To deploy to Modal + R2 yourself you need 
 
 1. **OpenRouter API key** — planning + VLM click interpretation + web search.
 2. **fal API key** — image generation (nano-banana).
-3. **Modal account + token** — hosts the orchestration FastAPI app (and, once step 8 lands, the LTX-2 video worker).
+3. **Modal account + token** — hosts the orchestration FastAPI app (and, optionally, the LTX streaming-video worker `ltx_stream.py`).
 4. **Cloudflare R2 bucket** — blob storage for generated images.
-5. **Postgres database** — metadata for the node graph. Any Postgres works (Railway, Neon, Supabase, local).
+5. **MongoDB database** — the node graph + world state. Railway's one-click Mongo or Atlas M0 (free) both work.
 
 Optional for v1:
 
@@ -37,12 +37,12 @@ Optional for v1:
 |---|---|---|
 | OpenRouter | <https://openrouter.ai/keys> | `OPENROUTER_API_KEY` |
 | fal | <https://fal.ai/dashboard/keys> | `FAL_KEY` |
-| Modal | `brew install modal-cli && modal token new` | (stored on disk) |
+| Modal | `pip install modal && modal token new` | (stored on disk) |
 | Cloudflare R2 | Cloudflare dash → R2 → Manage tokens. Needs *Object Read & Write*. | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 | R2 public URL | Enable the R2 bucket's public dev URL, or attach a custom domain. | `R2_PUBLIC_BASE_URL` |
+| MongoDB | Railway → Add MongoDB (or Atlas M0 free). | `MONGODB_URI`, `MONGODB_DB` |
 
 > **Enable CORS on the R2 bucket** (Cloudflare dash → R2 → bucket → Settings → CORS) with `AllowedOrigins` = your web origin and `AllowedMethods: [GET]`. Image conditioning crops the parent on a canvas client-side; without CORS the cross-origin image taints the canvas and the "from corners" region crop silently falls back to whole-parent conditioning. Minio (the `make demo` stack) sends CORS by default, so this only applies to the hosted R2 path.
-| MongoDB | Railway → Add MongoDB (or Atlas M0 free). | `MONGODB_URI`, `MONGODB_DB` |
 
 ## 2. Set Modal secrets
 
@@ -143,8 +143,9 @@ right subject, and small local VLMs are weak at structured output. The backend
 detects this and walks a fallback ladder — `json_object` → forced tool-call →
 prompt-with-repair — so a weak model degrades to *thinner but valid* grounding
 instead of crashing. It does **not** make a 7B model ground like Gemini. Want to
-know which models actually hold up? That's what the click-bench (next milestone)
-is for. If your model supports JSON mode but isn't auto-detected, pin it with
+know which models actually hold up? Run the click-bench
+(`tests/click_bench/` — `leaderboard.py` compares models on your own key). If
+your model supports JSON mode but isn't auto-detected, pin it with
 `LLM_STRUCTURED_OUTPUT=json_object`.
 
 Web search is OpenRouter-only; it's skipped on direct/local providers (the
@@ -167,6 +168,9 @@ cost/lock-in lever — but image quality varies a lot by model.
 
 Expected cost per "page explored": ~$0.02–0.03 of mixed spend, mostly fal.
 
-## Future: live video toggle (step 8)
+## Optional: live video streaming
 
-Will add a second Modal app (`ltx_stream.py`) deploying a GPU class. Costs jump to ~$2–4/GPU-hr while actively streaming — that's why it's a per-page toggle, and why the demo site only shows a prerecorded clip.
+`modal deploy ltx_stream.py` deploys the GPU streaming worker; put its WS URL in
+`NEXT_PUBLIC_LTX_WS_URL` (step 4). Costs jump to ~$2–4/GPU-hr while actively
+streaming — that's why it's a per-page toggle and the default animate path is the
+cheap one-shot fal clip instead.
