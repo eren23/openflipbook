@@ -67,7 +67,11 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     region = _region_crop(parent_bytes, chain["anchor"])
     region_url = image_provider.encode_data_url(region)
     label = chain["label"]
-    base = f"A closer, interior view of {label}, a place within the parent map."
+    # Default "interior" enters the place; a chain can set view="exterior" for a
+    # closer OUTSIDE view — the shape that measures place_lift when the parent
+    # already draws a distinctive exterior (tests/map_corpus/chains.py docs).
+    view = chain.get("view", "interior")
+    base = f"A closer, {view} view of {label}, a place within the parent map."
     preamble = image_provider.conditioning_preamble(["region"], "place_scene")
     model = _model()
 

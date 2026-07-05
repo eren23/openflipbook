@@ -5,6 +5,31 @@ spot, generate an "enter" view, and score it against the REAL child image.
 The link lives on the child's MANIFEST row (parent_id + parent_ref) — the child
 needs no description of its own; its ground truth is the photo. The parent must
 have a (verified) corpus description so parent_ref resolves to a position.
+
+Sourcing a chain that actually MEASURES place_lift (learned the hard way):
+
+  1. The parent must depict the child's SPECIFIC identity, not a generic icon.
+     The seeded manor::church -> Chester nave chain scores place_lift=0 because a
+     village-map church glyph carries no Chester-specific identity to transfer —
+     continuity_with (footprint) is 9, but there is nothing to *place*-match.
+
+  2. Mind the exterior/interior gap. The descent prompt generates a *closer view*
+     of the place; by default that view is "interior". A map crop shows a
+     building's EXTERIOR, so it can only transfer identity the interior shares —
+     a distinctive DOME, a footprint, a silhouette. A plain facade -> an
+     arbitrary hall will not move place_lift (both the conditioned and baseline
+     gens guess a generic interior). Two chain shapes DO measure:
+       (a) interior-predictive: a distinctive exterior that defines the inside
+           (a domed rotunda on the map -> its domed reading room), or
+       (b) exterior-closeup: set the child row's `view: "exterior"` and pair a
+           map building with an exterior closeup of the SAME building — a
+           distinctive silhouette transfers and place_lift becomes measurable.
+
+  3. Prefer same-medium pairs, or lean on score_place_match (medium-agnostic):
+     an illustrated parent -> a photographed child is fine for place_lift (it
+     ignores medium) but sinks style_lift, which stays a secondary signal.
+
+  Row shape for a chain child: {..., parent_id, parent_ref, view?: "interior"}.
 """
 from __future__ import annotations
 
@@ -47,6 +72,10 @@ def descent_chains(
                 "parent_filename": parent_row["filename"],
                 "label": anchor["label"],
                 "anchor": anchor,
+                # "interior" (default) enters the place; "exterior" generates a
+                # closer OUTSIDE view — the shape that measures place_lift when
+                # the map already draws a distinctive exterior (see module docs).
+                "view": str(row.get("view", "interior")),
             }
         )
     return out

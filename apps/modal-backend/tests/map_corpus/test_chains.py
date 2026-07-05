@@ -43,3 +43,18 @@ def test_descent_chains_resolves_linked_rows_only() -> None:
     assert c["parent_filename"] == "manor.jpg"
     assert c["label"] == "Church"
     assert c["anchor"]["pos"] == {"x": 52.1, "y": 35.5}
+    assert c["view"] == "interior"  # default when the row omits it
+
+
+def test_descent_chains_honours_exterior_view() -> None:
+    # A chain child can opt into a closer EXTERIOR view (place_lift measurable
+    # for map-drawn distinctive buildings) via `view` on its row.
+    manifest = [
+        {"id": "manor", "filename": "manor.jpg", "tier": "map"},
+        {
+            "id": "mill-close", "filename": "mill.jpg", "tier": "closeup",
+            "parent_id": "manor", "parent_ref": "mill", "view": "exterior",
+        },
+    ]
+    chains = descent_chains(manifest, {"manor": _parent()})
+    assert len(chains) == 1 and chains[0]["view"] == "exterior"
