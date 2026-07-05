@@ -303,6 +303,35 @@ describe("registerPlanToImage (plan plane → image register)", () => {
     expect(wood.updated_at).toBe("t9");
   });
 
+  it("anchors renamed painted labels via shared tokens (live fishing-village fixture)", () => {
+    // Verbatim from the 2026-07-05 live run (session_1abbb3ba…): the painter
+    // renamed every plan feature, substring matching found only Market Square
+    // (1 anchor < 2), and the registration silently never fired.
+    const geos = [
+      plan("crescent_bay", "Crescent Bay", 50, 30),
+      plan("market_square", "Market Square", 50, 38),
+      plan("pine_forest", "Dark Pine Forest", 42, 38),
+      plan("white_lighthouse", "White Lighthouse", 42, 30),
+      plan("wooden_harbor", "Wooden Harbor", 58, 30),
+      img("geo_a", "North Point Lighthouse", 55.7, 11.52),
+      img("geo_b", "Old Harbor Piers", 85.4, 11.34),
+      img("geo_c", "Central Market Square", 41.4, 35.64),
+      img("geo_d", "Whispering Pines Ridge", 10.6, 37.86),
+      img("geo_e", "Crescent Basin", 68.8, 38.28),
+      img("geo_f", "Fisherman's Wharf", 89.4, 48.36),
+    ];
+    const reg = registerPlanToImage(geos, "t9")!;
+    expect(reg).not.toBeNull();
+    // lighthouse/harbor/pine/crescent anchor through token overlap; the
+    // generic halves (north/old/white/dark/ridge) don't create false pairs.
+    expect(reg.fit.matched).toBeGreaterThanOrEqual(4);
+    // The painted spread is much wider than the solver cluster — the fit
+    // must scale UP, and every plan (matched or not) rides the transform.
+    expect(reg.fit.scale).toBeGreaterThan(1);
+    expect(reg.updated).toHaveLength(5);
+    expect(reg.updated.every((g) => g.updated_at === "t9")).toBe(true);
+  });
+
   it("null when fewer than 2 label matches (nothing to anchor)", () => {
     expect(
       registerPlanToImage(
