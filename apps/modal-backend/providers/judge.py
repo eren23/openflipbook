@@ -47,7 +47,7 @@ def _image_block(image_bytes: bytes) -> dict[str, object]:
 def _parse_judgement(raw: str) -> JudgeResult:
     cleaned = raw.strip()
     match = _SCORE_RE.search(cleaned)
-    score = float(match.group(1)) if match else 0.0
+    score = float(match.group(1)) if match else None
     rationale = ""
     try:
         parsed = json.loads(cleaned[cleaned.find("{") : cleaned.rfind("}") + 1])
@@ -59,7 +59,31 @@ def _parse_judgement(raw: str) -> JudgeResult:
         if "score" in parsed:
             score = float(parsed["score"])
     except Exception:
-        rationale = cleaned[:300]
+        # Truncated/reasoning-preambled reply (gemini-3-flash prepends a "thought"
+        # then a JSON that max_tokens cuts off — the boxes-bug class). Walk the
+        # partial with the shared salvage decoder before giving up.
+        from providers.llm.client import salvage_json
+
+        salvaged, _ = salvage_json(cleaned)
+        if isinstance(salvaged, dict):
+            rationale = str(salvaged.get("rationale", ""))[:300]
+            if "score" in salvaged:
+                score = float(salvaged["score"])
+        if not rationale:
+            rationale = cleaned[:300]
+    if score is None:
+        # LOUD, not silent: a judge that can't produce a score used to default to
+        # 0.0 and read as "totally unlike" — corrupting every recon/descent cell
+        # it touched. Surface it so a broken judge call can't hide as a real 0.
+        from obs import log
+
+        log(
+            "warn",
+            "judge.unparseable",
+            raw_head=cleaned[:120],
+            model=_judge_model(),
+        )
+        return JudgeResult(score=0.0, rationale=f"UNPARSEABLE: {cleaned[:200]}", raw=cleaned[:500])
     return JudgeResult(score=score, rationale=rationale, raw=cleaned[:500])
 
 
@@ -69,8 +93,16 @@ async def _ask_judge(
     from providers import llm
 
     client = llm._client()
+    # Suppress the reasoning preamble: gemini-3-flash (the default judge) prepends
+    # a "thought" before the JSON on hard comparisons, which then blows the token
+    # budget and truncates the score — a silent 0. Forcing JSON-only keeps the
+    # content parseable; the bumped budget is headroom for the rationale.
+    system_json_only = (
+        system + " Respond with ONLY the JSON object and nothing else — "
+        "no reasoning, no preamble, no markdown fences."
+    )
     messages: list[Any] = [
-        {"role": "system", "content": system},
+        {"role": "system", "content": system_json_only},
         {
             "role": "user",
             "content": [{"type": "text", "text": user_text}, *image_blocks],
@@ -80,7 +112,7 @@ async def _ask_judge(
         model=_judge_model(),
         messages=messages,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=400,
     )
     raw = response.choices[0].message.content or ""
     return _parse_judgement(raw)
