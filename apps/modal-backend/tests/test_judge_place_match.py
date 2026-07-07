@@ -49,3 +49,39 @@ async def test_score_place_match_is_medium_agnostic_and_passes_both_images(
     b64 = base64.b64encode(b"GENERATED-DESCENT").decode("ascii")
     assert a64 in blocks[0]["image_url"]["url"]
     assert b64 in blocks[1]["image_url"]["url"]
+
+
+# --- _parse_judgement robustness (the silent-zero bug, pure) ---------------
+#
+# gemini-3-flash (the default judge) prepends a "thought" reasoning preamble on
+# hard comparisons; max_tokens then truncates the JSON before the score. The old
+# parser defaulted a truncated/absent score to 0.0 — reading as "totally unlike"
+# and corrupting every recon/descent cell it touched. Fixes: a legit 0 stays 0,
+# a truncated reply is marked UNPARSEABLE (loud, not a silent real 0), and a
+# reasoning-preambled-then-JSON reply is salvaged.
+
+
+def test_parse_clean_json() -> None:
+    r = judge._parse_judgement('{"score": 8, "rationale": "same tower"}')
+    assert r.score == 8.0 and r.rationale == "same tower"
+
+
+def test_parse_legit_zero_is_preserved() -> None:
+    # A real "unrelated place" 0 must survive — not be confused with a failure.
+    r = judge._parse_judgement('{"score": 0, "rationale": "unrelated"}')
+    assert r.score == 0.0
+    assert r.rationale == "unrelated"
+    assert "UNPARSEABLE" not in r.rationale
+
+
+def test_parse_truncated_thought_is_loud_not_silent_zero() -> None:
+    # The exact wild failure: reasoning preamble + JSON cut off before the number.
+    r = judge._parse_judgement('thought\n{"score":')
+    assert r.score == 0.0  # can't recover a score
+    assert r.rationale.startswith("UNPARSEABLE")  # but it says so, loudly
+
+
+def test_parse_salvages_reasoning_preamble_then_json() -> None:
+    # A preamble followed by a COMPLETE json object → salvage recovers the score.
+    r = judge._parse_judgement('Let me think. The dome matches.\n{"score": 9, "rationale": "dome"}')
+    assert r.score == 9.0
