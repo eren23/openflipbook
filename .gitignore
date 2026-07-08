@@ -55,6 +55,7 @@ scripts/ux-bench/reports/
 scripts/record-demo/*.mp4
 scripts/record-demo/*.webm
 scripts/record-demo/geo-storyboard.png
+scripts/record-demo/studies/
 
 # Vitest coverage HTML/json output.
 apps/web/coverage/
