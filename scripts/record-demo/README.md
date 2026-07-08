@@ -35,3 +35,34 @@ pnpm start              # runs record.ts
 - If fal / OpenRouter calls take longer than 90 s per hop, bump the `*_TIMEOUT_MS` constants in `record.ts`.
 - If the MP4 comes out over ~8 MB, increase the `-crf` argument (24 → 26) in `record.ts`.
 - To skip the speedup and preserve real-time cadence, set `SPEEDUP_PTS` to `1` in `record.ts`.
+
+## Feature studies (`record-features.ts`)
+
+A config-driven sibling recorder: one **study** per shipped feature, each a
+self-contained walkthrough that drives the real app (real mouse, real
+generations) and sequences on real signals — image-settled (waits for the
+*final*, not a stable draft), node-changed, and per-response resolver verdicts.
+Every study records its own clip so it can be **audited frame-by-frame before
+anyone trusts it** (the PR #129 "error-infested video" lesson).
+
+**Extend it:** add one entry to the `STUDIES` array in `record-features.ts`.
+That is the whole contract — `{ name, run(page, helpers) }`.
+
+```bash
+cd scripts/record-demo
+DEMO_BASE_URL=http://localhost:3001 ./node_modules/.bin/tsx record-features.ts          # all
+DEMO_BASE_URL=http://localhost:3001 ./node_modules/.bin/tsx record-features.ts wander    # one
+./encode-studies.sh                    # WebM → MP4 (1.6x) + 1 fps audit frames
+```
+
+Output (gitignored, under `studies/`):
+- `studies/<name>.mp4` — the clip.
+- `studies/frames/<name>/*.jpg` — 1 fps audit frames.
+- `studies/raw/<name>/*.webm` — raw capture + `console-errors.json`.
+
+Notes:
+- Runs against `:3001` too (pass `DEMO_BASE_URL`) — handy when another project
+  holds `:3000`. Bring the world stack up with the port override in the repo root.
+- Studies burn **real** fal/OpenRouter spend — one page per hop. Record
+  individually (`… record-features.ts <name>`) to keep any one run off a stack
+  that a long batch has bogged down, and watch the fal balance.
