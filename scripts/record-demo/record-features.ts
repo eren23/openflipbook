@@ -209,8 +209,12 @@ const zoomIntoTap: Study = {
 const wander: Study = {
   name: "wander",
   async run(p, h) {
-    // Wander in World Mode (the demo default) — the path verified by hand.
+    // Classic mode: every auto-tap on a salient spot generates an explainer, so
+    // the descent is reliable (World Mode only generates when a tap lands on an
+    // enterable place — stochastic per map). Salient candidates aren't blank, so
+    // the empty-tap rejection never fires on them.
     await h.seed(p, "a bustling medieval fantasy city map with many labelled districts", {
+      world: false,
       style: "Vintage",
     });
     await h.caption(p, "Wander · the world explores itself, hands-free");
@@ -238,7 +242,17 @@ async function record(study: Study): Promise<boolean> {
   const raw = path.join(OUT, "raw", study.name);
   await rm(raw, { recursive: true, force: true });
   await mkdir(raw, { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    // HEADED=1 to record with a real window — Wander's auto-tap fires reliably
+    // headed but stalls under headless (timer/visibility differences), so the
+    // wander study needs a headed run. The others record fine either way.
+    headless: !process.env.HEADED,
+    args: [
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
+    ],
+  });
   const context: BrowserContext = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
