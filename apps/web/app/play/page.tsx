@@ -66,6 +66,7 @@ import { BloomGlyph } from "@/components/PlayPage/BloomGlyph";
 import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
 import { ClickRipple } from "@/components/PlayPage/ClickRipple";
+import { BlankTapNudge } from "@/components/PlayPage/BlankTapNudge";
 import { BranchBeacons } from "@/components/PlayPage/BranchBeacons";
 import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
@@ -419,6 +420,18 @@ export default function PlayPage() {
     yPx: number;
     key: number;
   } | null>(null);
+  // A confidently-empty tap (resolver groundable=false): show a "nothing here"
+  // nudge at the point instead of burning a generation on a confabulated page.
+  const [blankTap, setBlankTap] = useState<{
+    xPx: number;
+    yPx: number;
+    key: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!blankTap) return;
+    const t = setTimeout(() => setBlankTap(null), 1700); // just past the fade
+    return () => clearTimeout(t);
+  }, [blankTap]);
   // ⌘/Ctrl-click hint capture via an inline floating input anchored at the
   // click point. The promise resolves to the typed hint (or null on
   // cancel/Esc) so the click handler can stay a single async function.
@@ -2299,6 +2312,19 @@ export default function PlayPage() {
       if (!hint && !worldEnabled) {
         hudEmit(cached ? "prefetch:hit" : "prefetch:miss", {});
       }
+      // Smarter taps: the resolver confidently flagged this spot as empty
+      // (open sky / water / blank margin). Don't burn a generation on a
+      // confabulated page — undo the bloom and give a gentle "nothing here".
+      // Only when we have a prewarmed verdict (a deliberate tap is usually
+      // hover-warmed); cold taps fall through to the normal path unchanged.
+      if (!hint && !worldEnabled && cached?.groundable === false) {
+        setMorphFx(null);
+        setClickRipple(null);
+        setBlankTap({ xPx: px, yPx: py, key: Date.now() });
+        hudEmit("morph:end", { duration_ms: 0, t: nowMs() });
+        clickInFlightRef.current = false;
+        return;
+      }
       // Image conditioning: build the weighted reference stack from the CLEAN
       // parent (not the marker-annotated one) — region crop at the tap → whole
       // parent → session root as the anti-drift anchor (skipped when this page
@@ -3367,6 +3393,15 @@ export default function PlayPage() {
                   rippleKey={clickRipple.key}
                   xPx={clickRipple.xPx}
                   yPx={clickRipple.yPx}
+                />
+              )}
+
+              {blankTap && (
+                <BlankTapNudge
+                  key={blankTap.key}
+                  nudgeKey={blankTap.key}
+                  xPx={blankTap.xPx}
+                  yPx={blankTap.yPx}
                 />
               )}
 

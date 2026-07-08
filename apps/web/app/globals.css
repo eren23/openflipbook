@@ -50,6 +50,15 @@ h3,
   100% { transform: scale(1.8); opacity: 0;   box-shadow: 0 0 0 18px rgba(255,255,255,0); }
 }
 
+/* "nothing to explore here" nudge on a confidently-empty tap: rise a little,
+ * hold, then fade — so a blank tap gets a gentle no instead of a junk page. */
+@keyframes ec-nudge {
+  0%   { transform: translate(-50%, -100%) translateY(6px);  opacity: 0; }
+  18%  { transform: translate(-50%, -100%) translateY(0);    opacity: 1; }
+  72%  { transform: translate(-50%, -100%) translateY(0);    opacity: 1; }
+  100% { transform: translate(-50%, -100%) translateY(-6px); opacity: 0; }
+}
+
 /* Subtle warm-tint pulse on the outgoing image while the next page decodes.
  * Held under 1.4s so it doesn't outlast a typical generation. */
 @keyframes ec-shimmer {
