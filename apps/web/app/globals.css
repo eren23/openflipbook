@@ -67,9 +67,18 @@ h3,
   100% { opacity: 1;   filter: blur(0px) saturate(1.0); }
 }
 
+/* Slow push-in toward the tapped point while the next page decodes: the dead
+ * wait before the draft reads as "diving into what you touched", not "stuck".
+ * transform-origin is set inline to the tap px; honours reduce-motion below. */
+@keyframes ec-morph-zoom {
+  0%   { transform: scale(1); }
+  100% { transform: scale(1.06); }
+}
+
 .ec-morph-old {
-  animation: ec-shimmer 1.4s ease-in-out infinite;
-  will-change: opacity, filter;
+  animation: ec-shimmer 1.4s ease-in-out infinite,
+             ec-morph-zoom 7s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  will-change: opacity, filter, transform;
 }
 
 .ec-morph-new {
