@@ -67,17 +67,20 @@ h3,
   100% { opacity: 1;   filter: blur(0px) saturate(1.0); }
 }
 
-/* Slow push-in toward the tapped point while the next page decodes: the dead
- * wait before the draft reads as "diving into what you touched", not "stuck".
- * transform-origin is set inline to the tap px; honours reduce-motion below. */
+/* A real push-in toward the tapped point while the next page decodes: the wait
+ * genuinely previews "diving into what you touched" — the tapped region grows to
+ * fill the frame (≈2.6×), softening slightly as it rushes in, then the next page
+ * blooms from that same point. transform-origin is set inline to the tap px;
+ * reduce-motion resets it below. `filter` here (last in the animation list) wins
+ * over ec-shimmer's, so it owns the depth blur; shimmer keeps the opacity pulse. */
 @keyframes ec-morph-zoom {
-  0%   { transform: scale(1); }
-  100% { transform: scale(1.06); }
+  0%   { transform: scale(1);   filter: blur(0px); }
+  100% { transform: scale(2.6); filter: blur(1px); }
 }
 
 .ec-morph-old {
   animation: ec-shimmer 1.4s ease-in-out infinite,
-             ec-morph-zoom 7s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+             ec-morph-zoom 5.5s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
   will-change: opacity, filter, transform;
 }
 
