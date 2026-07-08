@@ -51,6 +51,12 @@ export function MorphImagePair({
           style={{
             opacity: morphFx.phase === "reveal" ? 0 : 1,
             transition: "opacity 480ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+            // Push the wait-phase zoom toward the tapped point (ox/oy are px in
+            // this layer's own box). Falls back to centre if no origin.
+            transformOrigin:
+              typeof morphFx.ox === "number" && typeof morphFx.oy === "number"
+                ? `${morphFx.ox}px ${morphFx.oy}px`
+                : "center",
           }}
           draggable={false}
         />
