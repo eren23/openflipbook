@@ -67,6 +67,7 @@ import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
 import { ClickRipple } from "@/components/PlayPage/ClickRipple";
 import { BlankTapNudge } from "@/components/PlayPage/BlankTapNudge";
+import { useWander } from "@/hooks/useWander";
 import { BranchBeacons } from "@/components/PlayPage/BranchBeacons";
 import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
@@ -432,6 +433,8 @@ export default function PlayPage() {
     const t = setTimeout(() => setBlankTap(null), 1700); // just past the fade
     return () => clearTimeout(t);
   }, [blankTap]);
+  // Wander (auto-explore): the world explores itself, hands-free. See useWander.
+  const [wandering, setWandering] = useState(false);
   // ⌘/Ctrl-click hint capture via an inline floating input anchored at the
   // click point. The promise resolves to the typed hint (or null on
   // cancel/Esc) so the click handler can stay a single async function.
@@ -1554,6 +1557,21 @@ export default function PlayPage() {
       })
     );
   }, []);
+
+  // Wander (auto-explore): reuse the ranked precompute candidates + the tap flow
+  // to let the world explore itself, hands-free. Toggled by the ▶ button.
+  const stopWander = useCallback(() => setWandering(false), []);
+  useWander({
+    active: wandering,
+    phase,
+    nodeId: page?.nodeId ?? null,
+    imageDataUrl: page?.imageDataUrl ?? null,
+    title: page?.title ?? "",
+    query: page?.query ?? "",
+    outputLocale: resolveOutputLocale(outputLocale),
+    dispatchTapAt,
+    onExhausted: stopWander,
+  });
 
   // The geo-aware section of the right-click menu (E2): target-aware actions
   // routed to the primitives that already exist — runEdit (E1 mask path),
@@ -3587,6 +3605,22 @@ export default function PlayPage() {
                 the World pill so, on any residual overlap at narrow widths,
                 this later-in-DOM toolbar wins the stack and stays tappable. */}
             <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setWandering((w) => !w)}
+                aria-pressed={wandering}
+                disabled={!page?.imageDataUrl}
+                className={
+                  "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs text-white disabled:opacity-50 " +
+                  (wandering
+                    ? "animate-pulse bg-fuchsia-600"
+                    : "bg-fuchsia-600/85 hover:bg-fuchsia-600")
+                }
+                title="Wander — let the world explore itself, tapping the most interesting spot each page. Tap again to stop."
+              >
+                <span aria-hidden>{wandering ? "⏸" : "▶"}</span>
+                {wandering ? "Wandering…" : "Wander"}
+              </button>
               <button
                 type="button"
                 onClick={triggerExpand}
