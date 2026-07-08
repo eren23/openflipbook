@@ -54,6 +54,13 @@ export function useWander({
   // The last node we auto-tapped FROM, so a page is only wandered once even as
   // the effect re-runs.
   const tappedFrom = useRef<string | null>(null);
+  // The page's non-identity fields ride a ref, NOT the effect deps: the image
+  // data-URL string is re-minted after a page settles (the change-stream
+  // reconcile), and if the effect depended on it, that re-run would clear the
+  // pending linger timer AND early-return on tappedFrom — so the auto-tap never
+  // fired and Wander silently stalled. Arm on nodeId alone; read the rest here.
+  const latest = useRef({ imageDataUrl, title, query, outputLocale });
+  latest.current = { imageDataUrl, title, query, outputLocale };
 
   useEffect(() => {
     if (!active) {
@@ -65,7 +72,7 @@ export function useWander({
     if (
       phase !== "ready" ||
       !nodeId ||
-      !imageDataUrl?.startsWith("data:") ||
+      !latest.current.imageDataUrl?.startsWith("data:") ||
       tappedFrom.current === nodeId
     ) {
       return;
@@ -76,14 +83,15 @@ export function useWander({
     let timer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
       try {
+        const snap = latest.current;
         const res = await fetch("/api/precompute-candidates", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            image_data_url: imageDataUrl,
-            parent_title: title,
-            parent_query: query,
-            output_locale: outputLocale,
+            image_data_url: snap.imageDataUrl,
+            parent_title: snap.title,
+            parent_query: snap.query,
+            output_locale: snap.outputLocale,
             max_candidates: 6,
           }),
           signal: ac.signal,
@@ -118,16 +126,9 @@ export function useWander({
       ac.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [
-    active,
-    phase,
-    nodeId,
-    imageDataUrl,
-    title,
-    query,
-    outputLocale,
-    dispatchTapAt,
-    onExhausted,
-    lingerMs,
-  ]);
+    // Arm on identity only: active/phase/nodeId. The page's mutable fields
+    // (image, title, query, locale) ride `latest` so a re-mint of the data URL
+    // can't cancel the in-flight linger timer.
+     
+  }, [active, phase, nodeId, dispatchTapAt, onExhausted, lingerMs]);
 }
