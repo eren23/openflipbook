@@ -13,6 +13,13 @@ export interface MorphFx {
   isFinal: boolean;
   startedAt: number;
   reduceMotion: boolean;
+  /**
+   * True only when the tap is KNOWN to zoom-continue (classifier said
+   * scene/submap): the wait phase pushes into the tapped region and the
+   * arrival really is that region, closer. Absent/false → shimmer only, so
+   * the motion never promises a zoom the fresh path won't deliver.
+   */
+  dive?: boolean;
 }
 
 /**

@@ -255,3 +255,101 @@ def test_build_parses_surroundings_and_defaults_empty() -> None:
         {"subject": "x"}, x_pct=0.5, y_pct=0.5, fallback_subject="X"
     )
     assert bare.surroundings == ""
+
+
+# ---------- classic-mode classification (TAP_ZOOM_CONTINUE) ------------------
+#
+# Classic taps classify too now: the prompt asks for `enter_as` in BOTH modes
+# (wording differs), and precompute candidates carry it so warm taps can route
+# to the faithful zoom without a second resolve.
+
+
+def test_click_prompt_asks_enter_as_in_classic_mode(monkeypatch) -> None:
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    captured: dict = {}
+
+    async def fake_complete_json(**kwargs):
+        captured["messages"] = kwargs.get("messages")
+        return {"subject": "x"}
+
+    monkeypatch.setattr(click_mod._llm, "_complete_json", AsyncMock(side_effect=fake_complete_json))
+    asyncio.run(
+        click_mod.click_to_subject(
+            image_data_url="data:image/jpeg;base64,x",
+            x_pct=0.5,
+            y_pct=0.5,
+            parent_title="T",
+            parent_query="q",
+            world_mode=False,
+        )
+    )
+    system = str(captured["messages"][0]["content"])
+    assert "`enter_as`" in system
+    # classic wording, not the world-mode "step INTO" phrasing
+    assert "move CLOSER to" in system
+    assert "step INTO" not in system
+
+
+def test_click_prompt_world_mode_wording_unchanged(monkeypatch) -> None:
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    captured: dict = {}
+
+    async def fake_complete_json(**kwargs):
+        captured["messages"] = kwargs.get("messages")
+        return {"subject": "x"}
+
+    monkeypatch.setattr(click_mod._llm, "_complete_json", AsyncMock(side_effect=fake_complete_json))
+    asyncio.run(
+        click_mod.click_to_subject(
+            image_data_url="data:image/jpeg;base64,x",
+            x_pct=0.5,
+            y_pct=0.5,
+            parent_title="T",
+            parent_query="q",
+            world_mode=True,
+        )
+    )
+    system = str(captured["messages"][0]["content"])
+    assert "step INTO" in system  # the world clause is byte-identical
+    assert "place_form" in system
+
+
+def test_precompute_candidates_parse_enter_as(monkeypatch) -> None:
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    async def fake_complete_json(**kwargs):
+        return {
+            "candidates": [
+                {"x_pct": 0.2, "y_pct": 0.3, "subject": "castle", "salience": 0.9,
+                 "enter_as": "scene"},
+                {"x_pct": 0.6, "y_pct": 0.5, "subject": "legend box", "salience": 0.5,
+                 "enter_as": "bogus-value"},
+                {"x_pct": 0.8, "y_pct": 0.7, "subject": "harbor", "salience": 0.7},
+            ]
+        }
+
+    monkeypatch.setattr(click_mod._llm, "_complete_json", AsyncMock(side_effect=fake_complete_json))
+    cands = asyncio.run(
+        click_mod.precompute_click_candidates(
+            image_data_url="data:image/jpeg;base64,x",
+            parent_title="T",
+            parent_query="q",
+        )
+    )
+    by_subject = {c.subject: c for c in cands}
+    assert by_subject["castle"].enter_as == "scene"
+    # non-whitelisted value coerces to the safe default
+    assert by_subject["legend box"].enter_as == "explainer"
+    # absent → default
+    assert by_subject["harbor"].enter_as == "explainer"

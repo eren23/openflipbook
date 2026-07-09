@@ -78,6 +78,10 @@ class ClickCandidate:
     subject: str
     style: str
     salience: float
+    # scene | submap | explainer — same classification as ClickResolution, so a
+    # warm tap on a precomputed bucket can route to the faithful zoom without a
+    # second resolve (TAP_ZOOM_CONTINUE).
+    enter_as: str = "explainer"
 
 
 # JSON Schemas for the structured-output ladder. Used as the `tool` rung's
@@ -131,6 +135,10 @@ CANDIDATES_SCHEMA: dict[str, Any] = {
                     "subject": {"type": "string"},
                     "style": {"type": "string"},
                     "salience": {"type": "number"},
+                    "enter_as": {
+                        "type": "string",
+                        "enum": ["scene", "submap", "explainer"],
+                    },
                 },
                 "required": ["x_pct", "y_pct", "subject"],
             },
@@ -213,6 +221,20 @@ async def click_to_subject(
                 "Return an empty array when you are confident or when `enter_as` "
                 "is \"explainer\"."
             )
+    else:
+        # Classic mode classifies too (TAP_ZOOM_CONTINUE): a tap on a concrete
+        # place/thing zoom-continues the tapped pixels instead of fresh-generating
+        # a lookalike; abstract concepts keep the fresh labelled explainer.
+        world_clause = (
+            " (9) `enter_as` — one of \"scene\", \"submap\", or \"explainer\": "
+            "\"scene\" when the crosshair is on a concrete place or physical "
+            "thing the user would move CLOSER to (a building, landmark, room, "
+            "vehicle, creature, terrain feature); \"submap\" when the parent "
+            "image reads as a map or plan and the target is a sub-area best "
+            "shown as a closer map; \"explainer\" when it is an abstract "
+            "concept, mechanism, process, or diagram element best served by a "
+            "fresh labelled diagram."
+        )
     system = (
         "You examine a generated illustration of the page titled "
         f"'{parent_title}' (user query: '{parent_query}'). A red crosshair with "
@@ -466,7 +488,13 @@ async def precompute_click_candidates(
         "\"subject\": \"2-8 word noun phrase\", "
         "\"style\": \"<=30 word visual style sentence — same for every "
         "candidate, describing this illustration's medium/palette/line-work\", "
-        "\"salience\": 0..1}, ...]}. Coordinates are 0..1 with origin at the "
+        "\"salience\": 0..1, "
+        "\"enter_as\": \"scene|submap|explainer\"}, ...]}. `enter_as`: "
+        "\"scene\" = a concrete place or physical thing the reader would move "
+        "CLOSER to; \"submap\" = the page reads as a map/plan and this is a "
+        "sub-area best shown as a closer map; \"explainer\" = an abstract "
+        "concept, mechanism, or diagram element best served by a fresh "
+        "labelled diagram. Coordinates are 0..1 with origin at the "
         "top-left of the image. Sort by salience descending."
         + locale_clause
     )
@@ -517,6 +545,7 @@ async def precompute_click_candidates(
         style = str(entry.get("style", "")).strip()
         if not subject:
             continue
+        enter_as_raw = str(entry.get("enter_as", "")).strip().lower()
         out.append(
             ClickCandidate(
                 x_pct=x,
@@ -524,6 +553,11 @@ async def precompute_click_candidates(
                 subject=subject,
                 style=style,
                 salience=max(0.0, min(1.0, sal)),
+                enter_as=(
+                    enter_as_raw
+                    if enter_as_raw in ("scene", "submap", "explainer")
+                    else "explainer"
+                ),
             )
         )
         if len(out) >= max_candidates:

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { REGION_FRAC } from "./image-condition";
 
 import type { MorphFx } from "@/hooks/useImageMorph";
 
-import { inkMorphStyle } from "./morph-style";
+import { DIVE_END_SCALE, inkMorphStyle } from "./morph-style";
 
 const baseFx: MorphFx = {
   ox: 120,
@@ -62,5 +63,11 @@ describe("inkMorphStyle", () => {
     const revealS = inkMorphStyle({ ...baseFx, phase: "reveal", reduceMotion: true });
     expect(revealS?.maskImage).toBeUndefined();
     expect(revealS?.opacity).toBe(1);
+  });
+});
+
+describe("DIVE_END_SCALE (motion promise = pixel reality)", () => {
+  it("derives from the region-crop fraction the arrival renders", () => {
+    expect(DIVE_END_SCALE).toBeCloseTo(1 / REGION_FRAC, 6);
   });
 });

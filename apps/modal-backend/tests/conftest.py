@@ -50,6 +50,8 @@ _SCRUB = (
     # Enter-via-edit (default ON — scrub so a host kill-switch can't silently
     # flip the routing tests) + the edit-tier knobs it can interact with.
     "ENTER_EDIT_REF",
+    # Classic tap-zoom routing (default ON — same hermeticity reasoning).
+    "TAP_ZOOM_CONTINUE",
     # View grammar (default ON — same hermeticity reasoning).
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",

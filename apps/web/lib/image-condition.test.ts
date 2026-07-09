@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cropBox, orderedRefs, regionUpscale } from "./image-condition";
+import { cropBox, diveOriginPx, orderedRefs, REGION_FRAC, regionUpscale } from "./image-condition";
 
 /**
  * Pure core of the image-conditioning reference stack: where the region crop
@@ -83,5 +83,28 @@ describe("buildConditionRefs regionWhole (transition tap)", () => {
     });
     expect(refs.roles).toEqual(["region", "style"]);
     expect(refs.urls[0]).toBe("data:image/jpeg;base64,UEFSRU5U");
+  });
+});
+
+describe("diveOriginPx (the dive's convergence point)", () => {
+  const content = { offsetX: 10, offsetY: 20, width: 1000, height: 500 };
+
+  it("centred tap: origin = the tap itself, in element px", () => {
+    const o = diveOriginPx(0.5, 0.5, REGION_FRAC, content);
+    expect(o.x).toBeCloseTo(10 + 0.5 * 1000);
+    expect(o.y).toBeCloseTo(20 + 0.5 * 500);
+  });
+
+  it("edge tap: origin is the CLAMPED crop centre, not the raw tap", () => {
+    // Tap at the very corner — cropBox clamps to [0, frac], so its centre is
+    // frac/2 in from the edge; the arrival renders that crop, so the dive
+    // must aim there.
+    const o = diveOriginPx(0, 0, REGION_FRAC, content);
+    expect(o.x).toBeCloseTo(10 + (REGION_FRAC / 2) * 1000);
+    expect(o.y).toBeCloseTo(20 + (REGION_FRAC / 2) * 500);
+  });
+
+  it("REGION_FRAC is the conditioning default", () => {
+    expect(REGION_FRAC).toBe(0.42);
   });
 });
