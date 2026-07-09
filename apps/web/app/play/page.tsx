@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, DragEvent, FormEvent } from "react";
 import type {
   Citation,
+  EnterAs,
   EntityEditPlan,
   GenerateRequestBody,
   GenerateEvent,
@@ -50,7 +51,13 @@ import { useLoopKnobs, wireFields } from "@/hooks/useSpeedPreset";
 import { useSharedSession } from "@/hooks/useSharedSession";
 import { useExpandBloom } from "@/hooks/useExpandBloom";
 import { type Ascended, useAscend } from "@/hooks/useAscend";
-import { buildConditionRefs, cropBox, orderedRefs } from "@/lib/image-condition";
+import {
+  buildConditionRefs,
+  cropBox,
+  diveOriginPx,
+  orderedRefs,
+  REGION_FRAC,
+} from "@/lib/image-condition";
 import { enterAsToRenderMode, findRevisitTarget } from "@/lib/world-mode";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
@@ -435,6 +442,13 @@ export default function PlayPage() {
   }, [blankTap]);
   // Wander (auto-explore): the world explores itself, hands-free. See useWander.
   const [wandering, setWandering] = useState(false);
+  // The click handler closes over state at dispatch time; Wander's synthetic
+  // taps must read the LIVE value (withhold zoom routing mid-wander), so
+  // mirror it into a ref.
+  const wanderingRef = useRef(false);
+  useEffect(() => {
+    wanderingRef.current = wandering;
+  }, [wandering]);
   // ⌘/Ctrl-click hint capture via an inline floating input anchored at the
   // click point. The promise resolves to the typed hint (or null on
   // cancel/Esc) so the click handler can stay a single async function.
@@ -1961,6 +1975,7 @@ export default function PlayPage() {
             subject: string;
             style: string;
             salience: number;
+            enter_as?: string;
           }[];
         };
         if (!Array.isArray(data.candidates)) return;
@@ -1971,7 +1986,11 @@ export default function PlayPage() {
           if ((counts.get(scope) ?? 0) >= PREFETCH_PER_PAGE) break;
           const key = bucketKey(nodeId, c.x_pct, c.y_pct);
           if (cache.has(key)) continue;
-          cache.set(key, { subject: c.subject, style: c.style });
+          cache.set(key, {
+            subject: c.subject,
+            style: c.style,
+            ...(typeof c.enter_as === "string" ? { enter_as: c.enter_as } : {}),
+          });
           counts.set(scope, (counts.get(scope) ?? 0) + 1);
           // LRU evict oldest entries when we exceed the global cap.
           if (cache.size > PREFETCH_LRU_MAX) {
@@ -2054,6 +2073,7 @@ export default function PlayPage() {
             confidence?: number;
             point?: { x: number; y: number } | null;
             bbox?: { x: number; y: number; w: number; h: number } | null;
+            enter_as?: string;
           };
           if (data.subject) {
             cache.set(key, {
@@ -2068,6 +2088,9 @@ export default function PlayPage() {
                 : {}),
               ...(data.point ? { point: data.point } : {}),
               ...(data.bbox ? { bbox: data.bbox } : {}),
+              ...(typeof data.enter_as === "string"
+                ? { enter_as: data.enter_as }
+                : {}),
             });
             pageBucketCounts.set(
               pageScope,
@@ -2293,17 +2316,51 @@ export default function PlayPage() {
       const reduceMotion =
         typeof window !== "undefined" &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // The prefetch verdict is needed BEFORE the morph starts: it decides both
+      // the blank-tap rejection below and whether the wait-phase may DIVE (only
+      // a tap that is KNOWN to zoom-continue earns the push-in — anything else
+      // gets the honest shimmer). Skip when a hint is present (the prefetch was
+      // resolved without the user's note) or in World Mode (backend classifies).
+      const cached =
+        hint || worldEnabled
+          ? undefined
+          : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
+      const willZoom =
+        !hint &&
+        !worldEnabled &&
+        !wanderingRef.current &&
+        cached?.groundable !== false &&
+        (cached?.enter_as === "scene" || cached?.enter_as === "submap");
+      // Dive converges on the CLAMPED region-crop centre (an edge tap clamps
+      // the crop inward, and the arrival renders that crop) — in element px
+      // over the object-fit:contain content rect.
+      let diveOx = px;
+      let diveOy = py;
+      if (willZoom) {
+        const content = objectContainRect(
+          rect.width,
+          rect.height,
+          img.naturalWidth,
+          img.naturalHeight
+        );
+        if (content) {
+          const o = diveOriginPx(click.x_pct, click.y_pct, REGION_FRAC, content);
+          diveOx = o.x;
+          diveOy = o.y;
+        }
+      }
       setMorphFx({
-        ox: px,
-        oy: py,
+        ox: diveOx,
+        oy: diveOy,
         prevImg: currentImage,
         nextImg: null,
         phase: "wait",
         isFinal: false,
         startedAt: nowMs(),
         reduceMotion,
+        dive: willZoom,
       });
-      hudEmit("morph:start", { ox: px, oy: py, t: nowMs() });
+      hudEmit("morph:start", { ox: diveOx, oy: diveOy, t: nowMs() });
       let annotated = currentImage;
       try {
         annotated = await annotateClickPoint(
@@ -2315,15 +2372,6 @@ export default function PlayPage() {
         // Fall back to the raw image + numeric coords if canvas taint or
         // decode failed. VLM still gets the text coords as a hint.
       }
-      // Skip the prefetched-subject shortcut when a hint is present — the
-      // hover prefetch was resolved without the user's note, so it would
-      // ignore the angle they just typed.
-      // In World Mode we skip the hover-prefetch shortcut so the backend always
-      // classifies the tap (scene / sub-map / explainer) and frames the page.
-      const cached =
-        hint || worldEnabled
-          ? undefined
-          : cache.get(bucketKey(currentNodeId, click.x_pct, click.y_pct));
       // HUD visibility for the silent hover warming (UI_AUDIT #10): count
       // only clicks where the shortcut was eligible — a deliberate skip
       // (hint / world mode) is neither a hit nor a miss.
@@ -2513,6 +2561,15 @@ export default function PlayPage() {
               prefetched_style: cached.style,
               ...(cached.subject_context
                 ? { prefetched_subject_context: cached.subject_context }
+                : {}),
+              // Zoomable classification → the backend routes this tap to the
+              // faithful Kontext zoom (TAP_ZOOM_CONTINUE). Withheld while
+              // Wandering: auto-taps stay topical, or compounding region
+              // crops would degrade the descent after a few hops.
+              ...(cached.enter_as &&
+              (cached.enter_as === "scene" || cached.enter_as === "submap") &&
+              !wanderingRef.current
+                ? { prefetched_enter_as: cached.enter_as as EnterAs }
                 : {}),
             }
           : {}),

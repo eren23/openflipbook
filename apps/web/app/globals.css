@@ -67,21 +67,29 @@ h3,
   100% { opacity: 1;   filter: blur(0px) saturate(1.0); }
 }
 
-/* A real push-in toward the tapped point while the next page decodes: the wait
- * genuinely previews "diving into what you touched" — the tapped region grows to
- * fill the frame (≈2.6×), softening slightly as it rushes in, then the next page
- * blooms from that same point. transform-origin is set inline to the tap px;
- * reduce-motion resets it below. `filter` here (last in the animation list) wins
- * over ec-shimmer's, so it owns the depth blur; shimmer keeps the opacity pulse. */
+/* The DIVE: only applied when the tap is KNOWN to zoom-continue (classifier
+ * said scene/submap), so the motion's promise matches the pixels — the tapped
+ * region grows to fill the frame at exactly the magnification the Kontext
+ * arrival renders (--ec-dive-scale = 1/REGION_FRAC, set inline from TS).
+ * transform-origin = the clamped region-crop centre. `filter` here (last in
+ * the list) wins over ec-shimmer's, so it owns the depth blur; shimmer keeps
+ * the opacity pulse. Reduce-motion resets it below. */
 @keyframes ec-morph-zoom {
-  0%   { transform: scale(1);   filter: blur(0px); }
-  100% { transform: scale(2.6); filter: blur(1px); }
+  0%   { transform: scale(1);                             filter: blur(0px); }
+  100% { transform: scale(var(--ec-dive-scale, 2.38));    filter: blur(1px); }
 }
 
 .ec-morph-old {
   animation: ec-shimmer 1.4s ease-in-out infinite,
              ec-morph-zoom 5.5s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
   will-change: opacity, filter, transform;
+}
+
+/* Non-zoom taps (fresh explainer arrivals) keep the pre-dive wait look:
+ * shimmer only, no push-in — the motion never over-promises. */
+.ec-morph-shimmer {
+  animation: ec-shimmer 1.4s ease-in-out infinite;
+  will-change: opacity, filter;
 }
 
 .ec-morph-new {
@@ -108,6 +116,7 @@ h3,
     animation: none !important;
   }
   .ec-morph-old,
+  .ec-morph-shimmer,
   .ec-morph-new {
     animation: none !important;
     transition: opacity 180ms linear !important;

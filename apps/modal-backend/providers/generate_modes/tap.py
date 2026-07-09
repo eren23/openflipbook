@@ -40,6 +40,26 @@ _ENTER_AS_TO_RENDER: dict[str, str] = {
     "explainer": "explainer",
 }
 
+# Classic-mode twin (TAP_ZOOM_CONTINUE): a tap on a concrete place/thing
+# zoom-continues the tapped pixels (Kontext) instead of fresh-generating a
+# lookalike — the region crop the client already sends finally BITES (the
+# fresh path's fal nano ignores refs). Register split on purpose: `submap`
+# rides the cartographic zoom register; `scene` rides place_closeup's "view"
+# register ("from the SAME viewpoint the reference shows") so a tapped castle
+# in a watercolor scene doesn't get map wording. `explainer` maps to nothing —
+# concepts/diagram parts keep today's fresh labelled explainer.
+_CLASSIC_ENTER_AS_TO_RENDER: dict[str, str] = {
+    "scene": "place_closeup",
+    "submap": "place_submap",
+}
+
+
+def _classic_zoom_mode(enter_as: str | None) -> str | None:
+    """The classic tap's zoom render mode, or None to stay fresh."""
+    if not env_flag("TAP_ZOOM_CONTINUE", "true"):
+        return None
+    return _CLASSIC_ENTER_AS_TO_RENDER.get((enter_as or "").strip().lower())
+
 
 async def stream_tap(
     body: GenerateBody,
@@ -130,6 +150,25 @@ async def stream_tap(
             surroundings_behind_effective = (
                 _sanitize_hint(body.surroundings_behind, 240) or None
             )
+            # Classic warm tap: the prefetch cache carried the classifier's
+            # enter_as — route zoomable taps to the faithful Kontext zoom
+            # without a second resolve. Needs a region ref to bite (else
+            # select_operation falls back to fresh anyway).
+            if (
+                not effective_world_mode
+                and not render_mode
+                and body.condition_image_urls
+            ):
+                mapped = _classic_zoom_mode(body.prefetched_enter_as)
+                if mapped:
+                    render_mode = mapped
+                    log(
+                        "info",
+                        "tap.zoom_route",
+                        enter_as=body.prefetched_enter_as,
+                        render_mode=mapped,
+                        source="prefetched",
+                    )
             yield _sse(
                 {
                     "type": "status",
@@ -160,6 +199,22 @@ async def stream_tap(
                 render_mode = _ENTER_AS_TO_RENDER.get(
                     resolution.enter_as, "explainer"
                 )
+            elif (
+                not effective_world_mode
+                and not render_mode
+                and body.condition_image_urls
+            ):
+                # Classic cold tap: the in-band resolve just classified it.
+                mapped = _classic_zoom_mode(resolution.enter_as)
+                if mapped:
+                    render_mode = mapped
+                    log(
+                        "info",
+                        "tap.zoom_route",
+                        enter_as=resolution.enter_as,
+                        render_mode=mapped,
+                        source="resolved",
+                    )
             if resolution.subject:
                 effective_query = resolution.subject
                 yield _sse(

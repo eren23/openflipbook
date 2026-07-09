@@ -41,6 +41,33 @@ interface H {
 
 const imgLoc = (p: Page) => p.locator('img[alt^="Generated illustration"]').first();
 
+/** Convert IMAGE-frame fractions (what resolvers/candidates use) to viewport
+ *  px through the object-fit:contain content rect, so letterboxing doesn't
+ *  skew taps. Falls back to element-box fractions if natural size is absent. */
+async function imageFramePoint(
+  p: Page,
+  xPct: number,
+  yPct: number,
+): Promise<{ x: number; y: number }> {
+  const pt = await imgLoc(p).evaluate(
+    (el, f) => {
+      const img = el as HTMLImageElement;
+      const r = img.getBoundingClientRect();
+      if (!img.naturalWidth || !img.naturalHeight) {
+        return { x: r.left + r.width * f.x, y: r.top + r.height * f.y };
+      }
+      const na = img.naturalWidth / img.naturalHeight;
+      const ba = r.width / r.height;
+      let w = r.width, h = r.height, ox = 0, oy = 0;
+      if (na > ba) { h = r.width / na; oy = (r.height - h) / 2; }
+      else { w = r.height * na; ox = (r.width - w) / 2; }
+      return { x: r.left + ox + w * f.x, y: r.top + oy + h * f.y };
+    },
+    { x: xPct, y: yPct },
+  );
+  return pt;
+}
+
 const h: H = {
   base: BASE,
   img: imgLoc,
@@ -73,14 +100,12 @@ const h: H = {
     throw new Error("image never stabilized");
   },
   async hover(p, xPct, yPct) {
-    const box = await imgLoc(p).boundingBox();
-    if (!box) throw new Error("no image box");
-    await p.mouse.move(box.x + box.width * xPct, box.y + box.height * yPct, { steps: 6 });
+    const pt = await imageFramePoint(p, xPct, yPct);
+    await p.mouse.move(pt.x, pt.y, { steps: 6 });
   },
   async tap(p, xPct, yPct) {
-    const box = await imgLoc(p).boundingBox();
-    if (!box) throw new Error("no image box");
-    await p.mouse.move(box.x + box.width * xPct, box.y + box.height * yPct, { steps: 4 });
+    const pt = await imageFramePoint(p, xPct, yPct);
+    await p.mouse.move(pt.x, pt.y, { steps: 4 });
     await p.mouse.down();
     await p.mouse.up();
   },
@@ -190,19 +215,40 @@ const smarterTaps: Study = {
 const zoomIntoTap: Study = {
   name: "zoom-into-tap",
   async run(p, h) {
+    // Capture the candidates BEFORE seeding — the response listener must be
+    // armed when the page's precompute fires.
+    let candidates: { x_pct: number; y_pct: number; enter_as?: string }[] = [];
+    const candWait = p
+      .waitForResponse((r) => r.url().includes("/precompute-candidates"), {
+        timeout: 90_000,
+      })
+      .then(async (r) => {
+        const j = (await r.json().catch(() => null)) as {
+          candidates?: typeof candidates;
+        } | null;
+        candidates = j?.candidates ?? [];
+      })
+      .catch(() => {});
     await h.seed(p, "a colorful treasure map of a pirate island with a big skull rock", {
       world: false,
       style: "Storybook",
     });
-    await h.caption(p, "Zoom into the tapped point while the next page loads");
-    await p.waitForTimeout(1200);
-    // The zoom plays in the ~5s AFTER the tap, before the draft — hold on it.
+    await h.caption(p, "Tap a thing → the page ZOOMS INTO those exact pixels");
+    // Wait for the precompute so the tap lands on a WARM zoomable candidate —
+    // that's what arms both the client dive and the prefetched zoom route.
+    await candWait;
+    await p.waitForTimeout(1000);
+    const zoomable = candidates.find(
+      (c) => c.enter_as === "scene" || c.enter_as === "submap",
+    );
+    const [tx, ty] = zoomable ? [zoomable.x_pct, zoomable.y_pct] : [0.5, 0.42];
     const before = h.node(p);
-    await h.tap(p, 0.5, 0.42);
-    await p.waitForTimeout(5200); // capture the push-in toward the tap
+    await h.tap(p, tx, ty);
+    await p.waitForTimeout(5200); // the dive: pushing into the tapped region
     await h.waitNodeChange(p, before, GEN_TIMEOUT).catch(() => {});
     await h.waitStable(p);
-    await p.waitForTimeout(1500);
+    await h.caption(p, "The arrival IS the tapped region — same pixels, closer");
+    await p.waitForTimeout(2500);
   },
 };
 

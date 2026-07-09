@@ -18,6 +18,35 @@ export interface ConditionRefs {
 }
 
 /**
+ * The default region-crop fraction per axis: a tap conditions on the 42% box
+ * around it. The dive animation's end scale derives from this (1/0.42 ≈ 2.38)
+ * so the load-wait push-in lands where the zoom-continued arrival begins.
+ */
+export const REGION_FRAC = 0.42;
+
+/**
+ * Where the dive animation should converge, in element px: the CENTER of the
+ * clamped region crop (not the raw tap — an edge tap clamps the crop inward, and
+ * the zoom-continued arrival renders THAT crop, so the dive must aim at it).
+ * `content` is the object-fit:contain rect of the image inside its element
+ * (lib/image-click.objectContainRect). Pure.
+ */
+export function diveOriginPx(
+  xPct: number,
+  yPct: number,
+  frac: number,
+  content: { offsetX: number; offsetY: number; width: number; height: number },
+): { x: number; y: number } {
+  const box = cropBox(xPct, yPct, frac);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return {
+    x: content.offsetX + cx * content.width,
+    y: content.offsetY + cy * content.height,
+  };
+}
+
+/**
  * Crop rectangle (normalised 0..1) of `frac` per axis, centred on the click and
  * clamped so it stays inside the image. Pure — the geometry the region crop draws.
  */
@@ -148,7 +177,7 @@ export async function buildConditionRefs(opts: {
           cropBox(
             opts.click!.xPct,
             opts.click!.yPct,
-            opts.regionFrac ?? 0.42,
+            opts.regionFrac ?? REGION_FRAC,
           ),
       );
     } catch {

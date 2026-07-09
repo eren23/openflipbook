@@ -282,6 +282,10 @@ class GenerateBody(BaseModel):
     prefetched_subject: str | None = None
     prefetched_style: str | None = None
     prefetched_subject_context: str | None = None
+    # The prefetch's enter_as classification (scene|submap|explainer) — lets a
+    # warm classic tap route to the faithful zoom (TAP_ZOOM_CONTINUE) without a
+    # second resolve. Whitelist-mapped in tap.py; anything else is ignored.
+    prefetched_enter_as: str | None = None
     # World Mode semi-autonomy already resolved the tap client-side; this carries
     # the resolver's spatial-anchor note back so the planner can keep the
     # entered place's neighbours where the parent map had them.
@@ -1312,6 +1316,7 @@ async def precompute_candidates(req: Request, body: PrecomputeBody):
                     "subject": c.subject,
                     "style": c.style,
                     "salience": c.salience,
+                    "enter_as": c.enter_as,
                 }
                 for c in cands
             ],

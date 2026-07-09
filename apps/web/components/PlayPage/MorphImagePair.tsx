@@ -1,9 +1,9 @@
 "use client";
 
-import type { RefObject, TransitionEvent } from "react";
+import type { CSSProperties, RefObject, TransitionEvent } from "react";
 
 import type { MorphFx } from "@/hooks/useImageMorph";
-import { inkMorphStyle } from "@/lib/morph-style";
+import { DIVE_END_SCALE, inkMorphStyle } from "@/lib/morph-style";
 
 interface Props {
   imgRef: RefObject<HTMLImageElement | null>;
@@ -46,18 +46,31 @@ export function MorphImagePair({
           aria-hidden
           className={
             "absolute inset-0 block h-full w-full object-contain select-none " +
-            (morphFx.phase === "wait" && !morphFx.reduceMotion ? "ec-morph-old" : "")
+            (morphFx.phase === "wait" && !morphFx.reduceMotion
+              ? // Dive only when the arrival is KNOWN to be a zoom-continuation
+                // of the tapped region; otherwise the old gentle shimmer, so
+                // the motion never promises a zoom the fresh path won't keep.
+                morphFx.dive
+                ? "ec-morph-old"
+                : "ec-morph-shimmer"
+              : "")
           }
-          style={{
-            opacity: morphFx.phase === "reveal" ? 0 : 1,
-            transition: "opacity 480ms cubic-bezier(0.22, 0.61, 0.36, 1)",
-            // Push the wait-phase zoom toward the tapped point (ox/oy are px in
-            // this layer's own box). Falls back to centre if no origin.
-            transformOrigin:
-              typeof morphFx.ox === "number" && typeof morphFx.oy === "number"
-                ? `${morphFx.ox}px ${morphFx.oy}px`
-                : "center",
-          }}
+          style={
+            {
+              opacity: morphFx.phase === "reveal" ? 0 : 1,
+              transition: "opacity 480ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+              // Push the wait-phase dive toward the region-crop centre (ox/oy
+              // px in this layer's box). Falls back to centre if no origin.
+              transformOrigin:
+                typeof morphFx.ox === "number" && typeof morphFx.oy === "number"
+                  ? `${morphFx.ox}px ${morphFx.oy}px`
+                  : "center",
+              // Single TS source of truth for the dive's end scale — derived
+              // from the region-crop fraction so the motion ends where the
+              // zoom-continued arrival begins.
+              "--ec-dive-scale": String(DIVE_END_SCALE),
+            } as CSSProperties
+          }
           draggable={false}
         />
       ) : null}

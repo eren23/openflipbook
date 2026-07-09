@@ -133,6 +133,10 @@ export interface GenerateRequestBody {
   // frames"). Backend feeds this to plan_page as authoritative meaning so
   // ambiguous phrases stay in the parent's domain.
   prefetched_subject_context?: string;
+  // The prefetch's enter_as classification. Lets a warm classic tap route to
+  // the faithful zoom-continuation (TAP_ZOOM_CONTINUE) without a second
+  // resolve; backend whitelist-maps it, anything else is ignored.
+  prefetched_enter_as?: EnterAs;
   // World Mode: the resolver's spatial-anchor note ("river to the south, the
   // Citadel NE") carried back so the planner keeps the entered place's
   // neighbours where the parent map had them. Mirrors GenerateBody.
@@ -267,9 +271,10 @@ export interface ResolveClickResponse {
   confidence?: number;
   point?: ResolveClickPoint | null;
   bbox?: ResolveClickBBox | null;
-  // World Mode: the resolver's read of what was tapped (a place to step into, a
-  // sub-area to map closer, or a concept to explain) + up to two short
-  // clarifying questions (semi autonomy only). Absent in classic mode.
+  // The resolver's read of what was tapped (a place to step into / move closer
+  // to, a sub-area to map closer, or a concept to explain). Classified in EVERY
+  // mode since TAP_ZOOM_CONTINUE — classic mode uses it to route zoomable taps
+  // to the faithful Kontext continuation. Clarifiers: world semi autonomy only.
   enter_as?: EnterAs;
   clarifiers?: string[];
   // World Mode spatial anchor: what sits AROUND the tapped spot and in which

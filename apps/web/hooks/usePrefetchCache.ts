@@ -26,6 +26,12 @@ export interface PrefetchEntry {
   confidence?: number;
   point?: PrefetchPoint | null;
   bbox?: PrefetchBBox | null;
+  /**
+   * scene | submap | explainer — the resolver's classification of the tapped
+   * thing. Zoomable taps (scene/submap) route to the faithful Kontext
+   * zoom-continuation server-side (TAP_ZOOM_CONTINUE) and dive client-side.
+   */
+  enter_as?: string;
 }
 
 export const PREFETCH_PER_PAGE = 6;
