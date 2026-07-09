@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio as _asyncio
 import base64
 import contextlib
+import os
 import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -575,11 +576,74 @@ async def stream_tap(
     result: Any = None
     main_task: _asyncio.Task | None = None
     if use_continuation and region_ref is not None:
-        main_task = _asyncio.create_task(
-            image_edit_provider.continue_image(
+
+        async def _judged_zoom() -> Any:
+            """Kontext zoom with a step-in judge + one keep-best retry.
+
+            Every zoom flavour funnels here (classic scene/closeup + submap,
+            world submap, wideRegionCut), so one gate covers them all: the
+            arrival must be the tapped region seen CLOSER (score_step_in — a
+            wider redraw or an unrelated scene fails), else retry once with
+            the critic's rationale folded in and keep the better attempt.
+            TAP_ZOOM_JUDGE default ON; judge failures never block the tap.
+            """
+            first = await image_edit_provider.continue_image(
                 region_ref, zoom_instruction, model_override=body.image_model
             )
-        )
+            if not env_flag("TAP_ZOOM_JUDGE", "true") or body.verify is False:
+                return first
+            from providers import judge, render_loop
+
+            region_bytes = render_loop.data_url_bytes(region_ref)
+            if region_bytes is None:
+                return first
+            try:
+                accept = float(os.environ.get("TAP_ZOOM_ACCEPT", "6.0"))
+            except ValueError:
+                accept = 6.0
+            step_in = _same_place_judge(judge)
+            try:
+                verdict = await step_in(region_bytes, first.jpeg_bytes)
+            except Exception:
+                return first
+            log(
+                "info",
+                "tap.zoom_judge",
+                attempt=1,
+                score=verdict.score,
+                accepted=verdict.score >= accept,
+            )
+            if verdict.score >= accept:
+                return first
+            # One deadline-aware retry (same margin discipline as the render
+            # loop: never start an attempt the ingress window can't fit).
+            remaining = ingress_timeout_s - 120.0 - (_time.perf_counter() - started)
+            if remaining < 45.0:
+                return first
+            retry_instruction = (
+                zoom_instruction
+                + " A previous attempt was rejected by a reviewer: \""
+                + (verdict.rationale or "not recognisably the same region, closer")[:200]
+                + "\". Render the SAME tapped region again — identical structures,"
+                " palette and line work — just seen closer."
+            )
+            try:
+                second = await image_edit_provider.continue_image(
+                    region_ref, retry_instruction, model_override=body.image_model
+                )
+                verdict2 = await step_in(region_bytes, second.jpeg_bytes)
+            except Exception:
+                return first
+            log(
+                "info",
+                "tap.zoom_judge",
+                attempt=2,
+                score=verdict2.score,
+                accepted=verdict2.score >= accept,
+            )
+            return second if verdict2.score >= verdict.score else first
+
+        main_task = _asyncio.create_task(_judged_zoom())
     elif use_enter_edit and enter_source is not None:
         # ONE selection for both the instruction's family grammar and the
         # dispatch: explicit per-request model > the steep-aware router
