@@ -10,6 +10,7 @@ generate.py imports `modal` at module level (deploy-only); stub it before import
 
 from __future__ import annotations
 
+import base64 as _b64
 import json
 import sys
 from typing import Any
@@ -437,3 +438,157 @@ async def test_classic_zoom_without_region_stays_fresh(
 
     gen.assert_awaited_once()
     cont.assert_not_awaited()
+
+
+# ---------- the zoom judge (TAP_ZOOM_JUDGE, default ON) ----------------------
+#
+# Every zoom-continued tap is checked by the step-in judge (the arrival must
+# be the SAME region, closer) with ONE keep-best retry. Judge failures and
+# stub refs (undecodable data URLs) never block the tap.
+
+
+def _region_data_url(payload: bytes = b"region-crop") -> str:
+    return "data:image/jpeg;base64," + _b64.b64encode(payload).decode()
+
+
+def _mock_step_in(monkeypatch: pytest.MonkeyPatch, scores: list[float]) -> AsyncMock:
+    from providers import judge as judge_mod
+    from providers.judge import JudgeResult
+
+    step = AsyncMock(
+        side_effect=[JudgeResult(s, f"verdict {s}", "raw") for s in scores]
+    )
+    monkeypatch.setattr(judge_mod, "score_step_in", step)
+    return step
+
+
+async def test_zoom_judge_pass_is_single_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [7.5])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    step.assert_awaited_once()
+    assert step.await_args.args[0] == b"region-crop"  # judged vs the REGION
+
+
+async def test_zoom_judge_fail_retries_with_rationale_and_keeps_best(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "fal-ai/flux-pro/kontext", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "fal-ai/flux-pro/kontext", "r2")
+    cont = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0, 8.0])  # fail → retry wins
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
+    retry_instruction = cont.await_args_list[1].args[1]
+    assert "rejected by a reviewer" in retry_instruction
+    assert "verdict 4.0" in retry_instruction  # the critic's rationale rides in
+    final = next(e for e in events if e["type"] == "final")
+    assert _b64.b64encode(b"jpeg-second").decode() in final["image_data_url"]
+
+
+async def test_zoom_judge_keep_best_prefers_first_when_retry_worse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "fal-ai/flux-pro/kontext", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "fal-ai/flux-pro/kontext", "r2")
+    cont = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0, 3.0])  # retry is WORSE → keep first
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
+    final = next(e for e in events if e["type"] == "final")
+    assert _b64.b64encode(b"jpeg-first").decode() in final["image_data_url"]
+
+
+async def test_zoom_judge_kill_switch_skips_judge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TAP_ZOOM_JUDGE", "false")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [9.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    step.assert_not_awaited()
+
+
+async def test_zoom_judge_error_never_blocks_the_tap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from providers import judge as judge_mod
+
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setattr(
+        judge_mod, "score_step_in", AsyncMock(side_effect=RuntimeError("judge down"))
+    )
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    assert any(e["type"] == "final" for e in events)
