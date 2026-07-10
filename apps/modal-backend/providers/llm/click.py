@@ -334,29 +334,47 @@ async def click_to_subject(
     return _build_click_resolution(parsed, x_pct=x_pct, y_pct=y_pct, fallback_subject=parent_title)
 
 
-def _coerce_unit(value: Any) -> float | None:
-    """Coerce a JSON value to a clamped [0,1] float, or None if non-numeric."""
+def _coerce_unit(
+    value: Any, *, clamp: bool = True, percent: bool = False
+) -> float | None:
+    """Coerce a JSON value to a [0,1] float, or None if non-numeric.
+
+    ``percent=True`` (COORDINATE fields only): the VLM mixes coordinate
+    scales WITHIN one reply (live-caught: ``{"x_pct": 0.55, "y_pct": 71.3}``
+    — a fraction and a percentage side by side), so values in (2, 100] are
+    read as percentages and rescaled. Values in (1, 2] stay overshot
+    fractions and clamp — a 1.5 is a right-edge overshoot, not "1.5%".
+    Non-coordinate fields (confidence, salience) keep plain clamp semantics:
+    a "5" there is an off-scale score, not 5%.
+
+    ``clamp=True`` (points/bboxes): out-of-range values pin to the nearest
+    edge — a rough position beats none. ``clamp=False`` (tap candidates):
+    still-out-of-range values return None so a garbage pixel coordinate
+    can't mint an edge-of-page auto-tap target.
+    """
     try:
         f = float(value)
     except (TypeError, ValueError):
         return None
     if f != f:  # NaN
         return None
+    if percent and 2.0 < f <= 100.0:
+        f = f / 100.0
     if f < 0.0:
-        return 0.0
+        return 0.0 if clamp else None
     if f > 1.0:
-        return 1.0
+        return 1.0 if clamp else None
     return f
 
 
 def _parse_point(raw: Any) -> tuple[float, float] | None:
     """Accept {"x": .., "y": ..} or [x, y] or null. Out-of-range → clamped."""
     if isinstance(raw, dict):
-        x = _coerce_unit(raw.get("x"))
-        y = _coerce_unit(raw.get("y"))
+        x = _coerce_unit(raw.get("x"), percent=True)
+        y = _coerce_unit(raw.get("y"), percent=True)
     elif isinstance(raw, (list, tuple)) and len(raw) >= 2:
-        x = _coerce_unit(raw[0])
-        y = _coerce_unit(raw[1])
+        x = _coerce_unit(raw[0], percent=True)
+        y = _coerce_unit(raw[1], percent=True)
     else:
         return None
     if x is None or y is None:
@@ -367,15 +385,15 @@ def _parse_point(raw: Any) -> tuple[float, float] | None:
 def _parse_bbox(raw: Any) -> tuple[float, float, float, float] | None:
     """Accept {x,y,w,h} or [x,y,w,h]. Returns None if any component invalid."""
     if isinstance(raw, dict):
-        x = _coerce_unit(raw.get("x"))
-        y = _coerce_unit(raw.get("y"))
-        w = _coerce_unit(raw.get("w") or raw.get("width"))
-        h = _coerce_unit(raw.get("h") or raw.get("height"))
+        x = _coerce_unit(raw.get("x"), percent=True)
+        y = _coerce_unit(raw.get("y"), percent=True)
+        w = _coerce_unit(raw.get("w") or raw.get("width"), percent=True)
+        h = _coerce_unit(raw.get("h") or raw.get("height"), percent=True)
     elif isinstance(raw, (list, tuple)) and len(raw) >= 4:
-        x = _coerce_unit(raw[0])
-        y = _coerce_unit(raw[1])
-        w = _coerce_unit(raw[2])
-        h = _coerce_unit(raw[3])
+        x = _coerce_unit(raw[0], percent=True)
+        y = _coerce_unit(raw[1], percent=True)
+        w = _coerce_unit(raw[2], percent=True)
+        h = _coerce_unit(raw[3], percent=True)
     else:
         return None
     if x is None or y is None or w is None or h is None:
@@ -513,8 +531,11 @@ async def precompute_click_candidates(
     # silently starves candidate warmup and stops Wander runs mid-flight. One
     # hotter retry flips almost all of those empty rolls; a genuinely sparse
     # page just comes back empty twice.
+    # Retry on a VALIDATED-empty roll, not just a raw-empty one: the live
+    # failure was 8 raw items whose mixed-scale coordinates all fell to the
+    # validator, which is the same starvation as a bare [].
     attempts = 2 if env_flag("PRECOMPUTE_EMPTY_RETRY", "true") else 1
-    items: Any = []
+    out: list[ClickCandidate] = []
     for attempt in range(attempts):
         async with span("vlm.precompute_candidates", model=_vlm_model()) as ctx:
             parsed = await _llm._complete_json(
@@ -538,24 +559,35 @@ async def precompute_click_candidates(
                 max_tokens=900,
                 span_ctx=ctx,
             )
-        items = parsed.get("candidates", [])
-        if isinstance(items, list) and items:
+        out = _validate_candidates(parsed.get("candidates", []), max_candidates)
+        if out:
             break
         if attempt + 1 < attempts:
             _llm._safe_log("warn", "vlm.precompute_candidates.empty_retry")
+    return out
+
+
+def _validate_candidates(items: Any, max_candidates: int) -> list[ClickCandidate]:
+    """Validate a raw VLM candidate list into ClickCandidates.
+
+    Coordinates ride ``_coerce_unit(clamp=False)``: percent-scale values
+    ((1, 100], the live-caught mixed-convention reply) rescale to fractions;
+    anything still out of range drops the entry — a clamped garbage
+    coordinate would mint an edge-of-page auto-tap target for Wander.
+    """
     out: list[ClickCandidate] = []
     if not isinstance(items, list):
         return out
     for entry in items:
         if not isinstance(entry, dict):
             continue
+        x = _coerce_unit(entry.get("x_pct"), clamp=False, percent=True)
+        y = _coerce_unit(entry.get("y_pct"), clamp=False, percent=True)
+        if x is None or y is None:
+            continue
         try:
-            x = float(entry.get("x_pct", -1))
-            y = float(entry.get("y_pct", -1))
             sal = float(entry.get("salience", 0.5))
         except (TypeError, ValueError):
-            continue
-        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             continue
         subject = str(entry.get("subject", "")).strip()
         style = str(entry.get("style", "")).strip()

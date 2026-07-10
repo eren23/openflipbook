@@ -7,6 +7,8 @@ under tests/click_bench (gated behind CLICK_BENCH_RUN=1).
 
 from __future__ import annotations
 
+import pytest
+
 from providers import llm
 
 # ---------- _coerce_unit --------------------------------------------------
@@ -420,3 +422,71 @@ def test_precompute_empty_retry_kill_switch(monkeypatch) -> None:
     cands = _precompute(click_mod)
     assert cands == []
     assert mock.await_count == 1
+
+
+# ---------- mixed-scale coordinate salvage (live-caught: gemini returned
+# ---------- {"x_pct": 0.55, "y_pct": 71.3} — fraction and percent in ONE
+# ---------- entry — and the 0..1 validator dropped all 8 candidates) ------
+
+
+def test_coerce_unit_rescales_percent_values() -> None:
+    from providers.llm.click import _coerce_unit
+
+    assert _coerce_unit(0.55, percent=True) == 0.55
+    assert _coerce_unit(1.0, percent=True) == 1.0  # a fraction, NOT 1%
+    assert _coerce_unit(71.3, percent=True) == pytest.approx(0.713)
+    assert _coerce_unit(100, percent=True) == 1.0
+    assert _coerce_unit("33.1", percent=True) == pytest.approx(0.331)
+    # (1, 2] is an overshot fraction, not a percentage — keeps the historical
+    # clamp reading (1.5 = right-edge overshoot, not 1.5% = left edge)
+    assert _coerce_unit(1.5, percent=True) == 1.0
+    # beyond percent range: clamp for points, drop for candidates
+    assert _coerce_unit(672, percent=True) == 1.0
+    assert _coerce_unit(672, percent=True, clamp=False) is None
+    assert _coerce_unit(-0.2, percent=True) == 0.0
+    assert _coerce_unit(-0.2, percent=True, clamp=False) is None
+    # non-coordinate fields keep plain clamp semantics: a "5" confidence is
+    # an off-scale score, not 5%
+    assert _coerce_unit(5) == 1.0
+    assert _coerce_unit("nope") is None
+    assert _coerce_unit(float("nan")) is None
+
+
+def test_precompute_salvages_mixed_scale_coordinates(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    mock = AsyncMock(
+        return_value={
+            "candidates": [
+                {"x_pct": 0.55, "y_pct": 71.3, "subject": "boat fleet", "salience": 0.95},
+                {"x_pct": 33.1, "y_pct": 30.5, "subject": "red cottage", "salience": 0.8},
+                # pixel garbage must DROP, not clamp into an edge tap target
+                {"x_pct": 672, "y_pct": 0.4, "subject": "ghost", "salience": 0.9},
+            ]
+        }
+    )
+    monkeypatch.setattr(click_mod._llm, "_complete_json", mock)
+    cands = _precompute(click_mod)
+    assert mock.await_count == 1  # salvage, not a second VLM spend
+    by_subject = {c.subject: c for c in cands}
+    assert set(by_subject) == {"boat fleet", "red cottage"}
+    assert by_subject["boat fleet"].y_pct == pytest.approx(0.713)
+    assert by_subject["red cottage"].x_pct == pytest.approx(0.331)
+
+
+def test_precompute_retries_when_every_entry_fails_validation(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    replies = [
+        {"candidates": [{"x_pct": 900, "y_pct": 1200, "subject": "junk", "salience": 1}]},
+        {"candidates": [{"x_pct": 0.4, "y_pct": 0.6, "subject": "harbor", "salience": 0.7}]},
+    ]
+    mock = AsyncMock(side_effect=lambda **kw: replies[mock.await_count - 1])
+    monkeypatch.setattr(click_mod._llm, "_complete_json", mock)
+    cands = _precompute(click_mod)
+    assert [c.subject for c in cands] == ["harbor"]
+    assert mock.await_count == 2  # validated-empty counts as an empty roll
