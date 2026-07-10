@@ -121,7 +121,7 @@ async def test_expand_image_parses_bria_and_uses_real_dims(
     async def fake_to_fal(data_url: str) -> str:
         return "fal://parent"
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         captured["model"] = model
         captured["args"] = args
         # BRIA Expand's real shape: a singular `image`, not `images: [...]`.
@@ -156,7 +156,7 @@ async def test_expand_image_zoomout_centers_and_uses_real_dims(
     async def fake_to_fal(data_url: str) -> str:
         return "fal://parent"
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         captured["model"] = model
         captured["args"] = args
         return {"image": {"url": "http://x", "content_type": "image/png"}}

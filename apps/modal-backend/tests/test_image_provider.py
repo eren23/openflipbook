@@ -134,7 +134,7 @@ async def test_generate_image_ignores_reference_urls_on_fresh_gen(
         uploaded.append(data_url)
         return f"fal://{data_url[-1]}"
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         captured["args"] = args
         return {"images": [{"url": "http://x"}], "requestId": "r1"}
 
@@ -218,14 +218,17 @@ def test_ensure_fal_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None
 # ---------- _is_retryable -----------------------------------------------
 
 
-def _fal_http_error(status: int) -> fal_client.FalClientHTTPError:
+def _fal_http_error(
+    status: int, message: str = "boom", error_type: str | None = None
+) -> fal_client.FalClientHTTPError:
     req = httpx.Request("POST", "https://fal.run/x")
     resp = httpx.Response(status, request=req)
     return fal_client.FalClientHTTPError(
-        "boom",
+        message,
         status_code=status,
         response_headers={},
         response=resp,
+        error_type=error_type,
     )
 
 
@@ -416,7 +419,7 @@ async def test_generate_image_stays_on_fal_by_default(
 ) -> None:
     monkeypatch.setenv("FAL_KEY", "fk")
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         return {"images": [{"url": "http://x"}], "requestId": "r1"}
 
     async def fake_fetch(info: dict) -> tuple[bytes, str]:
@@ -607,3 +610,97 @@ async def test_openrouter_image_failure_falls_back_to_fal_by_default(
     assert seen[0].startswith(image.OPENROUTER_IMAGE_PREFIX)  # tried riverflow first
     assert result.model == "fal-ai/nano-banana-pro"  # …then fell over to fal
 
+
+
+# ---------- stochastic no-media retries (RETRY_NO_MEDIA, default ON) ---------
+#
+# fal sometimes fails a render stochastically: a 422 tagged no_media_generated,
+# or a 200 whose images array is empty. The SAME request usually succeeds on
+# the next attempt (verified live), so both classes are retried in place.
+# Plain 4xx stays fail-fast (pinned above by test_not_retryable_fal_4xx_other).
+
+
+def test_retryable_fal_no_media_generated_error_type() -> None:
+    err = _fal_http_error(422, error_type="no_media_generated")
+    assert image._is_retryable(err) is True
+
+
+def test_retryable_fal_no_media_generated_in_message() -> None:
+    # The detail-list repr case: the marker rides the stringified body.
+    err = _fal_http_error(
+        422,
+        message="[{'loc': ['body'], 'msg': '...', 'type': 'no_media_generated'}]",
+    )
+    assert image._is_retryable(err) is True
+
+
+def test_no_media_retry_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETRY_NO_MEDIA", "false")
+    assert (
+        image._is_retryable(_fal_http_error(422, error_type="no_media_generated"))
+        is False
+    )
+    assert image._is_retryable(image._EmptyFalResult("fal returned no images")) is False
+
+
+def test_retryable_empty_fal_result() -> None:
+    assert image._is_retryable(image._EmptyFalResult("fal returned no images")) is True
+
+
+async def test_fal_subscribe_retries_no_media_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The stochastic evidence, pinned: first attempt raises the tagged 422,
+    # the identical retry succeeds.
+    calls = {"n": 0}
+
+    async def fake_subscribe(model: str, arguments: dict, with_logs: bool) -> dict:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _fal_http_error(422, error_type="no_media_generated")
+        return {"images": [{"url": "https://cdn/x.jpg"}]}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    result = await image._fal_subscribe("fal-ai/nano-banana", {}, require_images=True)
+    assert calls["n"] == 2
+    assert result["images"]
+
+
+async def test_fal_subscribe_require_images_retries_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    async def fake_subscribe(model: str, arguments: dict, with_logs: bool) -> dict:
+        calls["n"] += 1
+        return {"images": []} if calls["n"] == 1 else {"images": [{"url": "u"}]}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    result = await image._fal_subscribe("fal-ai/nano-banana", {}, require_images=True)
+    assert calls["n"] == 2
+    assert result["images"]
+
+
+async def test_fal_subscribe_require_images_accepts_bria_singular_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # BRIA Expand answers with a singular `image` object, not `images: [...]` —
+    # a successful outpaint must NOT be mistaken for an empty result.
+    async def fake_subscribe(model: str, arguments: dict, with_logs: bool) -> dict:
+        return {"image": {"url": "https://cdn/expanded.jpg"}}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    result = await image._fal_subscribe("fal-ai/bria/expand", {}, require_images=True)
+    assert result["image"]["url"].endswith("expanded.jpg")
+
+
+async def test_fal_subscribe_default_ignores_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Non-image callers (segmenter masks, video) keep byte-identical behaviour.
+    async def fake_subscribe(model: str, arguments: dict, with_logs: bool) -> dict:
+        return {"masks": []}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    result = await image._fal_subscribe("fal-ai/sam-3", {})
+    assert result == {"masks": []}

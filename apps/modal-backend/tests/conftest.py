@@ -55,6 +55,8 @@ _SCRUB = (
     "TAP_ZOOM_CONTINUE",
     "TAP_ZOOM_JUDGE",
     "TAP_ZOOM_ACCEPT",
+    # Stochastic-failure retry (default ON — scrub for hermeticity).
+    "RETRY_NO_MEDIA",
     # View grammar (default ON — same hermeticity reasoning).
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",
