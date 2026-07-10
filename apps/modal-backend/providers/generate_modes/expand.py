@@ -104,7 +104,10 @@ async def stream_expand(
             for pan_task in pan_tasks:
                 if not pan_task.done():
                     pan_task.cancel()
-        yield _sse({"type": "expand_done", "count": emitted}, trace_id)
+        yield _sse(
+            {"type": "expand_done", "count": emitted, "failed": total - emitted},
+            trace_id,
+        )
         return
 
     expand_style_lock = (body.session_style_anchor or "").strip() or None
@@ -122,7 +125,7 @@ async def stream_expand(
     )
     total = len(neighbors)
     if total == 0:
-        yield _sse({"type": "expand_done", "count": 0}, trace_id)
+        yield _sse({"type": "expand_done", "count": 0, "failed": 0}, trace_id)
         return
 
     # Image conditioning: every neighbour shares the parent's world + the
@@ -219,5 +222,8 @@ async def stream_expand(
         for bloom_task in tasks:
             if not bloom_task.done():
                 bloom_task.cancel()
-    yield _sse({"type": "expand_done", "count": emitted}, trace_id)
+    yield _sse(
+        {"type": "expand_done", "count": emitted, "failed": total - emitted},
+        trace_id,
+    )
     return

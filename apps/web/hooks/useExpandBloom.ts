@@ -18,6 +18,9 @@ export interface BloomState {
   total: number;
   /** True once `expand_done` lands (or the stream errored out). */
   done: boolean;
+  /** Proposed neighbours that never rendered (generation failures) — the tray
+   *  says so instead of pretending nothing was lost. Absent = unknown. */
+  failed?: number;
 }
 
 /** Persists one bloomed neighbour as a relation:"expand" child and returns its
@@ -143,7 +146,17 @@ export function useExpandBloom(persist: PersistNeighbour): {
                   );
                 });
               } else if (evt.type === "expand_done") {
-                setBloom((prev) => (prev ? { ...prev, done: true } : prev));
+                const failed =
+                  typeof evt.failed === "number" ? evt.failed : undefined;
+                setBloom((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        done: true,
+                        ...(failed !== undefined ? { failed } : {}),
+                      }
+                    : prev,
+                );
               } else if (evt.type === "error") {
                 throw new Error(evt.message);
               }

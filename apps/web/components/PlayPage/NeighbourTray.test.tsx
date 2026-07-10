@@ -114,4 +114,28 @@ describe("NeighbourTray", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close neighbours" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("says how many neighbours failed instead of pretending nothing was lost", () => {
+    const ok = item({ subject: "Made it", imageDataUrl: "data:x", nodeId: "n1" });
+    render(
+      <NeighbourTray items={[ok]} total={3} done failed={2} onPick={noop} onClose={noop} />
+    );
+    expect(screen.getByText(/2 failed/)).toBeTruthy();
+  });
+
+  it("all-failed bloom says so, not 'no neighbours found'", () => {
+    render(
+      <NeighbourTray items={[]} total={3} done failed={3} onPick={noop} onClose={noop} />
+    );
+    expect(screen.getByText(/Couldn't draw the neighbours/)).toBeTruthy();
+    expect(screen.queryByText(/No neighbours found nearby/)).toBeNull();
+  });
+
+  it("failed=0 renders the normal done status (byte-compat)", () => {
+    const ok = item({ subject: "Fine", imageDataUrl: "data:x", nodeId: "n1" });
+    render(
+      <NeighbourTray items={[ok]} total={1} done failed={0} onPick={noop} onClose={noop} />
+    );
+    expect(screen.queryByText(/failed/)).toBeNull();
+  });
 });

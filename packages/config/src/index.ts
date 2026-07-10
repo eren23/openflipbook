@@ -413,6 +413,10 @@ export interface GenerateNeighborEvent {
 export interface GenerateExpandDoneEvent {
   type: "expand_done";
   count: number;
+  // How many proposed neighbours/directions never rendered (generation
+  // failures). Additive; absent on older backends means "unknown", 0 means
+  // everything landed.
+  failed?: number;
   trace_id?: string;
 }
 
