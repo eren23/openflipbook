@@ -131,7 +131,12 @@ async def test_expand_zero_neighbours_emits_done(
     _mock_providers(monkeypatch, neighbours=[])
     events = await _collect(_event_stream(_expand_body(), "trace1"))
     assert not [e for e in events if e["type"] == "neighbor"]
-    assert events[-1] == {"type": "expand_done", "count": 0, "trace_id": "trace1"}
+    assert events[-1] == {
+        "type": "expand_done",
+        "count": 0,
+        "failed": 0,
+        "trace_id": "trace1",
+    }
 
 
 async def test_expand_isolates_one_neighbour_failure(
@@ -150,6 +155,9 @@ async def test_expand_isolates_one_neighbour_failure(
     assert len(neighbours) == 1
     assert events[-1]["type"] == "expand_done"
     assert events[-1]["count"] == 1
+    # Expand honesty: the lost neighbour is REPORTED, not silently dropped —
+    # the tray can say "1 failed" instead of pretending nothing was proposed.
+    assert events[-1]["failed"] == 1
 
 
 async def test_expand_requires_an_image(monkeypatch: pytest.MonkeyPatch) -> None:

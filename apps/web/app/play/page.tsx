@@ -3968,6 +3968,7 @@ export default function PlayPage() {
           items={bloom.items}
           total={bloom.total}
           done={bloom.done}
+          failed={bloom.failed}
           onPick={(item) => {
             if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
           }}

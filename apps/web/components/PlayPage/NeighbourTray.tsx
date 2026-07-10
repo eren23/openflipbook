@@ -19,6 +19,9 @@ interface Props {
   total: number;
   /** True once the `expand_done` event lands. */
   done: boolean;
+  /** Proposed neighbours that never rendered (generation failures). The tray
+   *  says so instead of silently pretending nothing was lost. */
+  failed?: number | undefined;
   onPick: (item: NeighbourItem) => void;
   onClose: () => void;
 }
@@ -31,7 +34,14 @@ const SCALE_META: Record<ScaleKind, { label: string; chip: string; width: string
   container: { label: "around", chip: "bg-amber-500", width: "w-28" },
 };
 
-export default function NeighbourTray({ items, total, done, onPick, onClose }: Props) {
+export default function NeighbourTray({
+  items,
+  total,
+  done,
+  failed,
+  onPick,
+  onClose,
+}: Props) {
   const ready = items.filter((i) => i.imageDataUrl).length;
   const pendingCount = Math.max(0, total - items.length);
   // The bloom finished but proposed nothing usable (e.g. a weak VLM whose
@@ -41,10 +51,13 @@ export default function NeighbourTray({ items, total, done, onPick, onClose }: P
   // Bloom started but no neighbours known yet (the VLM is still surveying):
   // show activity rather than nothing while it thinks.
   const proposing = !done && total === 0 && items.length === 0;
+  const failedNote = done && (failed ?? 0) > 0 ? ` · ${failed} failed` : "";
   const status = empty
-    ? "No neighbours found nearby"
+    ? (failed ?? 0) > 0
+      ? "Couldn't draw the neighbours — try again"
+      : "No neighbours found nearby"
     : done
-      ? `Around this page · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one`
+      ? `Around this page · ${ready} neighbour${ready === 1 ? "" : "s"} — tap one${failedNote}`
       : proposing
         ? "Looking around…"
         : `Looking around · ${ready} of ${total}`;
