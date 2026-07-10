@@ -440,9 +440,13 @@ def test_coerce_unit_rescales_percent_values() -> None:
     # (1, 2] is an overshot fraction, not a percentage — keeps the historical
     # clamp reading (1.5 = right-edge overshoot, not 1.5% = left edge)
     assert _coerce_unit(1.5, percent=True) == 1.0
-    # beyond percent range: clamp for points, drop for candidates
-    assert _coerce_unit(672, percent=True) == 1.0
-    assert _coerce_unit(672, percent=True, clamp=False) is None
+    # (100, 1000] reads as per-mille (live-caught: y_pct 238 where the same
+    # model's good rolls said 0.238)
+    assert _coerce_unit(238, percent=True) == pytest.approx(0.238)
+    assert _coerce_unit(672, percent=True, clamp=False) == pytest.approx(0.672)
+    # beyond the ladder: clamp for points, drop for candidates
+    assert _coerce_unit(1344, percent=True) == 1.0
+    assert _coerce_unit(1344, percent=True, clamp=False) is None
     assert _coerce_unit(-0.2, percent=True) == 0.0
     assert _coerce_unit(-0.2, percent=True, clamp=False) is None
     # non-coordinate fields keep plain clamp semantics: a "5" confidence is
@@ -462,8 +466,10 @@ def test_precompute_salvages_mixed_scale_coordinates(monkeypatch) -> None:
             "candidates": [
                 {"x_pct": 0.55, "y_pct": 71.3, "subject": "boat fleet", "salience": 0.95},
                 {"x_pct": 33.1, "y_pct": 30.5, "subject": "red cottage", "salience": 0.8},
-                # pixel garbage must DROP, not clamp into an edge tap target
-                {"x_pct": 672, "y_pct": 0.4, "subject": "ghost", "salience": 0.9},
+                # the live harbor-town flavour: fraction x + per-mille y
+                {"x_pct": 0.509, "y_pct": 238, "subject": "cathedral", "salience": 0.85},
+                # beyond the ladder must DROP, not clamp into an edge target
+                {"x_pct": 1344, "y_pct": 0.4, "subject": "ghost", "salience": 0.9},
             ]
         }
     )
@@ -471,9 +477,10 @@ def test_precompute_salvages_mixed_scale_coordinates(monkeypatch) -> None:
     cands = _precompute(click_mod)
     assert mock.await_count == 1  # salvage, not a second VLM spend
     by_subject = {c.subject: c for c in cands}
-    assert set(by_subject) == {"boat fleet", "red cottage"}
+    assert set(by_subject) == {"boat fleet", "red cottage", "cathedral"}
     assert by_subject["boat fleet"].y_pct == pytest.approx(0.713)
     assert by_subject["red cottage"].x_pct == pytest.approx(0.331)
+    assert by_subject["cathedral"].y_pct == pytest.approx(0.238)
 
 
 def test_precompute_retries_when_every_entry_fails_validation(monkeypatch) -> None:

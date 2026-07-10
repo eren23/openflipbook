@@ -340,17 +340,22 @@ def _coerce_unit(
     """Coerce a JSON value to a [0,1] float, or None if non-numeric.
 
     ``percent=True`` (COORDINATE fields only): the VLM mixes coordinate
-    scales WITHIN one reply (live-caught: ``{"x_pct": 0.55, "y_pct": 71.3}``
-    — a fraction and a percentage side by side), so values in (2, 100] are
-    read as percentages and rescaled. Values in (1, 2] stay overshot
-    fractions and clamp — a 1.5 is a right-edge overshoot, not "1.5%".
-    Non-coordinate fields (confidence, salience) keep plain clamp semantics:
-    a "5" there is an off-scale score, not 5%.
+    scales WITHIN one reply — live-caught flavours include
+    ``{"x_pct": 0.55, "y_pct": 71.3}`` (fraction + percent) and
+    ``{"x_pct": 0.509, "y_pct": 238}`` (fraction + PER-MILLE: the same
+    model's good rolls put the same cathedral at y=0.238). So: (2, 100]
+    reads as a percentage, (100, 1000] as per-mille, and anything beyond
+    is unsalvageable. Values in (1, 2] stay overshot fractions and clamp —
+    a 1.5 is a right-edge overshoot, not "1.5%". Ceiling: a raw PIXEL
+    value in (100, 1000] is indistinguishable from per-mille and lands
+    slightly off; the tap-side judges catch those downstream.
+    Non-coordinate fields (confidence, salience) keep plain clamp
+    semantics: a "5" there is an off-scale score, not 5%.
 
     ``clamp=True`` (points/bboxes): out-of-range values pin to the nearest
     edge — a rough position beats none. ``clamp=False`` (tap candidates):
-    still-out-of-range values return None so a garbage pixel coordinate
-    can't mint an edge-of-page auto-tap target.
+    still-out-of-range values return None so a garbage coordinate can't
+    mint an edge-of-page auto-tap target.
     """
     try:
         f = float(value)
@@ -360,6 +365,8 @@ def _coerce_unit(
         return None
     if percent and 2.0 < f <= 100.0:
         f = f / 100.0
+    elif percent and 100.0 < f <= 1000.0:
+        f = f / 1000.0
     if f < 0.0:
         return 0.0 if clamp else None
     if f > 1.0:
