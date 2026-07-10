@@ -353,3 +353,70 @@ def test_precompute_candidates_parse_enter_as(monkeypatch) -> None:
     assert by_subject["legend box"].enter_as == "explainer"
     # absent → default
     assert by_subject["harbor"].enter_as == "explainer"
+
+
+# ---------- empty-roll retry (gemini-flash sometimes returns a well-formed
+# ---------- empty list for scenic pages; one hotter retry flips it) -------
+
+
+def _precompute(click_mod):
+    import asyncio
+
+    return asyncio.run(
+        click_mod.precompute_click_candidates(
+            image_data_url="data:image/jpeg;base64,x",
+            parent_title="T",
+            parent_query="q",
+        )
+    )
+
+
+def test_precompute_empty_roll_retries_once_hotter(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    replies = [
+        {"candidates": []},
+        {"candidates": [{"x_pct": 0.2, "y_pct": 0.3, "subject": "castle", "salience": 0.9}]},
+    ]
+    mock = AsyncMock(side_effect=lambda **kw: replies[mock.await_count - 1])
+    monkeypatch.setattr(click_mod._llm, "_complete_json", mock)
+    cands = _precompute(click_mod)
+    assert [c.subject for c in cands] == ["castle"]
+    assert mock.await_count == 2
+    # the retry runs hotter than the first roll
+    temps = [kw.kwargs["temperature"] for kw in mock.await_args_list]
+    assert temps == [0.2, 0.5]
+    # the scene clause that removes the model's "not an explainer → empty" out
+    system = str(mock.await_args_list[0].kwargs["messages"][0])
+    assert "a rich scene is never empty" in system
+
+
+def test_precompute_nonempty_first_roll_calls_once(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    mock = AsyncMock(
+        return_value={
+            "candidates": [{"x_pct": 0.5, "y_pct": 0.5, "subject": "boat", "salience": 0.7}]
+        }
+    )
+    monkeypatch.setattr(click_mod._llm, "_complete_json", mock)
+    cands = _precompute(click_mod)
+    assert len(cands) == 1
+    assert mock.await_count == 1  # no double VLM spend on good rolls
+
+
+def test_precompute_empty_retry_kill_switch(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    monkeypatch.setenv("PRECOMPUTE_EMPTY_RETRY", "false")
+    mock = AsyncMock(return_value={"candidates": []})
+    monkeypatch.setattr(click_mod._llm, "_complete_json", mock)
+    cands = _precompute(click_mod)
+    assert cands == []
+    assert mock.await_count == 1

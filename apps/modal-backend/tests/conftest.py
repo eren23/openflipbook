@@ -59,6 +59,8 @@ _SCRUB = (
     # for hermeticity).
     "RETRY_NO_MEDIA",
     "FRIENDLY_ERRORS",
+    # Candidate empty-roll retry (default ON — same reasoning).
+    "PRECOMPUTE_EMPTY_RETRY",
     # View grammar (default ON — same hermeticity reasoning).
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",

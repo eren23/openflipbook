@@ -494,7 +494,10 @@ async def precompute_click_candidates(
         "CLOSER to; \"submap\" = the page reads as a map/plan and this is a "
         "sub-area best shown as a closer map; \"explainer\" = an abstract "
         "concept, mechanism, or diagram element best served by a fresh "
-        "labelled diagram. Coordinates are 0..1 with origin at the "
+        "labelled diagram. If the page is a scenic illustration or a map "
+        "rather than an annotated diagram, treat its distinct objects, "
+        "buildings, creatures, and landmarks as the clickable subjects — a "
+        "rich scene is never empty. Coordinates are 0..1 with origin at the "
         "top-left of the image. Sort by salience descending."
         + locale_clause
     )
@@ -502,31 +505,44 @@ async def precompute_click_candidates(
         "List the most click-worthy regions on this illustration. Return "
         f"at most {max_candidates}; fewer is fine if the page is sparse."
     )
+    from _env import env_flag
     from obs import span
 
-    async with span("vlm.precompute_candidates", model=_vlm_model()) as ctx:
-        parsed = await _llm._complete_json(
-            model=_vlm_model(),
-            messages=[
-                _system_message(system),
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_data_url, "detail": "high"},
-                        },
-                    ],
-                },
-            ],
-            schema=CANDIDATES_SCHEMA,
-            schema_name="click_candidates",
-            temperature=0.2,
-            max_tokens=900,
-            span_ctx=ctx,
-        )
-    items = parsed.get("candidates", [])
+    # gemini-flash occasionally reads a scenic (non-diagram) page as having no
+    # "annotated subjects" and returns a well-formed empty list — which
+    # silently starves candidate warmup and stops Wander runs mid-flight. One
+    # hotter retry flips almost all of those empty rolls; a genuinely sparse
+    # page just comes back empty twice.
+    attempts = 2 if env_flag("PRECOMPUTE_EMPTY_RETRY", "true") else 1
+    items: Any = []
+    for attempt in range(attempts):
+        async with span("vlm.precompute_candidates", model=_vlm_model()) as ctx:
+            parsed = await _llm._complete_json(
+                model=_vlm_model(),
+                messages=[
+                    _system_message(system),
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_text},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_data_url, "detail": "high"},
+                            },
+                        ],
+                    },
+                ],
+                schema=CANDIDATES_SCHEMA,
+                schema_name="click_candidates",
+                temperature=0.2 if attempt == 0 else 0.5,
+                max_tokens=900,
+                span_ctx=ctx,
+            )
+        items = parsed.get("candidates", [])
+        if isinstance(items, list) and items:
+            break
+        if attempt + 1 < attempts:
+            _llm._safe_log("warn", "vlm.precompute_candidates.empty_retry")
     out: list[ClickCandidate] = []
     if not isinstance(items, list):
         return out
