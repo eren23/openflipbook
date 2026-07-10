@@ -74,7 +74,11 @@ import { MorphImagePair } from "@/components/PlayPage/MorphImagePair";
 import { StrokeOverlay } from "@/components/PlayPage/StrokeOverlay";
 import { ClickRipple } from "@/components/PlayPage/ClickRipple";
 import { BlankTapNudge } from "@/components/PlayPage/BlankTapNudge";
-import { useWander } from "@/hooks/useWander";
+import {
+  useWander,
+  WANDER_MAX_PAGES,
+  type WanderStopReason,
+} from "@/hooks/useWander";
 import { BranchBeacons } from "@/components/PlayPage/BranchBeacons";
 import { GeneratingBanner } from "@/components/PlayPage/GeneratingBanner";
 import { Quickbar } from "@/components/PlayPage/Quickbar";
@@ -442,6 +446,14 @@ export default function PlayPage() {
   }, [blankTap]);
   // Wander (auto-explore): the world explores itself, hands-free. See useWander.
   const [wandering, setWandering] = useState(false);
+  // Why the last wander run stopped — a small transient pill by the ▶ button,
+  // so an auto-stop (page cap, failure, dead end) never reads as a silent bug.
+  const [wanderNote, setWanderNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wanderNote) return;
+    const t = setTimeout(() => setWanderNote(null), 6000);
+    return () => clearTimeout(t);
+  }, [wanderNote]);
   // The click handler closes over state at dispatch time; Wander's synthetic
   // taps must read the LIVE value (withhold zoom routing mid-wander), so
   // mirror it into a ref.
@@ -1597,7 +1609,16 @@ export default function PlayPage() {
 
   // Wander (auto-explore): reuse the ranked precompute candidates + the tap flow
   // to let the world explore itself, hands-free. Toggled by the ▶ button.
-  const stopWander = useCallback(() => setWandering(false), []);
+  const stopWander = useCallback((reason?: WanderStopReason) => {
+    setWandering(false);
+    setWanderNote(
+      reason === "max-pages"
+        ? `Wander: explored ${WANDER_MAX_PAGES} pages — ▶ to continue`
+        : reason
+          ? "Wander stopped: nothing tappable here"
+          : null,
+    );
+  }, []);
   useWander({
     active: wandering,
     phase,
@@ -1609,6 +1630,14 @@ export default function PlayPage() {
     dispatchTapAt,
     onExhausted: stopWander,
   });
+  // A failed generation mid-wander used to stall the run silently (the tap
+  // never advances the node, so the hook never re-arms). Stop loudly instead.
+  useEffect(() => {
+    if (wandering && phase === "error") {
+      setWandering(false);
+      setWanderNote("Wander stopped: generation failed");
+    }
+  }, [wandering, phase]);
 
   // The geo-aware section of the right-click menu (E2): target-aware actions
   // routed to the primitives that already exist — runEdit (E1 mask path),
@@ -3696,9 +3725,17 @@ export default function PlayPage() {
                 the World pill so, on any residual overlap at narrow widths,
                 this later-in-DOM toolbar wins the stack and stays tappable. */}
             <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
+              {wanderNote && (
+                <span className="flex items-center rounded-full bg-black/70 px-2.5 py-1 text-xs text-white/95">
+                  {wanderNote}
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => setWandering((w) => !w)}
+                onClick={() => {
+                  setWanderNote(null);
+                  setWandering((w) => !w);
+                }}
                 aria-pressed={wandering}
                 disabled={!page?.imageDataUrl}
                 className={
@@ -3707,7 +3744,7 @@ export default function PlayPage() {
                     ? "animate-pulse bg-fuchsia-600"
                     : "bg-fuchsia-600/85 hover:bg-fuchsia-600")
                 }
-                title="Wander — let the world explore itself, tapping the most interesting spot each page. Tap again to stop."
+                title="Wander — let the world explore itself, tapping the most interesting spot each page (stops itself after 8). Tap again to stop."
               >
                 <span aria-hidden>{wandering ? "⏸" : "▶"}</span>
                 {wandering ? "Wandering…" : "Wander"}

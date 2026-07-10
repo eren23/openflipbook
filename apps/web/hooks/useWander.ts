@@ -8,6 +8,13 @@ interface WanderCandidate {
   salience?: number;
 }
 
+/** Why a wander run ended on its own (the caller surfaces it). */
+export type WanderStopReason = "max-pages" | "no-candidates" | "resolver-error";
+
+/** Auto-explore spends real money per page — cap a run so a forgotten ▶
+ *  can't wander away with the wallet. One more ▶ starts a fresh run. */
+export const WANDER_MAX_PAGES = 8;
+
 interface Options {
   /** Whether wander is currently on. */
   active: boolean;
@@ -23,11 +30,14 @@ interface Options {
   outputLocale: string | null;
   /** Fire the existing tap flow at a normalized point (reuses everything). */
   dispatchTapAt: (xPct: number, yPct: number) => void;
-  /** Called when wander can't continue (no candidates / error) so the caller
-   *  can toggle it off. */
-  onExhausted: () => void;
+  /** Called when wander can't continue — max pages reached, a page with no
+   *  candidates, or the resolver erroring — so the caller can toggle it off
+   *  and say why. */
+  onExhausted: (reason: WanderStopReason) => void;
   /** ms to linger on a freshly-arrived page before the next auto-tap. */
   lingerMs?: number;
+  /** Auto-taps per activation before wander stops itself. */
+  maxPages?: number;
 }
 
 /**
@@ -50,10 +60,14 @@ export function useWander({
   dispatchTapAt,
   onExhausted,
   lingerMs = 2600,
+  maxPages = WANDER_MAX_PAGES,
 }: Options): void {
   // The last node we auto-tapped FROM, so a page is only wandered once even as
   // the effect re-runs.
   const tappedFrom = useRef<string | null>(null);
+  // Auto-taps this activation — reset on toggle-off so one more ▶ starts a
+  // fresh run.
+  const tapCount = useRef(0);
   // The page's non-identity fields ride a ref, NOT the effect deps: the image
   // data-URL string is re-minted after a page settles (the change-stream
   // reconcile), and if the effect depended on it, that re-run would clear the
@@ -65,6 +79,7 @@ export function useWander({
   useEffect(() => {
     if (!active) {
       tappedFrom.current = null;
+      tapCount.current = 0;
       return;
     }
     // Only auto-tap from a settled page whose pixels we can resolve, and only
@@ -75,6 +90,11 @@ export function useWander({
       !latest.current.imageDataUrl?.startsWith("data:") ||
       tappedFrom.current === nodeId
     ) {
+      return;
+    }
+    // The spend seatbelt: a forgotten ▶ stops itself after maxPages taps.
+    if (tapCount.current >= maxPages) {
+      onExhausted("max-pages");
       return;
     }
     tappedFrom.current = nodeId;
@@ -97,7 +117,7 @@ export function useWander({
           signal: ac.signal,
         });
         if (!res.ok) {
-          onExhausted();
+          onExhausted("resolver-error");
           return;
         }
         const data = (await res.json()) as { candidates?: WanderCandidate[] };
@@ -105,7 +125,7 @@ export function useWander({
           (c) => typeof c?.x_pct === "number" && typeof c?.y_pct === "number"
         );
         if (cands.length === 0) {
-          onExhausted();
+          onExhausted("no-candidates");
           return;
         }
         cands.sort((a, b) => (b.salience ?? 0) - (a.salience ?? 0));
@@ -114,7 +134,10 @@ export function useWander({
         const pool = cands.slice(0, Math.min(3, cands.length));
         const pick = pool[Math.floor(Math.random() * pool.length)]!;
         timer = setTimeout(() => {
-          if (!ac.signal.aborted) dispatchTapAt(pick.x_pct, pick.y_pct);
+          if (!ac.signal.aborted) {
+            tapCount.current += 1;
+            dispatchTapAt(pick.x_pct, pick.y_pct);
+          }
         }, lingerMs);
       } catch {
         // Aborted (page changed / toggled off) or network error — the next
@@ -130,5 +153,5 @@ export function useWander({
     // (image, title, query, locale) ride `latest` so a re-mint of the data URL
     // can't cancel the in-flight linger timer.
      
-  }, [active, phase, nodeId, dispatchTapAt, onExhausted, lingerMs]);
+  }, [active, phase, nodeId, dispatchTapAt, onExhausted, lingerMs, maxPages]);
 }
