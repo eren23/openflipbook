@@ -36,6 +36,24 @@ export interface PrefetchEntry {
 
 export const PREFETCH_PER_PAGE = 6;
 export const PREFETCH_LRU_MAX = 200;
+/** Per-page allowance for PRECOMPUTE candidate writes — its own budget, so
+ *  one cheap batched VLM call (8 spots) no longer exhausts the hover budget
+ *  and starve every other bucket of a resolve. Matches the precompute
+ *  request's max_candidates. */
+export const PRECOMPUTE_PER_PAGE = 8;
+
+/**
+ * Is this cache entry a FULL hover/click resolve (vs a precompute candidate)?
+ * Hover resolves always carry the groundability verdict; candidate writes
+ * never do (subject/style/enter_as only). Candidate-only entries are
+ * upgrade-eligible: a hover on that bucket re-resolves and merges, giving the
+ * hottest spots blank-tap verdicts + confidence. A resolved `groundable:
+ * false` is COMPLETE (a known blank), not re-fetchable. The cache is
+ * in-memory only, so pre-field legacy entries can't survive a deploy.
+ */
+export function isHoverResolved(entry: PrefetchEntry | undefined): boolean {
+  return !!entry && entry.groundable !== undefined;
+}
 
 /**
  * Owns the in-memory hover/click prefetch cache plus the discipline knobs
@@ -53,6 +71,9 @@ export function usePrefetchCache() {
   const timerRef = useRef<number | null>(null);
   const currentKeyRef = useRef<string | null>(null);
   const perPageCountRef = useRef<Map<string, number>>(new Map());
+  // Precompute candidates count HERE, not against the hover budget above —
+  // two writers, two allowances (see PRECOMPUTE_PER_PAGE).
+  const candidateCountRef = useRef<Map<string, number>>(new Map());
 
   // 3% grid — tighter than the original 5% so the 8 precomputed candidates
   // map to distinct buckets, but still loose enough that nearby hovers reuse
@@ -87,6 +108,7 @@ export function usePrefetchCache() {
     timerRef,
     currentKeyRef,
     perPageCountRef,
+    candidateCountRef,
     bucketKey,
     clearTimer,
     reset,

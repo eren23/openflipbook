@@ -2,7 +2,13 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PrefetchEntry } from "./usePrefetchCache";
-import { PREFETCH_LRU_MAX, PREFETCH_PER_PAGE, usePrefetchCache } from "./usePrefetchCache";
+import {
+  isHoverResolved,
+  PRECOMPUTE_PER_PAGE,
+  PREFETCH_LRU_MAX,
+  PREFETCH_PER_PAGE,
+  usePrefetchCache,
+} from "./usePrefetchCache";
 
 describe("usePrefetchCache constants", () => {
   it("exports the per-page bucket cap and LRU ceiling", () => {
@@ -100,5 +106,36 @@ describe("PrefetchEntry shape", () => {
     expect(blocked.groundable).toBe(false);
     // Consumers should suppress page-gen on this entry.
     expect(blocked.groundable === false && (blocked.confidence ?? 1) < 0.5).toBe(true);
+  });
+
+  it("exposes an independent candidate budget map", () => {
+    const { result } = renderHook(() => usePrefetchCache());
+    expect(result.current.candidateCountRef.current).not.toBe(
+      result.current.perPageCountRef.current
+    );
+    result.current.candidateCountRef.current.set("n1", 8);
+    expect(result.current.perPageCountRef.current.get("n1")).toBeUndefined();
+  });
+
+  it("PRECOMPUTE_PER_PAGE covers the whole 8-candidate precompute", () => {
+    expect(PRECOMPUTE_PER_PAGE).toBe(8);
+    expect(PRECOMPUTE_PER_PAGE).toBeGreaterThanOrEqual(PREFETCH_PER_PAGE);
+  });
+
+  it("isHoverResolved: candidate-only entries are upgrade-eligible", () => {
+    expect(isHoverResolved(undefined)).toBe(false);
+    // precompute writes: subject/style(/enter_as) only — upgradeable
+    expect(isHoverResolved({ subject: "castle", style: "" })).toBe(false);
+    expect(
+      isHoverResolved({ subject: "castle", style: "", enter_as: "scene" })
+    ).toBe(false);
+    // a full hover resolve is complete
+    expect(
+      isHoverResolved({ subject: "castle", style: "", groundable: true })
+    ).toBe(true);
+    // a RESOLVED blank is complete too (a known nothing, not re-fetchable)
+    expect(
+      isHoverResolved({ subject: "sky", style: "", groundable: false })
+    ).toBe(true);
   });
 });
