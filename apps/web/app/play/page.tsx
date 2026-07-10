@@ -138,6 +138,8 @@ import {
 } from "@/lib/session-pages";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import {
+  isHoverResolved,
+  PRECOMPUTE_PER_PAGE,
   PREFETCH_LRU_MAX,
   PREFETCH_PER_PAGE,
   usePrefetchCache,
@@ -817,6 +819,7 @@ export default function PlayPage() {
     timerRef: prefetchTimerRef,
     currentKeyRef: prefetchCurrentKeyRef,
     perPageCountRef: prefetchPerPageCountRef,
+    candidateCountRef: prefetchCandidateCountRef,
     bucketKey,
   } = usePrefetchCache();
 
@@ -2032,10 +2035,13 @@ export default function PlayPage() {
         };
         if (!Array.isArray(data.candidates)) return;
         const cache = prefetchCacheRef.current;
-        const counts = prefetchPerPageCountRef.current;
+        // Candidates count against their OWN allowance — one cheap batched
+        // call must not exhaust the hover budget and starve every other
+        // bucket of a full resolve (nudge/dive verdicts).
+        const counts = prefetchCandidateCountRef.current;
         const scope = nodeId;
         for (const c of data.candidates) {
-          if ((counts.get(scope) ?? 0) >= PREFETCH_PER_PAGE) break;
+          if ((counts.get(scope) ?? 0) >= PRECOMPUTE_PER_PAGE) break;
           const key = bucketKey(nodeId, c.x_pct, c.y_pct);
           if (cache.has(key)) continue;
           cache.set(key, {
@@ -2088,7 +2094,10 @@ export default function PlayPage() {
       const key = bucketKey(currentNodeId, xPct, yPct);
       if (prefetchCurrentKeyRef.current === key) return;
       prefetchCurrentKeyRef.current = key;
-      if (cache.has(key)) return;
+      // Skip only FULLY resolved buckets. A candidate-only entry (precompute:
+      // subject/style/enter_as, no groundable verdict) is upgrade-eligible —
+      // hovering the hottest spots earns them blank-tap + confidence data.
+      if (isHoverResolved(cache.get(key))) return;
       if ((pageBucketCounts.get(pageScope) ?? 0) >= PREFETCH_PER_PAGE) return;
       // Serial: cancel any prior in-flight prefetch — only the latest hover
       // is interesting, and parallel multi-MB POSTs are the cost we're
@@ -2128,7 +2137,12 @@ export default function PlayPage() {
             enter_as?: string;
           };
           if (data.subject) {
+            // Merge over any candidate-only entry so its fields (e.g. a
+            // precompute enter_as) survive when the resolve omits them; the
+            // fresh hover resolve wins on every field it carries.
+            const prior = cache.get(key);
             cache.set(key, {
+              ...(prior ?? {}),
               subject: data.subject,
               style: data.style ?? "",
               subject_context: data.subject_context ?? "",
