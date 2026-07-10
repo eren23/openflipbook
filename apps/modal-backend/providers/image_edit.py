@@ -96,6 +96,7 @@ async def edit_image(
         result = await _fal_subscribe(
             model,
             _edit_args_for(model, instruction, image_url, style_fal),
+            require_images=True,
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -213,7 +214,7 @@ async def continue_image(
     image_url = await to_fal_url(image_data_url)
     async with span("image.continue", model=model, instr_len=len(instruction)) as ctx:
         result = await _fal_subscribe(
-            model, _edit_args_for(model, instruction, image_url)
+            model, _edit_args_for(model, instruction, image_url), require_images=True
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -323,7 +324,7 @@ async def expand_image(
     image_url = await to_fal_url(image_data_url)
     async with span("image.expand", model=model, direction=direction, w=w, h=h) as ctx:
         result = await _fal_subscribe(
-            model, _expand_args_for(image_url, direction, w, h)
+            model, _expand_args_for(image_url, direction, w, h), require_images=True
         )
         image_info = _expand_first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -400,7 +401,9 @@ async def expand_image_zoomout(
     w, h = _dims_from_data_url(image_data_url) or (width, height)
     image_url = await to_fal_url(image_data_url)
     async with span("image.zoomout", model=model, factor=f, w=w, h=h) as ctx:
-        result = await _fal_subscribe(model, _zoomout_args_for(image_url, f, w, h, prompt))
+        result = await _fal_subscribe(
+            model, _zoomout_args_for(image_url, f, w, h, prompt), require_images=True
+        )
         image_info = _expand_first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
         ctx["bytes"] = len(jpeg_bytes)

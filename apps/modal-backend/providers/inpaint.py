@@ -65,7 +65,9 @@ async def inpaint_image(
     mask_url = await to_fal_url(mask_data_url)
     async with span("image.inpaint", model=model, instr_len=len(instruction)) as ctx:
         result = await _fal_subscribe(
-            model, _inpaint_args_for(model, instruction, image_url, mask_url)
+            model,
+            _inpaint_args_for(model, instruction, image_url, mask_url),
+            require_images=True,
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)

@@ -18,7 +18,7 @@ async def test_continue_image_defaults_to_kontext(
     async def fake_to_fal(data_url: str) -> str:
         return "fal://region"
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         captured["model"] = model
         captured["args"] = args
         return {"images": [{"url": "http://x"}], "requestId": "r1"}
@@ -120,7 +120,7 @@ async def test_continue_image_respects_env_override(
     async def fake_to_fal(data_url: str) -> str:
         return "fal://region"
 
-    async def fake_sub(model: str, args: dict) -> dict:
+    async def fake_sub(model: str, args: dict, **kw: object) -> dict:
         captured["model"] = model
         return {"images": [{"url": "http://x"}]}
 

@@ -45,6 +45,15 @@ class _EmptyImageResponse(RuntimeError):
     RuntimeError-catching caller behave exactly as before."""
 
 
+class _EmptyFalResult(RuntimeError):
+    """A fal call returned an empty `images` array. Raised INSIDE the retried
+    block (via `_fal_subscribe(require_images=True)`) so the tenacity loop gets
+    a chance at it — the failure is empirically stochastic (the same request
+    often succeeds on the next attempt, e.g. fal's no_media_generated class).
+    Message kept as "fal returned no images" for caller/test compat with the
+    _first_image safety net."""
+
+
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
     "balanced": "fal-ai/nano-banana-pro",
@@ -320,7 +329,7 @@ async def _generate_with_slug(
         refs=0,
     ) as ctx:
         result = await _fal_subscribe(
-            model, _args_for(model, prompt, aspect_ratio)
+            model, _args_for(model, prompt, aspect_ratio), require_images=True
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -608,12 +617,27 @@ def _is_retryable(exc: BaseException) -> bool:
     `openrouter:` image path) likewise wraps transport errors in its own
     types. Falls back to httpx exceptions for the post-fal CDN download path.
     """
+    from _env import env_flag
+
     if isinstance(exc, _EmptyImageResponse):
         # A no-image response fails FAST (not retried in place) so generate_image's
         # forced fal failover kicks in immediately — retrying a flaky/slow image
         # model 3x in place is what blew the upstream timeout -> "network error".
         return False
+    if isinstance(exc, _EmptyFalResult):
+        # fal's empty-images results are stochastic (the same request usually
+        # succeeds on retry) — kill-switch shared with the no_media class below.
+        return env_flag("RETRY_NO_MEDIA", "true")
     if isinstance(exc, fal_client.FalClientHTTPError):
+        # fal's no_media_generated (a 422 with a marker) is empirically
+        # STOCHASTIC — a retried identical request succeeds most of the time
+        # (verified live: a wander tap failed 422-no-media then rendered on
+        # retry). Other 4xx stay fail-fast.
+        if env_flag("RETRY_NO_MEDIA", "true") and (
+            getattr(exc, "error_type", None) == "no_media_generated"
+            or "no_media_generated" in str(exc)
+        ):
+            return True
         code = exc.status_code
         return code == 429 or 500 <= code < 600
     if isinstance(exc, fal_client.FalClientTimeoutError):
@@ -630,11 +654,19 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
-async def _fal_subscribe(model: str, arguments: dict) -> dict:
+async def _fal_subscribe(
+    model: str, arguments: dict, *, require_images: bool = False
+) -> dict:
     """fal_client.subscribe_async with bounded exponential backoff.
 
     Three attempts max. Doesn't retry on auth/4xx-other so a misconfigured
     key fails fast. Wider safety net would mask real bugs.
+
+    `require_images=True` (the image-shaped endpoints) raises _EmptyFalResult
+    INSIDE the retried block when the result carries no images — fal sometimes
+    returns 200 with an empty array, and that class is stochastic exactly like
+    no_media_generated. Default False keeps non-image callers (segmenter,
+    video) byte-identical.
     """
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(3),
@@ -643,7 +675,17 @@ async def _fal_subscribe(model: str, arguments: dict) -> dict:
         reraise=True,
     ):
         with attempt:
-            return await fal_client.subscribe_async(
+            result = await fal_client.subscribe_async(
                 model, arguments=arguments, with_logs=False
             )
+            # Two success shapes exist: `images: [...]` (nano/kontext/fill) and
+            # BRIA Expand's singular `image` object — accept either, so a
+            # successful outpaint is never mistaken for an empty result.
+            if (
+                require_images
+                and not result.get("images")
+                and not isinstance(result.get("image"), dict)
+            ):
+                raise _EmptyFalResult("fal returned no images")
+            return result
     raise RuntimeError("unreachable")  # pragma: no cover
