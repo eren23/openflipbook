@@ -885,6 +885,42 @@ def _note_duplicate_generate(body: GenerateBody) -> bool:
     return seen is not None and (now - seen) < _RECENT_GENERATE_TTL_S
 
 
+def _friendly_error(exc: BaseException) -> tuple[str, str]:
+    """(short human message, detail ≤300 chars) for the SSE error frame.
+
+    The raw exception used to reach the browser verbatim — for fal failures
+    that includes the ENTIRE prompt echoed back in the validation body, which
+    rendered as a wall of leaked internals. The mapping keeps the user-facing
+    message short and actionable; the capped `detail` plus the untouched
+    log/record_error calls keep full diagnosability server-side. String/attr
+    matching on purpose (no fal imports here); the error_type attr is the
+    stable half, wording matches are best-effort.
+    """
+    s = str(exc).lower()
+    name = type(exc).__name__
+    detail = f"{name}: {exc}"[:300]
+    if (
+        getattr(exc, "error_type", None) == "no_media_generated"
+        or "no_media_generated" in s
+        or "returned no images" in s
+        or name == "_EmptyImageResponse"
+    ):
+        return (
+            "The image model declined this one — hit retry or tap somewhere else.",
+            detail,
+        )
+    if isinstance(exc, TimeoutError) or "timed out" in s or "timeout" in name.lower():
+        return ("That page took too long to draw — hit retry.", detail)
+    if getattr(exc, "status_code", None) == 429 or "rate limit" in s:
+        return ("The image service is busy right now — retry in a moment.", detail)
+    if "content_policy" in s or "moderation" in s:
+        return (
+            "Blocked by the image model's safety filter — try a different spot or wording.",
+            detail,
+        )
+    return ("Generation failed — hit retry.", detail)
+
+
 async def _event_stream(
     body: GenerateBody,
     trace_id: str,
@@ -1074,7 +1110,13 @@ async def _event_stream(
             error=f"{type(exc).__name__}: {exc}",
         )
         record_error("sse_generate", exc)
-        yield _sse({"type": "error", "message": str(exc)}, trace_id)
+        if env_flag("FRIENDLY_ERRORS", "true"):
+            msg, detail = _friendly_error(exc)
+            yield _sse(
+                {"type": "error", "message": msg, "detail": detail}, trace_id
+            )
+        else:
+            yield _sse({"type": "error", "message": str(exc)}, trace_id)
 
 
 @fastapi_app.post("/sse/generate")

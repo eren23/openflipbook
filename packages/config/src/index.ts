@@ -354,7 +354,12 @@ export interface GenerateFinalEvent {
 
 export interface GenerateErrorEvent {
   type: "error";
+  // Short, human, safe-to-render message (FRIENDLY_ERRORS maps known failure
+  // classes; the raw exception never reaches the browser).
   message: string;
+  // Capped (~300 chars) diagnostic tail — debug HUD / logs surface, not the
+  // banner. Additive; absent on older backends or with FRIENDLY_ERRORS=false.
+  detail?: string;
   trace_id?: string;
 }
 

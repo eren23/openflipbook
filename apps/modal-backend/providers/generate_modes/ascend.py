@@ -219,7 +219,19 @@ async def stream_ascend(
     except Exception as exc:
         log("warn", "ascend.failed", error=f"{type(exc).__name__}: {exc}")
         record_error("ascend", exc)
-        yield _sse({"type": "error", "message": f"ascend failed: {exc}"}, trace_id)
+        # Same friendly mapping as the main funnel — the raw fal body echoes
+        # the whole prompt back, which must not reach the browser. Function-
+        # local import: generate imports this module at call time, so a
+        # module-level import would be circular.
+        from generate import _friendly_error
+
+        if env_flag("FRIENDLY_ERRORS", "true"):
+            msg, detail = _friendly_error(exc)
+            yield _sse({"type": "error", "message": msg, "detail": detail}, trace_id)
+        else:
+            yield _sse(
+                {"type": "error", "message": f"ascend failed: {exc}"}, trace_id
+            )
         return
     data_url = await _asyncio.to_thread(
         image_provider.encode_data_url, img.jpeg_bytes, img.mime_type

@@ -643,6 +643,8 @@ export default function PlayPage() {
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The last generate body, any kind — powers the error banner's "Try again".
+  const lastGenerateRef = useRef<GenerateRequestBody | null>(null);
   const streamRef = useRef<StreamClient | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus | "off">("off");
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
@@ -808,6 +810,11 @@ export default function PlayPage() {
 
   const generate = useCallback(
     async (body: GenerateRequestBody) => {
+      // Every generation kind (query/tap/edit/expand/ascend) funnels through
+      // here — keep the last body so the error banner's "Try again" can
+      // replay it verbatim (minus trace_id: the API route claims the
+      // Idempotency-Key per trace, so a same-trace replay would 409).
+      lastGenerateRef.current = body;
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -1063,6 +1070,9 @@ export default function PlayPage() {
             } else if (evt.type === "error") {
               hudEmit("sse:error", {
                 message: evt.message,
+                // Capped diagnostic tail (FRIENDLY_ERRORS) — HUD/logs only,
+                // never the banner.
+                detail: evt.detail,
                 trace_id: traceId,
                 t: nowMs(),
               });
@@ -1102,6 +1112,16 @@ export default function PlayPage() {
     },
     []
   );
+
+  // The error banner's "Try again": replay the exact failed request with the
+  // trace_id stripped — the API route claims the Idempotency-Key per trace,
+  // so a fresh trace is what makes the retry actually run.
+  const retryLast = useCallback(() => {
+    const last = lastGenerateRef.current;
+    if (!last) return;
+    const { trace_id: _dropped, ...rest } = last;
+    void generate(rest);
+  }, [generate]);
 
   // Build the expand body from the current page + session state and hand it to
   // the bloom hook (which owns the SSE loop, tray state, persistence + abort).
@@ -1259,6 +1279,9 @@ export default function PlayPage() {
           }
         });
       } catch (err) {
+        // An upload failure isn't a generation — "Try again" must not replay
+        // an unrelated earlier generate body.
+        lastGenerateRef.current = null;
         setError((err as Error).message);
         setPhase("error");
       }
@@ -3153,8 +3176,19 @@ export default function PlayPage() {
       {isDraggingFile && <DragDropOverlay />}
 
       {phase === "error" && (
-        <div className="rounded-lg border border-red-500 bg-red-50 px-4 py-3 text-sm text-red-900">
-          {error}
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm text-red-900">
+          <span className="min-w-0 break-words">
+            {(error ?? "Generation failed.").slice(0, 220)}
+          </span>
+          {lastGenerateRef.current && (
+            <button
+              type="button"
+              onClick={retryLast}
+              className="shrink-0 rounded-full border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-900 hover:bg-red-100"
+            >
+              ↻ Try again
+            </button>
+          )}
         </div>
       )}
 
