@@ -87,3 +87,11 @@ ladder-proof-runs/
 # Cursor Composer kickoff prompt — an ephemeral paste-into-chat scratch file,
 # not a durable doc (the project brief lives in .cursor/rules + docs/AUDIT_BOX).
 docs/CURSOR_KICKOFF.md
+
+# Live-verification scratch at repo root: Playwright MCP page snapshots
+# (*-snap.md) + one-off screenshot pairs. Durable receipts live on the
+# Desktop visuals folder; these are session droppings. .polly/ is local
+# tool state (registry.json), not project source.
+/*-snap.md
+/tapzoom-*.png
+/.polly/
