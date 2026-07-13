@@ -151,6 +151,13 @@ async def stream_tap(
             surroundings_behind_effective = (
                 _sanitize_hint(body.surroundings_behind, 240) or None
             )
+            # Warm place_form parity (#161): without this, the SAME tap
+            # renders the interior cold but the exterior warm — enter
+            # behavior must not depend on cache temperature. Whitelisted;
+            # anything else stays None ("unknown"), never a guess.
+            prefetched_form = (body.prefetched_place_form or "").strip().lower()
+            if prefetched_form in ("interior", "complex", "landscape", "generic"):
+                place_form_resolved = prefetched_form
             # Classic warm tap: the prefetch cache carried the classifier's
             # enter_as — route zoomable taps to the faithful Kontext zoom
             # without a second resolve. Needs a region ref to bite (else

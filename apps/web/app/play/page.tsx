@@ -2063,6 +2063,7 @@ export default function PlayPage() {
             style: string;
             salience: number;
             enter_as?: string;
+            place_form?: string;
           }[];
         };
         if (!Array.isArray(data.candidates)) return;
@@ -2080,6 +2081,9 @@ export default function PlayPage() {
             subject: c.subject,
             style: c.style,
             ...(typeof c.enter_as === "string" ? { enter_as: c.enter_as } : {}),
+            ...(typeof c.place_form === "string" && c.place_form
+              ? { place_form: c.place_form }
+              : {}),
           });
           counts.set(scope, (counts.get(scope) ?? 0) + 1);
           // LRU evict oldest entries when we exceed the global cap.
@@ -2167,6 +2171,7 @@ export default function PlayPage() {
             point?: { x: number; y: number } | null;
             bbox?: { x: number; y: number; w: number; h: number } | null;
             enter_as?: string;
+            place_form?: string;
           };
           if (data.subject) {
             // Merge over any candidate-only entry so its fields (e.g. a
@@ -2188,6 +2193,9 @@ export default function PlayPage() {
               ...(data.bbox ? { bbox: data.bbox } : {}),
               ...(typeof data.enter_as === "string"
                 ? { enter_as: data.enter_as }
+                : {}),
+              ...(typeof data.place_form === "string" && data.place_form
+                ? { place_form: data.place_form }
                 : {}),
             });
             pageBucketCounts.set(
@@ -2221,6 +2229,7 @@ export default function PlayPage() {
       style?: string;
       subject_context?: string;
       enter_as?: string;
+      place_form?: string;
       clarifiers?: string[];
       surroundings?: string;
     } | null> => {
@@ -2298,6 +2307,7 @@ export default function PlayPage() {
             style?: string;
             subject_context?: string;
             enter_as?: string;
+            place_form?: string;
             clarifiers?: string[];
             surroundings?: string;
           }
@@ -2675,6 +2685,12 @@ export default function PlayPage() {
               !wanderingRef.current
                 ? { prefetched_enter_as: cached.enter_as as EnterAs }
                 : {}),
+              // place_form rides under the SAME wander rule as enter_as: a
+              // wander auto-tap withholds every prefetched classification so
+              // the in-band resolve decides everything for that hop.
+              ...(cached.place_form && !wanderingRef.current
+                ? { prefetched_place_form: cached.place_form }
+                : {}),
             }
           : {}),
         // World Mode "semi" already resolved the tap → reuse it (skips the
@@ -2690,6 +2706,13 @@ export default function PlayPage() {
           : {}),
         ...(worldResolved?.surroundings
           ? { prefetched_surroundings: worldResolved.surroundings }
+          : {}),
+        // World "semi" is the OTHER warm path (the blocking client resolve
+        // makes the backend skip its own VLM) — hand its place_form back or
+        // interiors would depend on autonomy mode the same way they depended
+        // on cache temperature.
+        ...(worldResolved?.place_form
+          ? { prefetched_place_form: worldResolved.place_form }
           : {}),
         ...(worldEnabled
           ? {
@@ -3708,6 +3731,9 @@ export default function PlayPage() {
                       ? page.sceneView.map_crop ?? null
                       : null
                   }
+                  // This page IS an interior arrival (#161 stamp) — the
+                  // "no interior mapped yet" complaint would be a lie.
+                  interiorHere={page?.sceneView?.place_form === "interior"}
                 />
               )}
             </div>

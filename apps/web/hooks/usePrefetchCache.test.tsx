@@ -122,6 +122,22 @@ describe("PrefetchEntry shape", () => {
     expect(PRECOMPUTE_PER_PAGE).toBeGreaterThanOrEqual(PREFETCH_PER_PAGE);
   });
 
+  it("carries place_form through a cache write/read (warm-tap parity)", () => {
+    const { result } = renderHook(() => usePrefetchCache());
+    const cache = result.current.cacheRef.current;
+    const key = result.current.bucketKey("n1", 0.5, 0.5);
+    cache.set(key, {
+      subject: "The Tower of Art",
+      style: "ink",
+      enter_as: "scene",
+      place_form: "interior",
+    });
+    expect(cache.get(key)?.place_form).toBe("interior");
+    // legacy entries without it stay valid — absent means "unknown"
+    const legacy: PrefetchEntry = { subject: "x", style: "" };
+    expect(legacy.place_form).toBeUndefined();
+  });
+
   it("isHoverResolved: candidate-only entries are upgrade-eligible", () => {
     expect(isHoverResolved(undefined)).toBe(false);
     // precompute writes: subject/style(/enter_as) only — upgradeable

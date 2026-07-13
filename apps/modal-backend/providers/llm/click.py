@@ -82,6 +82,11 @@ class ClickCandidate:
     # warm tap on a precomputed bucket can route to the faithful zoom without a
     # second resolve (TAP_ZOOM_CONTINUE).
     enter_as: str = "explainer"
+    # The place's FORM ("interior" | "complex" | "landscape" | "generic") —
+    # same classification as ClickResolution.place_form, so a warm tap keeps
+    # the cold tap's enter behavior (INTERIOR_ENTERS). Empty when the VLM
+    # omitted or fumbled it — "unknown", never a guess.
+    place_form: str = ""
 
 
 # JSON Schemas for the structured-output ladder. Used as the `tool` rung's
@@ -138,6 +143,10 @@ CANDIDATES_SCHEMA: dict[str, Any] = {
                     "enter_as": {
                         "type": "string",
                         "enum": ["scene", "submap", "explainer"],
+                    },
+                    "place_form": {
+                        "type": "string",
+                        "enum": ["interior", "complex", "landscape", "generic"],
                     },
                 },
                 "required": ["x_pct", "y_pct", "subject"],
@@ -516,12 +525,26 @@ async def precompute_click_candidates(
         "\"style\": \"<=30 word visual style sentence — same for every "
         "candidate, describing this illustration's medium/palette/line-work\", "
         "\"salience\": 0..1, "
-        "\"enter_as\": \"scene|submap|explainer\"}, ...]}. `enter_as`: "
+        "\"enter_as\": \"scene|submap|explainer\", "
+        "\"place_form\": \"interior|complex|landscape|generic\"}, ...]}. "
+        "`enter_as`: "
         "\"scene\" = a concrete place or physical thing the reader would move "
         "CLOSER to; \"submap\" = the page reads as a map/plan and this is a "
         "sub-area best shown as a closer map; \"explainer\" = an abstract "
         "concept, mechanism, or diagram element best served by a fresh "
-        "labelled diagram. If the page is a scenic illustration or a map "
+        "labelled diagram. "
+        # place_form definition mirrors the click classifier's widened #161
+        # wording so a warm (precomputed) tap classifies EXACTLY like a cold
+        # one — this is what keeps interiors independent of cache temperature.
+        "`place_form` — the subject's FORM, judged from the image (not from "
+        "the words, which may be in any language): \"interior\" = a single "
+        "enclosed volume you'd stand inside (a room, hall, tavern, shop, "
+        "workshop) OR a discrete roofed building you would step into next (a "
+        "tower, house, temple, church, keep, windmill, lighthouse); "
+        "\"complex\" = a multi-structure compound or walkable outdoor area (a "
+        "castle, campus, harbor, market square, village); \"landscape\" = "
+        "open terrain (a valley, coastline, forest); \"generic\" = none of "
+        "these / unclear. If the page is a scenic illustration or a map "
         "rather than an annotated diagram, treat its distinct objects, "
         "buildings, creatures, and landmarks as the clickable subjects — a "
         "rich scene is never empty. Coordinates are 0..1 with origin at the "
@@ -565,7 +588,10 @@ async def precompute_click_candidates(
                 schema=CANDIDATES_SCHEMA,
                 schema_name="click_candidates",
                 temperature=0.2 if attempt == 0 else 0.5,
-                max_tokens=900,
+                # 8 items x (~90 tokens incl. the 30-word style sentence) plus
+                # the new one-word place_form enum — 900 was sized before that
+                # field (#127 right-sizing); 1000 keeps the same headroom.
+                max_tokens=1000,
                 span_ctx=ctx,
             )
         out = _validate_candidates(parsed.get("candidates", []), max_candidates)
@@ -603,6 +629,7 @@ def _validate_candidates(items: Any, max_candidates: int) -> list[ClickCandidate
         if not subject:
             continue
         enter_as_raw = str(entry.get("enter_as", "")).strip().lower()
+        place_form_raw = str(entry.get("place_form", "")).strip().lower()
         out.append(
             ClickCandidate(
                 x_pct=x,
@@ -614,6 +641,14 @@ def _validate_candidates(items: Any, max_candidates: int) -> list[ClickCandidate
                     enter_as_raw
                     if enter_as_raw in ("scene", "submap", "explainer")
                     else "explainer"
+                ),
+                # Same whitelist as the click classifier; "" = unknown (the
+                # warm tap then behaves like no classification), NOT a guess.
+                place_form=(
+                    place_form_raw
+                    if place_form_raw
+                    in ("interior", "complex", "landscape", "generic")
+                    else ""
                 ),
             )
         )

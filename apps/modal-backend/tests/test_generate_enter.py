@@ -720,6 +720,61 @@ async def test_complex_place_form_keeps_exterior_enter(
     assert "scene_view" not in final
 
 
+async def test_warm_prefetched_place_form_enters_interior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The warm path: prefetched_subject short-circuits the VLM resolve, so
+    # place_form must ride the body — or the SAME tap renders the interior
+    # cold and the exterior warm (cache temperature flipping enter behavior).
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    resolve = AsyncMock()
+    monkeypatch.setattr(llm_mod, "click_to_subject", resolve)
+    captured = _spy_enter_instruction(monkeypatch)
+
+    await _collect(
+        _event_stream(
+            _interior_body(
+                prefetched_subject="The Tower of Art",
+                prefetched_place_form="interior",
+            ),
+            "t1",
+        )
+    )
+
+    resolve.assert_not_awaited()  # still warm — no second VLM round-trip
+    assert captured["interior"] is True
+    assert "INDOOR" in edit.await_args.args[1]
+
+
+async def test_warm_invalid_prefetched_place_form_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Outside the {interior, complex, landscape, generic} whitelist the hint
+    # is silently dropped — "unknown" (exterior enter), never a guess.
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setattr(llm_mod, "click_to_subject", AsyncMock())
+    captured = _spy_enter_instruction(monkeypatch)
+
+    await _collect(
+        _event_stream(
+            _interior_body(
+                prefetched_subject="The Tower of Art",
+                prefetched_place_form="mansion",
+            ),
+            "t1",
+        )
+    )
+
+    assert captured["interior"] is False
+    assert "INDOOR" not in edit.await_args.args[1]
+
+
 def _mock_loop_judges(
     monkeypatch: pytest.MonkeyPatch, interior_scores: list[tuple[float, str]]
 ) -> tuple[AsyncMock, AsyncMock]:

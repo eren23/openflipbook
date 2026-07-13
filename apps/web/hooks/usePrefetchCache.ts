@@ -32,6 +32,12 @@ export interface PrefetchEntry {
    * zoom-continuation server-side (TAP_ZOOM_CONTINUE) and dive client-side.
    */
   enter_as?: string;
+  /**
+   * interior | complex | landscape | generic — the resolver's read of the
+   * place's FORM. Rides the tap body (prefetched_place_form) so a warm tap
+   * keeps the cold tap's enter behavior (INTERIOR_ENTERS). Absent = unknown.
+   */
+  place_form?: string;
 }
 
 export const PREFETCH_PER_PAGE = 6;

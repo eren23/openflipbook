@@ -391,6 +391,44 @@ def test_precompute_candidates_parse_enter_as(monkeypatch) -> None:
     assert by_subject["harbor"].enter_as == "explainer"
 
 
+def test_precompute_candidates_parse_place_form(monkeypatch) -> None:
+    # place_form warms the tap cache alongside enter_as so a warm tap keeps
+    # the cold tap's enter behavior (INTERIOR_ENTERS). Bogus/absent → "" —
+    # "unknown", never a guessed form.
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    async def fake_complete_json(**kwargs):
+        return {
+            "candidates": [
+                {"x_pct": 0.2, "y_pct": 0.3, "subject": "castle", "salience": 0.9,
+                 "place_form": "interior"},
+                {"x_pct": 0.6, "y_pct": 0.5, "subject": "legend box", "salience": 0.5,
+                 "place_form": "mansion"},
+                {"x_pct": 0.8, "y_pct": 0.7, "subject": "harbor", "salience": 0.7},
+            ]
+        }
+
+    monkeypatch.setattr(click_mod._llm, "_complete_json", AsyncMock(side_effect=fake_complete_json))
+    cands = asyncio.run(
+        click_mod.precompute_click_candidates(
+            image_data_url="data:image/jpeg;base64,x",
+            parent_title="T",
+            parent_query="q",
+        )
+    )
+    by_subject = {c.subject: c for c in cands}
+    assert by_subject["castle"].place_form == "interior"
+    assert by_subject["legend box"].place_form == ""
+    assert by_subject["harbor"].place_form == ""
+    # the prompt defines the field with the classifier's widened wording
+    system = str(click_mod._llm._complete_json.await_args.kwargs["messages"][0])
+    assert "place_form" in system
+    assert "OR a discrete roofed building you would step into" in system
+
+
 # ---------- empty-roll retry (gemini-flash sometimes returns a well-formed
 # ---------- empty list for scenic pages; one hotter retry flips it) -------
 
@@ -531,3 +569,46 @@ def test_precompute_retries_when_every_entry_fails_validation(monkeypatch) -> No
     cands = _precompute(click_mod)
     assert [c.subject for c in cands] == ["harbor"]
     assert mock.await_count == 2  # validated-empty counts as an empty roll
+
+
+# ---------- /resolve-click route: the response feeds the warm-tap cache ---
+
+
+def test_resolve_click_response_carries_place_form(monkeypatch) -> None:
+    # The hover-prefetch + world-semi clients read place_form off this
+    # response and hand it back as prefetched_place_form — if the route
+    # drops it, warm taps lose interiors (the cache-temperature bug).
+    import sys
+    from unittest.mock import AsyncMock, MagicMock
+
+    sys.modules.setdefault("modal", MagicMock())
+    from fastapi.testclient import TestClient
+
+    from generate import fastapi_app
+    from providers.llm import ClickResolution
+
+    monkeypatch.setattr(
+        llm,
+        "click_to_subject",
+        AsyncMock(
+            return_value=ClickResolution(
+                subject="The Tower of Art",
+                style="hand-drawn engraving",
+                enter_as="scene",
+                place_form="interior",
+            )
+        ),
+    )
+    client = TestClient(fastapi_app)
+    res = client.post(
+        "/resolve-click",
+        json={
+            "image_data_url": "data:image/jpeg;base64,x",
+            "x_pct": 0.5,
+            "y_pct": 0.5,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["place_form"] == "interior"
+    assert data["enter_as"] == "scene"  # the field it rides beside

@@ -20,6 +20,10 @@ interface Props {
   // A submap crop (tap-empty → cropped region): scope the inset to it, in world
   // coords. Mutually exclusive with focusId in practice (scene vs submap).
   crop?: MapCrop | null;
+  // The current page IS an interior arrival (scene_view.place_form ===
+  // "interior", INTERIOR_ENTERS): you're standing inside — "no interior
+  // mapped yet" would be a lie, so the chip drops the complaint.
+  interiorHere?: boolean;
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -40,6 +44,7 @@ export default function WorldMiniMap({
   focusId,
   focusLabel,
   crop,
+  interiorHere,
 }: Props) {
   const { entities: worldEntities, bounds: worldBounds } = useWorldMap(sessionId);
 
@@ -56,7 +61,8 @@ export default function WorldMiniMap({
         className="pointer-events-none absolute right-2 top-12 rounded-lg border border-black/20 bg-stone-50/95 px-2 py-1.5 text-[10px] text-stone-500 shadow-lg"
         data-testid="minimap-empty"
       >
-        inside {resolvedLabel} · no interior mapped yet
+        inside {resolvedLabel}
+        {interiorHere ? "" : " · no interior mapped yet"}
       </div>
     );
   }
