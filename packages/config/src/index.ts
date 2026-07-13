@@ -137,6 +137,10 @@ export interface GenerateRequestBody {
   // the faithful zoom-continuation (TAP_ZOOM_CONTINUE) without a second
   // resolve; backend whitelist-maps it, anything else is ignored.
   prefetched_enter_as?: EnterAs;
+  // The prefetch's place_form (interior|complex|landscape|generic). Lets a
+  // warm tap keep the cold tap's enter behavior (INTERIOR_ENTERS); backend
+  // whitelist-validates it, anything else is ignored.
+  prefetched_place_form?: string;
   // World Mode: the resolver's spatial-anchor note ("river to the south, the
   // Citadel NE") carried back so the planner keeps the entered place's
   // neighbours where the parent map had them. Mirrors GenerateBody.
@@ -276,6 +280,11 @@ export interface ResolveClickResponse {
   // mode since TAP_ZOOM_CONTINUE — classic mode uses it to route zoomable taps
   // to the faithful Kontext continuation. Clarifiers: world semi autonomy only.
   enter_as?: EnterAs;
+  // The tapped place's FORM ("interior" | "complex" | "landscape" |
+  // "generic"), judged from the image. Carried so a warm tap can hand it
+  // back (prefetched_place_form) and keep the cold tap's enter behavior
+  // (INTERIOR_ENTERS). Empty/absent = unknown.
+  place_form?: string;
   clarifiers?: string[];
   // World Mode spatial anchor: what sits AROUND the tapped spot and in which
   // direction ("river to the south, timbered houses west, market square NE"),

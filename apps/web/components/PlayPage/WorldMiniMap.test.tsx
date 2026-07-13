@@ -136,6 +136,30 @@ describe("WorldMiniMap", () => {
     expect(screen.queryByText(/world coords/i)).toBeNull();
   });
 
+  it("interiorHere: an interior arrival says 'inside X' without the complaint", async () => {
+    // The current page IS the interior (#161 stamp) — "no interior mapped
+    // yet" would be a lie about the very room you're standing in.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok(
+          mapPayload([
+            ent("u", "University", 50, 30),
+            ent("b", "Bridge", 80, 40),
+          ]),
+        ),
+      ) as unknown as typeof fetch,
+    );
+    render(
+      <WorldMiniMap sessionId="s1" focusId="u" focusLabel="University" interiorHere />,
+    );
+    await waitFor(() => expect(screen.getByTestId("minimap-empty")).toBeTruthy());
+    expect(screen.getByTestId("minimap-empty").textContent).toBe(
+      "inside University",
+    );
+    expect(screen.queryByText(/no interior mapped yet/i)).toBeNull();
+  });
+
   it("post-ascend: nested former roots still dot the world view with sane bounds", async () => {
     // The OUTWARD reparent shape: P top-level with scale=pScale; old roots at
     // parent-local coords/footprints. Dots resolve to absolutes; the stored

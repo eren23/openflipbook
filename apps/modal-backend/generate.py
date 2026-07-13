@@ -286,6 +286,10 @@ class GenerateBody(BaseModel):
     # warm classic tap route to the faithful zoom (TAP_ZOOM_CONTINUE) without a
     # second resolve. Whitelist-mapped in tap.py; anything else is ignored.
     prefetched_enter_as: str | None = None
+    # The prefetch's place_form (interior|complex|landscape|generic) — lets a
+    # warm tap keep the cold tap's enter behavior (INTERIOR_ENTERS renders the
+    # interior). Whitelist-validated in tap.py; anything else is ignored.
+    prefetched_place_form: str | None = None
     # World Mode semi-autonomy already resolved the tap client-side; this carries
     # the resolver's spatial-anchor note back so the planner can keep the
     # entered place's neighbours where the parent map had them.
@@ -1297,6 +1301,7 @@ async def resolve_click(req: Request, body: ResolveClickBody):
                 else None
             ),
             "enter_as": resolution.enter_as,
+            "place_form": resolution.place_form,
             "clarifiers": resolution.clarifiers,
             "surroundings": resolution.surroundings,
             "trace_id": trace_id,
@@ -1359,6 +1364,7 @@ async def precompute_candidates(req: Request, body: PrecomputeBody):
                     "style": c.style,
                     "salience": c.salience,
                     "enter_as": c.enter_as,
+                    "place_form": c.place_form,
                 }
                 for c in cands
             ],
