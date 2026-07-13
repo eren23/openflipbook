@@ -58,7 +58,11 @@ import {
   orderedRefs,
   REGION_FRAC,
 } from "@/lib/image-condition";
-import { enterAsToRenderMode, findRevisitTarget } from "@/lib/world-mode";
+import {
+  enterAsToRenderMode,
+  findRevisitTarget,
+  zoomModeForLevel,
+} from "@/lib/world-mode";
 import { usePersistedLocale } from "@/hooks/usePersistedLocale";
 import { usePersistedTheme } from "@/hooks/usePersistedTheme";
 import { useStyleAnchor } from "@/hooks/useStyleAnchor";
@@ -635,6 +639,13 @@ export default function PlayPage() {
   // double-click can pass the `phase === "generating"` check twice and start
   // two overlapping generates.
   const clickInFlightRef = useRef(false);
+  // One-shot render_mode pin from the context menu's "🔍 Zoom in here": set
+  // just before its synthetic dispatchTapAt, consumed (and cleared) at the
+  // top of the tap handler — so wander and normal taps can never inherit it,
+  // even when the pinned tap aborts before reaching generate.
+  const pinnedRenderModeRef = useRef<"place_submap" | "place_closeup" | null>(
+    null
+  );
   const [hoverPos, setHoverPos] = useState<{
     xPx: number;
     yPx: number;
@@ -1720,6 +1731,27 @@ export default function PlayPage() {
         },
       });
     }
+    // Explicit optical zoom (same image, closer — the Kontext zoom path).
+    // Taps ENTER places in world mode, so "closer, not inside" needs its own
+    // affordance. Not entity-gated: any point on the image content zooms
+    // (clickPct is null only on the letterbox, where "here" means nothing).
+    if (contextMenu.clickPct) {
+      const { x_pct, y_pct } = contextMenu.clickPct;
+      items.push({
+        label: "🔍 Zoom in here",
+        onClick: () => {
+          close();
+          // Map-ness heuristic: no scene_view (classic/root frames) or an
+          // explicit map level ⇒ aligned submap cut; any observer level
+          // (building/street/eye) ⇒ closeup. Consumed one-shot by the tap
+          // handler the synthetic click below runs through.
+          pinnedRenderModeRef.current = zoomModeForLevel(
+            page?.sceneView?.level
+          );
+          dispatchTapAt(x_pct, y_pct);
+        },
+      });
+    }
     // Export the root→here path as a shareable artifact (Wave 6). Server
     // route walks the chain; these just open the download.
     if (page?.nodeId) {
@@ -2215,6 +2247,12 @@ export default function PlayPage() {
     };
 
     const handler = async (evt: MouseEvent) => {
+      // "🔍 Zoom in here" pin: read + clear FIRST, whatever happens next — a
+      // guard return, a cancelled hint, or a failed generate must never leak
+      // the pinned mode into the NEXT tap. dispatchEvent runs this handler
+      // synchronously inside dispatchTapAt, so set-then-dispatch can't race.
+      const pinnedRenderMode = pinnedRenderModeRef.current;
+      pinnedRenderModeRef.current = null;
       if (phase === "generating") return;
       if (editMode) return;
       if (clickInFlightRef.current) return;
@@ -2234,11 +2272,11 @@ export default function PlayPage() {
       // saved place instead of generating a new one — the persistence that
       // makes the atlas read as one continuous world.
       if (worldEnabled && !evt.metaKey && !evt.ctrlKey) {
-        const revisitId = findRevisitTarget(
-          history.items,
-          currentNodeId,
-          click
-        );
+        // An explicit "Zoom in here" outranks the revisit shortcut — the
+        // user said closer, not back.
+        const revisitId = pinnedRenderMode
+          ? null
+          : findRevisitTarget(history.items, currentNodeId, click);
         if (revisitId) {
           clickInFlightRef.current = false;
           selectFromMap(revisitId);
@@ -2762,6 +2800,10 @@ export default function PlayPage() {
                 : {}),
             }
           : {}),
+        // The context menu's explicit optical zoom: the user SAID "closer,
+        // not inside", so this one-shot pin outranks every heuristic
+        // render_mode above (worldTap / sceneCloseup / wideCut) — spread last.
+        ...(pinnedRenderMode ? { render_mode: pinnedRenderMode } : {}),
         ...(styleAnchor ? { session_style_anchor: styleAnchor.style } : {}),
       });
     };

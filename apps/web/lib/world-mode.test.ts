@@ -4,6 +4,7 @@ import {
   REVISIT_RADIUS,
   enterAsToRenderMode,
   findRevisitTarget,
+  zoomModeForLevel,
 } from "./world-mode";
 
 describe("enterAsToRenderMode", () => {
@@ -13,6 +14,23 @@ describe("enterAsToRenderMode", () => {
     expect(enterAsToRenderMode("explainer")).toBe("explainer");
     expect(enterAsToRenderMode(undefined)).toBe("explainer");
     expect(enterAsToRenderMode("bogus")).toBe("explainer");
+  });
+});
+
+describe("zoomModeForLevel (context menu's 🔍 Zoom in here)", () => {
+  it("a map frame zooms as an aligned submap cut", () => {
+    expect(zoomModeForLevel("map")).toBe("place_submap");
+  });
+
+  it("no scene_view (classic/root pages) counts as a map frame", () => {
+    expect(zoomModeForLevel(undefined)).toBe("place_submap");
+    expect(zoomModeForLevel(null)).toBe("place_submap");
+  });
+
+  it("observer levels zoom as a closeup", () => {
+    expect(zoomModeForLevel("eye")).toBe("place_closeup");
+    expect(zoomModeForLevel("street")).toBe("place_closeup");
+    expect(zoomModeForLevel("building")).toBe("place_closeup");
   });
 });
 
