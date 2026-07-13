@@ -611,3 +611,102 @@ def test_pov_surroundings_sightline_cull() -> None:
     )
     assert "No other mapped landmark is visible from this viewpoint" in pov_view
     assert "The Docks" in pov_view
+
+
+# --- Interior enters (INTERIOR_ENTERS) ------------------------------------------
+#
+# interior=True flips every enter variant to the INDOOR register (step THROUGH
+# the entrance, enclosed interior, belongs-to-this-exact-building kinship);
+# interior=False must stay byte-identical to the pre-change strings — the
+# legacy golden above plus the frozen nano golden here.
+
+GOLDEN_ENTER_NANO = (
+    'Image 1 is the overhead map of "Sentinel\'s Rise" (a stone castle with '
+    "concentric walls); Image 2 is only a style reference — take no content "
+    "from it. Step inside this exact place and draw what a person standing "
+    "there sees: the view from ground level at eye level (camera about 1.7 m "
+    "up), facing north-east. This is the SAME place as the map, not a new "
+    "one: keep its architecture and structure shapes, materials, colour "
+    "palette, and exactly these landmarks: The Inner Bailey; The Watch Bell. "
+    "Keep left/right relations consistent with the map. Through openings and "
+    "beyond the walls, keep the neighbours where the map placed them (map "
+    "bearings, not view directions): to the north-east, the striped "
+    "lighthouse on the cliffs. The neighbours stay distant glimpses at the "
+    "edges of frame — do NOT widen or pull back the framing to include them. "
+    "Keep the exact art medium of Image 2 — hand-drawn engraving, sepia ink — "
+    "same palette and line work; NOT a photograph, no photorealism. Keep any "
+    "lettering sparse and legible — no garbled text. Do not change the input "
+    "aspect ratio."
+    "\n\nPlace the Inner Bailey at the centre."
+)
+
+_NANO_VIEW = {"projection": "eye_level", "azimuth_deg": 45.0, "camera_height": "eye"}
+
+
+def test_interior_false_is_byte_identical_legacy_and_nano() -> None:
+    # The kill-switch contract: interior=False (the default everywhere) must
+    # equal the pre-change strings exactly, param present or not.
+    assert _rich_enter(interior=False) == GOLDEN_ENTER_RICH
+    assert _rich_enter(view=_NANO_VIEW, style_ref=True) == GOLDEN_ENTER_NANO
+    assert (
+        _rich_enter(view=_NANO_VIEW, style_ref=True, interior=False)
+        == GOLDEN_ENTER_NANO
+    )
+
+
+def test_interior_legacy_is_indoor_directive() -> None:
+    s = _rich_enter(interior=True)
+    assert "INTO" in s and "INDOOR" in s
+    assert "NOT the building's exterior" in s
+    assert "NOT its facade" in s
+    assert "fits the building's shell" in s
+    assert "a round tower encloses a round chamber" in s
+    # the surroundings reword: through windows, anchored to the parent image
+    assert "Through windows and doorways, keep the neighbours where the parent image had them" in s
+    assert "Through openings and beyond the walls" not in s
+    # facts + medium plumbing still ride
+    assert "The Inner Bailey; The Watch Bell" in s
+    assert "hand-drawn engraving, sepia ink" in s
+    assert s.endswith("Place the Inner Bailey at the centre.")
+
+
+def test_interior_exterior_appearance_rides_the_materials_sentence() -> None:
+    s = _rich_enter(interior=True, exterior_appearance="black basalt, copper roof")
+    assert "same materials, palette and construction — black basalt, copper roof" in s
+    # absent -> no dangling dash
+    bare = _rich_enter(interior=True)
+    assert "construction, an inner space" in bare
+
+
+def test_interior_nano_gpt_kontext_variants() -> None:
+    n = _rich_enter(
+        view=_NANO_VIEW, style_ref=True, interior=True,
+        exterior_appearance="pale sandstone",
+    )
+    assert "Step through the entrance INTO it" in n
+    assert "INDOOR" in n and "NOT the building's exterior" in n
+    assert "pale sandstone" in n
+    assert "Through windows and doorways" in n
+    assert "Keep the exact art medium of Image 2" in n  # medium rider intact
+    assert "Step inside this exact place and draw what a person standing" not in n
+    g = _rich_enter(view={"projection": "eye_level"}, family="gpt_image", interior=True)
+    assert "INTO" in g and "INDOOR" in g and "NOT the building's exterior" in g
+    assert "Constraints:" in g  # the gpt grammar keeps its trailing block
+    assert "Preserve: the architecture and building shapes" not in g
+    k = _rich_enter(view={"projection": "eye_level"}, family="kontext", interior=True)
+    assert "INTO" in k and "INDOOR" in k and "NOT the building's exterior" in k
+    assert "Through windows and doorways keep:" in k
+    assert "Change the view to ground level inside" not in k
+
+
+def test_interior_feedback_clause() -> None:
+    from providers.prompt_library import feedback
+
+    s = feedback.retry_feedback_clause(
+        "eye_level", interior_rationale="shows the tower's facade from the street"
+    )
+    assert "failed the interior check" in s
+    assert "shows the tower's facade from the street" in s
+    assert "INSIDE the building" in s
+    # composes alongside the other axes; absent -> silent
+    assert feedback.retry_feedback_clause("eye_level") == ""

@@ -24,12 +24,14 @@ def retry_feedback_clause(
     same_place_rationale: str | None = None,
     detail_rationale: str | None = None,
     medium_rationale: str | None = None,
+    interior_rationale: str | None = None,
     family: str | None = None,
 ) -> str:
     conf = _clean(conformance_rationale)
     same = _clean(same_place_rationale)
     det = _clean(detail_rationale)
     med = _clean(medium_rationale)
+    intr = _clean(interior_rationale)
     parts: list[str] = []
     if conf:
         reminder = register_reminder(projection, family)
@@ -77,6 +79,20 @@ def retry_feedback_clause(
         text += (
             " Match the reference image's medium, palette, linework and paper "
             "texture exactly; the new view must look drawn by the same hand."
+        )
+        parts.append(text)
+    if intr:
+        text = (
+            "It also failed the interior check — the judge saw: "
+            f"{intr}"
+        )
+        if not text.endswith("."):
+            text += "."
+        text += (
+            " Render the view from INSIDE the building — an enclosed INDOOR "
+            "space with its inner walls, floor and ceiling or rafters "
+            "visible; never its exterior, its facade, or the streets and "
+            "grounds around it."
         )
         parts.append(text)
     return " ".join(parts)

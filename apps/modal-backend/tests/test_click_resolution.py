@@ -324,6 +324,40 @@ def test_click_prompt_world_mode_wording_unchanged(monkeypatch) -> None:
     assert "place_form" in system
 
 
+def test_click_prompt_interior_covers_discrete_buildings(monkeypatch) -> None:
+    # INTERIOR_ENTERS widened the `place_form` definition: "interior" now also
+    # covers a discrete roofed building you'd step into next — pin the
+    # examples so the classifier keeps routing towers/temples indoors.
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from providers.llm import click as click_mod
+
+    captured: dict = {}
+
+    async def fake_complete_json(**kwargs):
+        captured["messages"] = kwargs.get("messages")
+        return {"subject": "x"}
+
+    monkeypatch.setattr(click_mod._llm, "_complete_json", AsyncMock(side_effect=fake_complete_json))
+    asyncio.run(
+        click_mod.click_to_subject(
+            image_data_url="data:image/jpeg;base64,x",
+            x_pct=0.5,
+            y_pct=0.5,
+            parent_title="T",
+            parent_query="q",
+            world_mode=True,
+        )
+    )
+    system = str(captured["messages"][0]["content"])
+    assert "OR a discrete roofed building you would step into" in system
+    assert "a tower, house, temple, church, keep, windmill, lighthouse" in system
+    # the sibling forms keep their definitions
+    assert '"complex" = a multi-structure compound' in system
+    assert '"landscape" = open terrain' in system
+
+
 def test_precompute_candidates_parse_enter_as(monkeypatch) -> None:
     import asyncio
     from unittest.mock import AsyncMock

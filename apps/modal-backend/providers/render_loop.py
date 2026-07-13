@@ -50,6 +50,11 @@ class LoopConfig:
     # lock is advisory to loose-ref models (nano treats refs as inspiration —
     # the Ankh-Morpork demo drift), so the ART MEDIUM gets a runtime gate too.
     accept_medium: float = 6.0
+    # The interior floor (only when an interior judge is wired —
+    # INTERIOR_ENTERS): an interior enter that arrives OUTDOORS (facade,
+    # street, aerial) must not be accepted. Overridden by INTERIOR_ACCEPT at
+    # the tap call site.
+    accept_interior: float = 6.0
     # No retry when the previous attempt took longer than this (<=0 disables).
     retry_budget_s: float = 240.0
 
@@ -97,6 +102,9 @@ class Attempt:
     medium: JudgeResult | None  # None = no medium judge wired / no reference
     accepted: bool
     latency_s: float
+    # None = no interior judge wired (every non-INTERIOR_ENTERS path). Last +
+    # defaulted so existing positional constructions stay valid.
+    interior: JudgeResult | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +156,7 @@ def _is_accepted(
     same_place: JudgeResult | None,
     detail: JudgeResult | None,
     medium: JudgeResult | None,
+    interior: JudgeResult | None,
     config: LoopConfig,
 ) -> bool:
     if conformance is None:
@@ -158,6 +167,8 @@ def _is_accepted(
         return False
     if medium is not None and medium.score < config.accept_medium:
         return False
+    if interior is not None and interior.score < config.accept_interior:
+        return False
     return not (detail is not None and detail.score < config.accept_detail)
 
 
@@ -167,10 +178,11 @@ async def iter_attempts[ImageT: Rendered](
     projection: str,
     region_bytes: bytes | None,
     judge_conformance: Callable[[bytes, str], Awaitable[JudgeResult]],
-    judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]],
+    judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None,
     config: LoopConfig,
     judge_detail: Callable[[bytes], Awaitable[JudgeResult]] | None = None,
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
+    judge_interior: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
     feedback: Callable[..., str] = retry_feedback_clause,
     abort: Callable[[str], Awaitable[None]] | None = None,
@@ -180,7 +192,11 @@ async def iter_attempts[ImageT: Rendered](
     """Yield attempts until acceptance / budget / max attempts. The caller
     (the SSE generator) can emit a progress frame between yields. Attempt-0
     render exceptions PROPAGATE (the legacy error path); retry-render
-    exceptions stop the loop quietly (keep best so far)."""
+    exceptions stop the loop quietly (keep best so far).
+
+    judge_same_place=None disables the same-place axis (INTERIOR_ENTERS swaps
+    it for judge_interior — an indoor arrival can't show the region's
+    structures, so 'same place, closer' would reject every correct interior)."""
     from obs import log
 
     suffix = ""
@@ -203,14 +219,14 @@ async def iter_attempts[ImageT: Rendered](
                 return
         latency = clock() - started
 
-        # The four axes are independent verdicts on the same image — judged
+        # The five axes are independent verdicts on the same image — judged
         # concurrently (the Ankh-Morpork re-shoot: sequential judging alone
         # cost 10-20s per attempt).
         judged, failure = await judge_concurrently(
             judge_conformance(image.jpeg_bytes, projection),
             (
                 judge_same_place(region_bytes, image.jpeg_bytes)
-                if region_bytes is not None
+                if judge_same_place is not None and region_bytes is not None
                 else _no_judge()
             ),
             judge_detail(image.jpeg_bytes) if judge_detail is not None else _no_judge(),
@@ -219,8 +235,13 @@ async def iter_attempts[ImageT: Rendered](
                 if judge_medium is not None and region_bytes is not None
                 else _no_judge()
             ),
+            (
+                judge_interior(region_bytes, image.jpeg_bytes)
+                if judge_interior is not None and region_bytes is not None
+                else _no_judge()
+            ),
         )
-        conformance, same_place, detail, medium = judged
+        conformance, same_place, detail, medium, interior = judged
         if failure is not None:
             log(
                 "warn",
@@ -230,11 +251,12 @@ async def iter_attempts[ImageT: Rendered](
             )
             # No critic signal = the old blind coin-flip — don't spend more.
             yield Attempt(
-                index, image, suffix, conformance, same_place, detail, medium, False, latency
+                index, image, suffix, conformance, same_place, detail, medium,
+                False, latency, interior,
             )
             return
 
-        accepted = _is_accepted(conformance, same_place, detail, medium, config)
+        accepted = _is_accepted(conformance, same_place, detail, medium, interior, config)
         log(
             "info",
             "view.loop",
@@ -244,11 +266,13 @@ async def iter_attempts[ImageT: Rendered](
             same_place=_score(same_place),
             detail=_score(detail),
             medium=_score(medium),
+            interior=_score(interior),
             accepted=accepted,
             latency_s=round(latency, 1),
         )
         yield Attempt(
-            index, image, suffix, conformance, same_place, detail, medium, accepted, latency
+            index, image, suffix, conformance, same_place, detail, medium,
+            accepted, latency, interior,
         )
         if accepted:
             return
@@ -287,6 +311,11 @@ async def iter_attempts[ImageT: Rendered](
                 if medium is not None and medium.score < config.accept_medium
                 else None
             ),
+            interior_rationale=(
+                interior.rationale
+                if interior is not None and interior.score < config.accept_interior
+                else None
+            ),
             family=family,
         )
 
@@ -307,11 +336,13 @@ def conclude(attempts: list[Attempt]) -> LoopResult:
             _score(a.same_place),
             _score(a.medium),
             _score(a.detail),
+            _score(a.interior),
         ) > (
             _score(best.conformance),
             _score(best.same_place),
             _score(best.medium),
             _score(best.detail),
+            _score(best.interior),
         ):
             best = a
     return LoopResult(image=best.image, attempts=attempts, accepted=False)
@@ -323,10 +354,11 @@ async def run_view_loop[ImageT: Rendered](
     projection: str,
     region_bytes: bytes | None,
     judge_conformance: Callable[[bytes, str], Awaitable[JudgeResult]],
-    judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]],
+    judge_same_place: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None,
     config: LoopConfig | None = None,
     judge_detail: Callable[[bytes], Awaitable[JudgeResult]] | None = None,
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
+    judge_interior: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
 ) -> LoopResult:
     """Drain the loop for non-streaming callers (the bench)."""
@@ -340,6 +372,7 @@ async def run_view_loop[ImageT: Rendered](
         config=config or loop_config_from_env(),
         judge_detail=judge_detail,
         judge_medium=judge_medium,
+        judge_interior=judge_interior,
         family=family,
     ):
         attempts.append(attempt)

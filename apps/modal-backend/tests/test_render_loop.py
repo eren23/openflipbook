@@ -363,3 +363,88 @@ async def test_medium_judge_needs_region_bytes() -> None:
     )
     assert attempts[0].accepted and attempts[0].medium is None
     medium.assert_not_awaited()
+
+
+# ---------- the interior axis (INTERIOR_ENTERS) -------------------------------
+
+
+async def test_interior_axis_rejects_and_feeds_back() -> None:
+    # An interior enter that arrives OUTDOORS is rejected; the retry carries
+    # the judge's diagnosis + the indoor directive.
+    render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    interior = AsyncMock(side_effect=[_j(1.0, "it is the facade again"), _j(8.0)])
+    attempts = await _drain(
+        render=render, projection="eye_level", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=None,  # the swap: interior replaces same-place
+        judge_interior=interior,
+        config=_cfg(accept_interior=6.0),
+    )
+    assert len(attempts) == 2 and attempts[1].accepted
+    assert not attempts[0].accepted
+    assert attempts[0].same_place is None  # the disabled axis stays None
+    suffix = render.await_args_list[1].args[0]
+    assert "it is the facade again" in suffix
+    assert "failed the interior check" in suffix
+    assert "INSIDE the building" in suffix
+
+
+async def test_interior_axis_pass_accepts_single_attempt() -> None:
+    render = AsyncMock(return_value=_Img(b"a"))
+    interior = AsyncMock(return_value=_j(8.5))
+    attempts = await _drain(
+        render=render, projection="eye_level", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=None,
+        judge_interior=interior,
+        config=_cfg(accept_interior=6.0),
+    )
+    assert len(attempts) == 1 and attempts[0].accepted
+    assert attempts[0].interior is not None and attempts[0].interior.score == 8.5
+    render.assert_awaited_once()
+
+
+async def test_same_place_none_skips_that_judge_entirely() -> None:
+    # judge_same_place=None (the interior swap) must never call anything on
+    # the same-place axis even with region bytes present.
+    render = AsyncMock(return_value=_Img(b"a"))
+    attempts = await _drain(
+        render=render, projection="eye_level", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=None,
+        config=_cfg(),
+    )
+    assert attempts[0].accepted and attempts[0].same_place is None
+    assert attempts[0].interior is None  # no interior judge wired either
+
+
+async def test_interior_judge_needs_region_bytes() -> None:
+    # Mirrors the medium axis: no reference bytes -> the axis stays None.
+    interior = AsyncMock(return_value=_j(0.0, "never called"))
+    attempts = await _drain(
+        render=AsyncMock(return_value=_Img(b"a")), projection="eye_level",
+        region_bytes=None,
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=None,
+        judge_interior=interior,
+        config=_cfg(),
+    )
+    assert attempts[0].accepted and attempts[0].interior is None
+    interior.assert_not_awaited()
+
+
+async def test_interior_keep_best_prefers_higher_interior_score() -> None:
+    # Two rejected attempts tie on every axis except interior — the better
+    # interior wins (the axis joins the keep-best ordering).
+    render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    interior = AsyncMock(side_effect=[_j(2.0), _j(5.0)])  # both below 6.0
+    attempts = await _drain(
+        render=render, projection="eye_level", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=None,
+        judge_interior=interior,
+        config=_cfg(accept_interior=6.0),
+    )
+    result = conclude(attempts)
+    assert result.accepted is False
+    assert result.image.jpeg_bytes == b"b"
