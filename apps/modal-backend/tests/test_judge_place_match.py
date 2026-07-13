@@ -51,6 +51,38 @@ async def test_score_place_match_is_medium_agnostic_and_passes_both_images(
     assert b64 in blocks[1]["image_url"]["url"]
 
 
+@pytest.mark.asyncio
+async def test_score_map_legibility_is_single_image_craft_judge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The zoom gate's second axis: single-image (the arrival only), and the
+    # prompt must pin the contract — crisp fine detail high, blurry upscale
+    # mush low, lettering legibility in scope.
+    captured: dict[str, Any] = {}
+
+    async def fake_ask(system: str, user_text: str, image_blocks: list[dict[str, object]]):
+        captured["system"] = system
+        captured["user_text"] = user_text
+        captured["blocks"] = image_blocks
+        return JudgeResult(2.0, "smeared texture", "raw")
+
+    monkeypatch.setattr(judge, "_ask_judge", fake_ask)
+
+    result = await judge.score_map_legibility(b"ARRIVAL")
+
+    assert result.score == 2.0
+    prompt = (captured["system"] + " " + captured["user_text"]).lower()
+    assert "crisp" in prompt
+    assert "blurry" in prompt and "mush" in prompt
+    assert "legible" in prompt or "illegible" in prompt
+    assert "0-10" in captured["system"]
+
+    # exactly ONE image travels: the arrival
+    blocks = captured["blocks"]
+    assert len(blocks) == 1
+    assert base64.b64encode(b"ARRIVAL").decode("ascii") in blocks[0]["image_url"]["url"]
+
+
 # --- _parse_judgement robustness (the silent-zero bug, pure) ---------------
 #
 # gemini-3-flash (the default judge) prepends a "thought" reasoning preamble on

@@ -24,6 +24,10 @@ MODEL_SLOTS: dict[str, tuple[str | None, str | None]] = {
     # and tolerate a view change, where Kontext strict-zooms. The enter eval
     # (tests/continuity_bench/enter_runner.py) A/Bs the candidates.
     "enter_scene": ("fal-ai/nano-banana-pro/edit", "FAL_ENTER_MODEL"),
+    # World-mode map-zoom REDRAW (SUBMAP_REDRAW): same loose-refs pedigree as
+    # enter_scene — honours the region crop, re-synthesizes detail, keeps map
+    # lettering legible. Kontext here would defeat the purpose (pixel-freeze).
+    "submap_redraw": ("fal-ai/nano-banana-pro/edit", "SUBMAP_REDRAW_MODEL"),
     # B2 OUTWARD: a centered BRIA outpaint paints the container around the
     # source; the medium-flip hop is a tier-based fresh gen.
     "outpaint_zoomout": ("fal-ai/bria/expand", "FAL_OUTPAINT_MODEL"),

@@ -55,6 +55,13 @@ _SCRUB = (
     "TAP_ZOOM_CONTINUE",
     "TAP_ZOOM_JUDGE",
     "TAP_ZOOM_ACCEPT",
+    # Real map zoom (default ON: world submap zooms are redrawn via the
+    # loose-refs edit seam) + the legibility judge axis — scrub for the same
+    # hermeticity.
+    "SUBMAP_REDRAW",
+    "SUBMAP_REDRAW_MODEL",
+    "TAP_ZOOM_DETAIL",
+    "TAP_ZOOM_DETAIL_ACCEPT",
     # Stochastic-failure retry + friendly error frames (default ON — scrub
     # for hermeticity).
     "RETRY_NO_MEDIA",

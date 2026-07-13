@@ -129,11 +129,13 @@ def build_zoom_instruction(
     label_free: bool = False,
     register: str = "map",
     faithful: bool = False,
+    redraw: bool = False,
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string — pinned by
     tests/test_image_continue.py + the frozen goldens). With a view, the
-    keep-camera fragment is spelled per projection in PRESERVE form."""
+    keep-camera fragment is spelled per projection in PRESERVE form. redraw
+    (SUBMAP_REDRAW) switches to the fresh re-render wording."""
     from typing import cast
 
     from providers.prompt_library import instructions as _instructions
@@ -149,6 +151,7 @@ def build_zoom_instruction(
         label_free=label_free,
         register=register,
         faithful=faithful,
+        redraw=redraw,
     )
 
 
