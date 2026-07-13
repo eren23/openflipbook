@@ -136,6 +136,7 @@ import { viewNeutralAppearance } from "@/lib/appearance";
 // The in-session page graph node — lives in lib/session-pages.ts so the
 // ?continue= hydration mapper (nodeToPage) is a testable pure function.
 import {
+  foldSceneViewStamp,
   nodeToPage,
   type Page,
   type SessionNodeWire,
@@ -982,6 +983,15 @@ export default function PlayPage() {
                 // debug HUD counts how often (UI_AUDIT #11's live half).
                 hudEmit("layout:suppressed", {});
               }
+              // INTERIOR_ENTERS arrivals stamp the final with a scene_view
+              // Partial (scale_tier "room" + place_form "interior") — fold it
+              // over the request's scene_view so page state AND the persisted
+              // node carry the interior marker (the minimap chip + permalink
+              // reloads read it). Stamp absent → body.scene_view unchanged.
+              const foldedSceneView = foldSceneViewStamp(
+                body.scene_view,
+                evt.scene_view
+              );
               void persistNode(
                 {
                   parent_id: body.current_node_id || null,
@@ -1007,7 +1017,7 @@ export default function PlayPage() {
                     url: s.url,
                     title: s.title ?? null,
                   })),
-                  scene_view: body.scene_view ?? null,
+                  scene_view: foldedSceneView,
                 },
                 traceId
               ).then((saved) => {
@@ -1028,8 +1038,8 @@ export default function PlayPage() {
                     // Same relation the persist body sent — so the in-session
                     // map reads this page like the atlas will after a reload.
                     ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
-                    sceneView: body.scene_view
-                      ? { ...body.scene_view, node_id: saved.id }
+                    sceneView: foldedSceneView
+                      ? { ...foldedSceneView, node_id: saved.id }
                       : null,
                     ...(body.mode === "tap" && body.click
                       ? {
@@ -1045,8 +1055,8 @@ export default function PlayPage() {
                       ? {
                           ...prev,
                           nodeId: saved.id,
-                          sceneView: body.scene_view
-                            ? { ...body.scene_view, node_id: saved.id }
+                          sceneView: foldedSceneView
+                            ? { ...foldedSceneView, node_id: saved.id }
                             : null,
                         }
                       : prev
@@ -1077,8 +1087,8 @@ export default function PlayPage() {
                     imageDataUrl: evt.image_data_url,
                     caption: evt.page_title,
                     sceneDescription: evt.final_prompt ?? null,
-                    sceneView: body.scene_view
-                      ? { ...body.scene_view, node_id: saved.id }
+                    sceneView: foldedSceneView
+                      ? { ...foldedSceneView, node_id: saved.id }
                       : null,
                     traceId,
                   }).then((res) => {

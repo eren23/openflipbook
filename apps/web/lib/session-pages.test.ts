@@ -1,6 +1,11 @@
+import type { SceneView } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
-import { nodeToPage, type SessionNodeWire } from "./session-pages";
+import {
+  foldSceneViewStamp,
+  nodeToPage,
+  type SessionNodeWire,
+} from "./session-pages";
 
 function wire(overrides: Partial<SessionNodeWire> = {}): SessionNodeWire {
   return {
@@ -45,5 +50,37 @@ describe("nodeToPage (?continue= hydration)", () => {
 
   it("leaves relation absent when a pre-relation server omits it (descend semantics)", () => {
     expect("relation" in nodeToPage(wire())).toBe(false);
+  });
+});
+
+describe("foldSceneViewStamp (SSE final's interior arrival stamp)", () => {
+  const prior: SceneView = {
+    node_id: "n1",
+    level: "street",
+    observer: null,
+    map_crop: null,
+    focus_id: "geo_e1",
+    scale_tier: "place",
+  };
+
+  it("stamp absent → prior unchanged (pre-stamp behavior byte-identical)", () => {
+    expect(foldSceneViewStamp(prior, undefined)).toBe(prior);
+    expect(foldSceneViewStamp(undefined, undefined)).toBeNull();
+  });
+
+  it("prior null → null even with a stamp (nothing to anchor it to)", () => {
+    expect(
+      foldSceneViewStamp(null, { scale_tier: "room", place_form: "interior" }),
+    ).toBeNull();
+  });
+
+  it("merges the stamp over the prior — stamp wins per-field, rest survives", () => {
+    const folded = foldSceneViewStamp(prior, {
+      scale_tier: "room",
+      place_form: "interior",
+    });
+    expect(folded).toEqual({ ...prior, scale_tier: "room", place_form: "interior" });
+    expect(folded?.place_form).toBe("interior");
+    expect(folded?.focus_id).toBe("geo_e1"); // the frame the stamp anchors to
   });
 });

@@ -49,6 +49,23 @@ export interface SessionNodeWire {
   relation?: NodeRelation;
 }
 
+/** Fold the SSE final's scene_view stamp over the request's scene_view.
+ * INTERIOR_ENTERS arrivals (#161) stamp the final event with a Partial
+ * (scale_tier "room" + place_form "interior"); the client persists the
+ * REQUEST's scene_view, so without this fold the stamp never reaches page
+ * state or the saved node. Stamp absent → prior unchanged (byte-identical
+ * to pre-stamp behavior). Prior null → null: a stamp without a frame has
+ * nothing to anchor, and the chip this feeds only matters on world pages,
+ * which always carry a scene_view. */
+export function foldSceneViewStamp(
+  prior: SceneView | null | undefined,
+  stamp: Partial<SceneView> | null | undefined,
+): SceneView | null {
+  if (!prior) return null;
+  if (!stamp) return prior;
+  return { ...prior, ...stamp };
+}
+
 /** Server node row → in-session Page, for ?continue= hydration. */
 export function nodeToPage(n: SessionNodeWire): Page {
   return {
