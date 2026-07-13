@@ -167,6 +167,14 @@ const EDIT_REGION_ENABLED = ["1", "true", "yes"].includes(
 const WORLD_TAP_DEGRADE_ENABLED = !["0", "false", "no"].includes(
   (process.env.NEXT_PUBLIC_WORLD_TAP_DEGRADE ?? "").toLowerCase()
 );
+// Tap = ENTER, everywhere (default ON): geo-mapped places skip the descent
+// ladder's closeup rung and enter on the FIRST tap — the same one-hop promise
+// as unmapped spots ("that too must enter by default"). The optical zoom
+// stays reachable via right-click → "🔍 Zoom in here". =false restores the
+// closeup-then-enter ladder exactly.
+const TAP_ENTER_DIRECT_ENABLED = !["0", "false", "no"].includes(
+  (process.env.NEXT_PUBLIC_TAP_ENTER_DIRECT ?? "").toLowerCase()
+);
 // On-ramp coach: pre-first-page hint + existing post-first-page chip (default OFF).
 const ON_RAMP_COACH_ENABLED = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_ON_RAMP_COACH ?? "").toLowerCase(),
@@ -2567,6 +2575,7 @@ export default function PlayPage() {
               // map; INSIDE a place it's that place's children, so the tap nests
               // one level deeper instead of resolving to a city landmark.
               page.sceneView,
+              { enterDirect: TAP_ENTER_DIRECT_ENABLED },
             )
           : null;
       // W1/W2 fallback chain: the geometric route fell through on a map frame
@@ -2617,6 +2626,7 @@ export default function PlayPage() {
               page.nodeId,
               { x_pct: click.x_pct, y_pct: click.y_pct },
               page.sceneView,
+              TAP_ENTER_DIRECT_ENABLED,
             )
           : null;
       // Conditioning refs are built AFTER routing so the region crop can BE

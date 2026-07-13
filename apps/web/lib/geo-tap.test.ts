@@ -257,6 +257,25 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(second!.kind).toBe("scene");
   });
 
+  it("enterDirect: the FIRST place tap already enters — no closeup rung", () => {
+    const map = {
+      entities: [geo("clock", "clock tower", 60, 30, { height: 18 })],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 60 / 100, y_pct: 30 / 60 },
+      16 / 9,
+      undefined,
+      undefined,
+      { enterDirect: true },
+    );
+    expect(t!.kind).toBe("scene");
+    expect(t!.focus_id).toBe("clock");
+    expect(t!.focus_label).toBe("clock tower");
+  });
+
   it("routes a tap through the image frame, not the entities' tight bounds (live-bug regression)", () => {
     // Entities cluster in a sub-range of the 100×60 image frame, so their tight
     // bounding box differs from the frame the tap maps through. Tapping a place's

@@ -29,6 +29,10 @@ export function sceneCloseupSpec(
   nodeId: string | null,
   click: { x_pct: number; y_pct: number },
   currentView: SceneView | null | undefined,
+  // enterDirect (NEXT_PUBLIC_TAP_ENTER_DIRECT, default ON at the page): a
+  // localized entity ENTERS on the first tap; the closeup zoom is right-click
+  // territory. Absent = the historical ladder (closeup, then transition).
+  enterDirect = false,
 ): SceneCloseupSpec | null {
   // Map frames have their own (geometry-registered) ladder.
   if (!currentView || currentView.level === "map") return null;
@@ -38,6 +42,9 @@ export function sceneCloseupSpec(
   // (deriveGeoFromExtraction), so the closeup's focus links up once the
   // entity's geometry lands.
   const geoId = `geo_${hit.entity.id}`;
+  if (enterDirect) {
+    return { kind: "transition", name: hit.entity.name };
+  }
   if (currentView.closeup === true && currentView.focus_id === geoId) {
     return { kind: "transition", name: hit.entity.name };
   }

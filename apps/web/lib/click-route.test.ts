@@ -171,7 +171,48 @@ describe("routeToFocus (enter a place resolved by NAME)", () => {
   });
 });
 
-describe("the descent ladder (closeup rung)", () => {
+describe("enterDirect (tap = enter; the rung is right-click territory)", () => {
+  it("first tap on a place → SCENE, no closeup rung", () => {
+    const map = {
+      entities: [geo("palace", 50, 50, { footprint: { w: 10, d: 8 }, height: 18 })],
+      bounds: CROP,
+    };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.5, y_pct: 0.5 }, ASPECT, {
+      enterDirect: true,
+    });
+    expect(r.kind).toBe("scene");
+    if (r.kind === "scene") expect(r.focus_id).toBe("palace");
+  });
+
+  it("empty-area cluster taps still submap (areas keep the map ladder)", () => {
+    const map = { entities: [geo("a", 20, 20), geo("b", 30, 25)], bounds: CROP };
+    const r = routeClick(map, mapView(CROP), { x_pct: 0.25, y_pct: 0.225 }, ASPECT, {
+      enterDirect: true,
+    });
+    expect(r.kind).toBe("submap");
+  });
+
+  it("legacy closeup frames still transition (reopen-compat)", () => {
+    const map = {
+      entities: [geo("palace", 50, 50, { footprint: { w: 10, d: 8 }, height: 18 })],
+      bounds: CROP,
+    };
+    const closeupView: SceneView = {
+      node_id: "n-close",
+      level: "map",
+      observer: null,
+      map_crop: { x: 41, y: 41, w: 18, h: 18 },
+      focus_id: "palace",
+      closeup: true,
+    };
+    const r = routeClick(map, closeupView, { x_pct: 0.5, y_pct: 0.5 }, ASPECT, {
+      enterDirect: true,
+    });
+    expect(r.kind).toBe("scene");
+  });
+});
+
+describe("the descent ladder (closeup rung — the enterDirect:false kill-switch path)", () => {
   it("first tap on a place → closeup crop, not enter", () => {
     const map = { entities: [geo("palace", 50, 50, { footprint: { w: 10, d: 8 }, height: 18 })], bounds: CROP };
     const r = routeClick(map, mapView(CROP), { x_pct: 0.5, y_pct: 0.5 }, ASPECT);
