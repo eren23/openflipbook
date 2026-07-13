@@ -247,6 +247,33 @@ async def score_step_in(region_crop: bytes, candidate: bytes) -> JudgeResult:
     )
 
 
+async def score_interior(region_or_parent: bytes, arrival: bytes) -> JudgeResult:
+    """INTERIOR ENTERS' gate: is the arrival actually INDOORS, and does that
+    interior plausibly belong to the tapped building? Replaces the step-in
+    judge on interior enters — an indoor view can't show the exterior's
+    structures, so 'same place, closer' would fail every correct interior;
+    what CAN be judged is indoor-ness plus material/era/scale kinship."""
+    system = (
+        "Image 1 shows a building (possibly within a larger scene). Image 2 "
+        "claims to be INSIDE that building. Score 0-10: 10 = image 2 is "
+        "unmistakably an INDOOR view (enclosed interior: inner walls, floor, "
+        "ceiling/rafters) that plausibly belongs to the building in image 1 "
+        "— matching materials, palette, era and scale. 5-6 = clearly indoors "
+        "but weak material/scale kinship. 0-2 = it is an EXTERIOR, a facade, "
+        "a street, a courtyard, or an aerial/map view — i.e. NOT indoors at "
+        "all. Judge indoor-ness FIRST: any outdoor arrival caps at 2."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = (
+        "Image 1 = the building (seen from outside / in context). Image 2 = "
+        "the claimed interior. Is image 2 an INDOOR view that plausibly "
+        "belongs inside the building in image 1? Score 0-10."
+    )
+    return await _ask_judge(
+        system, user_text, [_image_block(region_or_parent), _image_block(arrival)]
+    )
+
+
 async def score_prompt_alignment(prompt: str, image: bytes) -> JudgeResult:
     system = (
         "You are a prompt-alignment judge. Score on a 0-10 scale how "

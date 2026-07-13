@@ -345,6 +345,12 @@ export interface GenerateFinalEvent {
   // were projected for a different camera register). Additive — the debug
   // HUD counts these (UI_AUDIT #11).
   layout_suppressed?: boolean;
+  // INTERIOR_ENTERS arrivals only: the backend's stamp of the arrival view
+  // (scale_tier "room" + place_form "interior"), echoing the request's
+  // scene_view when one was sent, so the client can persist the node
+  // honestly. Partial — the echo drops null fields. Additive; absent on
+  // every other path.
+  scene_view?: Partial<SceneView>;
   // Running estimated spend ($) for this session — coarse, mirrors
   // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
   // backends.
@@ -713,6 +719,9 @@ export interface SceneView {
   // count). >0 rotates the scene camera to another angle under
   // ENTER_AZIMUTH_ROTATE; absent/0 is byte-identical.
   enter_index?: number | null;
+  // The entered place's FORM ("interior" when the arrival is an INDOOR view
+  // under INTERIOR_ENTERS). Additive; absent on exterior/legacy arrivals.
+  place_form?: string;
 }
 
 // One entity's projected place in a rendered frame (geometry-engine output),

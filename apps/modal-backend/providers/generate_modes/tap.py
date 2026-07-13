@@ -507,6 +507,33 @@ async def stream_tap(
         # change) — the builder emits its degraded scene-level fallback;
         # deployers who pinned FAL_ENTER_MODEL=kontext should revert.
         log("warn", "view.kontext_enter_fallback", model=enter_model_slug)
+    # INTERIOR ENTERS (INTERIOR_ENTERS, default ON): the classifier read the
+    # tapped place as a discrete enterable volume — the enter instruction
+    # flips to the INDOOR register (and the loop swaps the same-place judge
+    # for the interior judge below) instead of rendering yet another
+    # exterior shot. `false` is the kill-switch: today's bytes exactly.
+    interior_enter = (
+        env_flag("INTERIOR_ENTERS", "true")
+        and place_form_resolved == "interior"
+        and render_mode == "place_scene"
+    )
+    exterior_appearance: str | None = None
+    if interior_enter:
+        # The matched world entity's appearance anchors the interior's
+        # materials to the exterior the world has already committed to.
+        matched_entity = _match_world_entity(
+            body.world_context, view_subject or effective_query
+        )
+        if matched_entity is not None:
+            exterior_appearance = (
+                str(matched_entity.get("appearance") or "").strip() or None
+            )
+        log(
+            "info",
+            "tap.interior_enter",
+            subject=view_subject or effective_query,
+            has_appearance=exterior_appearance is not None,
+        )
     enter_instruction = image_edit_provider.build_enter_instruction(
         plan.page_title,
         plan.facts,
@@ -519,6 +546,8 @@ async def stream_tap(
         style_ref=bool(_condition_url_for_role(body, "style")),
         surroundings_pov=surroundings_pov_effective,
         surroundings_behind=surroundings_behind_effective,
+        interior=interior_enter,
+        exterior_appearance=exterior_appearance,
     )
 
     # 3. Image gen — with progressive fast-tier draft.
@@ -701,6 +730,21 @@ async def stream_tap(
                 )
 
             loop_cfg = render_loop.loop_config_from_env(body.max_attempts)
+            if interior_enter:
+                # The interior floor (INTERIOR_ACCEPT, default 6.0) — read
+                # here like TAP_ZOOM_ACCEPT so the knob stays scoped to
+                # interior enters.
+                import dataclasses as _dataclasses
+
+                try:
+                    interior_accept = float(
+                        os.environ.get("INTERIOR_ACCEPT", "6.0")
+                    )
+                except ValueError:
+                    interior_accept = 6.0
+                loop_cfg = _dataclasses.replace(
+                    loop_cfg, accept_interior=interior_accept
+                )
             # Leave 180s for the final attempt's judge tail + post-loop
             # grounding/encode; floor of 60s so one slow planner can't
             # zero the render budget.
@@ -714,12 +758,20 @@ async def stream_tap(
                 projection=str((enter_view or {}).get("projection") or ""),
                 region_bytes=render_loop.data_url_bytes(enter_source),
                 judge_conformance=judge.score_view_conformance,
-                judge_same_place=_same_place_judge(judge),
+                # Interior enters SWAP the same-place axis for the interior
+                # judge: an indoor arrival can't show the region's exterior
+                # structures, so step-in would reject every correct interior.
+                judge_same_place=(
+                    None if interior_enter else _same_place_judge(judge)
+                ),
                 config=loop_cfg,
                 judge_detail=_judge_detail,
                 # The medium gate: the entered view must look drawn by the
                 # same hand as the tapped region (style_pair vs the crop).
                 judge_medium=judge.score_style_pair,
+                judge_interior=(
+                    judge.score_interior if interior_enter else None
+                ),
                 family=enter_family,
                 abort=_abort_if_disconnected,
                 deadline_s=loop_deadline,
@@ -902,6 +954,19 @@ async def stream_tap(
     )
     if executed_op != "fresh":
         final_payload["image_op"] = executed_op
+    # INTERIOR ENTERS arrival stamp (additive; absent otherwise → unchanged
+    # wire shape): the arrival is INDOORS at the room rung — echo the
+    # request's scene_view with scale_tier/place_form stamped so the client
+    # can persist the node honestly instead of assuming another exterior.
+    if interior_enter and use_enter_edit:
+        sv_stamp: dict[str, Any] = (
+            body.scene_view.model_dump(exclude_none=True)
+            if body.scene_view
+            else {}
+        )
+        sv_stamp["scale_tier"] = "room"
+        sv_stamp["place_form"] = "interior"
+        final_payload["scene_view"] = sv_stamp
     # Geometric grounding summary rides on `final` only when produced (flag
     # off → key absent → unchanged wire shape).
     if grounding_summary is not None:

@@ -61,6 +61,10 @@ _SCRUB = (
     "FRIENDLY_ERRORS",
     # Candidate empty-roll retry (default ON — same reasoning).
     "PRECOMPUTE_EMPTY_RETRY",
+    # Interior enters (default ON — indoor register + interior judge; scrub
+    # so a host kill-switch can't flip the routing tests).
+    "INTERIOR_ENTERS",
+    "INTERIOR_ACCEPT",
     # View grammar (default ON — same hermeticity reasoning).
     "VIEW_GRAMMAR",
     "FAL_ENTER_MODEL",

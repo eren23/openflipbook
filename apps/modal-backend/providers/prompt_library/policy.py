@@ -40,6 +40,11 @@ _INTERIOR_WORDS: tuple[str, ...] = (
     "library", "kitchen", "cellar", "vault", "study", "bedroom", "workshop",
     "forge", "office", "cabin", "hut", "cottage", "tent", "sanctum", "crypt",
     "throne room", "great hall", "interior", "inside",
+    # INTERIOR_ENTERS: discrete roofed buildings whose natural next view is
+    # from within (interior beats complex on conflict, so "keep"/"manor"/
+    # "cathedral" now land at eye level — deliberate).
+    "tower", "cathedral", "temple", "church", "chapel", "house", "manor",
+    "mill", "windmill", "lighthouse", "keep", "barracks", "granary", "smithy",
 )
 _COMPLEX_WORDS: tuple[str, ...] = (
     "castle", "fortress", "citadel", "keep", "palace", "campus", "university",

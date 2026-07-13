@@ -592,3 +592,214 @@ async def test_zoom_judge_error_never_blocks_the_tap(
 
     cont.assert_awaited_once()
     assert any(e["type"] == "final" for e in events)
+
+
+# ---------- interior enters (INTERIOR_ENTERS, default ON) ---------------------
+#
+# A tap the classifier reads as place_form="interior" (a room OR a discrete
+# roofed building) renders the INDOOR view: the enter instruction flips to the
+# interior register, the loop's same-place judge is swapped for score_interior,
+# and the final event stamps the arrival at the room rung. `false` is a strict
+# kill-switch back to today's exterior enters.
+
+
+def _interior_resolution(monkeypatch: pytest.MonkeyPatch, place_form: str) -> None:
+    from providers.llm import ClickResolution
+
+    monkeypatch.setattr(
+        llm_mod,
+        "click_to_subject",
+        AsyncMock(
+            return_value=ClickResolution(
+                subject="The Tower of Art",
+                style="hand-drawn engraving",
+                enter_as="scene",
+                place_form=place_form,
+            )
+        ),
+    )
+
+
+def _interior_body(**over: Any) -> GenerateBody:
+    """A cold place_scene tap (no prefetch → the in-band resolve carries
+    place_form) with a decodable region crop."""
+    defaults: dict[str, Any] = {
+        "prefetched_subject": None,
+        "prefetched_subject_context": None,
+        "prefetched_surroundings": None,
+        "condition_image_urls": [_region_data_url(), "data:p", "data:s"],
+        "condition_roles": ["region", "parent", "style"],
+    }
+    defaults.update(over)
+    return _tap_body(**defaults)
+
+
+def _spy_enter_instruction(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+    real = image_edit_mod.build_enter_instruction
+
+    def spy(*args: Any, **kwargs: Any) -> str:
+        captured.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(image_edit_mod, "build_enter_instruction", spy)
+    return captured
+
+
+async def test_interior_place_form_flips_instruction_to_indoor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Default (flag unset = ON): place_form interior + place_scene → the
+    # builder is called with interior=True and the matched world entity's
+    # appearance.
+    monkeypatch.setenv("VIEW_LOOP", "false")  # routing only, no judges
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    captured = _spy_enter_instruction(monkeypatch)
+
+    await _collect(
+        _event_stream(
+            _interior_body(
+                world_context=[
+                    {
+                        "id": "e1",
+                        "kind": "place",
+                        "name": "The Tower of Art",
+                        "appearance": "black basalt, no windows",
+                    }
+                ]
+            ),
+            "t1",
+        )
+    )
+
+    assert captured["interior"] is True
+    assert captured["exterior_appearance"] == "black basalt, no windows"
+    instruction = edit.await_args.args[1]
+    assert "INDOOR" in instruction
+    assert "NOT the building's exterior" in instruction
+    assert "black basalt, no windows" in instruction
+
+
+async def test_interior_kill_switch_reverts_to_exterior_enter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INTERIOR_ENTERS", "false")
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    captured = _spy_enter_instruction(monkeypatch)
+
+    events = await _collect(_event_stream(_interior_body(), "t1"))
+
+    assert captured["interior"] is False
+    assert "INDOOR" not in edit.await_args.args[1]
+    final = next(e for e in events if e["type"] == "final")
+    assert "scene_view" not in final  # no stamp when off
+
+
+async def test_complex_place_form_keeps_exterior_enter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "complex")
+    captured = _spy_enter_instruction(monkeypatch)
+
+    events = await _collect(_event_stream(_interior_body(), "t1"))
+
+    assert captured["interior"] is False
+    assert "INDOOR" not in edit.await_args.args[1]
+    final = next(e for e in events if e["type"] == "final")
+    assert "scene_view" not in final
+
+
+def _mock_loop_judges(
+    monkeypatch: pytest.MonkeyPatch, interior_scores: list[tuple[float, str]]
+) -> tuple[AsyncMock, AsyncMock]:
+    """Good scores on every axis except interior (per interior_scores).
+    Returns (interior, step_in) mocks — step_in must stay un-awaited on
+    interior enters (the swap)."""
+    from providers import judge as judge_mod
+    from providers.judge import JudgeResult
+
+    ok = JudgeResult(score=9.0, rationale="", raw="")
+    interior = AsyncMock(
+        side_effect=[JudgeResult(s, r, "") for s, r in interior_scores]
+    )
+    step_in = AsyncMock(return_value=ok)
+    monkeypatch.setattr(judge_mod, "score_view_conformance", AsyncMock(return_value=ok))
+    monkeypatch.setattr(judge_mod, "score_feature_articulation", AsyncMock(return_value=ok))
+    monkeypatch.setattr(judge_mod, "score_style_pair", AsyncMock(return_value=ok))
+    monkeypatch.setattr(judge_mod, "score_interior", interior)
+    monkeypatch.setattr(judge_mod, "score_step_in", step_in)
+    monkeypatch.setattr(judge_mod, "score_continuation", step_in)
+    return interior, step_in
+
+
+async def test_interior_enter_swaps_judge_and_stamps_scene_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The view loop judges interior enters with score_interior INSTEAD of the
+    # step-in judge, against the region crop; the final stamps the arrival.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    interior, step_in = _mock_loop_judges(monkeypatch, [(9.0, "clean interior")])
+
+    events = await _collect(_event_stream(_interior_body(), "t1"))
+
+    edit.assert_awaited_once()
+    interior.assert_awaited_once()
+    step_in.assert_not_awaited()
+    assert interior.await_args.args[0] == b"region-crop"  # judged vs the crop
+    final = next(e for e in events if e["type"] == "final")
+    assert final["scene_view"]["scale_tier"] == "room"
+    assert final["scene_view"]["place_form"] == "interior"
+
+
+async def test_interior_judge_fail_retries_with_rationale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An exterior arrival fails the interior floor → one retry whose
+    # instruction carries the judge's own diagnosis + the indoor directive.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    _, step_in = _mock_loop_judges(
+        monkeypatch, [(2.0, "still shows the facade"), (9.0, "indoors now")]
+    )
+
+    events = await _collect(_event_stream(_interior_body(), "t1"))
+
+    assert edit.await_count == 2
+    retry_instruction = edit.await_args_list[1].args[1]
+    assert "failed the interior check" in retry_instruction
+    assert "still shows the facade" in retry_instruction
+    step_in.assert_not_awaited()
+    assert any(e["type"] == "final" for e in events)
+
+
+async def test_interior_accept_env_floor_is_honored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # INTERIOR_ACCEPT lowers the floor: a 5.0 interior passes at 4.0.
+    monkeypatch.setenv("INTERIOR_ACCEPT", "4.0")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    interior, _ = _mock_loop_judges(monkeypatch, [(5.0, "weak kinship but indoors")])
+
+    await _collect(_event_stream(_interior_body(), "t1"))
+
+    edit.assert_awaited_once()  # accepted on the first attempt — no retry
+    interior.assert_awaited_once()

@@ -87,18 +87,40 @@ def _legacy_enter_instruction(
     layout_clause: str = "",
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     title = page_title.strip() or "this place"
     anchor = f'"{title}"'
     if subject_context and subject_context.strip():
         anchor += f" ({subject_context.strip()})"
-    text = (
-        f"Step INSIDE {anchor} — the place this image shows — and draw the view "
-        "from ground level within it. This is the SAME place seen from the "
-        "inside, not a new one and not the overhead map view: keep the exact "
-        "architecture, walls, towers, materials, colours and landmarks the "
-        "image shows, and reveal what they enclose"
-    )
+    if interior:
+        # INTERIOR ENTERS: the tapped place is a discrete enterable building —
+        # the arrival must be INDOORS, not yet another exterior shot of it.
+        text = (
+            f"Step through the entrance INTO {anchor} and draw the INDOOR "
+            "view from ground level within it — an enclosed interior with "
+            "its inner walls, floor and ceiling or rafters visible. NOT the "
+            "building's exterior, NOT its facade, NOT the surrounding "
+            "streets or grounds. The interior must plausibly belong to the "
+            "exact building the image shows: same materials, palette and "
+            "construction"
+        )
+        if exterior_appearance and exterior_appearance.strip():
+            text += f" — {exterior_appearance.strip()}"
+        text += (
+            ", an inner space that fits the building's shell (a round tower "
+            "encloses a round chamber; a tall building implies stairs, "
+            "galleries or upper floors)"
+        )
+    else:
+        text = (
+            f"Step INSIDE {anchor} — the place this image shows — and draw the view "
+            "from ground level within it. This is the SAME place seen from the "
+            "inside, not a new one and not the overhead map view: keep the exact "
+            "architecture, walls, towers, materials, colours and landmarks the "
+            "image shows, and reveal what they enclose"
+        )
     named = [f.strip() for f in facts if f and f.strip()]
     if named:
         text += ", working in what belongs here: " + "; ".join(named[:8])
@@ -107,8 +129,15 @@ def _legacy_enter_instruction(
         text += _pov_surroundings_text(surroundings, surroundings_behind)
     elif surroundings and surroundings.strip():
         text += (
-            " Through openings and beyond the walls, keep the neighbours where "
-            f"the map placed them: {surroundings.strip()}"
+            (
+                " Through windows and doorways, keep the neighbours where "
+                f"the parent image had them: {surroundings.strip()}"
+            )
+            if interior
+            else (
+                " Through openings and beyond the walls, keep the neighbours where "
+                f"the map placed them: {surroundings.strip()}"
+            )
         )
         if not text.endswith("."):
             text += "."
@@ -197,6 +226,39 @@ def _transform_sentence(view: ViewSpec) -> str:
     )
 
 
+def _interior_transform_sentence() -> str:
+    """The interior enter's one view-change sentence (INTERIOR_ENTERS): step
+    THROUGH the entrance and render the enclosed interior, never the facade."""
+    return (
+        "Step through the entrance INTO it and draw the INDOOR view from "
+        "ground level within: an enclosed interior with its inner walls, "
+        "floor and ceiling or rafters visible — NOT the building's exterior, "
+        "NOT its facade, NOT the surrounding streets or grounds."
+    )
+
+
+def _interior_invariants_sentence(
+    named: list[str], exterior_appearance: str | None
+) -> str:
+    """The interior twin of _invariants_sentence: the inside can't show the
+    exterior's landmarks, so kinship is MATERIAL + SHELL instead — the indoor
+    space must read as belonging to the exact building the reference shows."""
+    text = (
+        "The interior must plausibly belong to the exact building the image "
+        "shows: same materials, palette and construction"
+    )
+    if exterior_appearance and exterior_appearance.strip():
+        text += f" — {exterior_appearance.strip()}"
+    text += (
+        ", an inner space that fits the building's shell (a round tower "
+        "encloses a round chamber; a tall building implies stairs, galleries "
+        "or upper floors)"
+    )
+    if named:
+        text += ", and containing what belongs here: " + "; ".join(named[:8])
+    return text + "."
+
+
 def _lr_consistent_with_map(view: ViewSpec) -> bool:
     """Map left/right only survives a north-ish facing (or a plan view) —
     facing south INVERTS it (V1 red-team finding 12)."""
@@ -260,18 +322,28 @@ def _surroundings_sentence(
     *,
     pov: bool = False,
     behind: str | None = None,
+    interior: bool = False,
 ) -> str:
     """Neighbours framed EXPLICITLY as map bearings — the instruction's own
     facing is view-relative, and mixing registers silently is the A2
     contradiction this grammar exists to kill. pov=True (sightline-culled
-    client geometry) swaps to the view-relative wording instead."""
+    client geometry) swaps to the view-relative wording instead. interior
+    (INTERIOR_ENTERS) rewords the lead-in only — indoors, the neighbours are
+    glimpsed through windows and doorways, not 'beyond the walls'."""
     if pov:
         return _pov_surroundings_text(surroundings, behind)
     if not (surroundings and surroundings.strip()):
         return ""
     text = (
-        " Through openings and beyond the walls, keep the neighbours where the "
-        f"map placed them (map bearings, not view directions): {surroundings.strip()}"
+        (
+            " Through windows and doorways, keep the neighbours where the "
+            f"parent image had them: {surroundings.strip()}"
+        )
+        if interior
+        else (
+            " Through openings and beyond the walls, keep the neighbours where the "
+            f"map placed them (map bearings, not view directions): {surroundings.strip()}"
+        )
     )
     if not text.endswith("."):
         text += "."
@@ -319,6 +391,8 @@ def _enter_nano(
     style_ref: bool,
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     anchor = f'"{title}"'
     if subject_context and subject_context.strip():
@@ -333,10 +407,17 @@ def _enter_nano(
         text = f"The provided image is the overhead map of {anchor}. "
         ref_name = "the reference"
     proj = str(view.get("projection") or "")
-    text += _transform_sentence(view)
-    text += " " + _invariants_sentence(named, view)
+    if interior:
+        text += _interior_transform_sentence()
+        text += " " + _interior_invariants_sentence(named, exterior_appearance)
+    else:
+        text += _transform_sentence(view)
+        text += " " + _invariants_sentence(named, view)
     text += _surroundings_sentence(
-        surroundings, pov=surroundings_pov, behind=surroundings_behind
+        surroundings,
+        pov=surroundings_pov,
+        behind=surroundings_behind,
+        interior=interior,
     )
     text += " " + _medium_sentence(proj, style_anchor, ref_name)
     text += f" {ASPECT_GUARD}"
@@ -357,6 +438,8 @@ def _enter_gpt(
     style_ref: bool,
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     proj = str(view.get("projection") or "")
     ctx = (
@@ -364,7 +447,17 @@ def _enter_gpt(
         if subject_context and subject_context.strip()
         else ""
     )
-    if proj == "eye_level":
+    if interior:
+        # INTERIOR ENTERS: the change-first sentence goes INDOORS — the
+        # camera doesn't just drop to eye level in front of the facade.
+        change = (
+            f'Change the scene: step through the entrance INTO "{title}"{ctx} '
+            "and render the INDOOR view from ground level within it — an "
+            "enclosed interior with its inner walls, floor and ceiling or "
+            "rafters visible; NOT the building's exterior, NOT its facade, "
+            "NOT the surrounding streets or grounds."
+        )
+    elif proj == "eye_level":
         change = (
             "Change only the camera: move it from the overhead map view "
             "(Image 1) to eye level, about 1.7 m up, standing inside "
@@ -394,18 +487,26 @@ def _enter_gpt(
     if style_ref:
         refs += " Image 2 is a style reference only — take no content from it."
         ref_name = "Image 2"
-    text = (
-        f"{change} {refs} Preserve: the architecture and building shapes, "
-        "materials, colour palette"
-    )
-    if named:
-        text += f", this exact landmark set ({'; '.join(named[:8])})"
-    if _lr_consistent_with_map(view):
-        text += ", and their left/right relations as the map implies."
+    if interior:
+        text = (
+            f"{change} {refs} "
+            + _interior_invariants_sentence(named, exterior_appearance)
+        )
     else:
-        text += ", and their relative positions as seen from this viewpoint."
+        text = (
+            f"{change} {refs} Preserve: the architecture and building shapes, "
+            "materials, colour palette"
+        )
+        if named:
+            text += f", this exact landmark set ({'; '.join(named[:8])})"
+        if _lr_consistent_with_map(view):
+            text += ", and their left/right relations as the map implies."
+        else:
+            text += ", and their relative positions as seen from this viewpoint."
     if surroundings_pov:
         text += _pov_surroundings_text(surroundings, surroundings_behind)
+    elif interior:
+        text += _surroundings_sentence(surroundings, interior=True)
     elif surroundings and surroundings.strip():
         text += (
             " Keep the neighbours where the map placed them (map bearings): "
@@ -442,6 +543,8 @@ def _enter_kontext(
     view: ViewSpec,
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     """FORCED fallback only — Kontext rotates the subject, not the camera
     (3.33/10 same-place on view change). Scene-level phrasing, full medium in
@@ -453,7 +556,25 @@ def _enter_kontext(
         else ""
     )
     medium = (style_anchor or "").strip() or "hand-drawn illustration"
-    if proj == "eye_level":
+    if interior:
+        # Interior enter, Kontext grammar (frugal): one change sentence, the
+        # belongs-to-this-building preserve list, the medium.
+        text = (
+            f'Step through the entrance INTO this exact "{title}"{ctx} and '
+            "change the view to its enclosed INDOOR interior seen from ground "
+            "level — inner walls, floor and ceiling or rafters visible, NOT "
+            "the building's exterior, NOT its facade, NOT the surrounding "
+            "streets or grounds — while keeping an interior that plausibly "
+            "belongs to it: same materials, palette and construction"
+        )
+        if exterior_appearance and exterior_appearance.strip():
+            text += f" — {exterior_appearance.strip()}"
+        text += (
+            ", an inner space that fits the building's shell (a round tower "
+            "encloses a round chamber; a tall building implies stairs, "
+            "galleries or upper floors)"
+        )
+    elif proj == "eye_level":
         head = f'Change the view to ground level inside this exact "{title}"{ctx}'
     elif proj == "top_down":
         head = (
@@ -470,10 +591,11 @@ def _enter_kontext(
             f'Change the view of this exact "{title}"{ctx} to a high-angle '
             "three-quarter aerial view"
         )
-    text = (
-        f"{head} while preserving its exact architecture, walls, materials, "
-        "colours and landmarks"
-    )
+    if not interior:
+        text = (
+            f"{head} while preserving its exact architecture, walls, materials, "
+            "colours and landmarks"
+        )
     if named:
         text += f" ({'; '.join(named[:8])})"
     text += (
@@ -483,7 +605,11 @@ def _enter_kontext(
     if surroundings_pov:
         text += _pov_surroundings_text(surroundings, surroundings_behind)
     elif surroundings and surroundings.strip():
-        text += f" Beyond the walls keep: {surroundings.strip()}"
+        text += (
+            f" Through windows and doorways keep: {surroundings.strip()}"
+            if interior
+            else f" Beyond the walls keep: {surroundings.strip()}"
+        )
         if not text.endswith("."):
             text += "."
     if layout_clause.strip():
@@ -633,10 +759,15 @@ def build_enter_instruction(
     style_ref: bool = False,
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     """Enter: a view CHANGE that keeps the place. view=None -> today's exact
     string. All four projections are honored — top_down renders the place as
-    a closer plan map (the 2D pill's honored form, V1 finding 2)."""
+    a closer plan map (the 2D pill's honored form, V1 finding 2). interior
+    (INTERIOR_ENTERS) flips the core sentence to the INDOOR register in every
+    variant — a discrete building is entered, not re-shot from outside;
+    interior=False stays byte-identical."""
     if view is None or str(view.get("projection") or "") not in _ENTER_PROJECTIONS:
         return _legacy_enter_instruction(
             page_title,
@@ -647,6 +778,8 @@ def build_enter_instruction(
             layout_clause=layout_clause,
             surroundings_pov=surroundings_pov,
             surroundings_behind=surroundings_behind,
+            interior=interior,
+            exterior_appearance=exterior_appearance,
         )
     title = page_title.strip() or "this place"
     named = [f.strip() for f in facts if f and f.strip()]
@@ -658,6 +791,7 @@ def build_enter_instruction(
             surroundings=surroundings, layout_clause=layout_clause, view=view,
             surroundings_pov=surroundings_pov,
             surroundings_behind=surroundings_behind,
+            interior=interior, exterior_appearance=exterior_appearance,
         )
     if fam == "gpt_image":
         return _enter_gpt(
@@ -667,6 +801,7 @@ def build_enter_instruction(
             surroundings_pov=surroundings_pov,
             surroundings_behind=surroundings_behind,
             style_ref=style_ref,
+            interior=interior, exterior_appearance=exterior_appearance,
         )
     return _enter_nano(
         title, named,
@@ -675,6 +810,7 @@ def build_enter_instruction(
         surroundings_pov=surroundings_pov,
         surroundings_behind=surroundings_behind,
         style_ref=style_ref,
+        interior=interior, exterior_appearance=exterior_appearance,
     )
 
 

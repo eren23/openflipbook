@@ -165,12 +165,15 @@ def build_enter_instruction(
     style_ref: bool = False,
     surroundings_pov: bool = False,
     surroundings_behind: str | None = None,
+    interior: bool = False,
+    exterior_appearance: str | None = None,
 ) -> str:
     """Delegates to prompt_library.instructions (the body moved verbatim;
     view=None is byte-identical to the pre-grammar string). With a view, the
     research/10 per-family skeleton applies — the hardcoded "ground level"
     dies and the deliberate projection (eye_level / oblique / isometric /
-    top_down plan) is named instead."""
+    top_down plan) is named instead. interior (INTERIOR_ENTERS) flips every
+    variant to the INDOOR register; False stays byte-identical."""
     from typing import cast
 
     from providers.prompt_library import instructions as _instructions
@@ -188,6 +191,8 @@ def build_enter_instruction(
         style_ref=style_ref,
         surroundings_pov=surroundings_pov,
         surroundings_behind=surroundings_behind,
+        interior=interior,
+        exterior_appearance=exterior_appearance,
     )
 
 
