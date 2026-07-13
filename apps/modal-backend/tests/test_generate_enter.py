@@ -831,10 +831,11 @@ async def test_interior_accept_env_floor_is_honored(
 #
 # Kontext is reference-frozen: a world-mode submap "zoom" crop-UPSCALED the
 # region without re-synthesizing detail — dense city maps arrived as blurry
-# illegible mush. Default ON, the zoom is a FRESH cartographic re-render
-# (tier model) conditioned on the region crop; `false` is a strict kill-switch
-# back to the Kontext continue, and classic (non-world) submaps keep Kontext
-# regardless.
+# illegible mush. Default ON, the zoom rides the pixel-honoring EDIT seam with
+# a LOOSE-refs model (fal's fresh path DROPS reference images at dispatch, so
+# a "fresh conditioned redraw" would be text-anchored only); `false` is a
+# strict kill-switch back to the plain Kontext continue, and classic
+# (non-world) submaps keep Kontext regardless.
 
 
 def _world_submap_body(**over: Any) -> GenerateBody:
@@ -846,12 +847,13 @@ def _world_submap_body(**over: Any) -> GenerateBody:
     return _tap_body(**defaults)
 
 
-async def test_world_submap_redraw_routes_fresh_with_region_ref(
+async def test_world_submap_redraw_rides_edit_seam_with_loose_refs_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Default (flag unset = ON): the world submap zoom is a fresh tier-model
-    # render — the region crop rides as the reference + conditioning preamble,
-    # continue_image is never called, and the wire says map_redraw.
+    # Default (flag unset = ON): the world submap zoom is a continue_image of
+    # the region crop with the LOOSE-refs nano EDIT slug (NOT Kontext, NOT the
+    # ref-dropping fresh path), carrying the redraw wording; the wire says
+    # map_redraw.
     monkeypatch.setenv("WORLD_MODE", "true")
     _mock_plan(monkeypatch)
     edit = _mock_edit(monkeypatch)
@@ -860,18 +862,31 @@ async def test_world_submap_redraw_routes_fresh_with_region_ref(
 
     events = await _collect(_event_stream(_world_submap_body(), "t1"))
 
-    gen.assert_awaited_once()
-    cont.assert_not_awaited()
+    cont.assert_awaited_once()
+    gen.assert_not_awaited()
     edit.assert_not_awaited()
-    assert gen.await_args.kwargs["reference_urls"] == ["data:r"]  # the region crop
-    assert gen.await_args.kwargs["tier"] is None  # the fresh path's tier resolve
-    assert gen.await_args.kwargs["model_override"] is None  # no hardcoded model
-    prompt = gen.await_args.kwargs["prompt"]
-    assert prompt.startswith("Use the reference images as visual grounding")
-    assert "MORE DETAILED map" in prompt
+    assert cont.await_args.args[0] == "data:r"  # the region crop is the source
+    assert "MORE DETAILED map" in cont.await_args.args[1]
+    assert (
+        cont.await_args.kwargs["model_override"] == "fal-ai/nano-banana-pro/edit"
+    )
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "map_redraw"
-    assert final["image_model"] == "fal-ai/nano-banana-pro"
+
+
+async def test_submap_redraw_model_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORLD_MODE", "true")
+    monkeypatch.setenv("SUBMAP_REDRAW_MODEL", "fal-ai/nano-banana-2/edit")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    assert cont.await_args.kwargs["model_override"] == "fal-ai/nano-banana-2/edit"
 
 
 async def test_submap_redraw_kill_switch_is_todays_kontext(
@@ -890,6 +905,7 @@ async def test_submap_redraw_kill_switch_is_todays_kontext(
     gen.assert_not_awaited()
     assert cont.await_args.args[0] == "data:r"
     assert cont.await_args.args[1].startswith("Zoom into")  # the legacy wording
+    assert cont.await_args.kwargs["model_override"] is None  # default Kontext
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "zoom_continue"
 
@@ -909,6 +925,7 @@ async def test_classic_submap_keeps_kontext_regardless_of_flag(
 
     cont.assert_awaited_once()
     gen.assert_not_awaited()
+    assert cont.await_args.kwargs["model_override"] is None  # default Kontext
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "zoom_continue"
 
@@ -923,12 +940,12 @@ async def test_redraw_prompt_carries_clauses_and_style(
     monkeypatch.setenv("WORLD_TOPDOWN_MAPS", "true")
     _mock_plan(monkeypatch)
     _mock_edit(monkeypatch)
-    _mock_continue(monkeypatch)
-    gen = _mock_fresh(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
 
     events = await _collect(_event_stream(_world_submap_body(), "t1"))
 
-    prompt = gen.await_args.kwargs["prompt"]
+    prompt = cont.await_args.args[1]
     assert 'Draw a closer, richer, MORE DETAILED map of "The Stone Castle"' in prompt
     assert "individual buildings, lanes, courtyards" in prompt
     assert "The Inner Bailey" in prompt  # the planner's facts ride in
@@ -1144,8 +1161,9 @@ async def test_zoom_detail_accept_env_floor_is_honored(
 async def test_zoom_detail_gates_the_redraw_op_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The legibility gate covers BOTH ops: a mushy redraw retries on the
-    # FRESH path (never Kontext), rationale folded in.
+    # The legibility gate covers BOTH flavours: a mushy redraw retries on the
+    # SAME loose-refs edit seam (never plain Kontext, never the ref-dropping
+    # fresh path), rationale folded in.
     monkeypatch.setenv("WORLD_MODE", "true")
     _mock_plan(monkeypatch)
     _mock_edit(monkeypatch)
@@ -1164,10 +1182,14 @@ async def test_zoom_detail_gates_the_redraw_op_too(
         )
     )
 
-    assert gen.await_count == 2
-    cont.assert_not_awaited()
-    retry_prompt = gen.await_args_list[1].kwargs["prompt"]
+    assert cont.await_count == 2
+    gen.assert_not_awaited()
+    retry_prompt = cont.await_args_list[1].args[1]
     assert "smeared mush" in retry_prompt
     assert "MORE DETAILED map" in retry_prompt  # still the redraw instruction
+    assert [c.kwargs["model_override"] for c in cont.await_args_list] == [
+        "fal-ai/nano-banana-pro/edit",
+        "fal-ai/nano-banana-pro/edit",
+    ]
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "map_redraw"

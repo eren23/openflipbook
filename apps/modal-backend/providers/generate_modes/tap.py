@@ -373,7 +373,7 @@ async def stream_tap(
     image_op = model_router.select_operation(render_mode, region_ref is not None)
     use_continuation = image_op == "zoom_continue"
     # SUBMAP REDRAW (SUBMAP_REDRAW, default ON): a world-mode map zoom is
-    # RE-DRAWN at the closer scale by a fresh tier-model render conditioned on
+    # RE-DRAWN at the closer scale by a LOOSE-refs edit model conditioned on
     # the region crop, instead of Kontext's crop-upscale. Kontext is
     # reference-frozen — it magnifies the crop's pixels without synthesizing
     # new detail, so dense city maps arrive as blurry illegible mush (live
@@ -627,28 +627,24 @@ async def stream_tap(
     result: Any = None
     main_task: _asyncio.Task | None = None
     if use_continuation and region_ref is not None:
-        # SUBMAP_REDRAW rides the fresh-gen conditioning mechanics: the region
-        # crop as the (sole) reference + the same conditioning preamble the
-        # fresh branch composes — the redraw prompt names it "the reference
-        # image". The kill-switched path is today's Kontext continue, byte-
-        # identical.
-        redraw_preamble = (
-            image_provider.conditioning_preamble(["region"], body.mode)
-            if submap_redraw
-            else ""
+        # SUBMAP_REDRAW rides the pixel-honoring EDIT seam with a LOOSE-refs
+        # model. The fresh path is NOT an option: fal's text-to-image endpoints
+        # accept-but-ignore reference images (supports_refs=False, #109 removed
+        # the inert upload), so a "fresh render conditioned on the crop" is
+        # text-anchored only — a nice new map of somewhere else. The nano EDIT
+        # slug re-synthesizes WITH the crop's pixels (the enter path's slug);
+        # Kontext must NOT be this model — it freezes the pixels, which is the
+        # original mush. The kill-switched path is today's Kontext continue,
+        # byte-identical.
+        redraw_model = (
+            os.environ.get("SUBMAP_REDRAW_MODEL") or "fal-ai/nano-banana-pro/edit"
         )
 
         async def _render_zoom(instr: str) -> Any:
-            if submap_redraw:
-                return await image_provider.generate_image(
-                    prompt=redraw_preamble + instr,
-                    aspect_ratio=body.aspect_ratio,
-                    tier=body.image_tier,
-                    model_override=body.image_model,
-                    reference_urls=[region_ref],
-                )
             return await image_edit_provider.continue_image(
-                region_ref, instr, model_override=body.image_model
+                region_ref,
+                instr,
+                model_override=redraw_model if submap_redraw else body.image_model,
             )
 
         async def _judged_zoom() -> Any:
