@@ -210,6 +210,9 @@ export function geoTapRequest(
   // landmark. Every frame — city or interior — is a top-down map in the SAME
   // MAP_IMAGE_FRAME; the per-frame `scale` composes them to absolute coords.
   currentView?: SceneView | null,
+  // Threaded to routeClick: tap = enter (skip the closeup rung). See
+  // routeClick's enterDirect note; absent = the historical ladder.
+  opts?: { enterDirect?: boolean },
 ): GeoTap | null {
   if (map.entities.length === 0) return null;
   const insideId =
@@ -249,7 +252,11 @@ export function geoTapRequest(
     ...(currentView?.focus_id ? { focus_id: currentView.focus_id } : {}),
     ...(currentView?.closeup ? { closeup: true } : {}),
   };
-  const route = routeClick(candidates, mapView, click, aspect);
+  const route = routeClick(candidates, mapView, click, aspect, {
+    ...(opts?.enterDirect !== undefined
+      ? { enterDirect: opts.enterDirect }
+      : {}),
+  });
   if (route.kind === "explainer") return null;
   const byId = new Map(map.entities.map((e) => [e.id, e]));
 

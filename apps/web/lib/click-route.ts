@@ -183,7 +183,11 @@ export function routeClick(
   view: SceneView,
   click: ClickPoint,
   aspect: number,
-  opts?: { minSubmapEntities?: number },
+  // enterDirect (the page passes NEXT_PUBLIC_TAP_ENTER_DIRECT, default ON):
+  // a tapped place ENTERS on the first tap — the closeup rung is right-click
+  // territory ("Zoom in here"), not the tap default. Absent = the ladder,
+  // so the pure function's default stays the historical behavior.
+  opts?: { minSubmapEntities?: number; enterDirect?: boolean },
 ): ClickRoute {
   const { entities } = map;
   const focus = view.observer
@@ -196,8 +200,9 @@ export function routeClick(
   // faithful Kontext zoom), and only the tap on the place whose closeup you
   // are already on TRANSITIONS into it (enter). Scene frames (observer set)
   // keep entering directly — scene-level closeups are a later rung.
+  // Under enterDirect the rung is skipped outright: tap = enter, one hop.
   if (focus && focus.kind === "place") {
-    if (view.map_crop && !view.observer) {
+    if (!opts?.enterDirect && view.map_crop && !view.observer) {
       const alreadyCloseup =
         view.closeup === true && view.focus_id === focus.id;
       if (!alreadyCloseup) {

@@ -48,6 +48,23 @@ describe("sceneCloseupSpec (the ladder inside entered scenes)", () => {
     h_pct: 0.25,
   });
 
+  it("enterDirect: a tap on a localized entity → transition (tap = enter; the rung is right-click territory)", () => {
+    const spec = sceneCloseupSpec(
+      [hall],
+      "n1",
+      { x_pct: 0.5, y_pct: 0.4 },
+      sceneView(),
+      true,
+    );
+    expect(spec).toEqual({ kind: "transition", name: "The Great Hall" });
+  });
+
+  it("enterDirect: missed taps still null (nothing under the finger)", () => {
+    expect(
+      sceneCloseupSpec([hall], "n1", { x_pct: 0.95, y_pct: 0.95 }, sceneView(), true),
+    ).toBeNull();
+  });
+
   it("a tap on a localized entity → closeup with a padded, clamped box", () => {
     const spec = sceneCloseupSpec([hall], "n1", { x_pct: 0.5, y_pct: 0.4 }, sceneView());
     expect(spec).not.toBeNull();
