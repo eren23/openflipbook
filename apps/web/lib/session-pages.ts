@@ -54,15 +54,29 @@ export interface SessionNodeWire {
  * (scale_tier "room" + place_form "interior"); the client persists the
  * REQUEST's scene_view, so without this fold the stamp never reaches page
  * state or the saved node. Stamp absent → prior unchanged (byte-identical
- * to pre-stamp behavior). Prior null → null: a stamp without a frame has
- * nothing to anchor, and the chip this feeds only matters on world pages,
- * which always carry a scene_view. */
+ * to pre-stamp behavior).
+ *
+ * Prior null: live-caught (Oakhaven receipts) — a descent-ladder TRANSITION
+ * enter sends no scene_view, so the old "prior null → null" silently dropped
+ * the interior stamp and the persisted node hydrated unmarked. An interior
+ * arrival is self-describing: mint the minimal eye-level frame from the
+ * stamp instead. Non-interior stamps without a frame still fold to null
+ * (nothing to anchor). node_id is stamped by the callers (post-save). */
 export function foldSceneViewStamp(
   prior: SceneView | null | undefined,
   stamp: Partial<SceneView> | null | undefined,
 ): SceneView | null {
-  if (!prior) return null;
-  if (!stamp) return prior;
+  if (!stamp) return prior ?? null;
+  if (!prior) {
+    if (stamp.place_form !== "interior") return null;
+    return {
+      node_id: stamp.node_id ?? "",
+      level: "eye",
+      observer: null,
+      map_crop: null,
+      ...stamp,
+    };
+  }
   return { ...prior, ...stamp };
 }
 

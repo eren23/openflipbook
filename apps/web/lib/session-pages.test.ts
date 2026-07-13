@@ -68,10 +68,23 @@ describe("foldSceneViewStamp (SSE final's interior arrival stamp)", () => {
     expect(foldSceneViewStamp(undefined, undefined)).toBeNull();
   });
 
-  it("prior null → null even with a stamp (nothing to anchor it to)", () => {
-    expect(
-      foldSceneViewStamp(null, { scale_tier: "room", place_form: "interior" }),
-    ).toBeNull();
+  it("prior null + INTERIOR stamp → mints the minimal eye frame (live-caught: a ladder TRANSITION enter sends no scene_view, and the old null rule dropped the marker from state AND persistence)", () => {
+    const minted = foldSceneViewStamp(null, {
+      scale_tier: "room",
+      place_form: "interior",
+    });
+    expect(minted).toEqual({
+      node_id: "",
+      level: "eye",
+      observer: null,
+      map_crop: null,
+      scale_tier: "room",
+      place_form: "interior",
+    });
+  });
+
+  it("prior null + non-interior stamp → still null (nothing to anchor)", () => {
+    expect(foldSceneViewStamp(null, { scale_tier: "place" })).toBeNull();
   });
 
   it("merges the stamp over the prior — stamp wins per-field, rest survives", () => {
