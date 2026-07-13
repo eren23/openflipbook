@@ -636,9 +636,7 @@ async def stream_tap(
         # Kontext must NOT be this model — it freezes the pixels, which is the
         # original mush. The kill-switched path is today's Kontext continue,
         # byte-identical.
-        redraw_model = (
-            os.environ.get("SUBMAP_REDRAW_MODEL") or "fal-ai/nano-banana-pro/edit"
-        )
+        redraw_model = model_router.resolve_model("submap_redraw")
 
         async def _render_zoom(instr: str) -> Any:
             return await image_edit_provider.continue_image(
@@ -698,9 +696,13 @@ async def stream_tap(
                 return v.score >= accept and (d is None or d.score >= detail_accept)
 
             def _total(v: JudgeResult, d: JudgeResult | None) -> float:
-                # Keep-best over BOTH axes; degrades to the old single-score
-                # comparison when the detail judge is off.
-                return v.score + (d.score if d is not None else 0.0)
+                # Keep-best = the attempt whose WORST axis is best (min-floor).
+                # A sum could crown a retry that regressed legibility on a
+                # step_in swing — the exact mush the detail axis exists to
+                # block. Detail off degrades to the old single-score compare.
+                if d is None:
+                    return v.score
+                return min(v.score, d.score)
 
             try:
                 verdict, detail = await _verdicts(first)
