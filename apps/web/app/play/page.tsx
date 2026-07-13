@@ -2272,11 +2272,11 @@ export default function PlayPage() {
       // saved place instead of generating a new one — the persistence that
       // makes the atlas read as one continuous world.
       if (worldEnabled && !evt.metaKey && !evt.ctrlKey) {
-        const revisitId = findRevisitTarget(
-          history.items,
-          currentNodeId,
-          click
-        );
+        // An explicit "Zoom in here" outranks the revisit shortcut — the
+        // user said closer, not back.
+        const revisitId = pinnedRenderMode
+          ? null
+          : findRevisitTarget(history.items, currentNodeId, click);
         if (revisitId) {
           clickInFlightRef.current = false;
           selectFromMap(revisitId);
