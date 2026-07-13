@@ -17,6 +17,16 @@ export function enterAsToRenderMode(
   return "explainer";
 }
 
+// The context menu's "🔍 Zoom in here": which optical-zoom render mode fits
+// the CURRENT frame. Map frames — no scene_view yet (classic/root pages) or
+// an explicit map level — zoom as an aligned submap cut; any observer level
+// (building/street/eye) zooms as a closeup of what's under the pointer.
+export function zoomModeForLevel(
+  level: string | null | undefined,
+): "place_submap" | "place_closeup" {
+  return !level || level === "map" ? "place_submap" : "place_closeup";
+}
+
 export interface RevisitCandidate {
   nodeId: string | null;
   parentId?: string | null;
