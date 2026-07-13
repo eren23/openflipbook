@@ -667,6 +667,37 @@ def _faithful_zoom_instruction(
     return text.strip()
 
 
+def _redraw_zoom_instruction(
+    page_title: str,
+    facts: list[str],
+    layout_clause: str = "",
+    *,
+    style_anchor: str | None = None,
+) -> str:
+    """The SUBMAP_REDRAW variant of the map-register zoom: a fresh cartographic
+    re-render at the closer scale instead of a Kontext crop-upscale. Kontext is
+    reference-frozen — it magnifies the crop's pixels without synthesizing new
+    detail, so dense city maps arrive as blurry illegible mush. This wording
+    asks a fresh model to DRAW the closer map (finer architectural/street
+    detail) while keeping the reference's landmarks in place; medium_lock
+    carries the style anchor and the lettering guard rides inside it."""
+    title = page_title.strip() or "this place"
+    text = (
+        f'Draw a closer, richer, MORE DETAILED map of "{title}" — the area '
+        "the reference image shows. Redraw it at this larger scale with finer "
+        "architectural and street detail (individual buildings, lanes, "
+        "courtyards), keeping every named landmark, wall and waterway the "
+        "reference shows in the same positions"
+    )
+    named = [f.strip() for f in facts if f and f.strip()]
+    if named:
+        text += ", working in the features that belong here: " + "; ".join(named[:8])
+    text += ". " + medium_lock(style_anchor)
+    if layout_clause.strip():
+        text += "\n\n" + layout_clause.strip()
+    return text.strip()
+
+
 def build_zoom_instruction(
     page_title: str,
     facts: list[str],
@@ -678,6 +709,7 @@ def build_zoom_instruction(
     label_free: bool = False,
     register: str = "map",
     faithful: bool = False,
+    redraw: bool = False,
 ) -> str:
     """Zoom-continue: same place, SAME camera, finer detail. view=None ->
     today's exact string. With a view, the keep-camera fragment is spelled per
@@ -687,7 +719,10 @@ def build_zoom_instruction(
     directive. register="view" (place_closeup: the source is a perspective
     SCENE, not a map) swaps the cartographic words on the legacy skeleton.
     faithful (closeup rung) switches to pure magnification — no facts, no
-    elaboration. Defaults keep every instruction byte-identical."""
+    elaboration. redraw (SUBMAP_REDRAW: world-mode map zooms rendered fresh
+    instead of crop-upscaled) switches to the re-render wording — map register
+    by construction, so view/family/register don't apply. Defaults keep every
+    instruction byte-identical."""
     if label_free:
         text = build_zoom_instruction(
             page_title,
@@ -698,10 +733,15 @@ def build_zoom_instruction(
             family=family,
             register=register,
             faithful=faithful,
+            redraw=redraw,
         )
         if LETTERING_GUARD in text:
             return text.replace(LETTERING_GUARD, NO_LETTERING)
         return f"{text} {NO_LETTERING}"
+    if redraw:
+        return _redraw_zoom_instruction(
+            page_title, facts, layout_clause, style_anchor=style_anchor
+        )
     if faithful:
         # The closeup rung ignores the view-aware variants too — the
         # reference pixels carry the camera, and facts never ride a

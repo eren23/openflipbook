@@ -247,6 +247,23 @@ async def score_step_in(region_crop: bytes, candidate: bytes) -> JudgeResult:
     )
 
 
+async def score_map_legibility(arrival: bytes) -> JudgeResult:
+    """The zoom gate's second axis (TAP_ZOOM_DETAIL): is the arrived MAP
+    actually DRAWN at this scale — crisp linework, fine architectural detail —
+    or a crop-upscale's smeared mush? score_step_in can't catch mush: an
+    upscaled blur IS the same region seen closer, so it sails through.
+    Single-image by design — blur is visible without the reference crop."""
+    system = (
+        "Score this MAP image's craft 0-10. 10 = crisp linework, fine "
+        "architectural detail (individual buildings, streets), any lettering "
+        "legible. 4-6 = soft but readable. 0-2 = blurry upscale mush: smeared "
+        "texture, illegible or garbled lettering, no fine detail."
+        ' Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.'
+    )
+    user_text = "Score this map image's craft and legibility on a 0-10 scale."
+    return await _ask_judge(system, user_text, [_image_block(arrival)])
+
+
 async def score_interior(region_or_parent: bytes, arrival: bytes) -> JudgeResult:
     """INTERIOR ENTERS' gate: is the arrival actually INDOORS, and does that
     interior plausibly belong to the tapped building? Replaces the step-in

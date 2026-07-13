@@ -372,6 +372,19 @@ async def stream_tap(
     # edit endpoint; everything else is a fresh gen.
     image_op = model_router.select_operation(render_mode, region_ref is not None)
     use_continuation = image_op == "zoom_continue"
+    # SUBMAP REDRAW (SUBMAP_REDRAW, default ON): a world-mode map zoom is
+    # RE-DRAWN at the closer scale by a fresh tier-model render conditioned on
+    # the region crop, instead of Kontext's crop-upscale. Kontext is
+    # reference-frozen — it magnifies the crop's pixels without synthesizing
+    # new detail, so dense city maps arrive as blurry illegible mush (live
+    # screenshots). `false` is the kill-switch: today's continue_image bytes.
+    # Classic (non-world) submap zooms keep Kontext on purpose (blast radius).
+    submap_redraw = (
+        use_continuation
+        and effective_world_mode
+        and render_mode == "place_submap"
+        and env_flag("SUBMAP_REDRAW", "true")
+    )
     # Spend accounting (providers/spend.py): how many images this
     # generation billed — judged loops overwrite with their attempt count,
     # the draft records itself at emission.
@@ -470,6 +483,10 @@ async def stream_tap(
     # it through the world model and geometry.
     from providers.prompt_library import camera as camera_lib
 
+    # place_closeup zooms into a PERSPECTIVE scene — the cartographic wording
+    # would fight the reference pixels. The register also gates the legibility
+    # judge below (map zooms only).
+    zoom_register = "view" if render_mode == "place_closeup" else "map"
     zoom_instruction = image_edit_provider.build_zoom_instruction(
         plan.page_title,
         plan.facts,
@@ -480,14 +497,19 @@ async def stream_tap(
             body.image_model or model_router.resolve_model("zoom_continue")
         ),
         label_free=body.suppress_map_labels,
-        # place_closeup zooms into a PERSPECTIVE scene — the cartographic
-        # wording would fight the reference pixels.
-        register="view" if render_mode == "place_closeup" else "map",
+        register=zoom_register,
         # The closeup rung magnifies faithfully: no planner facts, no
         # "elaborate" — the facts channel is how city-wide context leaked
         # into closeups (the invented-riverside-palace failure).
         faithful=bool(body.scene_view and body.scene_view.closeup),
+        redraw=submap_redraw,
     )
+    if submap_redraw:
+        # The fresh path's top-down map lever rides the redraw too
+        # (WORLD_TOPDOWN_MAPS; flag-gated → "").
+        _redraw_topdown = _topdown_clause_for(body)
+        if _redraw_topdown:
+            zoom_instruction += "\n\n" + _redraw_topdown
     # The enter edit is a view CHANGE on the SAME place: the region crop
     # carries the look, this text carries the move inside + everything the
     # system knows (identity, neighbours-by-bearing, medium, geometry) —
@@ -605,20 +627,46 @@ async def stream_tap(
     result: Any = None
     main_task: _asyncio.Task | None = None
     if use_continuation and region_ref is not None:
+        # SUBMAP_REDRAW rides the fresh-gen conditioning mechanics: the region
+        # crop as the (sole) reference + the same conditioning preamble the
+        # fresh branch composes — the redraw prompt names it "the reference
+        # image". The kill-switched path is today's Kontext continue, byte-
+        # identical.
+        redraw_preamble = (
+            image_provider.conditioning_preamble(["region"], body.mode)
+            if submap_redraw
+            else ""
+        )
+
+        async def _render_zoom(instr: str) -> Any:
+            if submap_redraw:
+                return await image_provider.generate_image(
+                    prompt=redraw_preamble + instr,
+                    aspect_ratio=body.aspect_ratio,
+                    tier=body.image_tier,
+                    model_override=body.image_model,
+                    reference_urls=[region_ref],
+                )
+            return await image_edit_provider.continue_image(
+                region_ref, instr, model_override=body.image_model
+            )
 
         async def _judged_zoom() -> Any:
-            """Kontext zoom with a step-in judge + one keep-best retry.
+            """Judged zoom (redraw or Kontext) + one keep-best retry.
 
             Every zoom flavour funnels here (classic scene/closeup + submap,
-            world submap, wideRegionCut), so one gate covers them all: the
-            arrival must be the tapped region seen CLOSER (score_step_in — a
-            wider redraw or an unrelated scene fails), else retry once with
-            the critic's rationale folded in and keep the better attempt.
-            TAP_ZOOM_JUDGE default ON; judge failures never block the tap.
+            world submap + redraw, wideRegionCut), so one gate covers them
+            all: the arrival must be the tapped region seen CLOSER
+            (score_step_in — a wider redraw or an unrelated scene fails) AND,
+            on map-register zooms with TAP_ZOOM_DETAIL on, actually LEGIBLE
+            at the new scale (score_map_legibility — a crop-upscale's blurry
+            mush is the same region closer, so step-in alone passes it). On a
+            fail, retry once with every failed axis's rationale folded in and
+            keep the better attempt. TAP_ZOOM_JUDGE default ON; judge
+            failures never block the tap. view-register zooms
+            (place_closeup) skip the legibility axis.
             """
-            first = await image_edit_provider.continue_image(
-                region_ref, zoom_instruction, model_override=body.image_model
-            )
+            first = await _render_zoom(zoom_instruction)
             if not env_flag("TAP_ZOOM_JUDGE", "true") or body.verify is False:
                 return first
             from providers import judge, render_loop
@@ -630,9 +678,36 @@ async def stream_tap(
                 accept = float(os.environ.get("TAP_ZOOM_ACCEPT", "6.0"))
             except ValueError:
                 accept = 6.0
-            step_in = _same_place_judge(judge)
             try:
-                verdict = await step_in(region_bytes, first.jpeg_bytes)
+                detail_accept = float(
+                    os.environ.get("TAP_ZOOM_DETAIL_ACCEPT", "6.0")
+                )
+            except ValueError:
+                detail_accept = 6.0
+            step_in = _same_place_judge(judge)
+            detail_on = zoom_register == "map" and env_flag(
+                "TAP_ZOOM_DETAIL", "true"
+            )
+
+            async def _verdicts(img: Any) -> tuple[JudgeResult, JudgeResult | None]:
+                if not detail_on:
+                    return await step_in(region_bytes, img.jpeg_bytes), None
+                got = await _asyncio.gather(
+                    step_in(region_bytes, img.jpeg_bytes),
+                    judge.score_map_legibility(img.jpeg_bytes),
+                )
+                return got[0], got[1]
+
+            def _accepted(v: JudgeResult, d: JudgeResult | None) -> bool:
+                return v.score >= accept and (d is None or d.score >= detail_accept)
+
+            def _total(v: JudgeResult, d: JudgeResult | None) -> float:
+                # Keep-best over BOTH axes; degrades to the old single-score
+                # comparison when the detail judge is off.
+                return v.score + (d.score if d is not None else 0.0)
+
+            try:
+                verdict, detail = await _verdicts(first)
             except Exception:
                 return first
             log(
@@ -640,27 +715,35 @@ async def stream_tap(
                 "tap.zoom_judge",
                 attempt=1,
                 score=verdict.score,
-                accepted=verdict.score >= accept,
+                legibility=detail.score if detail is not None else None,
+                accepted=_accepted(verdict, detail),
             )
-            if verdict.score >= accept:
+            if _accepted(verdict, detail):
                 return first
             # One deadline-aware retry (same margin discipline as the render
             # loop: never start an attempt the ingress window can't fit).
             remaining = ingress_timeout_s - 120.0 - (_time.perf_counter() - started)
             if remaining < 45.0:
                 return first
+            reasons: list[str] = []
+            if verdict.score < accept:
+                reasons.append(
+                    (verdict.rationale or "not recognisably the same region, closer")[:200]
+                )
+            if detail is not None and detail.score < detail_accept:
+                reasons.append(
+                    (detail.rationale or "blurry upscale mush, no fine detail")[:200]
+                )
             retry_instruction = (
                 zoom_instruction
                 + " A previous attempt was rejected by a reviewer: \""
-                + (verdict.rationale or "not recognisably the same region, closer")[:200]
+                + "; ".join(reasons)
                 + "\". Render the SAME tapped region again — identical structures,"
                 " palette and line work — just seen closer."
             )
             try:
-                second = await image_edit_provider.continue_image(
-                    region_ref, retry_instruction, model_override=body.image_model
-                )
-                verdict2 = await step_in(region_bytes, second.jpeg_bytes)
+                second = await _render_zoom(retry_instruction)
+                verdict2, detail2 = await _verdicts(second)
             except Exception:
                 return first
             log(
@@ -668,9 +751,10 @@ async def stream_tap(
                 "tap.zoom_judge",
                 attempt=2,
                 score=verdict2.score,
-                accepted=verdict2.score >= accept,
+                legibility=detail2.score if detail2 is not None else None,
+                accepted=_accepted(verdict2, detail2),
             )
-            return second if verdict2.score >= verdict.score else first
+            return second if _total(verdict2, detail2) >= _total(verdict, detail) else first
 
         main_task = _asyncio.create_task(_judged_zoom())
     elif use_enter_edit and enter_source is not None:
@@ -946,7 +1030,9 @@ async def stream_tap(
     # the fresh path (unchanged wire shape). Lets the demo trace / A-B
     # drivers machine-check the route instead of inferring from the model.
     executed_op = (
-        "zoom_continue"
+        "map_redraw"
+        if use_continuation and submap_redraw
+        else "zoom_continue"
         if use_continuation
         else "enter_scene"
         if use_enter_edit

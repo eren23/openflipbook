@@ -459,7 +459,28 @@ def _mock_step_in(monkeypatch: pytest.MonkeyPatch, scores: list[float]) -> Async
         side_effect=[JudgeResult(s, f"verdict {s}", "raw") for s in scores]
     )
     monkeypatch.setattr(judge_mod, "score_step_in", step)
+    # The legibility axis (TAP_ZOOM_DETAIL, default ON) rides alongside on
+    # map-register zooms — pin it PASSING so these tests keep exercising the
+    # step-in axis alone; the detail-gate tests below own the legibility axis.
+    _mock_legibility(monkeypatch, [9.0] * max(2, len(scores)))
     return step
+
+
+def _mock_legibility(
+    monkeypatch: pytest.MonkeyPatch, scores: list[tuple[float, str] | float]
+) -> AsyncMock:
+    from providers import judge as judge_mod
+    from providers.judge import JudgeResult
+
+    results = [
+        JudgeResult(s, "ok", "raw")
+        if isinstance(s, (int, float))
+        else JudgeResult(s[0], s[1], "raw")
+        for s in scores
+    ]
+    leg = AsyncMock(side_effect=results)
+    monkeypatch.setattr(judge_mod, "score_map_legibility", leg)
+    return leg
 
 
 async def test_zoom_judge_pass_is_single_attempt(
@@ -579,6 +600,7 @@ async def test_zoom_judge_error_never_blocks_the_tap(
     monkeypatch.setattr(
         judge_mod, "score_step_in", AsyncMock(side_effect=RuntimeError("judge down"))
     )
+    _mock_legibility(monkeypatch, [9.0, 9.0])  # only step_in is down
 
     events = await _collect(
         _event_stream(
@@ -803,3 +825,349 @@ async def test_interior_accept_env_floor_is_honored(
 
     edit.assert_awaited_once()  # accepted on the first attempt — no retry
     interior.assert_awaited_once()
+
+
+# ---------- real map zoom (SUBMAP_REDRAW, default ON) --------------------------
+#
+# Kontext is reference-frozen: a world-mode submap "zoom" crop-UPSCALED the
+# region without re-synthesizing detail — dense city maps arrived as blurry
+# illegible mush. Default ON, the zoom is a FRESH cartographic re-render
+# (tier model) conditioned on the region crop; `false` is a strict kill-switch
+# back to the Kontext continue, and classic (non-world) submaps keep Kontext
+# regardless.
+
+
+def _world_submap_body(**over: Any) -> GenerateBody:
+    defaults: dict[str, Any] = {
+        "render_mode": "place_submap",
+        "world_mode": True,
+    }
+    defaults.update(over)
+    return _tap_body(**defaults)
+
+
+async def test_world_submap_redraw_routes_fresh_with_region_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Default (flag unset = ON): the world submap zoom is a fresh tier-model
+    # render — the region crop rides as the reference + conditioning preamble,
+    # continue_image is never called, and the wire says map_redraw.
+    monkeypatch.setenv("WORLD_MODE", "true")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    gen = _mock_fresh(monkeypatch)
+
+    events = await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    gen.assert_awaited_once()
+    cont.assert_not_awaited()
+    edit.assert_not_awaited()
+    assert gen.await_args.kwargs["reference_urls"] == ["data:r"]  # the region crop
+    assert gen.await_args.kwargs["tier"] is None  # the fresh path's tier resolve
+    assert gen.await_args.kwargs["model_override"] is None  # no hardcoded model
+    prompt = gen.await_args.kwargs["prompt"]
+    assert prompt.startswith("Use the reference images as visual grounding")
+    assert "MORE DETAILED map" in prompt
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "map_redraw"
+    assert final["image_model"] == "fal-ai/nano-banana-pro"
+
+
+async def test_submap_redraw_kill_switch_is_todays_kontext(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORLD_MODE", "true")
+    monkeypatch.setenv("SUBMAP_REDRAW", "false")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    gen = _mock_fresh(monkeypatch)
+
+    events = await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    cont.assert_awaited_once()
+    gen.assert_not_awaited()
+    assert cont.await_args.args[0] == "data:r"
+    assert cont.await_args.args[1].startswith("Zoom into")  # the legacy wording
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "zoom_continue"
+
+
+async def test_classic_submap_keeps_kontext_regardless_of_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # World mode NOT effective (env off) → the redraw never arms, whatever the
+    # flag says. Blast-radius choice: classic submap zooms stay Kontext.
+    monkeypatch.setenv("SUBMAP_REDRAW", "true")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    gen = _mock_fresh(monkeypatch)
+
+    events = await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    cont.assert_awaited_once()
+    gen.assert_not_awaited()
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "zoom_continue"
+
+
+async def test_redraw_prompt_carries_clauses_and_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The redraw instruction = closer-richer wording + medium/style lock +
+    # lettering guard (+ the top-down map lever when armed), and it is also
+    # the reported final_prompt.
+    monkeypatch.setenv("WORLD_MODE", "true")
+    monkeypatch.setenv("WORLD_TOPDOWN_MAPS", "true")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    _mock_continue(monkeypatch)
+    gen = _mock_fresh(monkeypatch)
+
+    events = await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    prompt = gen.await_args.kwargs["prompt"]
+    assert 'Draw a closer, richer, MORE DETAILED map of "The Stone Castle"' in prompt
+    assert "individual buildings, lanes, courtyards" in prompt
+    assert "The Inner Bailey" in prompt  # the planner's facts ride in
+    assert "hand-drawn engraving, sepia ink" in prompt  # the medium lock
+    assert "garbled" in prompt  # the lettering guard
+    assert "FLAT TOP-DOWN" in prompt  # the map lever rides the redraw
+    final = next(e for e in events if e["type"] == "final")
+    assert "MORE DETAILED map" in final["final_prompt"]
+
+
+# ---------- the zoom legibility gate (TAP_ZOOM_DETAIL, default ON) -------------
+#
+# score_step_in alone cannot catch upscale mush — a blurry magnification IS the
+# same region seen closer. Map-register zooms (submap, either op) must ALSO
+# pass score_map_legibility; a fail folds its rationale into the ONE existing
+# keep-best retry. view-register zooms (place_closeup) are exempt.
+
+
+async def test_zoom_detail_both_pass_accepts_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [8.0])
+    leg = _mock_legibility(monkeypatch, [7.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    leg.assert_awaited_once()
+    assert leg.await_args.args[0] == b"jpeg"  # judged on the ARRIVAL bytes
+
+
+async def test_zoom_detail_fail_retries_with_legibility_rationale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Step-in passes, legibility fails → the retry fires carrying the
+    # legibility rationale ONLY (the passing axis does not pollute it), and
+    # keep-best prefers the crisper second attempt.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "fal-ai/flux-pro/kontext", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "fal-ai/flux-pro/kontext", "r2")
+    cont = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0, 9.0])
+    _mock_legibility(monkeypatch, [(2.0, "smeared upscale mush"), (8.0, "crisp")])
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
+    retry_instruction = cont.await_args_list[1].args[1]
+    assert "rejected by a reviewer" in retry_instruction
+    assert "smeared upscale mush" in retry_instruction
+    assert "verdict 9.0" not in retry_instruction  # the passing axis stays out
+    final = next(e for e in events if e["type"] == "final")
+    assert _b64.b64encode(b"jpeg-second").decode() in final["image_data_url"]
+
+
+async def test_zoom_detail_both_axes_fail_folds_both_rationales(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "fal-ai/flux-pro/kontext", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "fal-ai/flux-pro/kontext", "r2")
+    cont = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0, 8.0])
+    _mock_legibility(monkeypatch, [(2.0, "smeared mush"), (8.0, "crisp")])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    retry_instruction = cont.await_args_list[1].args[1]
+    assert "verdict 4.0" in retry_instruction  # step-in's rationale
+    assert "smeared mush" in retry_instruction  # + legibility's
+
+
+async def test_zoom_detail_keep_best_spans_both_axes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Retry passes neither; totals decide (first 9+2=11 vs second 8+1=9) →
+    # keep the first attempt.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "fal-ai/flux-pro/kontext", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "fal-ai/flux-pro/kontext", "r2")
+    cont = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0, 8.0])
+    _mock_legibility(monkeypatch, [(2.0, "mush"), (1.0, "worse mush")])
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
+    final = next(e for e in events if e["type"] == "final")
+    assert _b64.b64encode(b"jpeg-first").decode() in final["image_data_url"]
+
+
+async def test_zoom_detail_kill_switch_never_calls_legibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TAP_ZOOM_DETAIL", "false")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0])
+    leg = _mock_legibility(monkeypatch, [9.0])  # would pass — must not be asked
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    leg.assert_not_awaited()
+
+
+async def test_zoom_detail_skips_view_register_closeups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # place_closeup zooms ride the "view" register — no map-craft judging.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0])
+    leg = _mock_legibility(monkeypatch, [9.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                prefetched_enter_as="scene",  # → place_closeup
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    leg.assert_not_awaited()
+
+
+async def test_zoom_detail_accept_env_floor_is_honored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # TAP_ZOOM_DETAIL_ACCEPT lowers the floor: a 5.0 passes at 4.0.
+    monkeypatch.setenv("TAP_ZOOM_DETAIL_ACCEPT", "4.0")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0])
+    _mock_legibility(monkeypatch, [5.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()  # accepted — no retry
+
+
+async def test_zoom_detail_gates_the_redraw_op_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The legibility gate covers BOTH ops: a mushy redraw retries on the
+    # FRESH path (never Kontext), rationale folded in.
+    monkeypatch.setenv("WORLD_MODE", "true")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    gen = _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [9.0, 9.0])
+    _mock_legibility(monkeypatch, [(2.0, "smeared mush"), (8.0, "crisp")])
+
+    events = await _collect(
+        _event_stream(
+            _world_submap_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert gen.await_count == 2
+    cont.assert_not_awaited()
+    retry_prompt = gen.await_args_list[1].kwargs["prompt"]
+    assert "smeared mush" in retry_prompt
+    assert "MORE DETAILED map" in retry_prompt  # still the redraw instruction
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "map_redraw"

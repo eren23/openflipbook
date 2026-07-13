@@ -105,6 +105,50 @@ def test_golden_zoom_view_none_both_paths() -> None:
         )
         == GOLDEN_ZOOM_RICH
     )
+    # redraw=False (the SUBMAP_REDRAW kill-switch value) is byte-identical.
+    assert (
+        image_edit.build_zoom_instruction(
+            "The Unseen University",
+            ["The Tower of Art", "The Library", "Great Hall"],
+            "Place the Tower of Art toward the upper-left.",
+            redraw=False,
+        )
+        == GOLDEN_ZOOM_RICH
+    )
+
+
+def test_redraw_zoom_is_fresh_rerender_wording() -> None:
+    # SUBMAP_REDRAW's instruction: a fresh cartographic re-render at the
+    # closer scale — closer/richer wording + medium lock + lettering guard +
+    # the layout clause — NOT the Kontext keep-pixels zoom skeleton.
+    s = image_edit.build_zoom_instruction(
+        "Ankh-Morpork",
+        ["The Shades", "Unseen University"],
+        "Place the Shades toward the lower-left.",
+        style_anchor="hand-drawn engraving, sepia ink",
+        redraw=True,
+    )
+    assert 'Draw a closer, richer, MORE DETAILED map of "Ankh-Morpork"' in s
+    assert "the area the reference image shows" in s
+    assert "individual buildings, lanes, courtyards" in s
+    assert "in the same positions" in s
+    assert "The Shades" in s and "Unseen University" in s
+    assert "hand-drawn engraving, sepia ink" in s  # the medium lock
+    assert "photograph" in s.lower()  # the photoreal guard rides the lock
+    assert "garbled" in s.lower()  # the lettering guard
+    assert "Place the Shades toward the lower-left." in s  # layout clause
+    assert "Zoom into" not in s  # not the Kontext skeleton
+
+
+def test_redraw_zoom_label_free_swaps_lettering_guard() -> None:
+    from providers.prompt_library.style import LETTERING_GUARD, NO_LETTERING
+
+    s = image_edit.build_zoom_instruction(
+        "The Keep", [], "", redraw=True, label_free=True
+    )
+    assert LETTERING_GUARD not in s
+    assert NO_LETTERING in s
+    assert "MORE DETAILED map" in s
 
 
 def test_golden_layout_default_call() -> None:
