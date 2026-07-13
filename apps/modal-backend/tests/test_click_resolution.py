@@ -353,8 +353,14 @@ def test_click_prompt_interior_covers_discrete_buildings(monkeypatch) -> None:
     system = str(captured["messages"][0]["content"])
     assert "OR a discrete roofed building you would step into" in system
     assert "a tower, house, temple, church, keep, windmill, lighthouse" in system
+    # Live-caught (Oakhaven receipts): the model judged the CROP, not the
+    # subject — a grand glass conservatory with towers around it rolled
+    # "complex" 3/3 until the definition pinned WHOSE form is judged
+    # ("interior" 3/3 after; in-container A/B, 2026-07-13).
+    assert "Judge the FORM of the" in system
+    assert "SINGLE roofed building" in system
     # the sibling forms keep their definitions
-    assert '"complex" = a multi-structure compound' in system
+    assert '"complex" = the subject ITSELF is multiple separate' in system
     assert '"landscape" = open terrain' in system
 
 
