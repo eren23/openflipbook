@@ -349,9 +349,10 @@ def _safe_log(level: str, event: str, **kv: Any) -> None:
 def _tier_attempts(tier: str) -> list[str]:
     """The ordered rungs to try for a starting tier (degrade-on-error path).
 
-    `json_schema` is not implemented yet, so it maps to `json_object` (the
-    closest structured rung); an unknown override starts at the top so it still
-    walks the full ladder.
+    The strict `json_schema` rung lives ABOVE this ladder: `_complete_json`
+    prepends it (it needs the caller's schema + the LLM_JSON_SCHEMA gate), so
+    a `json_schema` override maps to `json_object` here; an unknown override
+    starts at the top so it still walks the full ladder.
     """
     start = "json_object" if tier == "json_schema" else tier
     if start not in _TIER_LADDER:
@@ -360,10 +361,76 @@ def _tier_attempts(tier: str) -> list[str]:
     return list(_TIER_LADDER[idx:])
 
 
+# Models whose provider 400'd the strict json_schema shape. Remembered for the
+# process lifetime so the failed round-trip is paid once per model, not per
+# call — the same degrade the in-call ladder does, made sticky.
+_JSON_SCHEMA_DEMOTED: set[str] = set()
+
+
+def _strictify_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """A deep-copied, strict-mode-compatible variant of a caller schema.
+
+    Strict `json_schema` (OpenAI wire shape, forwarded by OpenRouter and
+    enforced server-side) demands every object node carry
+    ``additionalProperties: false`` and a ``required`` listing EVERY declared
+    property. Our callers express optionality as union types, never by
+    omission, so requiring everything declared is faithful — no optionality is
+    invented. Arrays/enums/numbers pass through untouched; nested defs are
+    walked like any other node. Pure: the input schema is never mutated.
+    """
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        out = {key: walk(value) for key, value in node.items()}
+        if out.get("type") == "object":
+            out.setdefault("additionalProperties", False)
+            out["required"] = list((out.get("properties") or {}).keys())
+        return out
+
+    return cast(dict[str, Any], walk(schema))
+
+
+def _schema_strictifiable(schema: dict[str, Any]) -> bool:
+    """Whether strict mode can express this schema faithfully.
+
+    An OPEN object node — ``{"type": "object"}`` with no declared properties,
+    like EXTRACTION_SCHEMA's items — has no strict translation: closing it
+    would enforce EMPTY objects (silent data loss) or 400, and a 400 here
+    would demote the whole MODEL in `_JSON_SCHEMA_DEMOTED`, robbing the
+    fully-typed schemas of the strict rung too. Such schemas skip the rung
+    per-call and keep today's json_object behavior.
+    """
+
+    def ok(node: Any) -> bool:
+        if isinstance(node, list):
+            return all(ok(item) for item in node)
+        if not isinstance(node, dict):
+            return True
+        if node.get("type") == "object" and not node.get("properties"):
+            return False
+        return all(ok(value) for value in node.values())
+
+    return ok(schema)
+
+
 def _rung_kwargs(rung: str, schema: dict[str, Any] | None, schema_name: str) -> dict[str, Any]:
     """The create() kwargs specific to a rung. Spread by the caller so the
     structured params bypass the SDK's strict per-arg typing, matching the
     existing `**_maybe_response_format(...)` pattern."""
+    if rung == "json_schema":
+        return {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name or "reply",
+                    "strict": True,
+                    "schema": _strictify_schema(schema or {"type": "object"}),
+                },
+            }
+        }
     if rung == "json_object":
         return {"response_format": {"type": "json_object"}}
     if rung == "tool":
@@ -577,12 +644,18 @@ async def _complete_json(
     """Issue a chat completion and return parsed JSON, degrading gracefully.
 
     Picks a structured-output strategy via `_resolve_structured_tier`, then
-    walks DOWN the ladder (json_object -> tool -> prompt) if a provider rejects
-    the chosen mechanism with a 400. The prompt rung adds a JSON-only hint and
-    one repair retry. The caller's existing `_build_*` / `_parse_*` coercers
-    stay the source of truth, so a weak model degrades to "thinner but valid"
-    rather than crashing. On the default OpenRouter path this issues the exact
-    same json_object request as before.
+    walks DOWN the ladder (json_schema -> json_object -> tool -> prompt) if a
+    provider rejects the chosen mechanism with a 400. The strict top rung is
+    attempted only with a caller `schema` that strict mode can express, an
+    LLM_JSON_SCHEMA=true gate (default), and a json_object-capable start — it
+    enforces the schema at the provider, killing malformed/wrong-scale replies
+    at the source; a 400 on it is remembered per-model in
+    `_JSON_SCHEMA_DEMOTED`. The prompt rung adds a
+    JSON-only hint and one repair retry. The caller's existing `_build_*` /
+    `_parse_*` coercers stay the source of truth, so a weak model degrades to
+    "thinner but valid" rather than crashing. With the gate off (or no schema)
+    the default OpenRouter path issues the exact same json_object request as
+    before.
 
     `response_sink`, when provided, receives the final raw response object so a
     caller that needs more than the parsed JSON (e.g. the planner reading
@@ -591,9 +664,18 @@ async def _complete_json(
     client = _llm._client()
     provider = _llm_provider()
     tier = _resolve_structured_tier(provider, model)
+    attempts = _tier_attempts(tier)
+    if (
+        schema is not None
+        and attempts[0] == "json_object"
+        and model not in _JSON_SCHEMA_DEMOTED
+        and env_flag("LLM_JSON_SCHEMA", "true")
+        and _schema_strictifiable(schema)
+    ):
+        attempts.insert(0, "json_schema")
+        tier = "json_schema"
     if span_ctx is not None:
         span_ctx["structured_tier"] = tier
-    attempts = _tier_attempts(tier)
     eb = extra_body or None
     last_error: BadRequestError | None = None
 
@@ -639,6 +721,12 @@ async def _complete_json(
         except BadRequestError as err:
             last_error = err
             next_tier = attempts[i + 1] if i + 1 < len(attempts) else None
+            if rung == "json_schema":
+                # Sticky per-model demotion: the next call starts straight at
+                # json_object instead of re-paying the failed round-trip.
+                _JSON_SCHEMA_DEMOTED.add(model)
+                if span_ctx is not None:
+                    span_ctx["structured_tier"] = "json_object"
             _llm._safe_log(
                 "warn",
                 "llm.tier_downgrade",

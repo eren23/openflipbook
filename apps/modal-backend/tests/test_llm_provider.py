@@ -720,6 +720,9 @@ def _bad_request() -> Exception:
 
 
 async def test_complete_json_json_object_rung_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Kill-switch pin: LLM_JSON_SCHEMA=false must reproduce the pre-rung
+    # ladder byte-identically — json_object first, no strict rung.
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
     fake = _FakeClient([_fake_response(content='{"subject": "Boiler"}')])
     monkeypatch.setattr(llm, "_client", lambda: fake)
     parsed = await llm._complete_json(
@@ -825,8 +828,10 @@ async def test_complete_json_downgrades_on_bad_request(
     monkeypatch.setattr(
         llm, "_safe_log", lambda level, event, **kv: events.append((event, kv))
     )
-    # gemini on openrouter starts at json_object; a 400 must drop a rung and the
-    # next rung (tool) succeeds within the same call.
+    # gemini on openrouter starts at json_object (strict rung switched off); a
+    # 400 must drop a rung and the next rung (tool) succeeds within the same
+    # call.
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
     fake = _FakeClient([_bad_request(), _fake_response(tool_args='{"subject": "Y"}')])
     monkeypatch.setattr(llm, "_client", lambda: fake)
     parsed = await llm._complete_json(
@@ -855,6 +860,183 @@ async def test_complete_json_empty_choices_returns_empty(
         schema=llm.CLICK_SCHEMA,
     )
     assert parsed == {}
+
+
+# ---------- strict json_schema rung (LLM_JSON_SCHEMA, default ON) ---------
+
+
+def test_strictify_schema_nested_arrays_no_mutation_idempotent() -> None:
+    import copy
+
+    before = copy.deepcopy(llm.CANDIDATES_SCHEMA)
+    strict = llm._strictify_schema(llm.CANDIDATES_SCHEMA)
+    # The input schema object is NOT mutated.
+    assert before == llm.CANDIDATES_SCHEMA
+    # Root object node: closed + all-required.
+    assert strict["additionalProperties"] is False
+    assert strict["required"] == ["candidates"]
+    # Nested array-of-objects: the item node is covered too, and its partial
+    # `required` (3 keys) is replaced by ALL declared properties.
+    item = strict["properties"]["candidates"]["items"]
+    assert item["additionalProperties"] is False
+    assert item["required"] == [
+        "x_pct",
+        "y_pct",
+        "subject",
+        "style",
+        "salience",
+        "enter_as",
+        "place_form",
+    ]
+    # Enums/numbers untouched.
+    assert item["properties"]["enter_as"]["enum"] == ["scene", "submap", "explainer"]
+    assert item["properties"]["x_pct"] == {"type": "number"}
+    # Idempotent.
+    assert llm._strictify_schema(strict) == strict
+
+
+def test_strictify_schema_covers_object_in_object() -> None:
+    strict = llm._strictify_schema(llm.CLICK_SCHEMA)
+    point = strict["properties"]["point"]
+    assert point["additionalProperties"] is False
+    assert point["required"] == ["x", "y"]
+    assert strict["required"] == list(llm.CLICK_SCHEMA["properties"].keys())
+
+
+async def test_complete_json_schema_rung_first_and_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    fake = _FakeClient([_fake_response(content='{"candidates": []}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    span: dict[str, Any] = {}
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CANDIDATES_SCHEMA,
+        schema_name="candidates",
+        span_ctx=span,
+    )
+    assert parsed == {"candidates": []}
+    assert len(fake.chat.completions.calls) == 1
+    rf = fake.chat.completions.calls[0]["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["name"] == "candidates"
+    assert rf["json_schema"]["strict"] is True
+    assert rf["json_schema"]["schema"] == llm._strictify_schema(llm.CANDIDATES_SCHEMA)
+    assert span["structured_tier"] == "json_schema"
+
+
+async def test_complete_json_schema_rung_demotes_and_caches_on_400(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    fake = _FakeClient(
+        [
+            _bad_request(),
+            _fake_response(content='{"subject": "A"}'),
+            _fake_response(content='{"subject": "B"}'),
+        ]
+    )
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    span: dict[str, Any] = {}
+    first = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        schema_name="click",
+        span_ctx=span,
+    )
+    # The 400 on the strict rung degrades to json_object WITHIN the same call.
+    assert first == {"subject": "A"}
+    calls = fake.chat.completions.calls
+    assert len(calls) == 2
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert span["structured_tier"] == "json_object"
+    assert "google/gemini-3-flash-preview" in llm._JSON_SCHEMA_DEMOTED
+    # The demotion is remembered: the next call goes straight to json_object —
+    # exactly one attempt, no strict round-trip re-paid.
+    second = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        schema_name="click",
+    )
+    assert second == {"subject": "B"}
+    assert len(calls) == 3
+    assert calls[2]["response_format"] == {"type": "json_object"}
+    llm._JSON_SCHEMA_DEMOTED.clear()
+
+
+async def test_complete_json_open_object_schema_skips_strict_rung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EXTRACTION_SCHEMA's items are OPEN objects ({"type": "object"}, no
+    # properties) — strict mode can't express that (closing them would enforce
+    # EMPTY objects). Such schemas keep json_object per-call, WITHOUT demoting
+    # the model for the fully-typed schemas.
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    assert not llm._schema_strictifiable(llm.EXTRACTION_SCHEMA)
+    assert llm._schema_strictifiable(llm.CANDIDATES_SCHEMA)
+    fake = _FakeClient([_fake_response(content='{"added": [], "updated": []}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.EXTRACTION_SCHEMA,
+        schema_name="extraction",
+    )
+    assert parsed == {"added": [], "updated": []}
+    assert fake.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
+    assert "google/gemini-3-flash-preview" not in llm._JSON_SCHEMA_DEMOTED
+
+
+async def test_complete_json_flag_off_no_schema_rung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
+    fake = _FakeClient([_fake_response(content='{"subject": "Z"}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    span: dict[str, Any] = {}
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+        schema=llm.CLICK_SCHEMA,
+        span_ctx=span,
+    )
+    assert parsed == {"subject": "Z"}
+    assert len(fake.chat.completions.calls) == 1
+    assert fake.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
+    assert span["structured_tier"] == "json_object"
+
+
+async def test_complete_json_no_schema_unchanged_by_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "true")
+    fake = _FakeClient([_fake_response(content='{"k": 1}')])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    parsed = await llm._complete_json(
+        model="google/gemini-3-flash-preview",
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=100,
+        temperature=0.2,
+    )
+    assert parsed == {"k": 1}
+    assert fake.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
 
 
 # ---------- _with_json_hint + multi-step downgrade -----------------------

@@ -32,6 +32,7 @@ from .click import (
 from .client import (
     _JSON_ONLY_HINT,
     _JSON_REPAIR_HINT,
+    _JSON_SCHEMA_DEMOTED,
     _LLM_BASE_URLS,
     _STRUCTURED_OUTPUT_FAMILIES,
     _TIER_LADDER,
@@ -60,6 +61,8 @@ from .client import (
     _rung_kwargs,
     _safe_json,
     _safe_log,
+    _schema_strictifiable,
+    _strictify_schema,
     _supports_online_suffix,
     _supports_structured_output,
     _system_message,

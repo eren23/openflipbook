@@ -33,6 +33,9 @@ _SCRUB = (
     "LLM_VLM_MODEL",
     "LLM_TEXT_MODEL",
     "LLM_STRUCTURED_OUTPUT",
+    # Strict json_schema rung (default ON — scrub so a host kill-switch can't
+    # flip the ladder tests).
+    "LLM_JSON_SCHEMA",
     "FAL_IMAGE_TIER",
     "FAL_IMAGE_MODEL",
     "FAL_IMAGE_MODEL_FAST",
