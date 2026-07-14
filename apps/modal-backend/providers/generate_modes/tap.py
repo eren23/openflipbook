@@ -385,10 +385,12 @@ async def stream_tap(
     # reference-frozen — it magnifies the crop's pixels without synthesizing
     # new detail, so dense city maps arrive as blurry illegible mush (live
     # screenshots). `false` is the kill-switch: today's continue_image bytes.
-    # Classic (non-world) submap zooms keep Kontext on purpose (blast radius).
+    # Classic mode included since the world-only debut (#164's noted
+    # follow-up): classic submap zooms mush identically; without world
+    # entities the layout/topdown clauses are simply empty and the redraw is
+    # prompt + region ref + the same two judges.
     submap_redraw = (
         use_continuation
-        and effective_world_mode
         and render_mode == "place_submap"
         and env_flag("SUBMAP_REDRAW", "true")
     )
