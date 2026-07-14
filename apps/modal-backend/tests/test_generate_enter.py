@@ -965,11 +965,12 @@ async def test_submap_redraw_kill_switch_is_todays_kontext(
     assert final["image_op"] == "zoom_continue"
 
 
-async def test_classic_submap_keeps_kontext_regardless_of_flag(
+async def test_classic_submap_redraws_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # World mode NOT effective (env off) → the redraw never arms, whatever the
-    # flag says. Blast-radius choice: classic submap zooms stay Kontext.
+    # Classic (world env off) submap zooms mush exactly like world ones —
+    # since the follow-up to #164 the redraw arms in classic mode as well:
+    # empty layout/topdown clauses, same loose-refs model, same judges.
     monkeypatch.setenv("SUBMAP_REDRAW", "true")
     _mock_plan(monkeypatch)
     _mock_edit(monkeypatch)
@@ -980,6 +981,24 @@ async def test_classic_submap_keeps_kontext_regardless_of_flag(
 
     cont.assert_awaited_once()
     gen.assert_not_awaited()
+    assert (
+        cont.await_args.kwargs["model_override"] == "fal-ai/nano-banana-pro/edit"
+    )
+    final = next(e for e in events if e["type"] == "final")
+    assert final["image_op"] == "map_redraw"
+
+
+async def test_classic_submap_kill_switch_restores_kontext(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUBMAP_REDRAW", "false")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+
+    events = await _collect(_event_stream(_world_submap_body(), "t1"))
+
+    cont.assert_awaited_once()
     assert cont.await_args.kwargs["model_override"] is None  # default Kontext
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "zoom_continue"
