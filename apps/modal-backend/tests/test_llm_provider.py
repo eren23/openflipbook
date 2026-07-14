@@ -721,19 +721,21 @@ def _bad_request() -> Exception:
 
 async def test_complete_json_json_object_rung_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     # Kill-switch pin: LLM_JSON_SCHEMA=false must reproduce the pre-rung
-    # ladder byte-identically — json_object first, no strict rung.
+    # ladder byte-identically — json_object first, no strict rung. Uses
+    # CANDIDATES_SCHEMA (strict-rung eligible) so the FLAG is what keeps the
+    # rung off, not CLICK_SCHEMA's partial `required`.
     monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
-    fake = _FakeClient([_fake_response(content='{"subject": "Boiler"}')])
+    fake = _FakeClient([_fake_response(content='{"candidates": []}')])
     monkeypatch.setattr(llm, "_client", lambda: fake)
     parsed = await llm._complete_json(
         model="google/gemini-3-flash-preview",
         messages=[{"role": "user", "content": "x"}],
         max_tokens=100,
         temperature=0.2,
-        schema=llm.CLICK_SCHEMA,
-        schema_name="click",
+        schema=llm.CANDIDATES_SCHEMA,
+        schema_name="candidates",
     )
-    assert parsed == {"subject": "Boiler"}
+    assert parsed == {"candidates": []}
     call = fake.chat.completions.calls[0]
     assert call["response_format"] == {"type": "json_object"}
 
@@ -875,8 +877,9 @@ def test_strictify_schema_nested_arrays_no_mutation_idempotent() -> None:
     # Root object node: closed + all-required.
     assert strict["additionalProperties"] is False
     assert strict["required"] == ["candidates"]
-    # Nested array-of-objects: the item node is covered too, and its partial
-    # `required` (3 keys) is replaced by ALL declared properties.
+    # Nested array-of-objects: the item node is covered too. Its `required`
+    # is declared ALL SEVEN fields at the source (the deliberate promotion
+    # that makes CANDIDATES strict-rung eligible) and preserved as-is.
     item = strict["properties"]["candidates"]["items"]
     assert item["additionalProperties"] is False
     assert item["required"] == [
@@ -897,10 +900,42 @@ def test_strictify_schema_nested_arrays_no_mutation_idempotent() -> None:
 
 def test_strictify_schema_covers_object_in_object() -> None:
     strict = llm._strictify_schema(llm.CLICK_SCHEMA)
+    # Nested nodes WITHOUT a `required` get one added (author intent =
+    # all-required)…
     point = strict["properties"]["point"]
     assert point["additionalProperties"] is False
     assert point["required"] == ["x", "y"]
-    assert strict["required"] == list(llm.CLICK_SCHEMA["properties"].keys())
+    # …while the root's declared partial `required` is preserved, never
+    # overwritten (see test_strictify_schema_preserves_partial_required).
+    assert strict["required"] == ["subject"]
+
+
+def test_strictify_schema_preserves_partial_required() -> None:
+    # A partial `required` (CLICK_SCHEMA root: bbox is genuinely optional —
+    # "omit bbox if you can't give a tight box") must survive UNTOUCHED.
+    # Overwriting it with all-properties is how strict generation would
+    # FABRICATE boxes, the #127 failure. Such schemas skip the strict rung
+    # via _schema_strictifiable, but the helper must stay honest regardless.
+    strict = llm._strictify_schema(llm.CLICK_SCHEMA)
+    assert strict["required"] == llm.CLICK_SCHEMA["required"] == ["subject"]
+    # The input is not mutated either.
+    assert llm.CLICK_SCHEMA["required"] == ["subject"]
+
+
+def test_schema_strictifiable_rejects_partial_required() -> None:
+    # Strict json_schema demands required == ALL properties, so a schema
+    # declaring a partial `required` is NOT strict-expressible: the partial
+    # required expresses genuine optionality, and forcing the rest required
+    # would make the model fabricate data (#127). CLICK_SCHEMA keeps the
+    # json_object ladder BY DESIGN.
+    assert not llm._schema_strictifiable(llm.CLICK_SCHEMA)
+
+
+def test_schema_strictifiable_accepts_candidates() -> None:
+    # CANDIDATES is the coordinate-dice killer the strict rung exists for;
+    # its item `required` is deliberately promoted to ALL SEVEN fields. If
+    # someone re-adds a partial required there, this fails loudly.
+    assert llm._schema_strictifiable(llm.CANDIDATES_SCHEMA)
 
 
 async def test_complete_json_schema_rung_first_and_span(
@@ -933,11 +968,13 @@ async def test_complete_json_schema_rung_demotes_and_caches_on_400(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     llm._JSON_SCHEMA_DEMOTED.clear()
+    # CANDIDATES_SCHEMA here: it's the strict-rung-eligible one (CLICK_SCHEMA's
+    # partial `required` keeps it off the rung by design).
     fake = _FakeClient(
         [
             _bad_request(),
-            _fake_response(content='{"subject": "A"}'),
-            _fake_response(content='{"subject": "B"}'),
+            _fake_response(content='{"candidates": ["A"]}'),
+            _fake_response(content='{"candidates": ["B"]}'),
         ]
     )
     monkeypatch.setattr(llm, "_client", lambda: fake)
@@ -947,12 +984,12 @@ async def test_complete_json_schema_rung_demotes_and_caches_on_400(
         messages=[{"role": "user", "content": "x"}],
         max_tokens=100,
         temperature=0.2,
-        schema=llm.CLICK_SCHEMA,
-        schema_name="click",
+        schema=llm.CANDIDATES_SCHEMA,
+        schema_name="candidates",
         span_ctx=span,
     )
     # The 400 on the strict rung degrades to json_object WITHIN the same call.
-    assert first == {"subject": "A"}
+    assert first == {"candidates": ["A"]}
     calls = fake.chat.completions.calls
     assert len(calls) == 2
     assert calls[0]["response_format"]["type"] == "json_schema"
@@ -966,10 +1003,10 @@ async def test_complete_json_schema_rung_demotes_and_caches_on_400(
         messages=[{"role": "user", "content": "x"}],
         max_tokens=100,
         temperature=0.2,
-        schema=llm.CLICK_SCHEMA,
-        schema_name="click",
+        schema=llm.CANDIDATES_SCHEMA,
+        schema_name="candidates",
     )
-    assert second == {"subject": "B"}
+    assert second == {"candidates": ["B"]}
     assert len(calls) == 3
     assert calls[2]["response_format"] == {"type": "json_object"}
     llm._JSON_SCHEMA_DEMOTED.clear()
@@ -1005,7 +1042,9 @@ async def test_complete_json_flag_off_no_schema_rung(
 ) -> None:
     llm._JSON_SCHEMA_DEMOTED.clear()
     monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
-    fake = _FakeClient([_fake_response(content='{"subject": "Z"}')])
+    # CANDIDATES_SCHEMA (strict-rung eligible) so the flag is the only thing
+    # keeping the rung off here.
+    fake = _FakeClient([_fake_response(content='{"candidates": []}')])
     monkeypatch.setattr(llm, "_client", lambda: fake)
     span: dict[str, Any] = {}
     parsed = await llm._complete_json(
@@ -1013,10 +1052,10 @@ async def test_complete_json_flag_off_no_schema_rung(
         messages=[{"role": "user", "content": "x"}],
         max_tokens=100,
         temperature=0.2,
-        schema=llm.CLICK_SCHEMA,
+        schema=llm.CANDIDATES_SCHEMA,
         span_ctx=span,
     )
-    assert parsed == {"subject": "Z"}
+    assert parsed == {"candidates": []}
     assert len(fake.chat.completions.calls) == 1
     assert fake.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
     assert span["structured_tier"] == "json_object"
@@ -1068,7 +1107,11 @@ def test_with_json_hint_appends_text_block_to_multimodal_user_turn() -> None:
 
 
 async def test_complete_json_two_step_downgrade(monkeypatch: pytest.MonkeyPatch) -> None:
-    # gemini starts at json_object; json_object 400 -> tool 400 -> prompt succeeds.
+    # Written for the 3-rung ladder, so the strict rung is pinned OFF (and the
+    # demotion cache cleared) to stay hermetic: gemini starts at json_object;
+    # json_object 400 -> tool 400 -> prompt succeeds.
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
     fake = _FakeClient(
         [_bad_request(), _bad_request(), _fake_response(content='{"subject": "Z"}')]
     )
@@ -1082,6 +1125,7 @@ async def test_complete_json_two_step_downgrade(monkeypatch: pytest.MonkeyPatch)
     )
     assert parsed == {"subject": "Z"}
     assert len(fake.chat.completions.calls) == 3
+    llm._JSON_SCHEMA_DEMOTED.clear()
 
 
 async def test_complete_json_reraises_when_all_rungs_400(
@@ -1089,6 +1133,10 @@ async def test_complete_json_reraises_when_all_rungs_400(
 ) -> None:
     from openai import BadRequestError
 
+    # Written for the 3-rung ladder: pin the strict rung off + clear the
+    # demotion cache so this test never depends on which test ran before it.
+    llm._JSON_SCHEMA_DEMOTED.clear()
+    monkeypatch.setenv("LLM_JSON_SCHEMA", "false")
     fake = _FakeClient([_bad_request(), _bad_request(), _bad_request()])
     monkeypatch.setattr(llm, "_client", lambda: fake)
     with pytest.raises(BadRequestError):

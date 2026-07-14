@@ -373,10 +373,16 @@ def _strictify_schema(schema: dict[str, Any]) -> dict[str, Any]:
     Strict `json_schema` (OpenAI wire shape, forwarded by OpenRouter and
     enforced server-side) demands every object node carry
     ``additionalProperties: false`` and a ``required`` listing EVERY declared
-    property. Our callers express optionality as union types, never by
-    omission, so requiring everything declared is faithful — no optionality is
-    invented. Arrays/enums/numbers pass through untouched; nested defs are
-    walked like any other node. Pure: the input schema is never mutated.
+    property. An object node with NO ``required`` means the author intended
+    all-required, so one is ADDED; an existing ``required`` is NEVER
+    overwritten — a partial one expresses genuine optionality (e.g.
+    CLICK_SCHEMA's "omit bbox if you can't give a tight box"), and silently
+    forcing those fields would make strict generation FABRICATE data, the
+    exact #127 failure. Such schemas are rejected by `_schema_strictifiable`
+    before this helper is ever consulted; preserving them here keeps the
+    helper honest regardless. Arrays/enums/numbers pass through untouched;
+    nested defs are walked like any other node. Pure: the input schema is
+    never mutated.
     """
 
     def walk(node: Any) -> Any:
@@ -387,7 +393,7 @@ def _strictify_schema(schema: dict[str, Any]) -> dict[str, Any]:
         out = {key: walk(value) for key, value in node.items()}
         if out.get("type") == "object":
             out.setdefault("additionalProperties", False)
-            out["required"] = list((out.get("properties") or {}).keys())
+            out.setdefault("required", list((out.get("properties") or {}).keys()))
         return out
 
     return cast(dict[str, Any], walk(schema))
@@ -400,8 +406,17 @@ def _schema_strictifiable(schema: dict[str, Any]) -> bool:
     like EXTRACTION_SCHEMA's items — has no strict translation: closing it
     would enforce EMPTY objects (silent data loss) or 400, and a 400 here
     would demote the whole MODEL in `_JSON_SCHEMA_DEMOTED`, robbing the
-    fully-typed schemas of the strict rung too. Such schemas skip the rung
-    per-call and keep today's json_object behavior.
+    fully-typed schemas of the strict rung too.
+
+    A PARTIAL ``required`` (a proper subset of the declared properties, like
+    CLICK_SCHEMA's ``["subject"]``) is equally inexpressible: strict mode
+    demands required == ALL properties, and a partial required is the author
+    saying the other fields are genuinely optional ("omit bbox if you can't
+    give a tight box") — forcing them required would make the model FABRICATE
+    values, the exact failure #127 was built to kill.
+
+    Either way such schemas skip the rung per-call (no cache write) and keep
+    today's json_object behavior.
     """
 
     def ok(node: Any) -> bool:
@@ -409,8 +424,13 @@ def _schema_strictifiable(schema: dict[str, Any]) -> bool:
             return all(ok(item) for item in node)
         if not isinstance(node, dict):
             return True
-        if node.get("type") == "object" and not node.get("properties"):
-            return False
+        if node.get("type") == "object":
+            props = node.get("properties")
+            if not props:
+                return False
+            required = node.get("required")
+            if required is not None and set(required) != set(props.keys()):
+                return False
         return all(ok(value) for value in node.values())
 
     return ok(schema)
