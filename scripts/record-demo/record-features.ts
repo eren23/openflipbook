@@ -281,7 +281,86 @@ const wander: Study = {
   },
 };
 
-const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander];
+const enterAndInteriors: Study = {
+  name: "enter-and-interiors",
+  async run(p, h) {
+    // Steep world enters ride gpt-image-2/edit by benched design (~2min per
+    // judged attempt, up to 2 attempts) — every wait below carries its own
+    // generous timeout instead of GEN_TIMEOUT.
+    const ENTER_TIMEOUT = 360_000;
+    // Arm the MAP's candidates listener before seeding (the precompute fires
+    // right after the first page settles).
+    let mapCands: { x_pct: number; y_pct: number; enter_as?: string; place_form?: string }[] = [];
+    const mapCandWait = p
+      .waitForResponse((r) => r.url().includes("/precompute-candidates"), { timeout: 90_000 })
+      .then(async (r) => {
+        mapCands = ((await r.json().catch(() => null)) as { candidates?: typeof mapCands } | null)?.candidates ?? [];
+      })
+      .catch(() => {});
+    // World Mode stays ON — that's the feature.
+    await h.seed(p, "a walled riverside fantasy city seen from above, with a famous observatory and grand guild halls", {
+      style: "Storybook",
+    });
+    await h.caption(p, "World Mode · tap a place → you're THERE. One tap, no zoom ladder.");
+    await mapCandWait;
+    await p.waitForTimeout(1500);
+    // A concrete place (enter_as scene); the geo-mapped and unmapped cases
+    // both ENTER in one hop now (#167).
+    const place = mapCands.find((c) => c.enter_as === "scene") ?? { x_pct: 0.5, y_pct: 0.45 };
+    let before = h.node(p);
+    // Arm the SCENE page's candidates before tapping — it fires on arrival.
+    let sceneCands: typeof mapCands = [];
+    const sceneCandWait = p
+      .waitForResponse((r) => r.url().includes("/precompute-candidates"), { timeout: ENTER_TIMEOUT })
+      .then(async (r) => {
+        sceneCands = ((await r.json().catch(() => null)) as { candidates?: typeof mapCands } | null)?.candidates ?? [];
+      })
+      .catch(() => {});
+    await h.tap(p, place.x_pct, place.y_pct);
+    await p.waitForTimeout(1200);
+    await h.caption(p, "Entering… (judged render — the loop retries until the camera lands)");
+    await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+    await h.waitStable(p, ENTER_TIMEOUT);
+    await h.caption(p, "Arrived: standing AT the place — one tap from the map");
+    await p.waitForTimeout(2800);
+    await sceneCandWait;
+    // Beat 2 — interiors: a building classified "interior" takes you INSIDE.
+    const interior =
+      sceneCands.find((c) => c.place_form === "interior") ??
+      sceneCands.find((c) => c.enter_as === "scene");
+    if (interior) {
+      await h.caption(p, "Tap a building → step INSIDE it");
+      await p.waitForTimeout(900);
+      before = h.node(p);
+      await h.tap(p, interior.x_pct, interior.y_pct);
+      await p.waitForTimeout(1200);
+      await h.caption(p, "Rendering the interior… (judged: indoors + matching the exterior's shell)");
+      await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+      await h.waitStable(p, ENTER_TIMEOUT);
+      await h.caption(p, "Inside: walls, floor, ceiling — same materials as the outside");
+      await p.waitForTimeout(3200);
+    }
+    // Beat 3 — the zoom didn't die; it moved to right-click.
+    await h.caption(p, "Want closer WITHOUT entering? Right-click → 🔍 Zoom in here");
+    await p.waitForTimeout(1200);
+    const box = await h.img(p).boundingBox();
+    if (box) {
+      before = h.node(p);
+      await p.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5, { button: "right" });
+      await p.waitForTimeout(900);
+      const zoomItem = p.getByText("Zoom in here", { exact: false }).first();
+      if (await zoomItem.count()) {
+        await zoomItem.click();
+        await h.waitNodeChange(p, before, GEN_TIMEOUT).catch(() => {});
+        await h.waitStable(p).catch(() => {});
+        await h.caption(p, "The optical zoom — explicit, on demand, never hijacking a tap");
+        await p.waitForTimeout(2800);
+      }
+    }
+  },
+};
+
+const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander, enterAndInteriors];
 
 // ── driver: record each study to studies/raw/<name>/*.webm ───────────────────
 async function record(study: Study): Promise<boolean> {
