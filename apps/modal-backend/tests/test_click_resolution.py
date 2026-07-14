@@ -362,6 +362,9 @@ def test_click_prompt_interior_covers_discrete_buildings(monkeypatch) -> None:
     # the sibling forms keep their definitions
     assert '"complex" = the subject ITSELF is multiple separate' in system
     assert '"landscape" = open terrain' in system
+    # Multi-room recursion: inside an interior, doors/stairs classify interior
+    # too — that's how rooms chain to rooms without a seeded floor plan.
+    assert "doorway, archway, staircase, corridor or hatch" in system
 
 
 def test_precompute_candidates_parse_enter_as(monkeypatch) -> None:
@@ -427,6 +430,12 @@ def test_precompute_candidates_parse_place_form(monkeypatch) -> None:
     )
     by_subject = {c.subject: c for c in cands}
     assert by_subject["castle"].place_form == "interior"
+    # The door clause rides the candidates prompt too (multi-room chaining) —
+    # keep both prompt copies in lockstep.
+    system = str(
+        click_mod._llm._complete_json.await_args_list[0].kwargs["messages"][0]
+    )
+    assert "doorways, " in system and "staircases, corridors and hatches" in system
     assert by_subject["legend box"].place_form == ""
     assert by_subject["harbor"].place_form == ""
     # the prompt defines the field with the classifier's widened wording
