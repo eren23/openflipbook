@@ -96,12 +96,13 @@ def test_coarser_tier_steps_outward() -> None:
     assert model_router.coarser_tier("bogus") is None  # unknown rung
 
 
-def test_select_enter_model_routes_steep_to_gpt(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Steep view transforms (aerial source -> eye_level/top_down) go to the
-    # gpt family (view-bench A/B: 8.0 vs the nano family's 2.5); aerial
-    # registers + the legacy no-view enter keep the enter_scene slot.
-    assert model_router.select_enter_model("eye_level") == "openai/gpt-image-2/edit"
-    assert model_router.select_enter_model("top_down") == "openai/gpt-image-2/edit"
+def test_select_enter_model_routes_steep_to_nano(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Steep view transforms (aerial source -> eye_level/top_down): re-benched
+    # 2026-07-14 (ENTER_BENCH_MODELS arms) — nano-banana-pro/edit 9.0 vs gpt
+    # 8.33 same-place, no aerial-attractor drift, 4x faster. The judged
+    # VIEW_LOOP now guards every enter, which the old gpt pin predates.
+    assert model_router.select_enter_model("eye_level") == "fal-ai/nano-banana-pro/edit"
+    assert model_router.select_enter_model("top_down") == "fal-ai/nano-banana-pro/edit"
     assert model_router.select_enter_model("oblique") == model_router.resolve_model("enter_scene")
     assert model_router.select_enter_model("isometric") == model_router.resolve_model("enter_scene")
     assert model_router.select_enter_model(None) == model_router.resolve_model("enter_scene")
