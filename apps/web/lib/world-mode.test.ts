@@ -22,9 +22,14 @@ describe("zoomModeForLevel (context menu's 🔍 Zoom in here)", () => {
     expect(zoomModeForLevel("map")).toBe("place_submap");
   });
 
-  it("no scene_view (classic/root pages) counts as a map frame", () => {
-    expect(zoomModeForLevel(undefined)).toBe("place_submap");
-    expect(zoomModeForLevel(null)).toBe("place_submap");
+  it("a frameless ROOT page (classic/session-start map) counts as a map frame", () => {
+    expect(zoomModeForLevel(undefined, true)).toBe("place_submap");
+    expect(zoomModeForLevel(null, true)).toBe("place_submap");
+  });
+
+  it("a frameless ENTERED page is a place you're AT — closeup (video-caught: the Astronomer's Study Desk read as a map and its zoom came back a cartographic redraw)", () => {
+    expect(zoomModeForLevel(undefined, false)).toBe("place_closeup");
+    expect(zoomModeForLevel(null)).toBe("place_closeup");
   });
 
   it("observer levels zoom as a closeup", () => {

@@ -1759,12 +1759,14 @@ export default function PlayPage() {
         label: "🔍 Zoom in here",
         onClick: () => {
           close();
-          // Map-ness heuristic: no scene_view (classic/root frames) or an
-          // explicit map level ⇒ aligned submap cut; any observer level
-          // (building/street/eye) ⇒ closeup. Consumed one-shot by the tap
-          // handler the synthetic click below runs through.
+          // Map-ness heuristic: explicit map level, or a frameless ROOT page
+          // (classic/session-start map) ⇒ aligned submap cut; everything else
+          // — including frameless ENTERED pages (a place you're AT, not a map
+          // you're over) ⇒ closeup. Consumed one-shot by the tap handler the
+          // synthetic click below runs through.
           pinnedRenderModeRef.current = zoomModeForLevel(
-            page?.sceneView?.level
+            page?.sceneView?.level,
+            !page?.parentId
           );
           dispatchTapAt(x_pct, y_pct);
         },
