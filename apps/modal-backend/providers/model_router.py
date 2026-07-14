@@ -117,18 +117,23 @@ def select_outward_op(from_tier: str, to_tier: str) -> str:
 
 
 # Steep view TRANSFORMS (an overhead map crop re-rendered at eye level or as a
-# closer plan) land ~2.5/10 on the nano family — it drifts back to its aerial
-# attractor — but 8/10 on gpt-image-2/edit, at equal same-place fidelity
-# (view-bench A/B, 2026-06-10). Aerial registers (oblique/isometric) are 9-10
-# on BOTH, so the cheaper incumbent keeps those.
+# closer plan): the 2026-06-10 view-bench put the nano family at ~2.5/10 here
+# (aerial-attractor drift) vs 8/10 on gpt-image-2/edit — but the 2026-07-14
+# enter re-bench (3 steep map→scene cases via ENTER_BENCH_MODELS) scored
+# nano-banana-pro/edit 9.0 vs gpt 8.33 on same-place, no rings drift in any
+# rationale, at ~30s/attempt vs ~2min (4x). Two things changed since June:
+# enter instructions gained the view-grammar transform sentences, and every
+# enter now runs the judged VIEW_LOOP (a drifted arrival fails conformance
+# and retries) — the seatbelt the old pin predates. Flipped to nano for
+# speed; FAL_ENTER_MODEL_STEEP restores gpt in one env if rings resurface.
 STEEP_ENTER_PROJECTIONS = frozenset({"eye_level", "top_down"})
-STEEP_ENTER_DEFAULT = "openai/gpt-image-2/edit"
+STEEP_ENTER_DEFAULT = "fal-ai/nano-banana-pro/edit"
 
 
 def select_enter_model(projection: str | None) -> str | None:
     """The enter model for a deliberate camera: steep transforms route to the
-    gpt family (FAL_ENTER_MODEL_STEEP override); everything else — including
-    the legacy no-view enter — keeps the enter_scene slot."""
+    steep default (FAL_ENTER_MODEL_STEEP override); everything else —
+    including the legacy no-view enter — keeps the enter_scene slot."""
     if projection in STEEP_ENTER_PROJECTIONS:
         return os.environ.get("FAL_ENTER_MODEL_STEEP") or STEEP_ENTER_DEFAULT
     return resolve_model("enter_scene")
