@@ -149,7 +149,21 @@ CANDIDATES_SCHEMA: dict[str, Any] = {
                         "enum": ["interior", "complex", "landscape", "generic"],
                     },
                 },
-                "required": ["x_pct", "y_pct", "subject"],
+                # Deliberately ALL SEVEN fields: each is prompt-mandated and
+                # enum/number-constrained, and _validate_candidates stays
+                # defensive about absence — all-required is what makes this
+                # schema strict-rung eligible (_schema_strictifiable rejects
+                # partial `required`), and CANDIDATES is the coordinate-dice
+                # killer the strict rung exists for.
+                "required": [
+                    "x_pct",
+                    "y_pct",
+                    "subject",
+                    "style",
+                    "salience",
+                    "enter_as",
+                    "place_form",
+                ],
             },
         }
     },
