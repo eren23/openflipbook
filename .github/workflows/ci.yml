@@ -59,8 +59,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Vitest
-        run: pnpm --filter @openflipbook/web test
+      - name: Vitest (with the coverage ratchet — thresholds in vitest.config)
+        run: pnpm --filter @openflipbook/web test -- --coverage
+      - name: Config package tests
+        run: pnpm --filter @openflipbook/config test
 
   build:
     runs-on: ubuntu-latest
@@ -105,11 +107,11 @@ jobs:
         run: |
           source .venv/bin/activate
           mypy providers obs.py generate.py
-      - name: Pytest
+      - name: Pytest (with the coverage ratchet — fail_under in pyproject)
         working-directory: apps/modal-backend
         run: |
           source .venv/bin/activate
-          pytest
+          pytest --cov=providers --cov=generate --cov-report=term
 
   e2e-mock:
     # Zero-key boot proof, every PR: the whole compose stack comes up under
