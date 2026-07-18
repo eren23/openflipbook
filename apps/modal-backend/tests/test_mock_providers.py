@@ -196,6 +196,55 @@ async def test_click_route_steers_enter_as_and_place_form() -> None:
     assert res.place_form == "interior"
 
 
+async def test_apostrophes_survive_template_extraction() -> None:
+    """"the smith's tavern": a lazy/char-class quote match truncates at the
+    possessive, drops "tavern", and the spec silently classifies default —
+    the template-anchored regex must keep the trigger word, on BOTH routes."""
+    from providers.llm.click import click_to_subject, precompute_click_candidates
+
+    res = await click_to_subject(
+        _IMG,
+        0.5,
+        0.5,
+        parent_title="The Smith's Tavern",
+        parent_query="the smith's tavern",
+    )
+    assert res.enter_as == "scene"
+    assert res.place_form == "interior"
+
+    cands = await precompute_click_candidates(
+        _IMG, "The Smith's Tavern", "the smith's tavern"
+    )
+    assert cands[0].enter_as == "scene"
+    assert cands[0].place_form == "interior"
+
+    # An apostrophe in the title must not eat the query: the district word
+    # still steers.
+    district = await precompute_click_candidates(
+        _IMG, "The Weaver's Row", "the cloth district"
+    )
+    assert district[0].enter_as == "submap"
+    assert district[0].place_form == "complex"
+
+
+def test_classifier_template_precedence() -> None:
+    """Title and query are JOINED before the rule ladder runs, so both can
+    steer; first-match precedence means an interior word in either field
+    outranks a district word in the other."""
+    assert mock._classify(
+        "page titled 'The Bell Tower' (user query: 'the old district'). x"
+    ) == ("scene", "interior")
+    assert mock._classify(
+        "page titled 'The Old District' (user query: 'the bell tower'). x"
+    ) == ("scene", "interior")
+    # Inner apostrophes in BOTH groups survive extraction; the static tail
+    # after the template (naming a district) is still excluded.
+    assert mock._classify(
+        "page titled 'The Smith's Tavern' (user query: 'the smith's home'). "
+        "Examples: a market district."
+    ) == ("scene", "interior")
+
+
 async def test_mock_error_lever_raises() -> None:
     with pytest.raises(RuntimeError, match="MOCK_ERROR"):
         await mock.mock_llm_client().chat.completions.create(
@@ -203,10 +252,15 @@ async def test_mock_error_lever_raises() -> None:
         )
 
 
-async def test_mock_error_reaches_sse_error_frame() -> None:
+async def test_mock_error_reaches_sse_error_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The lever's whole point: the forced failure propagates through
     _complete_json into generate.py's except-handler and comes out as the
     REAL friendly SSE error frame (#153)."""
+    # Pin the flag: with FRIENDLY_ERRORS off, the frame carries no `detail`
+    # key, so `err.get("detail", "") == ""` would let ANY error false-pass.
+    monkeypatch.setenv("FRIENDLY_ERRORS", "true")
     events = await _collect(
         _event_stream(
             GenerateBody(query="mock_error town", session_id="s-err", web_search=False),
@@ -214,4 +268,8 @@ async def test_mock_error_reaches_sse_error_frame() -> None:
         )
     )
     err = next(e for e in events if e["type"] == "error")
-    assert "MOCK_ERROR" in err.get("detail", "")
+    # Friendly frames put the exception text in `detail`, raw frames in
+    # `message` — checking both keeps the assertion honest under either shape.
+    assert ("MOCK_ERROR" in err.get("detail", "")) or (
+        "MOCK_ERROR" in err.get("message", "")
+    )

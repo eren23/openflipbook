@@ -38,9 +38,15 @@ _SUBJECTS = (
 
 _STYLE = "hand-inked map, sepia, fine linework"
 
-# The real prompts embed the steering text verbatim as `titled '<parent_title>'`
-# and `(user query: '<parent_query>')` — see providers/llm/click.py + world.py.
-_QUOTED_RE = re.compile(r"(?:titled|user query:)\s*'([^']*)'")
+# The real click/candidates prompts embed: titled '<T>' (user query: '<Q>').
+# (providers/llm/click.py — click_to_subject + precompute_click_candidates
+# both use exactly this shape.) GREEDY groups + the literal separators keep
+# inner apostrophes intact: "the smith's tavern" must NOT truncate at the
+# possessive — a truncated extraction loses the trigger word and silently
+# mis-steers e2e specs. Lazy `(.*?)` would stop at the same inner apostrophe;
+# greedy is safe because neither classified prompt contains a later "')" for
+# the tail group to overshoot to.
+_TEMPLATE_RE = re.compile(r"titled '(.*)' \(user query: '(.*)'\)")
 
 _CLASSIFY_RULES: tuple[tuple[tuple[str, ...], tuple[str, str]], ...] = (
     (
@@ -58,15 +64,20 @@ def _classify(text: str) -> tuple[str, str]:
     prompts embed parent_query/parent_title, and "tower" in the query makes
     every mock classification scene/interior, "district" submap/complex, etc.
 
-    When the text carries the prompts' embedded `titled '…'` / `user query:
-    '…'` quotes, ONLY those are matched: the candidates/world-mode prompts'
-    static instructions themselves name "a tower, house, temple … harbor,
-    market square … valley, coastline, forest" as EXAMPLES and would
-    otherwise classify every single request as scene/interior."""
+    When the text carries the prompts' embedded `titled '…' (user query:
+    '…')` template, ONLY the title+query are matched: the candidates/world-
+    mode prompts' static instructions themselves name "a tower, house,
+    temple … harbor, market square … valley, coastline, forest" as EXAMPLES
+    and would otherwise classify every single request as scene/interior.
+
+    Precedence: title and query are joined ("<title> <query>") and the rule
+    ladder runs top-down, first match wins — so an interior word in EITHER
+    field beats a district word (title 'X tower' + query 'Y district' →
+    scene/interior)."""
     t = text.lower()
-    quoted = _QUOTED_RE.findall(t)
-    if quoted:
-        t = " ".join(quoted)
+    m = _TEMPLATE_RE.search(t)
+    if m:
+        t = m.group(1) + " " + m.group(2)
     for keys, result in _CLASSIFY_RULES:
         if any(k in t for k in keys):
             return result
