@@ -49,12 +49,12 @@ markers = [
     "paid: spends fal/openrouter; skipped unless its *_BENCH_RUN flag is set",
 ]
 
-# The RATCHET: floor pinned just under the measured baseline (2026-07-18:
-# 84.68% over providers/ + generate.py). CI's pytest runs with --cov so a
+# The RATCHET: floor pinned just under the measured baseline (2026-07-19:
+# 85.72% over providers/ + generate.py). CI's pytest runs with --cov so a
 # PR that drops the total below this FAILS; a PR that raises coverage bumps
 # the floor. Never lower it to make a PR pass — that defeats the ratchet.
 [tool.coverage.report]
-fail_under = 83
+fail_under = 84
 
 [tool.mypy]
 python_version = "3.12"

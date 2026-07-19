@@ -120,6 +120,14 @@ _SCRUB = (
     "EDIT_LOOP_RETRY_BUDGET_S",
     "WORLD_BENCH_JUDGE_MODEL",
     "CONTINUITY_BENCH_JUDGE_MODEL",
+    # Video tier pins (providers/video.py) — same hermeticity reasoning.
+    "FAL_ANIMATE_MODEL",
+    "FAL_VIDEO_TIER",
+    "FAL_VIDEO_TIER_FAST",
+    "FAL_VIDEO_TIER_BALANCED",
+    "FAL_VIDEO_TIER_PRO",
+    "LTX_PRO_RESOLUTION",
+    "WAN_RESOLUTION",
     # Map-pan expand (outpaint the world outward).
     "EXPAND_MAP_PAN",
     "FAL_EXPAND_MODEL",

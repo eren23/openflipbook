@@ -133,6 +133,14 @@ async def test_moderation_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
     assert await moderation.flagged("anything") == (False, "")
 
 
+async def test_moderation_block_without_reason_gets_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MODERATE_PROMPTS", "1")
+    monkeypatch.setattr(llm_mod, "_client", lambda: _fake_client({"allowed": False}))
+    assert await moderation.flagged("bad thing") == (True, "blocked by moderation")
+
+
 async def _collect(agen: Any) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     async for chunk in agen:
