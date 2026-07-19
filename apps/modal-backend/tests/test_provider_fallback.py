@@ -43,6 +43,31 @@ def test_breaker_opens_after_threshold_and_recovers() -> None:
     assert breaker.available(slug)
 
 
+def test_breaker_cooldown_expiry_half_open_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After COOLDOWN_S the circuit half-opens: one probe is allowed, a probe
+    failure re-opens immediately (count stays >= threshold), a probe success
+    closes fully."""
+    slug = "fal-ai/nano-banana-pro"
+    clock = [1000.0]
+    monkeypatch.setattr(breaker.time, "monotonic", lambda: clock[0])
+
+    for _ in range(breaker.FAILURE_THRESHOLD):
+        breaker.record_failure(slug)
+    clock[0] += breaker.COOLDOWN_S - 1
+    assert not breaker.available(slug)  # still cooling
+    clock[0] += 2
+    assert breaker.available(slug)  # cooldown over -> probe allowed
+
+    breaker.record_failure(slug)  # failed probe re-opens on the spot
+    assert not breaker.available(slug)
+
+    clock[0] += breaker.COOLDOWN_S + 1
+    assert breaker.available(slug)
+    breaker.record_success(slug)  # good probe closes and clears the count
+    breaker.record_failure(slug)  # so one fresh failure stays sub-threshold
+    assert breaker.available(slug)
+
+
 def _img(model: str) -> GeneratedImage:
     return GeneratedImage(b"jpeg", "image/jpeg", model, None)
 
