@@ -100,3 +100,176 @@ async def test_mock_determinism() -> None:
     c = mock.mock_image("a different prompt", op="fresh")
     assert a.jpeg_bytes == b.jpeg_bytes
     assert a.jpeg_bytes != c.jpeg_bytes
+
+
+# ── World/interior routes: the candidates + neighbors prompts through the
+# REAL provider functions (parsers and validators run for real; only the model
+# reply is canned), steered via the query the prompts embed. ────────────────
+
+_IMG = "data:image/jpeg;base64,AAAA"  # never decoded — the mock ignores images
+
+
+async def test_candidates_route_validates_and_steers() -> None:
+    from providers.llm.click import precompute_click_candidates
+
+    tower = await precompute_click_candidates(_IMG, "A Tall Tower", "a tall stone tower")
+    assert 3 <= len(tower) <= 4
+    assert all(0.0 <= c.x_pct <= 1.0 and 0.0 <= c.y_pct <= 1.0 for c in tower)
+    saliences = [c.salience for c in tower]
+    assert saliences == sorted(saliences, reverse=True)
+    assert all(c.subject and c.style for c in tower)
+    assert tower[0].enter_as == "scene"
+    assert tower[0].place_form == "interior"
+
+    district = await precompute_click_candidates(
+        _IMG, "The Merchant District", "the merchant district"
+    )
+    assert district[0].enter_as == "submap"
+    assert district[0].place_form == "complex"
+
+
+async def test_neighbors_route_via_real_propose() -> None:
+    from providers.llm.world import propose_neighbors
+
+    out = await propose_neighbors(_IMG, "The Old Keep", "the old keep")
+    assert len(out) == 4
+    assert all(n.subject for n in out)
+    assert len({n.subject.lower() for n in out}) == 4  # _build_neighbors dedupes
+    assert all(n.scale in ("component", "peer", "container") for n in out)
+
+
+async def test_world_routes_deterministic() -> None:
+    from providers.llm.click import precompute_click_candidates
+    from providers.llm.world import propose_neighbors
+
+    a = await precompute_click_candidates(_IMG, "A Tall Tower", "a tall stone tower")
+    b = await precompute_click_candidates(_IMG, "A Tall Tower", "a tall stone tower")
+    assert a == b
+    n1 = await propose_neighbors(_IMG, "The Old Keep", "the old keep")
+    n2 = await propose_neighbors(_IMG, "The Old Keep", "the old keep")
+    assert n1 == n2
+
+
+def test_classifier_matrix() -> None:
+    assert mock._classify("The Clock Tower") == ("scene", "interior")
+    assert mock._classify("a smoky tavern by the docks") == ("scene", "interior")
+    assert mock._classify("a market district") == ("submap", "complex")
+    assert mock._classify("the harbor gate") == ("submap", "complex")
+    assert mock._classify("a wooded valley") == ("scene", "landscape")
+    assert mock._classify("the palace garden") == ("scene", "landscape")
+    assert mock._classify("photosynthesis") == ("explainer", "")
+    # Embedded-quote narrowing: the real prompts' STATIC text names tower /
+    # harbor / forest as examples — only the quoted title/query may steer.
+    assert mock._classify(
+        "page titled 'Photosynthesis' (user query: 'how leaves work'). "
+        "Examples: a tower, a harbor, a forest."
+    ) == ("explainer", "")
+
+
+def test_click_route_default_stays_byte_identical() -> None:
+    system = (
+        "You examine a generated illustration of the page titled 'Photosynthesis' "
+        "(user query: 'how leaves work'). A red crosshair marks the click."
+    )
+    user = "Look at the red crosshair marker on the image."
+    subject = mock._SUBJECTS[mock._h(system[:120], user[:200]) % len(mock._SUBJECTS)]
+    # The exact pre-world reply: enter_as explainer, NO place_form key.
+    assert mock._route(system, user) == json.dumps(
+        {
+            "subject": subject,
+            "style": "hand-inked map, sepia, fine linework",
+            "subject_context": f"{subject}, a notable place in this scene",
+            "groundable": True,
+            "confidence": 0.9,
+            "enter_as": "explainer",
+        }
+    )
+
+
+async def test_click_route_steers_enter_as_and_place_form() -> None:
+    from providers.llm.click import click_to_subject
+
+    res = await click_to_subject(
+        _IMG, 0.5, 0.5, parent_title="A Tall Tower", parent_query="a tall stone tower"
+    )
+    assert res.enter_as == "scene"
+    assert res.place_form == "interior"
+
+
+async def test_apostrophes_survive_template_extraction() -> None:
+    """"the smith's tavern": a lazy/char-class quote match truncates at the
+    possessive, drops "tavern", and the spec silently classifies default —
+    the template-anchored regex must keep the trigger word, on BOTH routes."""
+    from providers.llm.click import click_to_subject, precompute_click_candidates
+
+    res = await click_to_subject(
+        _IMG,
+        0.5,
+        0.5,
+        parent_title="The Smith's Tavern",
+        parent_query="the smith's tavern",
+    )
+    assert res.enter_as == "scene"
+    assert res.place_form == "interior"
+
+    cands = await precompute_click_candidates(
+        _IMG, "The Smith's Tavern", "the smith's tavern"
+    )
+    assert cands[0].enter_as == "scene"
+    assert cands[0].place_form == "interior"
+
+    # An apostrophe in the title must not eat the query: the district word
+    # still steers.
+    district = await precompute_click_candidates(
+        _IMG, "The Weaver's Row", "the cloth district"
+    )
+    assert district[0].enter_as == "submap"
+    assert district[0].place_form == "complex"
+
+
+def test_classifier_template_precedence() -> None:
+    """Title and query are JOINED before the rule ladder runs, so both can
+    steer; first-match precedence means an interior word in either field
+    outranks a district word in the other."""
+    assert mock._classify(
+        "page titled 'The Bell Tower' (user query: 'the old district'). x"
+    ) == ("scene", "interior")
+    assert mock._classify(
+        "page titled 'The Old District' (user query: 'the bell tower'). x"
+    ) == ("scene", "interior")
+    # Inner apostrophes in BOTH groups survive extraction; the static tail
+    # after the template (naming a district) is still excluded.
+    assert mock._classify(
+        "page titled 'The Smith's Tavern' (user query: 'the smith's home'). "
+        "Examples: a market district."
+    ) == ("scene", "interior")
+
+
+async def test_mock_error_lever_raises() -> None:
+    with pytest.raises(RuntimeError, match="MOCK_ERROR"):
+        await mock.mock_llm_client().chat.completions.create(
+            messages=[{"role": "user", "content": "please mock_error now"}]
+        )
+
+
+async def test_mock_error_reaches_sse_error_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lever's whole point: the forced failure propagates through
+    _complete_json into generate.py's except-handler and comes out as the
+    REAL friendly SSE error frame (#153)."""
+    # Pin the flag: with FRIENDLY_ERRORS off, the frame carries no `detail`
+    # key, so `err.get("detail", "") == ""` would let ANY error false-pass.
+    monkeypatch.setenv("FRIENDLY_ERRORS", "true")
+    events = await _collect(
+        _event_stream(
+            GenerateBody(query="mock_error town", session_id="s-err", web_search=False),
+            "t-err",
+        )
+    )
+    err = next(e for e in events if e["type"] == "error")
+    # Friendly frames put the exception text in `detail`, raw frames in
+    # `message` — checking both keeps the assertion honest under either shape.
+    assert ("MOCK_ERROR" in err.get("detail", "")) or (
+        "MOCK_ERROR" in err.get("message", "")
+    )
