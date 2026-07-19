@@ -227,20 +227,23 @@ async def test_apostrophes_survive_template_extraction() -> None:
     assert district[0].place_form == "complex"
 
 
-def test_classifier_template_precedence() -> None:
-    """Title and query are JOINED before the rule ladder runs, so both can
-    steer; first-match precedence means an interior word in either field
-    outranks a district word in the other."""
+def test_classifier_steers_on_the_query_ONLY() -> None:
+    """The user query is the ONE channel a spec controls, so it is the only
+    text that steers — live-caught: mock-minted page titles are hash-picked
+    from _SUBJECTS and leak trigger words of their own (a "market district"
+    query rolled interior off its own title). Title words must NOT steer."""
+    # Title carries an interior word; the query says district → the QUERY wins.
     assert mock._classify(
         "page titled 'The Bell Tower' (user query: 'the old district'). x"
-    ) == ("scene", "interior")
+    ) == ("submap", "complex")
+    # And the reverse: a district-ish title cannot demote a tower query.
     assert mock._classify(
         "page titled 'The Old District' (user query: 'the bell tower'). x"
     ) == ("scene", "interior")
-    # Inner apostrophes in BOTH groups survive extraction; the static tail
-    # after the template (naming a district) is still excluded.
+    # Inner apostrophes in the query survive extraction; the static tail
+    # after the template (naming a market district) is still excluded.
     assert mock._classify(
-        "page titled 'The Smith's Tavern' (user query: 'the smith's home'). "
+        "page titled 'The Smith's Tavern' (user query: 'the smith's tavern'). "
         "Examples: a market district."
     ) == ("scene", "interior")
 
