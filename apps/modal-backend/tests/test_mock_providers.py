@@ -150,14 +150,21 @@ async def test_world_routes_deterministic() -> None:
     assert n1 == n2
 
 
+def _q(query: str) -> str:
+    """Wrap a query in the prompts' template — since the no-template default
+    landed, ONLY a parsed user query can steer, so the matrix goes through
+    the same channel the specs use."""
+    return f"page titled 'X' (user query: '{query}'). tail"
+
+
 def test_classifier_matrix() -> None:
-    assert mock._classify("The Clock Tower") == ("scene", "interior")
-    assert mock._classify("a smoky tavern by the docks") == ("scene", "interior")
-    assert mock._classify("a market district") == ("submap", "complex")
-    assert mock._classify("the harbor gate") == ("submap", "complex")
-    assert mock._classify("a wooded valley") == ("scene", "landscape")
-    assert mock._classify("the palace garden") == ("scene", "landscape")
-    assert mock._classify("photosynthesis") == ("explainer", "")
+    assert mock._classify(_q("The Clock Tower")) == ("scene", "interior")
+    assert mock._classify(_q("a smoky tavern by the docks")) == ("scene", "interior")
+    assert mock._classify(_q("a market district")) == ("submap", "complex")
+    assert mock._classify(_q("the harbor gate")) == ("submap", "complex")
+    assert mock._classify(_q("a wooded valley")) == ("scene", "landscape")
+    assert mock._classify(_q("the palace garden")) == ("scene", "landscape")
+    assert mock._classify(_q("photosynthesis")) == ("explainer", "")
     # Embedded-quote narrowing: the real prompts' STATIC text names tower /
     # harbor / forest as examples — only the quoted title/query may steer.
     assert mock._classify(
@@ -246,6 +253,22 @@ def test_classifier_steers_on_the_query_ONLY() -> None:
         "page titled 'The Smith's Tavern' (user query: 'the smith's tavern'). "
         "Examples: a market district."
     ) == ("scene", "interior")
+
+
+def test_classifier_multiline_title_and_no_template() -> None:
+    """Live-caught (second spec run): TAP pages get mock titles embedding the
+    composed planner text — newlines included — and a non-DOTALL template
+    died on the newline, sending _classify into a full-prompt scan where the
+    static examples classified everything interior. Pins: (a) multiline
+    titles still parse and the QUERY steers; (b) with NO template at all the
+    result is the neutral default, never a raw-prompt scan."""
+    assert mock._classify(
+        "page titled 'Mock page: Query: The Harbor Gate\n\nParent page "
+        "(anchor)' (user query: 'a market district'). Examples: a tower."
+    ) == ("submap", "complex")
+    assert mock._classify(
+        "no template here at all. Examples: a tower, house, temple."
+    ) == ("explainer", "")
 
 
 async def test_mock_error_lever_raises() -> None:

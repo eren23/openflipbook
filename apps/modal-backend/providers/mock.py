@@ -46,7 +46,11 @@ _STYLE = "hand-inked map, sepia, fine linework"
 # mis-steers e2e specs. Lazy `(.*?)` would stop at the same inner apostrophe;
 # greedy is safe because neither classified prompt contains a later "')" for
 # the tail group to overshoot to.
-_TEMPLATE_RE = re.compile(r"titled '(.*)' \(user query: '(.*)'\)")
+# DOTALL: mock page titles for TAP pages embed the composed planner text —
+# newlines included — and a template that dies on a newline sent _classify
+# into the full-prompt fallback, where the static instruction examples
+# ("a tower, house…") classified EVERYTHING interior (live-caught twice).
+_TEMPLATE_RE = re.compile(r"titled '(.*)' \(user query: '(.*)'\)", re.DOTALL)
 
 _CLASSIFY_RULES: tuple[tuple[tuple[str, ...], tuple[str, str]], ...] = (
     (
@@ -79,8 +83,12 @@ def _classify(text: str) -> tuple[str, str]:
     wins (interior-first)."""
     t = text.lower()
     m = _TEMPLATE_RE.search(t)
-    if m:
-        t = m.group(2)
+    if m is None:
+        # No parsed query = no steering. Scanning the raw prompt here is the
+        # false-positive machine (its static examples name towers/markets),
+        # so an unparseable prompt gets the neutral default, full stop.
+        return ("explainer", "")
+    t = m.group(2)
     for keys, result in _CLASSIFY_RULES:
         if any(k in t for k in keys):
             return result
