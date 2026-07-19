@@ -46,7 +46,11 @@ _STYLE = "hand-inked map, sepia, fine linework"
 # mis-steers e2e specs. Lazy `(.*?)` would stop at the same inner apostrophe;
 # greedy is safe because neither classified prompt contains a later "')" for
 # the tail group to overshoot to.
-_TEMPLATE_RE = re.compile(r"titled '(.*)' \(user query: '(.*)'\)")
+# DOTALL: mock page titles for TAP pages embed the composed planner text —
+# newlines included — and a template that dies on a newline sent _classify
+# into the full-prompt fallback, where the static instruction examples
+# ("a tower, house…") classified EVERYTHING interior (live-caught twice).
+_TEMPLATE_RE = re.compile(r"titled '(.*)' \(user query: '(.*)'\)", re.DOTALL)
 
 _CLASSIFY_RULES: tuple[tuple[tuple[str, ...], tuple[str, str]], ...] = (
     (
@@ -65,19 +69,26 @@ def _classify(text: str) -> tuple[str, str]:
     every mock classification scene/interior, "district" submap/complex, etc.
 
     When the text carries the prompts' embedded `titled '…' (user query:
-    '…')` template, ONLY the title+query are matched: the candidates/world-
-    mode prompts' static instructions themselves name "a tower, house,
-    temple … harbor, market square … valley, coastline, forest" as EXAMPLES
-    and would otherwise classify every single request as scene/interior.
+    '…')` template, ONLY the user-query group is matched. The TITLE is
+    excluded on purpose (live-caught by the first spec run): mock page
+    titles are hash-picked from _SUBJECTS ("The Harbor Gate", "The River
+    Quarter"…) and leak trigger words of their OWN — a "market district"
+    query rolled interior because its mock-minted title carried an
+    interior word. The query is the ONE channel a spec controls; nothing
+    else may steer. The prompts' static instruction text is excluded for
+    the same reason (it names "a tower, house, temple … harbor, market
+    square" as EXAMPLES and would classify every request scene/interior).
 
-    Precedence: title and query are joined ("<title> <query>") and the rule
-    ladder runs top-down, first match wins — so an interior word in EITHER
-    field beats a district word (title 'X tower' + query 'Y district' →
-    scene/interior)."""
+    Precedence: the rule ladder runs top-down on the query, first match
+    wins (interior-first)."""
     t = text.lower()
     m = _TEMPLATE_RE.search(t)
-    if m:
-        t = m.group(1) + " " + m.group(2)
+    if m is None:
+        # No parsed query = no steering. Scanning the raw prompt here is the
+        # false-positive machine (its static examples name towers/markets),
+        # so an unparseable prompt gets the neutral default, full stop.
+        return ("explainer", "")
+    t = m.group(2)
     for keys, result in _CLASSIFY_RULES:
         if any(k in t for k in keys):
             return result

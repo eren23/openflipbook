@@ -150,14 +150,21 @@ async def test_world_routes_deterministic() -> None:
     assert n1 == n2
 
 
+def _q(query: str) -> str:
+    """Wrap a query in the prompts' template — since the no-template default
+    landed, ONLY a parsed user query can steer, so the matrix goes through
+    the same channel the specs use."""
+    return f"page titled 'X' (user query: '{query}'). tail"
+
+
 def test_classifier_matrix() -> None:
-    assert mock._classify("The Clock Tower") == ("scene", "interior")
-    assert mock._classify("a smoky tavern by the docks") == ("scene", "interior")
-    assert mock._classify("a market district") == ("submap", "complex")
-    assert mock._classify("the harbor gate") == ("submap", "complex")
-    assert mock._classify("a wooded valley") == ("scene", "landscape")
-    assert mock._classify("the palace garden") == ("scene", "landscape")
-    assert mock._classify("photosynthesis") == ("explainer", "")
+    assert mock._classify(_q("The Clock Tower")) == ("scene", "interior")
+    assert mock._classify(_q("a smoky tavern by the docks")) == ("scene", "interior")
+    assert mock._classify(_q("a market district")) == ("submap", "complex")
+    assert mock._classify(_q("the harbor gate")) == ("submap", "complex")
+    assert mock._classify(_q("a wooded valley")) == ("scene", "landscape")
+    assert mock._classify(_q("the palace garden")) == ("scene", "landscape")
+    assert mock._classify(_q("photosynthesis")) == ("explainer", "")
     # Embedded-quote narrowing: the real prompts' STATIC text names tower /
     # harbor / forest as examples — only the quoted title/query may steer.
     assert mock._classify(
@@ -227,22 +234,41 @@ async def test_apostrophes_survive_template_extraction() -> None:
     assert district[0].place_form == "complex"
 
 
-def test_classifier_template_precedence() -> None:
-    """Title and query are JOINED before the rule ladder runs, so both can
-    steer; first-match precedence means an interior word in either field
-    outranks a district word in the other."""
+def test_classifier_steers_on_the_query_ONLY() -> None:
+    """The user query is the ONE channel a spec controls, so it is the only
+    text that steers — live-caught: mock-minted page titles are hash-picked
+    from _SUBJECTS and leak trigger words of their own (a "market district"
+    query rolled interior off its own title). Title words must NOT steer."""
+    # Title carries an interior word; the query says district → the QUERY wins.
     assert mock._classify(
         "page titled 'The Bell Tower' (user query: 'the old district'). x"
-    ) == ("scene", "interior")
+    ) == ("submap", "complex")
+    # And the reverse: a district-ish title cannot demote a tower query.
     assert mock._classify(
         "page titled 'The Old District' (user query: 'the bell tower'). x"
     ) == ("scene", "interior")
-    # Inner apostrophes in BOTH groups survive extraction; the static tail
-    # after the template (naming a district) is still excluded.
+    # Inner apostrophes in the query survive extraction; the static tail
+    # after the template (naming a market district) is still excluded.
     assert mock._classify(
-        "page titled 'The Smith's Tavern' (user query: 'the smith's home'). "
+        "page titled 'The Smith's Tavern' (user query: 'the smith's tavern'). "
         "Examples: a market district."
     ) == ("scene", "interior")
+
+
+def test_classifier_multiline_title_and_no_template() -> None:
+    """Live-caught (second spec run): TAP pages get mock titles embedding the
+    composed planner text — newlines included — and a non-DOTALL template
+    died on the newline, sending _classify into a full-prompt scan where the
+    static examples classified everything interior. Pins: (a) multiline
+    titles still parse and the QUERY steers; (b) with NO template at all the
+    result is the neutral default, never a raw-prompt scan."""
+    assert mock._classify(
+        "page titled 'Mock page: Query: The Harbor Gate\n\nParent page "
+        "(anchor)' (user query: 'a market district'). Examples: a tower."
+    ) == ("submap", "complex")
+    assert mock._classify(
+        "no template here at all. Examples: a tower, house, temple."
+    ) == ("explainer", "")
 
 
 async def test_mock_error_lever_raises() -> None:
