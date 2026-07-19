@@ -124,6 +124,11 @@ jobs:
       - name: Bring up the mocked stack
         env:
           MOCK_PROVIDERS: "1"
+          # World mode ON: the backend flag AND (via the compose build-arg
+          # fallthrough) the web bundle's NEXT_PUBLIC_WORLD_MODE — the
+          # world/interior Playwright specs need it. Classic paths stay
+          # exercisable (per-request world_mode:false + the UI mode toggle).
+          WORLD_MODE: "true"
         run: docker compose up -d --build
       - name: Wait for the web app
         run: |
@@ -154,6 +159,44 @@ jobs:
             -d '{"query":"a town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_idem","current_node_id":""}')
           echo "replay status: $code"
           test "$code" = "409"
+      # ── The interactive gate (soak phase): the real Playwright suite runs
+      # against the mocked stack on EVERY PR. continue-on-error while the
+      # suite proves itself green across ~10 unrelated PRs; then the flip PR
+      # deletes that line and browser tests become REQUIRED. Deterministic by
+      # construction (mock providers, serial workers, signal-driven waits).
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Playwright against the mocked stack (soak — flip to required after ~10 greens)
+        continue-on-error: true
+        working-directory: apps/web
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          E2E_MOCK: "1"
+        run: pnpm e2e
+      - name: Backend/web logs on failure
+        if: failure()
+        run: docker compose logs --tail 100 backend web
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-mock-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
 
   e2e:
     # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +
