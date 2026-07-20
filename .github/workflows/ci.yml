@@ -159,11 +159,10 @@ jobs:
             -d '{"query":"a town","aspect_ratio":"16:9","web_search":false,"session_id":"ci_idem","current_node_id":""}')
           echo "replay status: $code"
           test "$code" = "409"
-      # ── The interactive gate (soak phase): the real Playwright suite runs
-      # against the mocked stack on EVERY PR. continue-on-error while the
-      # suite proves itself green across ~10 unrelated PRs; then the flip PR
-      # deletes that line and browser tests become REQUIRED. Deterministic by
-      # construction (mock providers, serial workers, signal-driven waits).
+      # ── The interactive gate: the real Playwright suite runs against the
+      # mocked stack on EVERY PR, as a REQUIRED step (soak completed at 16
+      # consecutive greens, 2026-07-19→20). Deterministic by construction
+      # (mock providers, serial workers, signal-driven waits).
       - uses: pnpm/action-setup@v4
         with: { version: 9.12.0 }
       - uses: actions/setup-node@v4
@@ -179,8 +178,7 @@ jobs:
       - name: Install Playwright browsers
         working-directory: apps/web
         run: pnpm exec playwright install --with-deps chromium
-      - name: Playwright against the mocked stack (soak — flip to required after ~10 greens)
-        continue-on-error: true
+      - name: Playwright against the mocked stack (required)
         working-directory: apps/web
         env:
           E2E_BASE_URL: http://localhost:3000
