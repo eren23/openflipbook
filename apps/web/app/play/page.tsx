@@ -346,6 +346,15 @@ async function triggerExtraction(args: {
     await new Promise((r) => setTimeout(r, 4000));
     return attempt();
   }
+  // HARD failure (HTTP error / network throw) gets one delayed retry too —
+  // live-caught 2026-07-20: an OpenRouter timeout chain 502'd the extract
+  // and the page silently had NO labels, NO codex, NO geo, with a console
+  // error as the only trace. Extraction transients are exactly as
+  // stochastic as the 0/0 flake above; the second pass usually lands.
+  if (first === null) {
+    await new Promise((r) => setTimeout(r, 8000));
+    return attempt();
+  }
   return first;
 }
 
@@ -679,6 +688,9 @@ export default function PlayPage() {
   const abortRef = useRef<AbortController | null>(null);
   // The last generate body, any kind — powers the error banner's "Try again".
   const lastGenerateRef = useRef<GenerateRequestBody | null>(null);
+  // True when the current error landed while the tab was HIDDEN — the
+  // freeze-suspension class; the visibilitychange effect auto-retries once.
+  const erroredWhileHiddenRef = useRef(false);
   const streamRef = useRef<StreamClient | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus | "off">("off");
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
@@ -1134,6 +1146,16 @@ export default function PlayPage() {
         }
         setError((err as Error).message);
         setPhase("error");
+        // Freeze-death marker (live-caught 2026-07-20): Chromium suspends a
+        // background tab's fetches (ERR_NETWORK_IO_SUSPENDED), so a 60-120s
+        // generation dies the moment the user tab-switches — and the backend
+        // cancels the work on disconnect. A failure that lands while HIDDEN
+        // is near-certainly the suspension, not the request: remember it and
+        // auto-retry once on return instead of greeting the user with an
+        // error banner for something they never watched fail.
+        erroredWhileHiddenRef.current =
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden";
         setMorphFx(null);
         setProgressiveDraft(false);
         // Best-effort error sink so /status's "recent errors" panel can
@@ -1166,6 +1188,21 @@ export default function PlayPage() {
     const { trace_id: _dropped, ...rest } = last;
     void generate(rest);
   }, [generate]);
+
+  // Resume-retry: when the tab comes back to the foreground and the current
+  // error was recorded while HIDDEN (the freeze-suspension class), fire the
+  // banner's own retry automatically — once. A real failure re-errors and
+  // the banner takes over as usual.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!erroredWhileHiddenRef.current) return;
+      erroredWhileHiddenRef.current = false;
+      if (lastGenerateRef.current) retryLast();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [retryLast]);
 
   // Build the expand body from the current page + session state and hand it to
   // the bloom hook (which owns the SSE loop, tray state, persistence + abort).
