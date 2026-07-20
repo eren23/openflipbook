@@ -319,7 +319,14 @@ async def expand_image(
     south) so 'expand' extends the same place seamlessly rather than blooming
     new subjects. Default BRIA Expand (bakeoff winner); FAL_EXPAND_MODEL override."""
     from obs import span
+    from providers import mock
 
+    # Live-caught 2026-07-20: this was the ONE image op without the gate, so
+    # "mock" stacks with EXPAND_MAP_PAN=1 quietly billed real BRIA calls per
+    # Around click — until the fal balance ran dry and the tray went empty.
+    if mock.on():
+        m = mock.mock_image(f"pan {direction}", op="expand")
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = (
         model_override
@@ -397,7 +404,11 @@ async def expand_image_zoomout(
     the canvas is centered, not edge-pinned. `factor` is clamped to ~1.5-4x. This is
     the opt-in (SCALE_OUTWARD_OUTPAINT) path; the seamless default is `scale_parent`."""
     from obs import span
+    from providers import mock
 
+    if mock.on():
+        m = mock.mock_image(prompt or f"zoomout {factor}x", op="zoomout")
+        return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = (
         model_override

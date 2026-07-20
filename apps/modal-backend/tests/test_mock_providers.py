@@ -299,3 +299,22 @@ async def test_mock_error_reaches_sse_error_frame(
     assert ("MOCK_ERROR" in err.get("detail", "")) or (
         "MOCK_ERROR" in err.get("message", "")
     )
+
+
+async def test_expand_pan_and_zoomout_are_gated() -> None:
+    """Live-caught 2026-07-20: expand_image was the one image op WITHOUT the
+    mock gate, so EXPAND_MAP_PAN "mock" stacks billed real BRIA calls per
+    Around click. The fixture deletes FAL_KEY, so any regression re-raises
+    the key-missing error here instead of billing anyone."""
+    from providers.image_edit import expand_image, expand_image_zoomout
+
+    src = mock.mock_image("seed", op="fresh")
+    data_url = "data:image/jpeg;base64," + base64.b64encode(src.jpeg_bytes).decode()
+
+    pan = await expand_image(data_url, "west")
+    assert pan.model == "mock/expand"
+    Image.open(io.BytesIO(pan.jpeg_bytes)).verify()
+
+    out = await expand_image_zoomout(data_url, factor=3.0, prompt="ink map")
+    assert out.model == "mock/zoomout"
+    Image.open(io.BytesIO(out.jpeg_bytes)).verify()
