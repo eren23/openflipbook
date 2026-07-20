@@ -15,6 +15,7 @@ localised — seedream/gpt-image-2 use `image_size`, nano-banana family uses
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from dataclasses import dataclass
@@ -668,6 +669,17 @@ async def _fal_subscribe(
     no_media_generated. Default False keeps non-image callers (segmenter,
     video) byte-identical.
     """
+    # Wall-clock deadline per attempt (live-caught 2026-07-20: one fal edit
+    # call hung 12+ minutes with no error — and the SSE heartbeat happily
+    # kept the dead generation open forever, endless shimmer, no banner).
+    # A timeout is NON-retryable by design: fail fast to the friendly
+    # "took too long — hit retry" frame instead of stacking 3x the deadline.
+    # 240s clears the slowest legitimate fal path (gpt-image-2 edits ran
+    # ~170s in calibration); openrouter-hosted models don't ride this seam.
+    try:
+        deadline_s = max(30.0, float(os.environ.get("FAL_CALL_TIMEOUT_S", "") or 240.0))
+    except ValueError:
+        deadline_s = 240.0
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
@@ -675,8 +687,11 @@ async def _fal_subscribe(
         reraise=True,
     ):
         with attempt:
-            result = await fal_client.subscribe_async(
-                model, arguments=arguments, with_logs=False
+            result = await asyncio.wait_for(
+                fal_client.subscribe_async(
+                    model, arguments=arguments, with_logs=False
+                ),
+                timeout=deadline_s,
             )
             # Two success shapes exist: `images: [...]` (nano/kontext/fill) and
             # BRIA Expand's singular `image` object — accept either, so a
