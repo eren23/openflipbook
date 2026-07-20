@@ -35,3 +35,46 @@ test("forced failure shows the banner; retry sends a FRESH idempotency key", asy
   expect(keys[1]).not.toBe(keys[0]);
   expect(statuses[1]).toBe(200);
 });
+
+test("a failure that lands while HIDDEN auto-retries on return — no banner click needed", async ({
+  page,
+}) => {
+  // The freeze-suspension class (live-caught): Chromium suspends background
+  // tabs' fetches, killing in-flight generations; the backend cancels on
+  // disconnect. The client remembers hidden-time errors and fires the
+  // banner's own retry automatically when the tab returns.
+  let posts = 0;
+  page.on("request", (req) => {
+    if (req.url().includes("/api/generate-page") && req.method() === "POST") {
+      posts += 1;
+    }
+  });
+
+  // The override must exist before the app's FIRST script: the mock error
+  // frame lands well under a second after hydration, so a post-goto evaluate
+  // loses the race and the error records as visible (caught live: the first
+  // version of this test did exactly that).
+  await page.addInitScript(() => {
+    let vis = "hidden";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => vis,
+    });
+    (window as unknown as { __setVis: (v: string) => void }).__setVis = (v) => {
+      vis = v;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+  });
+  await page.goto("/play?q=" + encodeURIComponent("MOCK_ERROR hidden town"));
+
+  await page
+    .getByRole("button", { name: /Try again/ })
+    .waitFor({ state: "visible", timeout: 60_000 });
+  expect(posts).toBe(1);
+
+  // The user comes back — the retry must fire on its own.
+  await page.evaluate(() =>
+    (window as unknown as { __setVis: (v: string) => void }).__setVis("visible"),
+  );
+  await expect.poll(() => posts, { timeout: 20_000 }).toBe(2);
+});
