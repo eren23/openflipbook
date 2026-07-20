@@ -704,3 +704,57 @@ async def test_fal_subscribe_default_ignores_empty_result(
     monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
     result = await image._fal_subscribe("fal-ai/sam-3", {})
     assert result == {"masks": []}
+
+
+async def test_fal_subscribe_deadline_fails_fast(monkeypatch) -> None:
+    # Live-caught 2026-07-20: a fal edit call hung 12+ min; heartbeats kept
+    # the dead stream open forever. The per-attempt deadline turns a hang
+    # into TimeoutError (→ the friendly "took too long" frame) and is NOT
+    # retried — one deadline, not three stacked.
+    import asyncio
+
+    from providers import image as image_provider
+
+    calls = {"n": 0}
+
+    async def hung_subscribe(model, arguments=None, with_logs=False):
+        calls["n"] += 1
+        await asyncio.sleep(30)
+
+    monkeypatch.setenv("FAL_CALL_TIMEOUT_S", "30")  # floor clamps to 30s
+    monkeypatch.setattr(image_provider.fal_client, "subscribe_async", hung_subscribe)
+    # Shrink the effective deadline below the floor via a direct patch of the
+    # env read is not possible (floor 30s) — instead patch wait_for's timeout
+    # source: use a tiny sleep vs a tiny deadline by patching asyncio.wait_for
+    # would test the stdlib, not us. So: patch subscribe to outlive a 30s
+    # deadline is too slow for CI — instead verify the wiring by patching
+    # asyncio.wait_for to observe the timeout value and raise immediately.
+    seen = {}
+
+    async def spy_wait_for(coro, timeout=None):
+        seen["timeout"] = timeout
+        coro.close()
+        raise TimeoutError("deadline")
+
+    monkeypatch.setattr(image_provider.asyncio, "wait_for", spy_wait_for)
+    with pytest.raises(TimeoutError):
+        await image_provider._fal_subscribe("fal-ai/x", {})
+    assert seen["timeout"] == 30.0  # env honored (with the 30s floor)
+    assert calls["n"] == 0  # wait_for raised before subscribe ran (spy short-circuit)
+
+
+async def test_fal_subscribe_deadline_not_retried(monkeypatch) -> None:
+
+    from providers import image as image_provider
+
+    attempts = {"n": 0}
+
+    async def spy_wait_for(coro, timeout=None):
+        attempts["n"] += 1
+        coro.close()
+        raise TimeoutError("deadline")
+
+    monkeypatch.setattr(image_provider.asyncio, "wait_for", spy_wait_for)
+    with pytest.raises(TimeoutError):
+        await image_provider._fal_subscribe("fal-ai/x", {})
+    assert attempts["n"] == 1  # a hang fails FAST — no 3x deadline stack

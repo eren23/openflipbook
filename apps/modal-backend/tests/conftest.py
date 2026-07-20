@@ -69,6 +69,7 @@ _SCRUB = (
     # for hermeticity).
     "RETRY_NO_MEDIA",
     "FRIENDLY_ERRORS",
+    "FAL_CALL_TIMEOUT_S",
     # Candidate empty-roll retry (default ON — same reasoning).
     "PRECOMPUTE_EMPTY_RETRY",
     # Interior enters (default ON — indoor register + interior judge; scrub
