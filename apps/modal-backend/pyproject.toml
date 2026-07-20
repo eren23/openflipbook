@@ -54,7 +54,7 @@ markers = [
 # PR that drops the total below this FAILS; a PR that raises coverage bumps
 # the floor. Never lower it to make a PR pass — that defeats the ratchet.
 [tool.coverage.report]
-fail_under = 84
+fail_under = 85
 
 [tool.mypy]
 python_version = "3.12"

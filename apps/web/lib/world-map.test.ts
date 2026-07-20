@@ -1,8 +1,55 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { EntityGeoEdit, WorldEntityGeo } from "@openflipbook/config";
+import type { EntityGeoEdit, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
-import { __test, ladderDisagreement, registerPlanToImage } from "./world-map";
+// In-memory Mongo stand-in so the optimistic read-modify-write wrappers run for
+// real (findOne / insertOne-with-dup / replaceOne-filtered-on-updated_at)
+// without a database. recordError calls are captured for the INV-4 assertion.
+const mongo = vi.hoisted(() => {
+  const docs = new Map<string, { _id: string; updated_at: Date } & Record<string, unknown>>();
+  const errors: Record<string, unknown>[] = [];
+  const col = {
+    async findOne(filter: { _id: string }) {
+      return docs.get(filter._id) ?? null;
+    },
+    async insertOne(doc: { _id: string; updated_at: Date }) {
+      if (docs.has(doc._id)) {
+        const err = new Error("dup") as Error & { code?: number };
+        err.code = 11000;
+        throw err;
+      }
+      docs.set(doc._id, doc);
+      return { acknowledged: true };
+    },
+    async replaceOne(filter: { _id: string; updated_at: Date }, next: { _id: string; updated_at: Date }) {
+      const cur = docs.get(filter._id);
+      if (!cur || cur.updated_at.getTime() !== filter.updated_at.getTime()) {
+        return { matchedCount: 0 };
+      }
+      docs.set(filter._id, next);
+      return { matchedCount: 1 };
+    },
+  };
+  return { docs, errors, col };
+});
+
+vi.mock("./db", () => ({
+  getDb: async () => ({ collection: () => mongo.col }),
+  recordError: async (input: Record<string, unknown>) => {
+    mongo.errors.push(input);
+  },
+}));
+
+import {
+  __test,
+  applyEntityEdits,
+  deriveGeoFromExtraction,
+  getWorldMap,
+  ladderDisagreement,
+  registerPlanToImage,
+  removeEntityGeos,
+  upsertEntityGeos,
+} from "./world-map";
 
 const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
   __test;
@@ -360,5 +407,194 @@ describe("registerPlanToImage (plan plane → image register)", () => {
         "t",
       ),
     ).toBeNull();
+  });
+});
+
+// ── Mongo wrappers + the extraction seeding bridge (fake collection) ────────
+
+const mapView = (crop = { x: 0, y: 0, w: 100, h: 60 }): SceneView => ({
+  node_id: "n1",
+  level: "map",
+  observer: null,
+  map_crop: crop,
+});
+
+describe("world-map Mongo wrappers (optimistic read-modify-write)", () => {
+  beforeEach(() => {
+    mongo.docs.clear();
+    mongo.errors.length = 0;
+  });
+
+  it("getWorldMap on an unknown session → empty snapshot at epoch", async () => {
+    const snap = await getWorldMap("s_missing");
+    expect(snap.session_id).toBe("s_missing");
+    expect(snap.entities).toEqual([]);
+    expect(snap.bounds).toEqual({ x: 0, y: 0, w: 0, h: 0 });
+    expect(snap.updated_at).toBe(new Date(0).toISOString());
+  });
+
+  it("upsertEntityGeos inserts then replaces, recomputing bounds each write", async () => {
+    const first = await upsertEntityGeos("s1", [geo("a", "derived", 0, 0)]);
+    expect(first.entities).toHaveLength(1);
+    expect(first.bounds.w).toBeCloseTo(6); // one 6×6 footprint
+    // Second write goes down the replaceOne path (doc now exists).
+    const second = await upsertEntityGeos("s1", [geo("b", "derived", 10, 0)]);
+    expect(second.entities.map((e) => e.id).sort()).toEqual(["a", "b"]);
+    expect(second.bounds.w).toBeCloseTo(16); // -3 → 13
+    // Round-trips through getWorldMap (snapshotFromDoc path).
+    const read = await getWorldMap("s1");
+    expect(read.entities).toHaveLength(2);
+    expect(read.updated_at).toBe(second.updated_at);
+  });
+
+  it("applyEntityEdits([]) reads without writing; edits run through the pure core", async () => {
+    await upsertEntityGeos("s2", [geo("geo_a", "derived", 10, 10)]);
+    const before = await applyEntityEdits("s2", []);
+    expect(before.entities[0]!.pos).toEqual({ x: 10, y: 10 });
+    const after = await applyEntityEdits("s2", [
+      { op: "move", target: "geo_a", dx: 5, dy: -3 },
+      { op: "set_height", target: "geo_a", height: 9 },
+    ]);
+    expect(after.entities[0]!.pos).toEqual({ x: 15, y: 7 });
+    expect(after.entities[0]!.height).toBe(9);
+    expect(after.entities[0]!.source).toBe("user");
+  });
+
+  it("removeEntityGeos drops ids + re-roots orphans; empty ids is a read", async () => {
+    const parent = geo("geo_p", "user", 10, 10);
+    const child = { ...geo("geo_c", "derived", 1, 1), parent_id: "geo_p" };
+    await upsertEntityGeos("s3", [parent, child]);
+    const noop = await removeEntityGeos("s3", []);
+    expect(noop.entities).toHaveLength(2);
+    const after = await removeEntityGeos("s3", ["geo_p"]);
+    expect(after.entities.map((e) => e.id)).toEqual(["geo_c"]);
+    expect(after.entities[0]!.parent_id ?? null).toBeNull();
+  });
+});
+
+describe("deriveGeoFromExtraction (extraction → derived map geometry)", () => {
+  beforeEach(() => {
+    mongo.docs.clear();
+    mongo.errors.length = 0;
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const item = (id: string, over: Record<string, unknown> = {}) => ({
+    entity_id: id,
+    kind: "place" as const,
+    label: id,
+    bbox: { x_pct: 0.4, y_pct: 0.4, w_pct: 0.2, h_pct: 0.2 },
+    ...over,
+  });
+
+  it("no items → current snapshot, no write", async () => {
+    const snap = await deriveGeoFromExtraction("s4", mapView(), 16 / 9, []);
+    expect(snap.entities).toEqual([]);
+    expect(mongo.docs.size).toBe(0);
+  });
+
+  it("seeds discounted derived geos from top-down map bboxes (+ rung stamp)", async () => {
+    const snap = await deriveGeoFromExtraction(
+      "s5",
+      mapView(),
+      16 / 9,
+      [item("e1", { confidence: 0.8, visual: "tall" })],
+      "top_down",
+      -90,
+      null,
+      "city",
+    );
+    expect(snap.entities).toHaveLength(1);
+    const g = snap.entities[0]!;
+    expect(g.id).toBe("geo_e1");
+    expect(g.entity_id).toBe("e1");
+    expect(g.parent_id).toBeNull();
+    expect(g.source).toBe("derived");
+    expect(g.confidence).toBeCloseTo(0.48); // 0.8 × 0.6 discount
+    expect(g.scale_tier).toBe("city");
+    expect(g.visual).toBe("tall");
+    // bbox centre (0.5, 0.5) into the 100×60 crop.
+    expect(g.pos).toEqual({ x: 50, y: 30 });
+    expect(g.footprint).toEqual({ w: 20, d: 12 });
+  });
+
+  it("defaults confidence to 0.5 (→ 0.3 stored) and omits the rung when absent", async () => {
+    const snap = await deriveGeoFromExtraction("s6", mapView(), 16 / 9, [item("e2")]);
+    expect(snap.entities[0]!.confidence).toBeCloseTo(0.3);
+    expect(snap.entities[0]!.scale_tier).toBeUndefined();
+  });
+
+  it("seeding into a parent learns its scale; INV-4 disagreement hits recordError", async () => {
+    // Parent claims the OUTWARD direction (district→city should GROW) but its
+    // 10-wide footprint over a 20-wide interior learns scale 0.5 → warn, keep.
+    await upsertEntityGeos("s7", [
+      { ...geo("geo_parent", "user", 30, 18), footprint: { w: 10, d: 10 }, scale_tier: "district" },
+    ]);
+    const snap = await deriveGeoFromExtraction(
+      "s7",
+      mapView(),
+      16 / 9,
+      [item("e3")],
+      "top_down",
+      -90,
+      "geo_parent",
+      "city",
+    );
+    const child = snap.entities.find((e) => e.id === "geo_e3")!;
+    expect(child.parent_id).toBe("geo_parent");
+    const parent = snap.entities.find((e) => e.id === "geo_parent")!;
+    // footprint extent 10 ÷ interior extent 20 (one 20×12 child) = 0.5.
+    expect(parent.scale).toBeCloseTo(0.5);
+    expect(parent.source).toBe("user"); // scale-only write keeps authority
+    expect(mongo.errors).toHaveLength(1);
+    expect(mongo.errors[0]!.kind).toBe("world-map.inv4");
+    expect(String(mongo.errors[0]!.message)).toMatch(/OUTWARD/);
+  });
+
+  it("a missing parent id seeds children without learning any scale", async () => {
+    const snap = await deriveGeoFromExtraction(
+      "s8",
+      mapView(),
+      16 / 9,
+      [item("e4")],
+      "top_down",
+      -90,
+      "geo_ghost",
+    );
+    expect(snap.entities.map((e) => e.id)).toEqual(["geo_e4"]);
+    expect(mongo.errors).toHaveLength(0);
+  });
+
+  it("persists borders + height_m only behind WORLD_SEGMENT_BORDERS", async () => {
+    const border = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+    ];
+    vi.stubEnv("WORLD_SEGMENT_BORDERS", "");
+    const off = await deriveGeoFromExtraction("s9", mapView(), 16 / 9, [
+      item("e5", { border, height_m: 12 }),
+    ]);
+    expect(off.entities[0]!.border).toBeUndefined();
+    expect(off.entities[0]!.height_m).toBeUndefined();
+
+    vi.stubEnv("WORLD_SEGMENT_BORDERS", "1");
+    const on = await deriveGeoFromExtraction("s10", mapView(), 16 / 9, [
+      item("e6", { border, height_m: 12 }),
+      item("e7", { border: border.slice(0, 2), height_m: 0 }), // <3 pts, no height
+    ]);
+    const g6 = on.entities.find((e) => e.id === "geo_e6")!;
+    // Image-normalized polygon mapped linearly into the 100×60 crop.
+    expect(g6.border).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 60 },
+    ]);
+    expect(g6.height_m).toBe(12);
+    const g7 = on.entities.find((e) => e.id === "geo_e7")!;
+    expect(g7.border).toBeUndefined();
+    expect(g7.height_m).toBeUndefined();
   });
 });
