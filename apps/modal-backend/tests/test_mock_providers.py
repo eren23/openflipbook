@@ -336,3 +336,23 @@ async def test_animate_is_gated_and_returns_a_playable_clip() -> None:
     raw = base64.b64decode(clip.video_url.split(",", 1)[1])
     # ftyp box at offset 4 = the mp4 magic; enough to prove it's not junk.
     assert raw[4:8] == b"ftyp"
+
+
+async def test_segment_sam3_flag_respects_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEGMENTER_PROVIDER=sam3_fal is one paid fal call PER LABEL — under mock
+    it must reroute to the VLM arm (which rides the mocked llm client)."""
+    from providers import segmenter
+
+    monkeypatch.setenv("SEGMENTER_PROVIDER", "sam3_fal")
+    called = {"sam3": False}
+
+    async def _boom(*a: Any, **k: Any) -> list[Any]:
+        called["sam3"] = True
+        raise AssertionError("sam3 path must not run under mock")
+
+    monkeypatch.setattr(segmenter, "_segment_sam3", _boom)
+    out = await segmenter.segment(
+        mock.mock_image("seed", op="fresh").jpeg_bytes, ["tower"]
+    )
+    assert called["sam3"] is False
+    assert isinstance(out, list)
