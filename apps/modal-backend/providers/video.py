@@ -78,6 +78,17 @@ async def animate_image(
 ) -> AnimatedClip:
     from obs import span
 
+    from . import mock
+
+    # Same gate as every image op (the #184 lesson: one ungated fal entry
+    # point is enough for a "mock" stack to bill real money).
+    if mock.on():
+        return AnimatedClip(
+            video_url=mock.mock_video_data_url(),
+            content_type="video/mp4",
+            model="mock/animate",
+            duration_seconds=1.0,
+        )
     if not os.environ.get("FAL_KEY"):
         raise RuntimeError("FAL_KEY is not set")
 

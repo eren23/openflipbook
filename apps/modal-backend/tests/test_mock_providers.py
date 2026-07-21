@@ -318,3 +318,41 @@ async def test_expand_pan_and_zoomout_are_gated() -> None:
     out = await expand_image_zoomout(data_url, factor=3.0, prompt="ink map")
     assert out.model == "mock/zoomout"
     Image.open(io.BytesIO(out.jpeg_bytes)).verify()
+
+
+async def test_animate_is_gated_and_returns_a_playable_clip() -> None:
+    """Finding #7 from the 2026-07-20 ledger, same class as the expand hole:
+    Animate had no mock gate. The fixture deletes FAL_KEY, so a regression
+    re-raises the key-missing error. The payload must be a VALID mp4 — the
+    client hands it straight to <video src>."""
+    from providers.video import animate_image
+
+    src = mock.mock_image("seed", op="fresh")
+    data_url = "data:image/jpeg;base64," + base64.b64encode(src.jpeg_bytes).decode()
+
+    clip = await animate_image(image_data_url=data_url, prompt="gentle drift")
+    assert clip.model == "mock/animate"
+    assert clip.video_url.startswith("data:video/mp4;base64,")
+    raw = base64.b64decode(clip.video_url.split(",", 1)[1])
+    # ftyp box at offset 4 = the mp4 magic; enough to prove it's not junk.
+    assert raw[4:8] == b"ftyp"
+
+
+async def test_segment_sam3_flag_respects_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEGMENTER_PROVIDER=sam3_fal is one paid fal call PER LABEL — under mock
+    it must reroute to the VLM arm (which rides the mocked llm client)."""
+    from providers import segmenter
+
+    monkeypatch.setenv("SEGMENTER_PROVIDER", "sam3_fal")
+    called = {"sam3": False}
+
+    async def _boom(*a: Any, **k: Any) -> list[Any]:
+        called["sam3"] = True
+        raise AssertionError("sam3 path must not run under mock")
+
+    monkeypatch.setattr(segmenter, "_segment_sam3", _boom)
+    out = await segmenter.segment(
+        mock.mock_image("seed", op="fresh").jpeg_bytes, ["tower"]
+    )
+    assert called["sam3"] is False
+    assert isinstance(out, list)

@@ -243,7 +243,11 @@ async def segment(
     untouched. `boxes` (the detector's output for these labels) is used only by
     the SAM3 path — proper-noun labels don't ground from text, so the detector's
     box localizes the concept and SAM3 refines the mask; the VLM path ignores it."""
-    if segmenter_provider() == "sam3_fal":
+    from . import mock
+
+    # Mock stacks always take the VLM arm (it rides the mocked llm client) —
+    # SAM3 is one paid fal call PER LABEL, the priciest way to rediscover #184.
+    if segmenter_provider() == "sam3_fal" and not mock.on():
         return await _segment_sam3(image_bytes, labels, boxes)
     return await _segment_vlm(image_bytes, labels)
 
