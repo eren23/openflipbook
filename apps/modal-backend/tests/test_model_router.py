@@ -110,6 +110,27 @@ def test_select_enter_model_routes_steep_to_nano(monkeypatch: pytest.MonkeyPatch
     assert model_router.select_enter_model("eye_level") == "fal-ai/custom/steep"
 
 
+def test_select_enter_retry_model_is_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        model_router.select_enter_retry_model("fal-ai/nano-banana-pro/edit")
+        == "fal-ai/nano-banana-pro/edit"
+    )
+
+    monkeypatch.setenv("ENTER_RETRY_MODEL_SWAP", "true")
+    assert (
+        model_router.select_enter_retry_model("fal-ai/nano-banana-pro/edit")
+        == "fal-ai/nano-banana-2/edit"
+    )
+
+    monkeypatch.setenv("FAL_ENTER_RETRY_MODEL", "fal-ai/custom/edit")
+    assert (
+        model_router.select_enter_retry_model("fal-ai/nano-banana-pro/edit")
+        == "fal-ai/custom/edit"
+    )
+
+
 def test_nano_text_to_image_does_not_support_refs() -> None:
     # Fresh-gen nano endpoints accept-but-ignore image_urls (PR #109); the
     # registry must report that so the picker never promises ref conditioning.

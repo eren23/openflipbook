@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from providers import llm as _llm
+from providers.coordinate_scale import coerce_unit
 
 from .client import ENTITY_KINDS, _safe_json, _system_message, _vlm_model
 
@@ -370,18 +371,38 @@ def _coerce_entity_update(entry: Any) -> EntityUpdate | None:
 def _coerce_bbox(raw: Any) -> dict[str, float] | None:
     if not isinstance(raw, dict):
         return None
-    try:
-        x = float(raw.get("x_pct", -1))
-        y = float(raw.get("y_pct", -1))
-        w = float(raw.get("w_pct", -1))
-        h = float(raw.get("h_pct", -1))
-    except (TypeError, ValueError):
+
+    def _first(*keys: str) -> Any:
+        for key in keys:
+            if key in raw:
+                return raw[key]
         return None
-    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+
+    x = coerce_unit(
+        _first("x_pct", "x"), clamp=False, percent=True, drop_beyond_ladder=True
+    )
+    y = coerce_unit(
+        _first("y_pct", "y"), clamp=False, percent=True, drop_beyond_ladder=True
+    )
+    w = coerce_unit(
+        _first("w_pct", "w", "width"),
+        clamp=False,
+        percent=True,
+        drop_beyond_ladder=True,
+    )
+    h = coerce_unit(
+        _first("h_pct", "h", "height"),
+        clamp=False,
+        percent=True,
+        drop_beyond_ladder=True,
+    )
+    if x is None or y is None or w is None or h is None:
         return None
-    if not (0.0 < w <= 1.0 and 0.0 < h <= 1.0):
+    if w <= 0.0 or h <= 0.0:
         return None
     # Clip box so it stays inside the frame.
     w = min(w, 1.0 - x)
     h = min(h, 1.0 - y)
+    if w <= 0.0 or h <= 0.0:
+        return None
     return {"x_pct": x, "y_pct": y, "w_pct": w, "h_pct": h}

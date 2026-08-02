@@ -10,12 +10,44 @@ without spending a VLM call (the _ask_judge boundary is stubbed)."""
 from __future__ import annotations
 
 import base64
+import io
 from typing import Any
 
 import pytest
 
 from providers import judge
 from providers.judge import JudgeResult
+
+
+def _striped_jpeg(width: int, height: int, *, quality: int = 95) -> bytes:
+    Image = pytest.importorskip("PIL.Image")
+    ImageDraw = pytest.importorskip("PIL.ImageDraw")
+
+    im = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(im)
+    for x in range(0, width, 12):
+        color = ((x * 17) % 255, (x * 31) % 255, (x * 47) % 255)
+        draw.rectangle((x, 0, min(width, x + 6), height), fill=color)
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
+def test_image_block_bounds_large_judge_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    Image = pytest.importorskip("PIL.Image")
+    monkeypatch.setenv("VLM_JUDGE_MAX_SIDE_PX", "256")
+    monkeypatch.setenv("VLM_JUDGE_JPEG_QUALITY", "70")
+    raw = _striped_jpeg(1200, 800)
+
+    block = judge._image_block(raw)
+
+    image_url = block["image_url"]
+    assert isinstance(image_url, dict)
+    url = str(image_url["url"])
+    compact = base64.b64decode(url.split(",", 1)[1])
+    assert len(compact) < len(raw)
+    with Image.open(io.BytesIO(compact)) as im:
+        assert max(im.size) <= 256
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ same VLM + key the click resolver already requires.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import re
@@ -36,8 +37,41 @@ def _judge_model() -> str:
     )
 
 
+def _bounded_int_env(name: str, default: int, *, floor: int, ceiling: int) -> int:
+    try:
+        value = int(os.environ.get(name, "") or default)
+    except ValueError:
+        value = default
+    return max(floor, min(ceiling, value))
+
+
+def _judge_transport_bytes(image_bytes: bytes) -> bytes:
+    """Bound VLM judge payload size without changing judge semantics.
+
+    OpenRouter sees the full base64 data URL, even with image detail="low".
+    Generated bench artifacts are often multi-MB JPEGs, so normalise them to a
+    smaller RGB JPEG before transport. If Pillow cannot decode the bytes (unit
+    stubs, corrupt inputs), preserve the original block exactly.
+    """
+    max_side = _bounded_int_env("VLM_JUDGE_MAX_SIDE_PX", 512, floor=256, ceiling=2048)
+    quality = _bounded_int_env("VLM_JUDGE_JPEG_QUALITY", 72, floor=45, ceiling=95)
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(image_bytes)) as src:
+            img = ImageOps.exif_transpose(src).convert("RGB")
+            if max(img.size) > max_side:
+                img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            compact = buf.getvalue()
+    except Exception:
+        return image_bytes
+    return compact if compact and len(compact) < len(image_bytes) else image_bytes
+
+
 def _image_block(image_bytes: bytes) -> dict[str, object]:
-    b64 = base64.b64encode(image_bytes).decode("ascii")
+    b64 = base64.b64encode(_judge_transport_bytes(image_bytes)).decode("ascii")
     return {
         "type": "image_url",
         "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
@@ -108,7 +142,8 @@ async def _ask_judge(
             "content": [{"type": "text", "text": user_text}, *image_blocks],
         },
     ]
-    response = await client.chat.completions.create(
+    response = await llm._create_with_retry(
+        client,
         model=_judge_model(),
         messages=messages,
         temperature=0.0,

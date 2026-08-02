@@ -12,6 +12,8 @@ import base64
 import os
 from typing import Any, TypedDict
 
+from providers.coordinate_scale import coerce_unit
+
 
 # A centre-based detection box, normalised 0..1 — the shape `parse_detections`
 # emits and `grounding.diff` consumes (matches ProjectedEntity's box fields).
@@ -54,15 +56,35 @@ def parse_detections(payload: Any) -> list[Detection]:
         if not isinstance(d, dict):
             continue
         label = str(d.get("label", "")).strip()
-        if not label or not all(k in d for k in ("x", "y", "w", "h")):
+        if not label:
+            continue
+        box = d.get("bbox") or d.get("box") or d
+
+        if isinstance(box, (list, tuple)) and len(box) >= 4:
+            x_raw, y_raw, w_raw, h_raw = box[:4]
+        elif isinstance(box, dict):
+            x_raw = box.get("x", box.get("x_pct"))
+            y_raw = box.get("y", box.get("y_pct"))
+            w_raw = box.get("w", box.get("w_pct", box.get("width")))
+            h_raw = box.get("h", box.get("h_pct", box.get("height")))
+        else:
+            continue
+
+        x = coerce_unit(x_raw, percent=True, drop_beyond_ladder=True)
+        y = coerce_unit(y_raw, percent=True, drop_beyond_ladder=True)
+        w = coerce_unit(w_raw, percent=True, drop_beyond_ladder=True)
+        h = coerce_unit(h_raw, percent=True, drop_beyond_ladder=True)
+        if x is None or y is None or w is None or h is None:
+            continue
+        if w <= 0.0 or h <= 0.0:
             continue
         out.append(
             {
                 "label": label,
-                "x_pct": _clamp01(d["x"]),
-                "y_pct": _clamp01(d["y"]),
-                "w_pct": _clamp01(d["w"]),
-                "h_pct": _clamp01(d["h"]),
+                "x_pct": x,
+                "y_pct": y,
+                "w_pct": w,
+                "h_pct": h,
                 "score": _clamp01(d.get("score", 1.0)),
             }
         )

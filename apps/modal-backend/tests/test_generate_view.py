@@ -397,6 +397,51 @@ async def test_view_loop_retries_with_critic_feedback(
     assert conf.await_count == 2
 
 
+async def test_enter_retry_model_swap_only_changes_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ENTER_RETRY_MODEL_SWAP is an oblique/loop experiment: attempt 0 stays on
+    # the production router pick; only retry attempts switch to the configured
+    # fal edit slug.
+    monkeypatch.setenv("ENTER_RETRY_MODEL_SWAP", "true")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_judges(
+        monkeypatch, [(3.0, "looks like a bird's-eye view"), (10.0, "clean")]
+    )
+
+    await _collect(_event_stream(_steep_body(), "t1"))
+
+    assert [c.kwargs["model_override"] for c in edit.await_args_list] == [
+        "fal-ai/nano-banana-pro/edit",
+        "fal-ai/nano-banana-2/edit",
+    ]
+
+
+async def test_enter_retry_model_swap_respects_explicit_image_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A request-level model override is already explicit operator intent; the
+    # retry experiment must not silently substitute a different slug.
+    monkeypatch.setenv("ENTER_RETRY_MODEL_SWAP", "true")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_judges(
+        monkeypatch, [(3.0, "looks like a bird's-eye view"), (10.0, "clean")]
+    )
+
+    await _collect(
+        _event_stream(_steep_body(image_model="fal-ai/custom/edit"), "t1")
+    )
+
+    assert [c.kwargs["model_override"] for c in edit.await_args_list] == [
+        "fal-ai/custom/edit",
+        "fal-ai/custom/edit",
+    ]
+
+
 async def test_view_loop_accept_fast_no_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

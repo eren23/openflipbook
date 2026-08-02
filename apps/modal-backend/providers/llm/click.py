@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from providers import llm as _llm
+from providers.coordinate_scale import coerce_unit as _coerce_scaled_unit
 
 from .client import _coerce_scale, _system_message, _vlm_model
 
@@ -390,21 +391,7 @@ def _coerce_unit(
     still-out-of-range values return None so a garbage coordinate can't
     mint an edge-of-page auto-tap target.
     """
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    if f != f:  # NaN
-        return None
-    if percent and 2.0 < f <= 100.0:
-        f = f / 100.0
-    elif percent and 100.0 < f <= 1000.0:
-        f = f / 1000.0
-    if f < 0.0:
-        return 0.0 if clamp else None
-    if f > 1.0:
-        return 1.0 if clamp else None
-    return f
+    return _coerce_scaled_unit(value, clamp=clamp, percent=percent)
 
 
 def _parse_point(raw: Any) -> tuple[float, float] | None:

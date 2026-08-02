@@ -3,7 +3,13 @@
 For each golden chain (a child interior/closeup linked via parent_id+parent_ref to
 a place ENTITY in a parent map), crop the parent map at that place and generate an
 "enter" view two ways:
-  with   — region-conditioned on the cropped parent place (the product descent)
+  with   — region-conditioned via the seam the PRODUCT ships: the region crop is
+           the edit SOURCE (view "interior" -> build_enter_instruction+edit_image
+           on the enter_scene model; view "exterior" -> build_zoom_instruction+
+           continue_image, the closeup rung). NOT generate_image — fal's
+           text-to-image accepts-but-IGNORES reference_urls (research/01), which
+           made this arm an unconditioned reinvention and place_lift
+           structurally ~0 until 2026-07-29.
   without— a plain fresh generation (baseline)
 then JUDGE both against the REAL child photo and the cropped region (continuity).
 The headline metric is place_lift = how much region-conditioning moves the
@@ -24,6 +30,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -57,10 +64,24 @@ def resolve_chains() -> list[dict[str, Any]]:
     return descent_chains(load_manifest(), descs)
 
 
+async def _judge_with_retry(label: str, call: Callable[[], Awaitable[Any]]) -> Any:
+    attempts = max(1, int(os.environ.get("DESCENT_BENCH_JUDGE_RETRIES", "3")))
+    for attempt in range(1, attempts + 1):
+        try:
+            return await call()
+        except Exception:
+            if attempt == attempts:
+                raise
+            print(f"judge {label} failed; retrying ({attempt}/{attempts})")
+            await asyncio.sleep(min(8.0, 2.0 ** (attempt - 1)))
+
+
 async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     from providers import image as image_provider
-    from providers import judge
+    from providers import image_edit as image_edit_provider
+    from providers import judge, model_router
     from tests.continuity_bench.coherence_runner import _enter, _region_crop
+    from tests.map_corpus import ROOT
 
     parent_bytes = image_path(chain["parent_id"]).read_bytes()
     child_bytes = image_path(chain["child_id"]).read_bytes()
@@ -72,28 +93,74 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     # already draws a distinctive exterior (tests/map_corpus/chains.py docs).
     view = chain.get("view", "interior")
     base = f"A closer, {view} view of {label}, a place within the parent map."
-    preamble = image_provider.conditioning_preamble(["region"], "place_scene")
-    model = _model()
 
-    with_img = await _enter(f"{preamble}\n\n{base}", aspect, model, region_url)
-    without_img = await _enter(base, aspect, model, None)
-    # save artifacts for visual inspection (overlays/ is gitignored)
-    from tests.map_corpus import ROOT
-
+    # save artifacts for visual inspection (overlays/ is gitignored). A live
+    # judge can die after image spend; opt-in reuse lets the rerun finish judges
+    # without paying to regenerate the same artifacts.
     art = ROOT / "overlays"
     art.mkdir(parents=True, exist_ok=True)
-    (art / f"descent-{chain['child_id']}-region.jpg").write_bytes(region)
-    (art / f"descent-{chain['child_id']}-with.jpg").write_bytes(with_img)
-    (art / f"descent-{chain['child_id']}-without.jpg").write_bytes(without_img)
-    real_with = await judge.score_style_pair(child_bytes, with_img)
-    real_without = await judge.score_style_pair(child_bytes, without_img)
+    region_path = art / f"descent-{chain['child_id']}-region.jpg"
+    with_path = art / f"descent-{chain['child_id']}-with.jpg"
+    without_path = art / f"descent-{chain['child_id']}-without.jpg"
+    region_path.write_bytes(region)
+
+    if (
+        os.environ.get("DESCENT_BENCH_REUSE_ARTIFACTS") == "1"
+        and with_path.exists()
+        and without_path.exists()
+    ):
+        print(f"  reusing descent artifacts for {chain['child_id']}")
+        with_img = with_path.read_bytes()
+        without_img = without_path.read_bytes()
+    else:
+        # with — the product seam per chain shape, region crop as the edit SOURCE
+        # so the reference pixels actually bite (generate_image ignores refs).
+        if view == "interior":
+            instruction = image_edit_provider.build_enter_instruction(
+                label,
+                [],
+                subject_context=f"{label}, a place within the parent map",
+                interior=True,
+            )
+            with_gen = await image_edit_provider.edit_image(
+                region_url,
+                instruction,
+                model_override=model_router.resolve_model("enter_scene"),
+            )
+        else:
+            # exterior closeup = the product's zoom_continue rung (Kontext).
+            instruction = image_edit_provider.build_zoom_instruction(
+                label, [], register="view", faithful=True
+            )
+            with_gen = await image_edit_provider.continue_image(
+                region_url,
+                instruction,
+                model_override=model_router.resolve_model("zoom_continue"),
+            )
+        with_img = with_gen.jpeg_bytes
+        without_img = await _enter(base, aspect, _model(), None)
+        with_path.write_bytes(with_img)
+        without_path.write_bytes(without_img)
+
+    real_with = await _judge_with_retry(
+        "style_with", lambda: judge.score_style_pair(child_bytes, with_img)
+    )
+    real_without = await _judge_with_retry(
+        "style_without", lambda: judge.score_style_pair(child_bytes, without_img)
+    )
     # medium-AGNOSTIC place judge: style_pair sinks a CORRECT illustrated descent
     # of a photographed place to ~0 purely on the medium gap. place_match scores
     # same-place-ignoring-medium, so place_lift measures what the descent is
     # actually for — carrying the real place over — across illustration->photo.
-    place_with = await judge.score_place_match(child_bytes, with_img)
-    place_without = await judge.score_place_match(child_bytes, without_img)
-    continuity = await judge.score_continuation(region, with_img)
+    place_with = await _judge_with_retry(
+        "place_with", lambda: judge.score_place_match(child_bytes, with_img)
+    )
+    place_without = await _judge_with_retry(
+        "place_without", lambda: judge.score_place_match(child_bytes, without_img)
+    )
+    continuity = await _judge_with_retry(
+        "continuity", lambda: judge.score_continuation(region, with_img)
+    )
     return {
         "child_id": chain["child_id"],
         "parent_id": chain["parent_id"],

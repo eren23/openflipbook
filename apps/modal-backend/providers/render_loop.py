@@ -184,6 +184,7 @@ async def iter_attempts[ImageT: Rendered](
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     judge_interior: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
+    render_for_attempt: Callable[[str, int], Awaitable[ImageT]] | None = None,
     feedback: Callable[..., str] = retry_feedback_clause,
     abort: Callable[[str], Awaitable[None]] | None = None,
     clock: Callable[[], float] = time.monotonic,
@@ -199,16 +200,21 @@ async def iter_attempts[ImageT: Rendered](
     structures, so 'same place, closer' would reject every correct interior)."""
     from obs import log
 
+    async def _render(index: int, suffix: str) -> ImageT:
+        if render_for_attempt is not None:
+            return await render_for_attempt(suffix, index)
+        return await render(suffix)
+
     suffix = ""
     for index in range(config.max_attempts):
         if abort is not None:
             await abort("view-loop-render")
         started = clock()
         if index == 0:
-            image = await render(suffix)
+            image = await _render(index, suffix)
         else:
             try:
-                image = await render(suffix)
+                image = await _render(index, suffix)
             except Exception as exc:
                 log(
                     "warn",
@@ -360,6 +366,7 @@ async def run_view_loop[ImageT: Rendered](
     judge_medium: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     judge_interior: Callable[[bytes, bytes], Awaitable[JudgeResult]] | None = None,
     family: str | None = None,
+    render_for_attempt: Callable[[str, int], Awaitable[ImageT]] | None = None,
 ) -> LoopResult:
     """Drain the loop for non-streaming callers (the bench)."""
     attempts: list[Attempt] = []
@@ -374,6 +381,7 @@ async def run_view_loop[ImageT: Rendered](
         judge_medium=judge_medium,
         judge_interior=judge_interior,
         family=family,
+        render_for_attempt=render_for_attempt,
     ):
         attempts.append(attempt)
     return conclude(attempts)

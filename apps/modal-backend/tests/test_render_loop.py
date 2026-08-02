@@ -74,6 +74,26 @@ async def test_feedback_folds_rationale_and_register() -> None:
     assert attempts[1].instruction_suffix == suffix
 
 
+async def test_render_for_attempt_receives_attempt_index() -> None:
+    render = AsyncMock(return_value=_Img(b"unused"))
+    render_for_attempt = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
+    attempts = await _drain(
+        render=render,
+        render_for_attempt=render_for_attempt,
+        projection="oblique",
+        region_bytes=b"r",
+        judge_conformance=AsyncMock(side_effect=[_j(3.0, "too flat"), _j(9.0)]),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        config=_cfg(),
+    )
+
+    assert len(attempts) == 2 and attempts[1].accepted
+    render.assert_not_awaited()
+    assert render_for_attempt.await_args_list[0].args == ("", 0)
+    assert render_for_attempt.await_args_list[1].args[1] == 1
+    assert "too flat" in render_for_attempt.await_args_list[1].args[0]
+
+
 async def test_max_attempts_keep_best() -> None:
     render = AsyncMock(side_effect=[_Img(b"a"), _Img(b"b")])
     conf = AsyncMock(side_effect=[_j(4.0), _j(6.0)])

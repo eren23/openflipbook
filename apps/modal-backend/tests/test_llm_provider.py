@@ -277,6 +277,43 @@ def test_extraction_bbox_clips_to_frame() -> None:
     assert bbox["h_pct"] == pytest.approx(0.3)
 
 
+def test_extraction_bbox_salvages_percent_aliases() -> None:
+    raw = (
+        "{\"added\": [{\"kind\": \"place\", \"name\": \"Harbor\", "
+        "\"appearance\": \"stone quay\", \"bbox\": "
+        "{\"x\": 12.5, \"y\": 25, \"width\": 30, \"height\": 40}}], "
+        "\"updated\": []}"
+    )
+    out = llm._parse_extraction(raw)
+    bbox = out.added[0].bbox
+    assert bbox is not None
+    assert bbox["x_pct"] == pytest.approx(0.125)
+    assert bbox["y_pct"] == pytest.approx(0.25)
+    assert bbox["w_pct"] == pytest.approx(0.3)
+    assert bbox["h_pct"] == pytest.approx(0.4)
+
+
+def test_extraction_bbox_salvages_per_mille_and_drops_pixels() -> None:
+    raw = (
+        "{\"added\": ["
+        "{\"kind\": \"place\", \"name\": \"Cathedral\", "
+        "\"appearance\": \"large nave\", \"bbox\": "
+        "{\"x_pct\": 509, \"y_pct\": 238, \"w_pct\": 120, \"h_pct\": 180}}, "
+        "{\"kind\": \"place\", \"name\": \"Ghost\", "
+        "\"appearance\": \"wrong edge box\", \"bbox\": "
+        "{\"x_pct\": 1344, \"y_pct\": 0.2, \"w_pct\": 0.1, \"h_pct\": 0.1}}"
+        "], \"updated\": []}"
+    )
+    out = llm._parse_extraction(raw)
+    cathedral, ghost = out.added
+    assert cathedral.bbox is not None
+    assert cathedral.bbox["x_pct"] == pytest.approx(0.509)
+    assert cathedral.bbox["y_pct"] == pytest.approx(0.238)
+    assert cathedral.bbox["w_pct"] == pytest.approx(0.12)
+    assert cathedral.bbox["h_pct"] == pytest.approx(0.18)
+    assert ghost.bbox is None
+
+
 def test_extraction_update_whitelists_change_keys() -> None:
     raw = (
         "{\"added\": [], \"updated\": [{\"match_name\": \"Mira\", "

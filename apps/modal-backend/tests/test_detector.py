@@ -18,6 +18,41 @@ def test_accepts_bare_list_and_entities_key() -> None:
     assert parse_detections({"entities": [{"label": "b", "x": 0.2, "y": 0.2, "w": 0.1, "h": 0.1}]})[0]["label"] == "b"
 
 
+def test_salvages_percent_per_mille_and_bbox_aliases() -> None:
+    out = parse_detections(
+        {
+            "detections": [
+                {
+                    "label": "tower",
+                    "bbox": {"x_pct": 50, "y_pct": 30, "width": 20, "height": 60},
+                },
+                {"label": "dock", "x": 509, "y": 238, "w": 120, "h": 180},
+            ]
+        }
+    )
+    by_label = {d["label"]: d for d in out}
+    assert by_label["tower"]["x_pct"] == 0.5
+    assert by_label["tower"]["y_pct"] == 0.3
+    assert by_label["tower"]["w_pct"] == 0.2
+    assert by_label["tower"]["h_pct"] == 0.6
+    assert by_label["dock"]["x_pct"] == 0.509
+    assert by_label["dock"]["y_pct"] == 0.238
+    assert by_label["dock"]["w_pct"] == 0.12
+    assert by_label["dock"]["h_pct"] == 0.18
+
+
+def test_drops_pixel_like_coordinates_beyond_ladder() -> None:
+    out = parse_detections(
+        {
+            "detections": [
+                {"label": "pixel", "x": 1344, "y": 0.4, "w": 0.2, "h": 0.2},
+                {"label": "good", "x": 0.4, "y": 0.4, "w": 0.2, "h": 0.2},
+            ]
+        }
+    )
+    assert [d["label"] for d in out] == ["good"]
+
+
 def test_drops_incomplete_or_blank_label() -> None:
     out = parse_detections(
         {

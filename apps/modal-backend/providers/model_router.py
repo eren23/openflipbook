@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import os
 
+from _env import env_flag
+
 # op -> (default model slug or None for tier-based, env override key or None).
 MODEL_SLOTS: dict[str, tuple[str | None, str | None]] = {
     "fresh": (None, None),  # tier-based via image.py (FAL_IMAGE_MODEL_*)
@@ -128,6 +130,7 @@ def select_outward_op(from_tier: str, to_tier: str) -> str:
 # speed; FAL_ENTER_MODEL_STEEP restores gpt in one env if rings resurface.
 STEEP_ENTER_PROJECTIONS = frozenset({"eye_level", "top_down"})
 STEEP_ENTER_DEFAULT = "fal-ai/nano-banana-pro/edit"
+ENTER_RETRY_DEFAULT = "fal-ai/nano-banana-2/edit"
 
 
 def select_enter_model(projection: str | None) -> str | None:
@@ -137,6 +140,17 @@ def select_enter_model(projection: str | None) -> str | None:
     if projection in STEEP_ENTER_PROJECTIONS:
         return os.environ.get("FAL_ENTER_MODEL_STEEP") or STEEP_ENTER_DEFAULT
     return resolve_model("enter_scene")
+
+
+def select_enter_retry_model(first_model: str | None) -> str | None:
+    """Retry-only model for VIEW_LOOP enters.
+
+    Disabled keeps the original model on every attempt. Enabled swaps only
+    attempts after index 0 to a cheaper/faster fal edit slug from the existing
+    nano family; the first attempt remains the production router pick."""
+    if not env_flag("ENTER_RETRY_MODEL_SWAP", "false"):
+        return first_model
+    return os.environ.get("FAL_ENTER_RETRY_MODEL") or ENTER_RETRY_DEFAULT
 
 
 # ── Capability registry + fallback chains (Wave 4) ───────────────────────────

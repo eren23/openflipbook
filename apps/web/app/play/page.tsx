@@ -2072,10 +2072,13 @@ export default function PlayPage() {
   // page. Pumps each candidate into prefetchCacheRef so clicks landing near
   // them skip the VLM call. Runs once per nodeId. Disabled if the page lacks
   // a stable nodeId (in-progress generation) — without a nodeId the bucket
-  // key is "noid" and would collide across pages.
+  // key is "noid" and would collide across pages. Disabled in World Mode:
+  // world taps route through geometry / cold resolver context, and candidate-
+  // only warm entries can carry stale enter_as/place_form classifications.
   const precomputedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (phase !== "ready") return;
+    if (worldEnabled) return;
     if (!page?.imageDataUrl || !page.nodeId) return;
     if (page.imageDataUrl.startsWith("http") && !page.imageDataUrl.startsWith("data:")) {
       // Persisted images served from R2 are also fine — backend accepts URLs
@@ -2170,6 +2173,7 @@ export default function PlayPage() {
     page?.query,
     outputLocale,
     bucketKey,
+    worldEnabled,
   ]);
 
   useEffect(() => {
@@ -2965,6 +2969,7 @@ export default function PlayPage() {
       }
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
+      if (worldEnabled) return;
       if (prefetchTimerRef.current !== null) {
         window.clearTimeout(prefetchTimerRef.current);
       }

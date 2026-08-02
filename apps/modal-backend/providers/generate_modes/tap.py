@@ -529,8 +529,12 @@ async def stream_tap(
     # Steep transforms route to the gpt family (view-bench A/B: eye_level
     # 8.0 vs the nano family's 2.5 from an aerial source, same-place
     # equal); aerial registers + the legacy no-view enter keep the slot.
-    enter_model_slug = body.image_model or model_router.select_enter_model(
-        str(enter_view.get("projection")) if enter_view else None
+    enter_projection = str(enter_view.get("projection")) if enter_view else None
+    enter_model_slug = body.image_model or model_router.select_enter_model(enter_projection)
+    enter_retry_model_slug = (
+        enter_model_slug
+        if body.image_model
+        else model_router.select_enter_retry_model(enter_model_slug)
     )
     enter_family = camera_lib.model_family(enter_model_slug)
     if enter_view is not None and enter_family == "kontext":
@@ -786,26 +790,39 @@ async def stream_tap(
             "info",
             "tap.enter_edit",
             model=enter_model_slug,
+            retry_model=(
+                enter_retry_model_slug
+                if enter_retry_model_slug != enter_model_slug
+                else None
+            ),
             source="region" if region_ref else "parent_image",
             style_ref=bool(enter_style_ref),
-            projection=(enter_view or {}).get("projection"),
+            projection=enter_projection,
             loop=view_loop,
         )
         if view_loop:
             from providers import judge, render_loop
 
-            async def _render_enter(suffix: str) -> Any:
+            async def _render_enter_attempt(suffix: str, attempt_index: int) -> Any:
                 instr = (
                     enter_instruction
                     if not suffix
                     else f"{enter_instruction}\n\n{suffix}"
                 )
+                model = (
+                    enter_model_slug
+                    if attempt_index == 0
+                    else enter_retry_model_slug
+                )
                 return await image_edit_provider.edit_image(
                     enter_source,
                     instr,
-                    model_override=enter_model_slug,
+                    model_override=model,
                     style_ref_url=enter_style_ref,
                 )
+
+            async def _render_enter(suffix: str) -> Any:
+                return await _render_enter_attempt(suffix, 0)
 
             # The richness critic: the named interior features (the
             # planner's facts) must stay articulated across retries — a
@@ -846,7 +863,7 @@ async def stream_tap(
             loop_attempts: list[Attempt] = []
             async for loop_att in render_loop.iter_attempts(
                 _render_enter,
-                projection=str((enter_view or {}).get("projection") or ""),
+                projection=enter_projection or "",
                 region_bytes=render_loop.data_url_bytes(enter_source),
                 judge_conformance=judge.score_view_conformance,
                 # Interior enters SWAP the same-place axis for the interior
@@ -864,6 +881,7 @@ async def stream_tap(
                     judge.score_interior if interior_enter else None
                 ),
                 family=enter_family,
+                render_for_attempt=_render_enter_attempt,
                 abort=_abort_if_disconnected,
                 deadline_s=loop_deadline,
             ):

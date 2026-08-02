@@ -106,6 +106,25 @@ _CASES: list[Case] = [
 ]
 
 
+def _selected(name: str, allowed: list[str]) -> list[str]:
+    raw = os.environ.get(name)
+    if not raw:
+        return allowed
+    picked = [v.strip() for v in raw.split(",") if v.strip()]
+    unknown = [v for v in picked if v not in allowed]
+    if unknown:
+        raise ValueError(f"{name} has unknown value(s): {', '.join(unknown)}")
+    return picked
+
+
+def _positioning_probe_on() -> bool:
+    return os.environ.get("VIEW_BENCH_POSITIONING_PROBE", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 @dataclass(frozen=True)
 class ArmResult:
     arm: str
@@ -136,29 +155,62 @@ def _crop_region(map_bytes: bytes, tap: tuple[float, float]) -> bytes:
     return buf.getvalue()
 
 
+def _style_ref_bytes(map_bytes: bytes) -> bytes:
+    """Compact the style exemplar before fal upload.
+
+    The report still keeps the full map, but the second nano reference only
+    needs medium/style signal; multi-MB data URLs can stall inside fal upload.
+    """
+    from PIL import Image, ImageOps
+
+    try:
+        max_side = int(os.environ.get("VIEW_BENCH_STYLE_REF_MAX_SIDE", "1024"))
+    except ValueError:
+        max_side = 1024
+    try:
+        quality = int(os.environ.get("VIEW_BENCH_STYLE_REF_QUALITY", "82"))
+    except ValueError:
+        quality = 82
+    max_side = max(256, min(2048, max_side))
+    quality = max(45, min(95, quality))
+
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(map_bytes))).convert("RGB")
+    img.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 async def _run_case(case: Case, aspect: str) -> CaseResult:
     from providers import image as image_provider
     from providers import image_edit as image_edit_provider
     from providers import model_router
     from providers.prompt_library import camera as camera_lib
 
-    src = await image_provider.generate_image(
-        prompt=case.map_prompt, aspect_ratio=aspect, tier="balanced"
-    )
-    map_url = image_provider.encode_data_url(src.jpeg_bytes)
-    region_bytes = _crop_region(src.jpeg_bytes, case.tap)
+    _REPORTS.mkdir(parents=True, exist_ok=True)
+    map_path = _REPORTS / f"view_{case.name}_map.jpg"
+    reuse = bool(os.environ.get("VIEW_BENCH_REUSE_ARTIFACTS")) and map_path.exists()
+    if reuse:
+        map_bytes = map_path.read_bytes()
+    else:
+        src = await image_provider.generate_image(
+            prompt=case.map_prompt, aspect_ratio=aspect, tier="balanced"
+        )
+        map_bytes = src.jpeg_bytes
+    style_ref_url = image_provider.encode_data_url(_style_ref_bytes(map_bytes))
+    region_bytes = _crop_region(map_bytes, case.tap)
     region_url = image_provider.encode_data_url(region_bytes)
 
     loop_mode = bool(os.environ.get("VIEW_BENCH_LOOP"))
 
-    _REPORTS.mkdir(parents=True, exist_ok=True)
-    (_REPORTS / f"view_{case.name}_map.jpg").write_bytes(src.jpeg_bytes)
+    map_path.write_bytes(map_bytes)
     (_REPORTS / f"view_{case.name}_region.jpg").write_bytes(region_bytes)
 
     arms: list[ArmResult] = []
-    for arm, view in _ARM_VIEWS.items():
-        # Per-arm model = the production router pick (steep arms route to the
-        # gpt family under PR #35), so the bench measures the full stack.
+    for arm in _selected("VIEW_BENCH_ARMS", list(_ARM_VIEWS)):
+        view = _ARM_VIEWS[arm]
+        # Per-arm model = the production router pick, so the bench measures
+        # the full stack instead of a stale model pin.
         arm_model = model_router.select_enter_model(
             str(view.get("projection")) if view else None
         )
@@ -182,11 +234,26 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
             from providers import judge as judge_mod
             from providers import render_loop
 
-            async def _render(suffix: str, _i: str = instruction, _m: str | None = arm_model) -> Any:
+            retry_arm_model = model_router.select_enter_retry_model(arm_model)
+
+            async def _render_attempt(
+                suffix: str,
+                attempt_index: int,
+                _i: str = instruction,
+                _first: str | None = arm_model,
+                _retry: str | None = retry_arm_model,
+            ) -> Any:
                 full = _i if not suffix else f"{_i}\n\n{suffix}"
+                model = _first if attempt_index == 0 else _retry
                 return await image_edit_provider.edit_image(
-                    region_url, full, model_override=_m, style_ref_url=map_url
+                    region_url,
+                    full,
+                    model_override=model,
+                    style_ref_url=style_ref_url,
                 )
+
+            async def _render(suffix: str) -> Any:
+                return await _render_attempt(suffix, 0)
 
             async def _judge_detail(
                 img: bytes, _label: str = case.place_label, _f: list[str] = case.facts
@@ -202,6 +269,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 config=render_loop.LoopConfig(max_attempts=3),
                 judge_detail=_judge_detail,
                 judge_medium=judge_mod.score_style_pair,
+                render_for_attempt=_render_attempt,
             )
             for i, att in enumerate(loop_result.attempts):
                 (_REPORTS / f"view_{case.name}_{arm}_a{i}.jpg").write_bytes(
@@ -239,7 +307,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                     region_url,
                     instruction,
                     model_override=arm_model,
-                    style_ref_url=map_url,
+                    style_ref_url=style_ref_url,
                 )
                 break
             except Exception as exc:  # bench resilience — reported, not fatal
@@ -343,12 +411,19 @@ def summarize(results: list[CaseResult]) -> dict[str, Any]:
 async def run_bench() -> dict[str, Any]:
     from dataclasses import asdict
 
-    results = [await _run_case(c, "16:9") for c in _CASES]
-    probe = await _positioning_probe("16:9")
+    case_names = _selected("VIEW_BENCH_CASES", [c.name for c in _CASES])
+    results = [await _run_case(c, "16:9") for c in _CASES if c.name in case_names]
+    probe = (
+        await _positioning_probe("16:9")
+        if _positioning_probe_on()
+        else {"skipped": True}
+    )
     return {
         "judge_model": os.environ.get("CONTINUITY_BENCH_JUDGE_MODEL"),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "loop": bool(os.environ.get("VIEW_BENCH_LOOP")),
+        "arms_filter": os.environ.get("VIEW_BENCH_ARMS"),
+        "cases_filter": os.environ.get("VIEW_BENCH_CASES"),
         "conform_threshold": _CONFORM_THRESHOLD,
         "same_place_floor": _SAME_PLACE_FLOOR,
         "cases": [asdict(r) for r in results],
