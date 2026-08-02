@@ -142,15 +142,26 @@ async def _ask_judge(
             "content": [{"type": "text", "text": user_text}, *image_blocks],
         },
     ]
-    response = await llm._create_with_retry(
-        client,
-        model=_judge_model(),
-        messages=messages,
-        temperature=0.0,
-        max_tokens=400,
-    )
-    raw = response.choices[0].message.content or ""
-    return _parse_judgement(raw)
+    # _create_with_retry only retries API-level errors; a 200 with EMPTY content
+    # (a transient judge-model failure) parses to a loud UNPARSEABLE score-0
+    # without raising, so it slips past that retry AND the benches' own
+    # exception-only retry — banking a blank reply as a real 0. Re-issue the
+    # call when the reply can't be parsed.
+    attempts = _bounded_int_env("VLM_JUDGE_EMPTY_RETRIES", 3, floor=1, ceiling=5)
+    result = JudgeResult(score=0.0, rationale="UNPARSEABLE: no judge response", raw="")
+    for _ in range(attempts):
+        response = await llm._create_with_retry(
+            client,
+            model=_judge_model(),
+            messages=messages,
+            temperature=0.0,
+            max_tokens=400,
+        )
+        raw = response.choices[0].message.content or ""
+        result = _parse_judgement(raw)
+        if not result.rationale.startswith("UNPARSEABLE"):
+            return result
+    return result
 
 
 async def score_style_pair(image_a: bytes, image_b: bytes) -> JudgeResult:

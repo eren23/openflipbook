@@ -149,3 +149,77 @@ def test_parse_salvages_reasoning_preamble_then_json() -> None:
     # A preamble followed by a COMPLETE json object → salvage recovers the score.
     r = judge._parse_judgement('Let me think. The dome matches.\n{"score": 9, "rationale": "dome"}')
     assert r.score == 9.0
+
+
+# --- _ask_judge retries a transient EMPTY / unparseable response --------------
+#
+# _create_with_retry only retries API-level errors; a 200 with empty content
+# parses to a loud UNPARSEABLE score-0 without raising, so every caller (the
+# view-loop AND the paid benches) used to bank a transient blank reply as a real
+# 0. _ask_judge now re-issues the call when the reply can't be parsed.
+
+
+class _FakeMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content: str) -> None:
+        self.message = _FakeMessage(content)
+
+
+class _FakeResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [_FakeChoice(content)]
+
+
+def _stub_replies(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> dict[str, int]:
+    from providers import llm
+
+    calls = {"n": 0}
+
+    async def _fake_create(_client: Any, **_kw: Any) -> _FakeResponse:
+        content = replies[min(calls["n"], len(replies) - 1)]
+        calls["n"] += 1
+        return _FakeResponse(content)
+
+    monkeypatch.setattr(llm, "_client", lambda: object())
+    monkeypatch.setattr(llm, "_create_with_retry", _fake_create)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_ask_judge_retries_empty_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # First call returns an empty body (the observed transient), second is valid.
+    calls = _stub_replies(monkeypatch, ["", '{"score": 7, "rationale": "match"}'])
+
+    r = await judge._ask_judge("sys", "user", [])
+
+    assert calls["n"] == 2  # retried the blank reply
+    assert r.score == 7.0
+    assert "UNPARSEABLE" not in r.rationale
+
+
+@pytest.mark.asyncio
+async def test_ask_judge_gives_up_loudly_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Persistent empty replies → bounded retries, then the loud UNPARSEABLE 0.
+    monkeypatch.setenv("VLM_JUDGE_EMPTY_RETRIES", "2")
+    calls = _stub_replies(monkeypatch, [""])
+
+    r = await judge._ask_judge("sys", "user", [])
+
+    assert calls["n"] == 2  # capped, not infinite
+    assert r.score == 0.0
+    assert r.rationale.startswith("UNPARSEABLE")
+
+
+@pytest.mark.asyncio
+async def test_ask_judge_does_not_retry_a_legit_score(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A valid reply (incl. a legit 0) must not burn extra calls.
+    calls = _stub_replies(monkeypatch, ['{"score": 0, "rationale": "unrelated"}'])
+
+    r = await judge._ask_judge("sys", "user", [])
+
+    assert calls["n"] == 1
+    assert r.score == 0.0 and "UNPARSEABLE" not in r.rationale
