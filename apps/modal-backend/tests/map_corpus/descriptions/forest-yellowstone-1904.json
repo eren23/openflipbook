@@ -17,7 +17,7 @@
    "visual": "Large, pale blue body of water in the far upper background.",
    "pos": {
     "x": 31.0,
-    "y": 60.0
+    "y": 14.0
    },
    "footprint": {
     "w": 25.0,
@@ -412,8 +412,8 @@
   }
  ],
  "review": {
-  "status": "vlm_draft",
-  "by": "",
-  "date": ""
+  "status": "verified",
+  "by": "claude (image-inspected via overlay; yellowstone-lake pos corrected to its border centroid; grand-canyon anchor confirmed on-feature for descent chain); eren spot-check welcome",
+  "date": "2026-08-02"
  }
 }

@@ -110,6 +110,19 @@
       "attribution": "Joanbanjo, via Wikimedia Commons, CC BY-SA 3.0",
       "sha256": "12f7f44988fc21a2168ea5406db32edb63ac731c446d711d216bb577873d71ec",
       "filename": "wm-sala-del-maggior-consiglio-palau-ducal-de-ven-ci.jpg"
+    },
+    {
+      "id": "wm-grand-canyon-of-yellowstone-and-lower-falls-wyom",
+      "tier": "closeup",
+      "genre": "closeup",
+      "source_url": "https://commons.wikimedia.org/wiki/Special:FilePath/Grand%20Canyon%20of%20Yellowstone%20and%20Lower%20falls%2C%20Wyoming%2C%20United%20States.jpg?width=1600",
+      "license_note": "CC BY-SA 4.0 (via Wikimedia Commons)",
+      "attribution": "Erik Whalen, via Wikimedia Commons, CC BY-SA 4.0",
+      "sha256": "752c1ffda0b68535a5548b00230523387580ec37df872cc76a0328eff1277480",
+      "filename": "wm-grand-canyon-of-yellowstone-and-lower-falls-wyom.jpg",
+      "parent_id": "forest-yellowstone-1904",
+      "parent_ref": "grand-canyon-yellowstone",
+      "view": "exterior"
     }
   ]
 }
