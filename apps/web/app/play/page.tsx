@@ -3830,7 +3830,12 @@ export default function PlayPage() {
             {phase === "ready" &&
               localizeStatus?.status === "failed" &&
               localizeStatus.nodeId === page?.nodeId && (
-                <div className="pointer-events-auto absolute bottom-3 left-3 flex items-center gap-3 rounded-full bg-amber-700/90 px-4 py-2 text-xs text-white shadow-lg">
+                <div className="pointer-events-auto absolute bottom-3 end-3 z-10 flex items-center gap-3 rounded-full bg-amber-700/90 px-4 py-2 text-xs text-white shadow-lg">
+                  {/* end-3 (not left-3): the bottom-LEFT corner holds the 📌 Pin
+                      style button (z-10) which rendered on top and occluded this
+                      toast's text. Localize belongs on the right per TapHint's
+                      layout contract (Pin-style left / hint centered / localize
+                      right); z-10 keeps "Map it" tappable over the centered hint. */}
                   <span>Couldn’t map this page — taps may miss.</span>
                   <button
                     type="button"
