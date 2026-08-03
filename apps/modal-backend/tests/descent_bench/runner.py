@@ -59,6 +59,24 @@ def _model() -> str:
     return os.environ.get("FAL_IMAGE_MODEL_BALANCED", "fal-ai/nano-banana-pro")
 
 
+# The label the model can't cheat off. A famous real name (e.g. "Grand Canyon of
+# the Yellowstone") lets the BASELINE render the place from text alone, so both
+# arms ceiling and place_lift reads 0 — even when region-conditioning is doing
+# real work. Blinding the name in BOTH arms isolates the crop's contribution:
+# the fantasy/generated-map regime the product actually serves (a made-up place
+# the model can only render from its DRAWN form). The judge never sees the label
+# — it compares images — so this changes only what the arms are TOLD, not scoring.
+_BLIND_PROMPT_LABEL = "the place marked at this spot on the map"
+
+
+def _blind_label() -> bool:
+    return os.environ.get("DESCENT_BENCH_BLIND_LABEL", "").lower() in ("1", "true", "yes")
+
+
+def _prompt_label(label: str) -> str:
+    return _BLIND_PROMPT_LABEL if _blind_label() else label
+
+
 def resolve_chains() -> list[dict[str, Any]]:
     descs = {d["map_id"]: d for d in load_descriptions(status="verified")}
     return descent_chains(load_manifest(), descs)
@@ -92,7 +110,8 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     # closer OUTSIDE view — the shape that measures place_lift when the parent
     # already draws a distinctive exterior (tests/map_corpus/chains.py docs).
     view = chain.get("view", "interior")
-    base = f"A closer, {view} view of {label}, a place within the parent map."
+    plabel = _prompt_label(label)
+    base = f"A closer, {view} view of {plabel}, a place within the parent map."
 
     # save artifacts for visual inspection (overlays/ is gitignored). A live
     # judge can die after image spend; opt-in reuse lets the rerun finish judges
@@ -117,9 +136,9 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
         # so the reference pixels actually bite (generate_image ignores refs).
         if view == "interior":
             instruction = image_edit_provider.build_enter_instruction(
-                label,
+                plabel,
                 [],
-                subject_context=f"{label}, a place within the parent map",
+                subject_context=f"{plabel}, a place within the parent map",
                 interior=True,
             )
             with_gen = await image_edit_provider.edit_image(
@@ -130,7 +149,7 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
         else:
             # exterior closeup = the product's zoom_continue rung (Kontext).
             instruction = image_edit_provider.build_zoom_instruction(
-                label, [], register="view", faithful=True
+                plabel, [], register="view", faithful=True
             )
             with_gen = await image_edit_provider.continue_image(
                 region_url,
@@ -186,6 +205,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "blind_label": _blind_label(),
         "chains": rows,
         "mean_place_lift": _mean("place_lift"),
         "mean_style_lift": _mean("style_lift"),

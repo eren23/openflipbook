@@ -150,3 +150,58 @@ async def test_exterior_with_arm_rides_zoom_continue(monkeypatch, tmp_path) -> N
 
     assert calls["continue"] == ["data:region"]
     assert calls["edit"] == []
+
+
+def test_prompt_label_blinds_only_when_enabled(monkeypatch) -> None:
+    assert runner._prompt_label("Grand Canyon of the Yellowstone") == (
+        "Grand Canyon of the Yellowstone"
+    )
+    monkeypatch.setenv("DESCENT_BENCH_BLIND_LABEL", "1")
+    blinded = runner._prompt_label("Grand Canyon of the Yellowstone")
+    assert blinded == runner._BLIND_PROMPT_LABEL
+    assert "Grand Canyon" not in blinded
+
+
+async def test_blind_label_strips_the_name_from_both_arms(monkeypatch, tmp_path) -> None:
+    """DESCENT_BENCH_BLIND_LABEL removes the real place name from BOTH the with-arm
+    edit instruction and the without-arm base prompt, so place_lift can isolate
+    the region crop's contribution (the model can't cheat off a famous name)."""
+    monkeypatch.setenv("DESCENT_BENCH_BLIND_LABEL", "1")
+    captured: dict[str, str] = {}
+
+    async def _fake_edit(image_data_url, instruction, **_kw):
+        captured["edit_instr"] = instruction
+        return _StubImage()
+
+    async def _fake_enter(prompt, aspect, model, ref):
+        captured["without_prompt"] = prompt
+        return b"\xff\xd8without"
+
+    async def _fake_judge(*_a, **_k):
+        return _StubJudgement(5.0)
+
+    from tests import map_corpus
+
+    monkeypatch.setattr(map_corpus, "ROOT", tmp_path)
+    monkeypatch.setattr(runner, "image_path", lambda _id: _StubPath())
+    monkeypatch.setattr(coherence_runner, "_region_crop", lambda _b, _a: b"\xff\xd8region")
+    monkeypatch.setattr(coherence_runner, "_enter", _fake_enter)
+    monkeypatch.setattr(image_provider, "encode_data_url", lambda _b: "data:region")
+    monkeypatch.setattr(image_edit_provider, "edit_image", _fake_edit)
+    monkeypatch.setattr(model_router, "resolve_model", lambda slot: f"model:{slot}")
+    for name in ("score_style_pair", "score_place_match", "score_continuation"):
+        monkeypatch.setattr(judge, name, _fake_judge)
+
+    chain = {
+        "parent_id": "p",
+        "child_id": "c",
+        "anchor": {},
+        "label": "The Grand Bazaar of Isfahan",
+        "view": "interior",
+    }
+    await runner._score_chain(chain, "16:9")
+
+    # neither arm is told the real name; both see the blind marker
+    assert "Grand Bazaar" not in captured["edit_instr"]
+    assert "Grand Bazaar" not in captured["without_prompt"]
+    assert "marked at this spot" in captured["without_prompt"]
