@@ -316,6 +316,16 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
             scores["align_ty"] = round(float(align["ty"]), 1)
             scores["align_flip"] = 1.0 if align["flip_x"] else 0.0
         scores["unalignable"] = 1.0 if geo.get("unalignable") else 0.0
+        # §4 phase-1 diagnostic (zero weight): does the fitted register
+        # GENERALIZE to a held-out entity? recovery_gain > 0 (frame units)
+        # means a read-side inverse register would place fresh detections
+        # closer to metric truth than the raw detector output.
+        probe = geo.get("pose_probe")
+        if probe is not None:
+            scores["pose_n"] = probe["n"]
+            scores["pose_err_raw"] = probe["err_raw"]
+            scores["pose_err_recovered"] = probe["err_recovered"]
+            scores["pose_gain"] = probe["recovery_gain"]
         used = {k: w for k, w in weights.items() if k in scores and w > 0}
         if used:
             total = sum(used.values())

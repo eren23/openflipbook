@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from tests.recon_bench._align import Alignment, fit_alignment, geo_scores
+from tests.recon_bench._align import (
+    Alignment,
+    fit_alignment,
+    geo_scores,
+    pose_probe_loo,
+)
 from tests.recon_bench.runner import _expected_layout, corpus_scenarios
 
 # --- alignment fit -----------------------------------------------------------
@@ -47,6 +52,52 @@ def test_fit_clamps_scale_and_needs_two_points() -> None:
 def test_alignment_apply_round_trips() -> None:
     a = Alignment(scale=1.5, tx=-10.0, ty=5.0, flip_x=False, residual=0.0, matched=4)
     assert a.apply((10.0, 10.0)) == (pytest.approx(5.0), pytest.approx(20.0))
+
+
+def test_alignment_invert_undoes_apply_including_flip() -> None:
+    for flip in (False, True):
+        a = Alignment(scale=0.65, tx=12.0, ty=-4.0, flip_x=flip, residual=0.0, matched=4)
+        for p in PTS:
+            x, y = a.invert(a.apply(p))
+            assert (x, y) == (pytest.approx(p[0]), pytest.approx(p[1]))
+
+
+# --- pose probe (§4 phase 1: does the register GENERALIZE?) ------------------
+#
+# pos_aligned fits and scores on the SAME pairs — it forgives drift but can't
+# say whether the register would place an entity it was NOT fitted on (the
+# metric-pose-recovery question). The leave-one-out probe answers that: fit on
+# N-1 matches, invert-register the held-out observation, compare its error to
+# the raw error. recovery_gain > 0 ⇒ read-side recovery is real, not circular.
+
+
+def test_pose_probe_register_drift_recovers() -> None:
+    # The wild drift signature: whole layout rescaled 0.65 + shifted. Raw
+    # errors are huge; the register generalizes so LOO recovery is ~exact.
+    pairs = _pairs(lambda p: (0.65 * p[0] + 12, 0.65 * p[1] + 8), PTS)
+    probe = pose_probe_loo(pairs)
+    assert probe is not None and probe["n"] == 4
+    assert probe["err_raw"] > 10
+    assert probe["err_recovered"] == pytest.approx(0.0, abs=0.1)
+    assert probe["recovery_gain"] > 10
+
+
+def test_pose_probe_scatter_does_not_fake_recovery() -> None:
+    # Unstructured error (each entity off in a different direction) — no
+    # shared register exists, so LOO must NOT report a healthy gain.
+    scatter = [
+        ((10.0, 10.0), (30.0, 50.0)),
+        ((50.0, 30.0), (20.0, 10.0)),
+        ((90.0, 50.0), (60.0, 5.0)),
+        ((30.0, 45.0), (85.0, 20.0)),
+    ]
+    probe = pose_probe_loo(scatter)
+    assert probe is not None
+    assert probe["recovery_gain"] < 5  # no drift structure to exploit
+
+
+def test_pose_probe_needs_three_pairs() -> None:
+    assert pose_probe_loo(_pairs(lambda p: p, PTS[:2])) is None
 
 
 # --- geometric scorecard -----------------------------------------------------

@@ -36,6 +36,13 @@ class Alignment:
         x = (FRAME_W - p[0]) if self.flip_x else p[0]
         return (self.scale * x + self.tx, self.scale * p[1] + self.ty)
 
+    def invert(self, p: Point) -> Point:
+        """Observed frame -> expected (metric) frame — the read-side register:
+        what a recovered coordinate for a fresh detection would be."""
+        x = (p[0] - self.tx) / self.scale
+        y = (p[1] - self.ty) / self.scale
+        return ((FRAME_W - x) if self.flip_x else x, y)
+
 
 def fit_alignment(pairs: list[tuple[Point, Point]]) -> Alignment | None:
     """Least-squares uniform scale + translation over (expected, observed)
@@ -77,6 +84,41 @@ def fit_alignment(pairs: list[tuple[Point, Point]]) -> Alignment | None:
 def _pos_score(dist: float) -> float:
     tol = _POS_TOLERANCE_FRAC * hypot(FRAME_W, FRAME_H)
     return max(0.0, 1.0 - dist / tol)
+
+
+def pose_probe_loo(pairs: list[tuple[Point, Point]]) -> dict[str, float] | None:
+    """§4 phase-1 probe: does the similarity register GENERALIZE?
+
+    pos_aligned fits and scores on the SAME pairs, so it forgives drift but
+    cannot say whether the register would correctly place an entity it was
+    not fitted on — the metric-pose-recovery question (turn a fresh detection
+    into a trustworthy metric coordinate). Leave-one-out: fit on N-1 matched
+    pairs, invert-register the held-out observation into the expected frame,
+    compare that error to the raw error. recovery_gain > 0 (frame units) ⇒
+    read-side recovery is real, not circular. None when <3 pairs (each LOO
+    fit needs the fitter's 2-pair minimum)."""
+    if len(pairs) < 3:
+        return None
+    raw_errs: list[float] = []
+    rec_errs: list[float] = []
+    for i, (e, o) in enumerate(pairs):
+        fit = fit_alignment(pairs[:i] + pairs[i + 1 :])
+        if fit is None:
+            continue
+        r = fit.invert(o)
+        raw_errs.append(hypot(e[0] - o[0], e[1] - o[1]))
+        rec_errs.append(hypot(e[0] - r[0], e[1] - r[1]))
+    if not raw_errs:
+        return None
+    n = len(raw_errs)
+    err_raw = sum(raw_errs) / n
+    err_rec = sum(rec_errs) / n
+    return {
+        "n": float(n),
+        "err_raw": round(err_raw, 2),
+        "err_recovered": round(err_rec, 2),
+        "recovery_gain": round(err_raw - err_rec, 2),
+    }
 
 
 def geo_scores(
@@ -128,6 +170,9 @@ def geo_scores(
         "pos_raw": pos_raw,
         "pos_aligned": pos_aligned,
         "size": size,
+        # §4 diagnostic: leave-one-out generalization of the register (None
+        # when <3 matches). Zero composite weight, like `alignment`.
+        "pose_probe": pose_probe_loo(pairs),
         "alignment": (
             {
                 "scale": round(align.scale, 3),
