@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSegments,
   marksForEndReportedStage,
+  marksForRevealEnd,
   type WaterfallMark,
 } from "./waterfall-segments";
 
@@ -71,5 +72,42 @@ describe("marksForEndReportedStage", () => {
     expect(out.map((m) => m.stage)).toEqual(["final", "idle", "decode"]);
     expect(out[1]).toEqual({ stage: "idle", t: 2000, end: 186_813 });
     expect(out[2]).toEqual({ stage: "decode", t: 186_813, end: 187_003 });
+  });
+});
+
+describe("marksForRevealEnd", () => {
+  it("no hidden time -> a single reveal mark spanning the window (unchanged behavior)", () => {
+    const prev: WaterfallMark[] = [{ stage: "decode", t: 2000, end: 2100 }];
+    const out = marksForRevealEnd(prev, 2600, []);
+    expect(out[out.length - 1]).toEqual({ stage: "morph", t: 2100, end: 2600 });
+    expect(out).toHaveLength(2);
+  });
+
+  it("the 91724ms incident: hidden time banks as idle, reveal shows only visible ms", () => {
+    // The reveal's CSS transitionend is compositor-gated and pauses while the
+    // tab is hidden — a backgrounded tab banked 90.9s of idle into "reveal".
+    const prev: WaterfallMark[] = [{ stage: "decode", t: 2000, end: 2100 }];
+    const hidden = [{ start: 2200, end: 93_000 }];
+    const out = marksForRevealEnd(prev, 93_400, hidden);
+    expect(out.map((m) => m.stage)).toEqual(["decode", "idle", "morph"]);
+    expect(out[1]).toEqual({ stage: "idle", t: 2100, end: 92_900 });
+    expect(out[2]).toEqual({ stage: "morph", t: 92_900, end: 93_400 });
+  });
+
+  it("hidden spans are clipped to the reveal window; sub-gap overlap adds no idle", () => {
+    // Hidden mostly BEFORE the reveal window (during gen, decode already
+    // handles that) — only the 50ms overlap counts, under IDLE_GAP_MS.
+    const prev: WaterfallMark[] = [{ stage: "decode", t: 2000, end: 2100 }];
+    const out = marksForRevealEnd(prev, 2600, [{ start: 0, end: 2150 }]);
+    expect(out.map((m) => m.stage)).toEqual(["decode", "morph"]);
+    expect(out[1]).toEqual({ stage: "morph", t: 2100, end: 2600 });
+  });
+
+  it("a still-open hidden range (no end yet) is clipped at the event's arrival", () => {
+    const prev: WaterfallMark[] = [{ stage: "decode", t: 2000, end: 2100 }];
+    const out = marksForRevealEnd(prev, 93_400, [{ start: 2200 }]);
+    expect(out.map((m) => m.stage)).toEqual(["decode", "idle", "morph"]);
+    expect(out[1]).toEqual({ stage: "idle", t: 2100, end: 93_300 });
+    expect(out[2]).toEqual({ stage: "morph", t: 93_300, end: 93_400 });
   });
 });

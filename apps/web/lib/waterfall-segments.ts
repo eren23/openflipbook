@@ -73,6 +73,43 @@ export function buildSegments(
   return segments;
 }
 
+/** A document-hidden interval on the trace clock; `end` absent while the tab
+ * is still hidden when the closing event fires. */
+export interface HiddenRange {
+  start: number;
+  end?: number;
+}
+
+/** Insert-point helper for the reveal's end (`morph:end`): the reveal's CSS
+ * transitionend is compositor-gated and PAUSES while the tab is hidden, so a
+ * backgrounded tab banks its idle wall-clock into "reveal" (the 91724ms
+ * incident — same hazard `marksForEndReportedStage` fixed for decode).
+ * Hidden time inside the [previous end, endT] window renders as `idle`; the
+ * reveal bar keeps only the visible remainder. */
+export function marksForRevealEnd(
+  prev: readonly WaterfallMark[],
+  endT: number,
+  hiddenRanges: readonly HiddenRange[],
+): WaterfallMark[] {
+  const last = prev[prev.length - 1];
+  const windowStart = last == null ? endT : (last.end ?? last.t);
+  const windowEnd = Math.max(endT, windowStart);
+  let hiddenMs = 0;
+  for (const r of hiddenRanges) {
+    const s = Math.max(r.start, windowStart);
+    const e = Math.min(r.end ?? windowEnd, windowEnd);
+    if (e > s) hiddenMs += e - s;
+  }
+  const out = [...prev];
+  if (hiddenMs > IDLE_GAP_MS) {
+    out.push({ stage: "idle", t: windowStart, end: windowStart + hiddenMs });
+    out.push({ stage: "morph", t: windowStart + hiddenMs, end: windowEnd });
+  } else {
+    out.push({ stage: "morph", t: windowStart, end: windowEnd });
+  }
+  return out;
+}
+
 /** Insert-point helper for end-reported events (decode): the event arrives at
  * its END carrying a measured duration; reconstruct the start, and surface a
  * leading idle gap when the stage began long after the previous mark ended. */

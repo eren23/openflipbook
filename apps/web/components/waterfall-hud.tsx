@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { on, type HudEventName } from "@/lib/trace";
 import {
   buildSegments,
   marksForEndReportedStage,
+  marksForRevealEnd,
+  type HiddenRange,
   type WaterfallMark as Mark,
   type WaterfallStage as StageKey,
 } from "@/lib/waterfall-segments";
@@ -48,6 +50,10 @@ export default function WaterfallHUD() {
   const [run, setRun] = useState<RunState>(EMPTY);
   const [hasShown, setHasShown] = useState(false);
   const [now, setNow] = useState(0);
+  // Document-hidden spans on the trace clock. The reveal's transitionend is
+  // compositor-gated and pauses while hidden — morph:end subtracts these so
+  // idle time renders as `idle`, not a 90s+ "reveal" bar.
+  const hiddenRangesRef = useRef<HiddenRange[]>([]);
 
   useEffect(() => {
     const offs: Array<() => void> = [];
@@ -55,9 +61,29 @@ export default function WaterfallHUD() {
       offs.push(on(name, cb));
     };
 
+    const onVisibility = () => {
+      const ranges = hiddenRangesRef.current;
+      if (document.visibilityState === "hidden") {
+        ranges.push({ start: performanceNow() });
+      } else {
+        const open = ranges[ranges.length - 1];
+        if (open && open.end == null) open.end = performanceNow();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    offs.push(() =>
+      document.removeEventListener("visibilitychange", onVisibility),
+    );
+
     sub("trace:set", (p: unknown) => {
       const id = (p as { id?: string; ts?: number })?.id ?? null;
       const ts = (p as { ts?: number })?.ts ?? 0;
+      // A run can start while hidden (#185 auto-retry fires on return): keep
+      // an open hidden span so the fresh run still knows it's backgrounded.
+      hiddenRangesRef.current =
+        document.visibilityState === "hidden"
+          ? [{ start: performanceNow() }]
+          : [];
       setRun({
         traceId: id,
         startedAt: ts || null,
@@ -131,18 +157,22 @@ export default function WaterfallHUD() {
     sub("morph:end", (p: unknown) => {
       // The reveal runs from the decode's end to this event's arrival; the
       // legacy duration_ms (measured since CLICK) is ignored for the bar.
+      // Hidden spans inside that window render as `idle`, not `reveal` — the
+      // transitionend pauses while backgrounded (the 91724ms incident).
       const v = p as { t?: number; duration_ms?: number };
       setRun((prev) => {
         const last = prev.marks[prev.marks.length - 1];
         const lastEnd = last == null ? 0 : (last.end ?? last.t);
         const endT = typeof v?.t === "number" ? v.t : lastEnd;
+        const marks = marksForRevealEnd(
+          prev.marks,
+          endT,
+          hiddenRangesRef.current,
+        );
         return {
           ...prev,
-          marks: [
-            ...prev.marks,
-            { stage: "morph", t: lastEnd, end: Math.max(endT, lastEnd) },
-          ],
-          endedAt: Math.max(endT, lastEnd),
+          marks,
+          endedAt: marks[marks.length - 1]?.end ?? Math.max(endT, lastEnd),
           active: null,
         };
       });
