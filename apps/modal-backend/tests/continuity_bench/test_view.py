@@ -7,6 +7,8 @@ and the project_top_down port the positioning probe depends on.
 """
 from __future__ import annotations
 
+import pytest
+
 from providers.geometry import project_top_down
 from tests.continuity_bench.view_runner import (
     _ARM_INTENT,
@@ -14,6 +16,7 @@ from tests.continuity_bench.view_runner import (
     _CASES,
     ArmResult,
     CaseResult,
+    _bench_loop_config,
     summarize,
 )
 
@@ -36,6 +39,32 @@ def test_cases_and_arms_are_well_formed() -> None:
         if view is not None:
             assert view["projection"] == arm
             assert view["source"] == "user"
+
+
+def test_bench_loop_config_defaults_match_the_old_literal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unset env must be byte-identical to the old LoopConfig(max_attempts=3)
+    # literal; VIEW_BENCH_ACCEPT_* raises the floors (the retry-forcing A/B
+    # lever). Production VIEW_LOOP_ACCEPT_* must stay ignored on the bench.
+    for k in (
+        "VIEW_BENCH_ACCEPT_CONFORMANCE",
+        "VIEW_BENCH_ACCEPT_SAME_PLACE",
+        "VIEW_BENCH_ACCEPT_DETAIL",
+        "VIEW_BENCH_ACCEPT_MEDIUM",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    from providers.render_loop import LoopConfig
+
+    assert _bench_loop_config() == LoopConfig(max_attempts=3)
+
+    monkeypatch.setenv("VIEW_LOOP_ACCEPT_CONFORMANCE", "9.9")  # production knob
+    assert _bench_loop_config().accept_conformance == 7.0  # still ignored
+
+    monkeypatch.setenv("VIEW_BENCH_ACCEPT_CONFORMANCE", "8.5")
+    cfg = _bench_loop_config()
+    assert cfg.accept_conformance == 8.5
+    assert cfg.accept_same_place == 6.0  # untouched floors keep defaults
 
 
 def test_summarize_gates() -> None:

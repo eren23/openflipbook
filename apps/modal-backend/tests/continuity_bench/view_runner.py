@@ -103,7 +103,66 @@ _CASES: list[Case] = [
         surroundings="just north, the bell tower; south beyond the walls, terraced vineyards",
         facts=["the cloth stalls", "the well"],
     ),
+    # The failing-first case: the 2026-07-21 failure class was oblique enters
+    # into DENSE complex places — the landmark survives but the FRAMING
+    # scatters (wider/sideways) across retries. The two cases above pass on
+    # attempt 0, so the retry path (and ENTER_RETRY_MODEL_SWAP) never runs;
+    # this one crowds the subject so oblique framing is genuinely hard.
+    Case(
+        name="etched_cliff_monastery",
+        map_prompt=(
+            "a fine-lined etched top-down map of a sprawling cliffside "
+            "monastery complex: a great domed library hall at the center, "
+            "twin bell towers flanking it, terraced courtyards stepping down "
+            "the cliff to the south, a covered bridge crossing a gorge to the "
+            "west, and a walled herb garden northeast; dense fine linework, "
+            "muted umber wash, many small annexes and stairways crowding the "
+            "slopes"
+        ),
+        style="fine-lined etching, muted umber wash, dense linework",
+        tap=(0.5, 0.45),
+        place_label="The Great Library Hall",
+        subject_context=(
+            "a great domed library hall at the heart of a crowded cliffside "
+            "monastery complex, hemmed in by towers, annexes and stairways"
+        ),
+        surroundings=(
+            "twin bell towers flanking the hall; terraced courtyards stepping "
+            "down the cliff to the south; the covered gorge bridge to the west"
+        ),
+        facts=["the reading terrace", "the twin bell towers"],
+    ),
 ]
+
+
+# The env names the bench honours for its loop accept floors (A/B lever).
+_BENCH_ACCEPT_ENVS = (
+    "VIEW_BENCH_ACCEPT_CONFORMANCE",
+    "VIEW_BENCH_ACCEPT_SAME_PLACE",
+    "VIEW_BENCH_ACCEPT_DETAIL",
+    "VIEW_BENCH_ACCEPT_MEDIUM",
+)
+
+
+def _bench_loop_config() -> Any:
+    """The bench's LoopConfig. Passing a literal here SHORT-CIRCUITS
+    loop_config_from_env, so the production VIEW_LOOP_ACCEPT_* env never
+    reaches bench runs — accept floors were locked at the dataclass defaults
+    and the two seed cases pass on attempt 0, leaving the retry path (and
+    ENTER_RETRY_MODEL_SWAP) unexercisable. VIEW_BENCH_ACCEPT_* raises the
+    floors for A/Bs that need guaranteed retries; unset env keeps runs
+    byte-identical to the old literal (defaults match the dataclass)."""
+    from providers import render_loop
+
+    return render_loop.LoopConfig(
+        max_attempts=3,
+        accept_conformance=render_loop._env_float(
+            "VIEW_BENCH_ACCEPT_CONFORMANCE", 7.0
+        ),
+        accept_same_place=render_loop._env_float("VIEW_BENCH_ACCEPT_SAME_PLACE", 6.0),
+        accept_detail=render_loop._env_float("VIEW_BENCH_ACCEPT_DETAIL", 6.0),
+        accept_medium=render_loop._env_float("VIEW_BENCH_ACCEPT_MEDIUM", 6.0),
+    )
 
 
 def _selected(name: str, allowed: list[str]) -> list[str]:
@@ -133,6 +192,10 @@ class ArmResult:
     conformance_rationale: str
     # How many loop attempts produced this arm (1 = single-shot, the default).
     attempts: int = 1
+    # Loop mode only: per-attempt judge scores in attempt order, so an A/B can
+    # compare the RETRY attempts (index >= 1) — the only ones a retry-model
+    # swap changes — instead of just the kept-best headline.
+    attempt_scores: list[dict[str, float | None]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -266,7 +329,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 region_bytes=region_bytes,
                 judge_conformance=judge_mod.score_view_conformance,
                 judge_same_place=judge_mod.score_continuation,
-                config=render_loop.LoopConfig(max_attempts=3),
+                config=_bench_loop_config(),
                 judge_detail=_judge_detail,
                 judge_medium=judge_mod.score_style_pair,
                 render_for_attempt=_render_attempt,
@@ -294,6 +357,17 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                         best.conformance.rationale if best.conformance else ""
                     ),
                     attempts=len(loop_result.attempts),
+                    attempt_scores=[
+                        {
+                            "conformance": (
+                                att.conformance.score if att.conformance else None
+                            ),
+                            "same_place": (
+                                att.same_place.score if att.same_place else None
+                            ),
+                        }
+                        for att in loop_result.attempts
+                    ],
                 )
             )
             continue
@@ -424,6 +498,10 @@ async def run_bench() -> dict[str, Any]:
         "loop": bool(os.environ.get("VIEW_BENCH_LOOP")),
         "arms_filter": os.environ.get("VIEW_BENCH_ARMS"),
         "cases_filter": os.environ.get("VIEW_BENCH_CASES"),
+        # Receipts: which accept floors this run actually used (A/B lever).
+        "accept_env": {
+            k: os.environ[k] for k in _BENCH_ACCEPT_ENVS if k in os.environ
+        },
         "conform_threshold": _CONFORM_THRESHOLD,
         "same_place_floor": _SAME_PLACE_FLOOR,
         "cases": [asdict(r) for r in results],
