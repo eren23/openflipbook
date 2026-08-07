@@ -3343,8 +3343,22 @@ export default function PlayPage() {
         setDomLabels={setWorldDomLabels}
       />
 
-      {worldEnabled && (
-        <div className="-mt-2 flex justify-end">
+      <div className="-mt-2 flex justify-end gap-2">
+        {/* Always-on gallery entrance: the published-worlds feed at /gallery
+            was only reachable AFTER you publish (window.open on success), so a
+            first-time visitor could never discover other people's worlds — the
+            reach loop (explore others → make your own → share) had no front
+            door. Opens in a new tab so an in-progress session isn't lost. */}
+        <a
+          href="/gallery"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Browse worlds other people have published"
+          className="rounded-full border border-[var(--color-ink)]/25 bg-[var(--color-paper)]/70 px-3 py-1 text-xs font-medium text-[var(--color-ink)]/80 transition hover:bg-[var(--color-ink)]/10"
+        >
+          🖼️ Gallery
+        </a>
+        {worldEnabled && (
           <button
             type="button"
             onClick={() => void planWorld()}
@@ -3354,8 +3368,8 @@ export default function PlayPage() {
           >
             ✍ Describe a place
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {isDraggingFile && <DragDropOverlay />}
 
