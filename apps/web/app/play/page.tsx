@@ -478,6 +478,18 @@ export default function PlayPage() {
     const t = setTimeout(() => setWanderNote(null), 6000);
     return () => clearTimeout(t);
   }, [wanderNote]);
+  // Share: copying a permalink used to be a silent right-click-menu action, so
+  // sharing (each /n/ link is a whole explorable world) never happened. A
+  // top-level Share button + this transient confirmation surface it. The copy
+  // itself is inlined at the button + the context-menu (both read the live
+  // `page`, in JSX scope) so there's no cross-scope handler to thread.
+  const [shareNote, setShareNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shareNote) return;
+    const t = setTimeout(() => setShareNote(null), 2500);
+    return () => clearTimeout(t);
+  }, [shareNote]);
+  const SHARE_COPIED_NOTE = "Link copied — anyone can open it to explore this world";
   // The click handler closes over state at dispatch time; Wander's synthetic
   // taps must read the LIVE value (withhold zoom routing mid-wander), so
   // mirror it into a ref.
@@ -4071,9 +4083,32 @@ export default function PlayPage() {
       )}
 
       {page?.nodeId && (
-        <p className="text-center text-xs opacity-60">
-          Permalink: <code>/n/{page.nodeId}</code>
-        </p>
+        <div className="flex flex-col items-center gap-1 text-xs">
+          <div className="flex items-center gap-2 opacity-60">
+            <span>
+              Permalink: <code>/n/{page.nodeId}</code>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (!page?.nodeId) return;
+                void navigator.clipboard?.writeText(
+                  `${window.location.origin}/n/${page.nodeId}`,
+                );
+                setShareNote(SHARE_COPIED_NOTE);
+              }}
+              title="Copy a link anyone can open to explore this world"
+              className="rounded-full border border-[var(--color-ink)]/30 px-2.5 py-0.5 font-medium opacity-100 transition hover:bg-[var(--color-ink)]/10"
+            >
+              🔗 Share
+            </button>
+          </div>
+          {shareNote && (
+            <span role="status" className="text-[var(--color-ink)]/80">
+              {shareNote}
+            </span>
+          )}
+        </div>
       )}
 
       {quickbarOpen && (
@@ -4180,6 +4215,7 @@ export default function PlayPage() {
             if (page?.nodeId) {
               const link = `${window.location.origin}/n/${page.nodeId}`;
               void navigator.clipboard?.writeText(link);
+              setShareNote(SHARE_COPIED_NOTE);
             }
             setContextMenu(null);
           }}
