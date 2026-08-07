@@ -118,9 +118,14 @@ async def _score_chain(chain: dict[str, Any], aspect: str) -> dict[str, Any]:
     # without paying to regenerate the same artifacts.
     art = ROOT / "overlays"
     art.mkdir(parents=True, exist_ok=True)
+    # Blind vs named runs generate DIFFERENT with/without images (the prompt
+    # label differs), so tag the reusable artifacts by blind state — else a
+    # `BLIND_LABEL=1 REUSE_ARTIFACTS=1` run silently judges the prior named
+    # images while the report claims blind_label:true. Region is pure geometry.
+    blind_tag = "-blind" if _blind_label() else ""
     region_path = art / f"descent-{chain['child_id']}-region.jpg"
-    with_path = art / f"descent-{chain['child_id']}-with.jpg"
-    without_path = art / f"descent-{chain['child_id']}-without.jpg"
+    with_path = art / f"descent-{chain['child_id']}-with{blind_tag}.jpg"
+    without_path = art / f"descent-{chain['child_id']}-without{blind_tag}.jpg"
     region_path.write_bytes(region)
 
     if (

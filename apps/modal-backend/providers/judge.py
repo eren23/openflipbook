@@ -21,6 +21,10 @@ from dataclasses import dataclass
 from typing import Any
 
 _SCORE_RE = re.compile(r"\"score\"\s*:\s*(\d+(?:\.\d+)?)")
+# The one unparseable sentinel. Emitted by _parse_judgement (and the empty-reply
+# default) and the ONLY thing _ask_judge retries on — with the colon-space so a
+# valid reply whose rationale merely starts with the word can't be retried away.
+_UNPARSEABLE_PREFIX = "UNPARSEABLE: "
 
 
 @dataclass(frozen=True)
@@ -117,7 +121,7 @@ def _parse_judgement(raw: str) -> JudgeResult:
             raw_head=cleaned[:120],
             model=_judge_model(),
         )
-        return JudgeResult(score=0.0, rationale=f"UNPARSEABLE: {cleaned[:200]}", raw=cleaned[:500])
+        return JudgeResult(score=0.0, rationale=f"{_UNPARSEABLE_PREFIX}{cleaned[:200]}", raw=cleaned[:500])
     return JudgeResult(score=score, rationale=rationale, raw=cleaned[:500])
 
 
@@ -147,8 +151,10 @@ async def _ask_judge(
     # without raising, so it slips past that retry AND the benches' own
     # exception-only retry — banking a blank reply as a real 0. Re-issue the
     # call when the reply can't be parsed.
+    # NOTE: this is a total-attempts cap (cost bound), not additional retries —
+    # default 3 = up to 3 calls before banking the loud UNPARSEABLE 0.
     attempts = _bounded_int_env("VLM_JUDGE_EMPTY_RETRIES", 3, floor=1, ceiling=5)
-    result = JudgeResult(score=0.0, rationale="UNPARSEABLE: no judge response", raw="")
+    result = JudgeResult(score=0.0, rationale=f"{_UNPARSEABLE_PREFIX}no judge response", raw="")
     for _ in range(attempts):
         response = await llm._create_with_retry(
             client,
@@ -159,7 +165,7 @@ async def _ask_judge(
         )
         raw = response.choices[0].message.content or ""
         result = _parse_judgement(raw)
-        if not result.rationale.startswith("UNPARSEABLE"):
+        if not result.rationale.startswith(_UNPARSEABLE_PREFIX):
             return result
     return result
 

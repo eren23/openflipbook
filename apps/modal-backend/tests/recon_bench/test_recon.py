@@ -96,6 +96,23 @@ def test_pose_probe_scatter_does_not_fake_recovery() -> None:
     assert probe["recovery_gain"] < 5  # no drift structure to exploit
 
 
+def test_pose_probe_out_of_clamp_rescale_leaves_residual() -> None:
+    # A coherent rescale whose TRUE scale (3.0) sits outside fit_alignment's
+    # [0.5, 2.0] clamp. The clamp saturates at 2.0 — never the true 3.0 — so the
+    # register can only PARTIALLY recover: err_recovered stays well above 0,
+    # unlike an in-clamp drift which recovers ~exactly (…register_drift_recovers).
+    # (recovery_gain is still large+positive here — clamped-2.0 beats identity —
+    # so gain alone can't flag this; err_recovered is the honest signal.) Pins the
+    # clamp: widen/remove it and err_recovered collapses to ~0 on this case,
+    # faking read-side recovery the product's clamped register can never deliver.
+    pairs = _pairs(lambda p: (3.0 * p[0] + 5, 3.0 * p[1] + 5), PTS)
+    fit = fit_alignment(pairs)
+    assert fit is not None and fit.scale == 2.0  # clamp bites, not the true 3.0
+    probe = pose_probe_loo(pairs)
+    assert probe is not None
+    assert probe["err_recovered"] > 5.0  # partial only; ≈0 if the clamp were gone
+
+
 def test_pose_probe_needs_three_pairs() -> None:
     assert pose_probe_loo(_pairs(lambda p: p, PTS[:2])) is None
 

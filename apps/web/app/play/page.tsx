@@ -480,9 +480,10 @@ export default function PlayPage() {
   }, [wanderNote]);
   // Share: copying a permalink used to be a silent right-click-menu action, so
   // sharing (each /n/ link is a whole explorable world) never happened. A
-  // top-level Share button + this transient confirmation surface it. The copy
-  // itself is inlined at the button + the context-menu (both read the live
-  // `page`, in JSX scope) so there's no cross-scope handler to thread.
+  // top-level Share button + this transient confirmation surface it. `copyPermalink`
+  // is the one copy path (button + context-menu both call it) and only claims
+  // success after the write resolves — an insecure context (no `navigator.clipboard`)
+  // or a denied/rejected write shows the failure note instead of lying "copied".
   const [shareNote, setShareNote] = useState<string | null>(null);
   useEffect(() => {
     if (!shareNote) return;
@@ -490,6 +491,17 @@ export default function PlayPage() {
     return () => clearTimeout(t);
   }, [shareNote]);
   const SHARE_COPIED_NOTE = "Link copied — anyone can open it to explore this world";
+  const SHARE_COPY_FAILED_NOTE = "Couldn't copy — long-press the link to copy it";
+  const copyPermalink = async (nodeId: string) => {
+    const link = `${window.location.origin}/n/${nodeId}`;
+    try {
+      if (!navigator.clipboard) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(link);
+      setShareNote(SHARE_COPIED_NOTE);
+    } catch {
+      setShareNote(SHARE_COPY_FAILED_NOTE);
+    }
+  };
   // The click handler closes over state at dispatch time; Wander's synthetic
   // taps must read the LIVE value (withhold zoom routing mid-wander), so
   // mirror it into a ref.
@@ -4105,11 +4117,7 @@ export default function PlayPage() {
             <button
               type="button"
               onClick={() => {
-                if (!page?.nodeId) return;
-                void navigator.clipboard?.writeText(
-                  `${window.location.origin}/n/${page.nodeId}`,
-                );
-                setShareNote(SHARE_COPIED_NOTE);
+                if (page?.nodeId) void copyPermalink(page.nodeId);
               }}
               title="Copy a link anyone can open to explore this world"
               className="rounded-full border border-[var(--color-ink)]/30 px-2.5 py-0.5 font-medium opacity-100 transition hover:bg-[var(--color-ink)]/10"
@@ -4226,11 +4234,7 @@ export default function PlayPage() {
           }
           canSavePostcard={!!page?.nodeId}
           onCopyPermalink={() => {
-            if (page?.nodeId) {
-              const link = `${window.location.origin}/n/${page.nodeId}`;
-              void navigator.clipboard?.writeText(link);
-              setShareNote(SHARE_COPIED_NOTE);
-            }
+            if (page?.nodeId) void copyPermalink(page.nodeId);
             setContextMenu(null);
           }}
           onSavePostcard={() => {
