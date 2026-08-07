@@ -17,8 +17,23 @@ from tests.continuity_bench.view_runner import (
     ArmResult,
     CaseResult,
     _bench_loop_config,
+    _run_tag,
     summarize,
 )
+
+
+def test_run_tag_suffixes_arm_frames_and_sanitizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unset = historic untagged names (so VIEW_BENCH_REUSE_ARTIFACTS keeps
+    # working); set = a leading-underscore suffix with path-unsafe chars scrubbed
+    # so an off/on A/B doesn't clobber view_<case>_<arm>_a<i>.jpg.
+    monkeypatch.delenv("VIEW_BENCH_RUN_TAG", raising=False)
+    assert _run_tag() == ""
+    monkeypatch.setenv("VIEW_BENCH_RUN_TAG", "swap off")
+    assert _run_tag() == "_swap-off"
+    monkeypatch.setenv("VIEW_BENCH_RUN_TAG", "a/b.2")
+    assert _run_tag() == "_a-b.2"  # '.', '-' kept; '/' scrubbed
 
 
 def _case(name: str, conf: dict[str, float], same: dict[str, float]) -> CaseResult:

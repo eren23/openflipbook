@@ -184,6 +184,20 @@ def _positioning_probe_on() -> bool:
     )
 
 
+def _run_tag() -> str:
+    """Per-run suffix for ARM output frames (VIEW_BENCH_RUN_TAG) so an off/on
+    A/B keeps both sets instead of the second run clobbering the first
+    (e.g. the ENTER_RETRY_MODEL_SWAP A/B, where both runs wrote
+    view_<case>_<arm>_a<i>.jpg). Empty = the historic untagged names. The base
+    map/region/probe frames stay UNtagged so VIEW_BENCH_REUSE_ARTIFACTS still
+    finds them across runs."""
+    raw = os.environ.get("VIEW_BENCH_RUN_TAG", "").strip()
+    if not raw:
+        return ""
+    safe = "".join(c if (c.isalnum() or c in "._-") else "-" for c in raw)
+    return f"_{safe}"
+
+
 @dataclass(frozen=True)
 class ArmResult:
     arm: str
@@ -335,7 +349,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                 render_for_attempt=_render_attempt,
             )
             for i, att in enumerate(loop_result.attempts):
-                (_REPORTS / f"view_{case.name}_{arm}_a{i}.jpg").write_bytes(
+                (_REPORTS / f"view_{case.name}_{arm}{_run_tag()}_a{i}.jpg").write_bytes(
                     att.image.jpeg_bytes
                 )
             best = max(
@@ -345,7 +359,7 @@ async def _run_case(case: Case, aspect: str) -> CaseResult:
                     a.same_place.score if a.same_place else -1.0,
                 ),
             )
-            (_REPORTS / f"view_{case.name}_{arm}.jpg").write_bytes(
+            (_REPORTS / f"view_{case.name}_{arm}{_run_tag()}.jpg").write_bytes(
                 loop_result.image.jpeg_bytes
             )
             arms.append(
@@ -498,6 +512,7 @@ async def run_bench() -> dict[str, Any]:
         "loop": bool(os.environ.get("VIEW_BENCH_LOOP")),
         "arms_filter": os.environ.get("VIEW_BENCH_ARMS"),
         "cases_filter": os.environ.get("VIEW_BENCH_CASES"),
+        "run_tag": os.environ.get("VIEW_BENCH_RUN_TAG"),
         # Receipts: which accept floors this run actually used (A/B lever).
         "accept_env": {
             k: os.environ[k] for k in _BENCH_ACCEPT_ENVS if k in os.environ
