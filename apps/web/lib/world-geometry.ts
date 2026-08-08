@@ -434,13 +434,17 @@ export interface SimilarityFit {
 const _FIT_FRAME_W = 100;
 
 /** Least-squares uniform scale + translation over (from, to) point pairs;
- *  tries the x-flipped register too and keeps the lower residual. Scale
- *  clamped [0.5, 2]; null when < 2 pairs (nothing to anchor). TS port of
- *  tests/recon_bench/_align.fit_alignment — keep the two in lockstep. */
+ *  tries the x-flipped register too and keeps the lower residual. Scale clamped
+ *  [minScale, 2] (default minScale 0.5); null when < 2 pairs (nothing to anchor).
+ *  TS port of tests/recon_bench/_align.fit_alignment — keep the two in lockstep.
+ *  The gated register lowers minScale to REGISTER_MIN_SCALE to reach coherent
+ *  deep compressions (a place drawn tighter than planned) the 0.5 clamp rejects. */
 export function fitSimilarity(
   pairs: [WorldVec2, WorldVec2][],
+  opts?: { minScale?: number },
 ): SimilarityFit | null {
   if (pairs.length < 2) return null;
+  const minScale = opts?.minScale ?? 0.5;
   let best: SimilarityFit | null = null;
   for (const flip of [false, true]) {
     const src = pairs.map(([f]) => ({
@@ -460,7 +464,7 @@ export function fitSimilarity(
       den += (src[i]!.x - sx) ** 2 + (src[i]!.y - sy) ** 2;
     }
     let s = den > 1e-9 ? num / den : 1.0;
-    s = Math.max(0.5, Math.min(2.0, s));
+    s = Math.max(minScale, Math.min(2.0, s));
     const tx = dx - s * sx;
     const ty = dy - s * sy;
     let sq = 0;
@@ -487,21 +491,27 @@ export function applySimilarity(f: SimilarityFit, p: WorldVec2): WorldVec2 {
 
 // §4 fit-health gate (port of providers/register.py::_fit_is_healthy, validated
 // in the recon bench). A fit is only safe to APPLY when it actually explains the
-// drift: a scale saturated at the [0.5,2] clamp or a high residual means it does
-// not, and applying it then DOUBLES error (phase-1 probe: -35 mean gain on
-// clamped fits). A 2-point fit is exactly-determined (residual 0 — always "looks
-// perfect"), so require ≥3 anchors to over-determine the 4-DOF similarity.
-// residual is RMS in the fit's TARGET frame — for registerPlanToImage that IS
-// the stored (image) frame, so no per-scale correction is needed here (unlike
-// the bench's invert direction, which stores in the ÷scale expected frame).
+// drift: a scale saturated at the [REGISTER_MIN_SCALE, 2] clamp or a high residual
+// means it does not, and applying it then DOUBLES error (phase-1 probe: -35 mean
+// gain on clamped fits). A 2-point fit is exactly-determined (residual 0 — always
+// "looks perfect"), so require ≥3 anchors to over-determine the 4-DOF similarity.
+// residual is RMS in the fit's TARGET frame — for registerPlanToImage that IS the
+// stored (image) frame, so no per-scale correction is needed here (unlike the
+// bench's invert direction, which stores in the ÷scale expected frame).
+//
+// REGISTER_MIN_SCALE (0.40) < the legacy 0.5 clamp: recon Step 2 (#201) showed
+// coherent deep compressions (a place drawn ~½ size, low residual) are
+// recoverable — the 0.5 floor just clamped them out. The gated register fits
+// down to 0.40; the residual gate keeps scattered compressions out.
+export const REGISTER_MIN_SCALE = 0.4;
 const _REGISTER_MIN_MATCHED = 3;
 const _REGISTER_RESIDUAL_MAX = 0.1 * Math.hypot(_FIT_FRAME_W, 60); // ~11.66, MAP_IMAGE_FRAME diag
 
 export function isFitHealthy(f: SimilarityFit): boolean {
   return (
     f.matched >= _REGISTER_MIN_MATCHED &&
-    f.scale > 0.5 &&
-    f.scale < 2.0 && // strictly inside the clamp — not saturated
+    f.scale > REGISTER_MIN_SCALE &&
+    f.scale < 2.0 && // strictly inside the recovery clamp — not saturated
     f.residual <= _REGISTER_RESIDUAL_MAX
   );
 }

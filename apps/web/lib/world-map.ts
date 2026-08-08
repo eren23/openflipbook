@@ -23,6 +23,7 @@ import {
   estimateGeoFromBBox,
   fitSimilarity,
   isFitHealthy,
+  REGISTER_MIN_SCALE,
   localBounds,
   localExtent,
   mapPolygonToCrop,
@@ -581,7 +582,9 @@ export function registerPlanToImage(
     usedG.add(c.g.id);
     pairs.push([c.p.pos, c.g.pos]);
   }
-  const fit = fitSimilarity(pairs);
+  // Gated runs fit down to REGISTER_MIN_SCALE (0.40) to rescue coherent deep
+  // compressions the 0.5 clamp would reject; legacy keeps the 0.5 default.
+  const fit = fitSimilarity(pairs, opts?.gate ? { minScale: REGISTER_MIN_SCALE } : undefined);
   if (fit === null) return null;
   // Already registered (or trivially in register): skip the churn.
   if (

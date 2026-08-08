@@ -453,6 +453,23 @@ describe("registerPlanToImage (plan plane → image register)", () => {
     expect(registerPlanToImage(geos, "t9", { gate: true })).toBeNull();
     expect(registerPlanToImage(geos, "t9")).not.toBeNull();
   });
+
+  it("gate on: rescues a coherent deep compression (scale 0.45) via the recovery floor", () => {
+    // The painter drew the 3 features at 0.45× the planned spread — a clean
+    // compression. Legacy's 0.5 floor clamps to a wrong scale; the gated register
+    // fits down to 0.40, recovers the true 0.45, and (low residual) applies it.
+    const geos = [
+      plan("tower", "The Tower", 10, 10),
+      plan("harbor", "Harbor", 30, 20),
+      plan("wood", "Dark Wood", 50, 40),
+      img("geo_tower", "Tower", 9.5, 9.5), // 0.45·pos + 5
+      img("geo_harbor", "Harbor", 18.5, 14),
+      img("geo_wood", "Dark Wood", 27.5, 23),
+    ];
+    const reg = registerPlanToImage(geos, "t9", { gate: true })!;
+    expect(reg).not.toBeNull();
+    expect(reg.fit.scale).toBeCloseTo(0.45); // recovered below the 0.5 clamp
+  });
 });
 
 // ── Mongo wrappers + the extraction seeding bridge (fake collection) ────────

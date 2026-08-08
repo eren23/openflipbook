@@ -218,6 +218,14 @@ describe("fitSimilarity (parity with recon_bench fit_alignment)", () => {
     expect(fitSimilarity([[PTS[0]!, PTS[0]!]])).toBeNull();
   });
 
+  it("reaches a deep compression with a lowered minScale (else clamps to 0.5)", () => {
+    // painter drew the layout at 0.45× the plan (tighter): the default 0.5 floor
+    // clamps it out; minScale 0.40 reaches the true scale (recon Step 2).
+    const compress = pairs((p) => ({ x: 0.45 * p.x + 5, y: 0.45 * p.y + 5 }));
+    expect(fitSimilarity(compress)!.scale).toBe(0.5);
+    expect(fitSimilarity(compress, { minScale: 0.4 })!.scale).toBeCloseTo(0.45);
+  });
+
   it("applySimilarity round-trips a known fit", () => {
     const out = applySimilarity(
       { scale: 1.5, tx: -10, ty: 5, flipX: false, residual: 0, matched: 4 },
@@ -247,9 +255,11 @@ describe("isFitHealthy (§4 safe-to-apply gate — port of register._fit_is_heal
     expect(isFitHealthy(fit({ matched: 2 }))).toBe(false);
   });
 
-  it("rejects a scale saturated at the clamp (0.5 or 2.0)", () => {
+  it("rejects a scale saturated at the recovery clamp (0.40 or 2.0)", () => {
     expect(isFitHealthy(fit({ scale: 2.0 }))).toBe(false);
-    expect(isFitHealthy(fit({ scale: 0.5 }))).toBe(false);
+    expect(isFitHealthy(fit({ scale: 0.4 }))).toBe(false);
+    expect(isFitHealthy(fit({ scale: 0.45 }))).toBe(true); // deep compression recovers
+    expect(isFitHealthy(fit({ scale: 0.5 }))).toBe(true); // the old floor is now in-range
   });
 
   it("rejects a high-residual (scattered) fit", () => {
