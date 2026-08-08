@@ -326,6 +326,12 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
             scores["pose_err_raw"] = probe["err_raw"]
             scores["pose_err_recovered"] = probe["err_recovered"]
             scores["pose_gain"] = probe["recovery_gain"]
+        # §4 Step 1 (zero weight): pos_raw AS IF we STORED inverse-registered
+        # coords, gated to healthy fits. recovery_gated_on=1 marks the cells where
+        # the register is safe to bake in; pos_recovered ≥ pos_raw there.
+        if "pos_recovered" in geo:
+            scores["pos_recovered"] = round(float(geo["pos_recovered"]), 3)
+            scores["recovery_gated_on"] = 1.0 if geo.get("recovery_gated_on") else 0.0
         used = {k: w for k, w in weights.items() if k in scores and w > 0}
         if used:
             total = sum(used.values())

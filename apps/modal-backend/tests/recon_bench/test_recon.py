@@ -4,13 +4,16 @@ the expected-layout builder produces correct bins + height ratios, and
 corpus scenario resolution honours the verified-only contract."""
 from __future__ import annotations
 
+from math import hypot
 from typing import Any
 
 import pytest
 
 from tests.recon_bench._align import (
     Alignment,
+    _pos_score,
     fit_alignment,
+    gated_recovery,
     geo_scores,
     pose_probe_loo,
 )
@@ -21,6 +24,10 @@ from tests.recon_bench.runner import _expected_layout, corpus_scenarios
 
 def _pairs(transform, pts: list[tuple[float, float]]):
     return [(p, transform(p)) for p in pts]
+
+
+def _pos(e: tuple[float, float], o: tuple[float, float]) -> float:
+    return _pos_score(hypot(e[0] - o[0], e[1] - o[1]))
 
 
 PTS = [(10.0, 10.0), (50.0, 30.0), (90.0, 50.0), (30.0, 45.0)]
@@ -115,6 +122,83 @@ def test_pose_probe_out_of_clamp_rescale_leaves_residual() -> None:
 
 def test_pose_probe_needs_three_pairs() -> None:
     assert pose_probe_loo(_pairs(lambda p: p, PTS[:2])) is None
+
+
+# --- §4 Step 1: fit-health-gated recovery ------------------------------------
+#
+# gated_recovery scores positions AS IF the stored coord were inverse-registered
+# into the metric frame — but ONLY when the fit is trustworthy (scale strictly
+# in-clamp, low residual, ≥3 matches). On an unhealthy fit it must fall back to
+# the raw coord, so recovery is never worse than storing raw (the phase-1 -35
+# clamped-fit disaster can never reach a stored coord).
+
+
+def test_gated_recovery_healthy_drift_beats_raw() -> None:
+    # A clean in-clamp similarity drift (scale 0.65 + shift, residual ~0): the
+    # gate opens and inverse-registering recovers the metric coords ~exactly, so
+    # pos_recovered clears pos_raw.
+    pairs = _pairs(lambda p: (0.65 * p[0] + 18, 0.65 * p[1] + 14), PTS)
+    raw = sum(_pos(e, o) for e, o in pairs) / len(pairs)
+    rec = gated_recovery(pairs)
+    assert rec["gated_on"] is True
+    assert rec["pos_recovered"] > raw
+    assert rec["pos_recovered"] == pytest.approx(1.0, abs=0.02)
+
+
+def test_gated_recovery_clamped_scale_gates_off() -> None:
+    # True scale 3.0 saturates the fitter at 2.0 — inverting through the wrong
+    # scale is the -35 hazard, so the gate stays SHUT and pos_recovered == raw.
+    pairs = _pairs(lambda p: (3.0 * p[0] + 5, 3.0 * p[1] + 5), PTS)
+    raw = sum(_pos(e, o) for e, o in pairs) / len(pairs)
+    rec = gated_recovery(pairs)
+    assert rec["gated_on"] is False
+    assert rec["pos_recovered"] == round(raw, 4)  # gates off ⇒ raw, unrounded-safe
+
+
+def test_gated_recovery_high_residual_gates_off() -> None:
+    # In-range scale (~1) but the layout doesn't fit ANY global similarity
+    # (per-point noise ~21 units > the residual gate): don't trust the invert.
+    noisy = [
+        ((10.0, 10.0), (25.0, -5.0)),
+        ((50.0, 30.0), (35.0, 45.0)),
+        ((90.0, 50.0), (105.0, 35.0)),
+        ((30.0, 45.0), (15.0, 60.0)),
+    ]
+    fit = fit_alignment(noisy)
+    assert fit is not None and 0.5 < fit.scale < 2.0 and fit.residual > 11.7
+    raw = sum(_pos(e, o) for e, o in noisy) / len(noisy)
+    rec = gated_recovery(noisy)
+    assert rec["gated_on"] is False
+    assert rec["pos_recovered"] == round(raw, 4)  # gates off ⇒ raw, unrounded-safe
+
+
+def test_gated_recovery_too_few_matches_gates_off() -> None:
+    # A perfect 2-point drift still can't be trusted (2 matches only exactly
+    # determine the 4-DOF fit — no residual left to expose overfit).
+    pairs = _pairs(lambda p: (0.65 * p[0] + 12, 0.65 * p[1] + 8), PTS[:2])
+    raw = sum(_pos(e, o) for e, o in pairs) / len(pairs)
+    rec = gated_recovery(pairs)
+    assert rec["gated_on"] is False
+    assert rec["pos_recovered"] == round(raw, 4)  # gates off ⇒ raw, unrounded-safe
+
+
+def test_gated_recovery_empty() -> None:
+    assert gated_recovery([]) == {"pos_recovered": 0.0, "gated_on": False}
+
+
+def test_gate_uses_expected_frame_residual() -> None:
+    # invert divides by scale, so a compression fit (scale<1) amplifies its
+    # observed residual by 1/scale in the storage frame. Gate on residual/scale:
+    # the SAME observed residual is healthy at scale 1 but not when compressed.
+    # (This is the recon-corpus scale-0.588 cell that wobbled pos_raw -0.009.)
+    from tests.recon_bench._align import _RECOVERY_RESIDUAL_MAX as MAX
+    from tests.recon_bench._align import _fit_is_healthy
+
+    resid = 0.9 * MAX  # comfortably under the cap in the OBSERVED frame
+    ok = Alignment(scale=1.0, tx=0, ty=0, flip_x=False, residual=resid, matched=4)
+    bad = Alignment(scale=0.6, tx=0, ty=0, flip_x=False, residual=resid, matched=4)
+    assert _fit_is_healthy(ok) is True  # 0.9*MAX / 1.0 <= MAX
+    assert _fit_is_healthy(bad) is False  # 0.9*MAX / 0.6 = 1.5*MAX > MAX
 
 
 # --- geometric scorecard -----------------------------------------------------

@@ -86,6 +86,53 @@ def _pos_score(dist: float) -> float:
     return max(0.0, 1.0 - dist / tol)
 
 
+# §4 Step 1 — fit-health-gated recovery. Storing inverse-registered coords is only
+# safe when the fit actually explains the drift; a clamped scale (the fitter
+# saturated at 0.5/2.0) or a high residual means it does NOT, and inverting through
+# such a fit can DOUBLE the error (phase-1 probe measured -35 mean gain on clamped
+# fits). Gate: scale STRICTLY inside the clamp, residual small in the EXPECTED
+# (storage) frame, and enough matches to over-determine the 4-DOF similarity.
+# The residual is measured in the storage frame — residual / scale — because
+# `invert` divides by scale, so a compression fit (scale < 1) AMPLIFIES its
+# observed-frame residual by 1/scale on the way back (the recon corpus caught a
+# scale-0.588 cell whose invert wobbled pos_raw -0.009; expected-frame residual
+# flags exactly those noise-amplifying compressions). Fail ⇒ keep raw.
+_RECOVERY_MIN_MATCHED = 3
+_RECOVERY_RESIDUAL_MAX = 0.10 * hypot(FRAME_W, FRAME_H)  # ~11.7 frame units
+
+
+def _fit_is_healthy(align: Alignment) -> bool:
+    return (
+        align.matched >= _RECOVERY_MIN_MATCHED
+        and 0.5 < align.scale < 2.0  # strictly inside the clamp, not saturated
+        and align.residual / align.scale <= _RECOVERY_RESIDUAL_MAX  # expected frame
+    )
+
+
+def gated_recovery(pairs: list[tuple[Point, Point]]) -> dict[str, Any]:
+    """§4 Step 1: score positions AS IF the stored coord were inverse-registered
+    into the metric frame — but only when the fit is healthy enough to trust.
+
+    Fit the similarity on the matches; for each observed detection recover its
+    metric coordinate via `Alignment.invert` and score that against ground truth
+    like pos_raw. On an unhealthy fit (clamped scale / high residual / too few
+    matches) fall back to the RAW observed coord, so recovery is never worse than
+    storing raw — the phase-1 -35 disaster can't reach a stored coord. Zero
+    composite weight: a diagnostic for whether the register is safe to bake into
+    stored coords, and how much pos_raw it would buy where it is."""
+    if not pairs:
+        return {"pos_recovered": 0.0, "gated_on": False}
+    raw = sum(_pos_score(hypot(e[0] - o[0], e[1] - o[1])) for e, o in pairs) / len(pairs)
+    align = fit_alignment(pairs)
+    if align is None or not _fit_is_healthy(align):
+        return {"pos_recovered": round(raw, 4), "gated_on": False}
+    recovered = sum(
+        _pos_score(hypot(*(a - b for a, b in zip(e, align.invert(o), strict=True))))
+        for e, o in pairs
+    ) / len(pairs)
+    return {"pos_recovered": round(recovered, 4), "gated_on": True}
+
+
 def pose_probe_loo(pairs: list[tuple[Point, Point]]) -> dict[str, float] | None:
     """§4 phase-1 probe: does the similarity register GENERALIZE?
 
@@ -145,6 +192,7 @@ def geo_scores(
     pos_raw = sum(
         _pos_score(hypot(e[0] - o[0], e[1] - o[1])) for e, o in pairs
     ) / len(pairs)
+    recovery = gated_recovery(pairs)
 
     align = fit_alignment(pairs)
     if align is None:
@@ -173,6 +221,10 @@ def geo_scores(
         # §4 diagnostic: leave-one-out generalization of the register (None
         # when <3 matches). Zero composite weight, like `alignment`.
         "pose_probe": pose_probe_loo(pairs),
+        # §4 Step 1 diagnostic (zero weight): pos_raw AS IF stored coords were
+        # inverse-registered — but only where the fit is trustworthy (else raw).
+        "pos_recovered": recovery["pos_recovered"],
+        "recovery_gated_on": recovery["gated_on"],
         "alignment": (
             {
                 "scale": round(align.scale, 3),
