@@ -485,6 +485,27 @@ export function applySimilarity(f: SimilarityFit, p: WorldVec2): WorldVec2 {
   return { x: f.scale * x + f.tx, y: f.scale * p.y + f.ty };
 }
 
+// §4 fit-health gate (port of providers/register.py::_fit_is_healthy, validated
+// in the recon bench). A fit is only safe to APPLY when it actually explains the
+// drift: a scale saturated at the [0.5,2] clamp or a high residual means it does
+// not, and applying it then DOUBLES error (phase-1 probe: -35 mean gain on
+// clamped fits). A 2-point fit is exactly-determined (residual 0 — always "looks
+// perfect"), so require ≥3 anchors to over-determine the 4-DOF similarity.
+// residual is RMS in the fit's TARGET frame — for registerPlanToImage that IS
+// the stored (image) frame, so no per-scale correction is needed here (unlike
+// the bench's invert direction, which stores in the ÷scale expected frame).
+const _REGISTER_MIN_MATCHED = 3;
+const _REGISTER_RESIDUAL_MAX = 0.1 * Math.hypot(_FIT_FRAME_W, 60); // ~11.66, MAP_IMAGE_FRAME diag
+
+export function isFitHealthy(f: SimilarityFit): boolean {
+  return (
+    f.matched >= _REGISTER_MIN_MATCHED &&
+    f.scale > 0.5 &&
+    f.scale < 2.0 && // strictly inside the clamp — not saturated
+    f.residual <= _REGISTER_RESIDUAL_MAX
+  );
+}
+
 /** Axis-aligned bounds over entities' OWN pos+footprint (no parent resolve) —
  *  the LOCAL frame of a place's interior, where each child's pos is local. */
 export function localBounds<

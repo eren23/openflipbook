@@ -22,6 +22,7 @@ import {
   applySimilarity,
   estimateGeoFromBBox,
   fitSimilarity,
+  isFitHealthy,
   localBounds,
   localExtent,
   mapPolygonToCrop,
@@ -520,6 +521,7 @@ export async function deriveGeoFromExtraction(
 export function registerPlanToImage(
   geos: WorldEntityGeo[],
   nowIso: string,
+  opts?: { gate?: boolean },
 ): { updated: WorldEntityGeo[]; fit: SimilarityFit } | null {
   const plans = geos.filter(
     (g) => g.id.startsWith("geo_plan_") && (g.parent_id ?? null) === null,
@@ -590,6 +592,13 @@ export function registerPlanToImage(
   ) {
     return null;
   }
+  // §4 fit-health gate (opt-in, WORLD_REGISTER_GATE): a fit whose scale saturated
+  // the [0.5,2] clamp, whose residual is high, or that rode only 2 anchors is
+  // untrustworthy — applying it re-expresses EVERY plan geo through a bad
+  // transform and corrupts the world (phase-1 probe: doubles error). Skip it and
+  // keep the plan positions. Off (default) = legacy behaviour: apply any
+  // non-identity fit with ≥2 matches.
+  if (opts?.gate && !isFitHealthy(fit)) return null;
   const updated = plans.map((p) => ({
     ...p,
     pos: applySimilarity(fit, p.pos),

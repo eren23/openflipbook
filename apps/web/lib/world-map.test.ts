@@ -408,6 +408,51 @@ describe("registerPlanToImage (plan plane → image register)", () => {
       ),
     ).toBeNull();
   });
+
+  // §4 fit-health gate (WORLD_REGISTER_GATE): opt-in skip of untrustworthy fits.
+  it("gate on: a clamped-scale fit skips instead of corrupting the world", () => {
+    // True scale 3.0 saturates fitSimilarity at 2.0 — applying it re-expresses
+    // every plan through a bad transform (phase-1: doubles error).
+    const geos = [
+      plan("tower", "The Tower", 10, 10),
+      plan("harbor", "Harbor", 30, 20),
+      plan("wood", "Dark Wood", 50, 40),
+      img("geo_tower", "Tower", 35, 35),
+      img("geo_harbor", "Harbor", 95, 65),
+      img("geo_wood", "Dark Wood", 155, 125),
+    ];
+    expect(registerPlanToImage(geos, "t9", { gate: true })).toBeNull();
+    // Legacy (gate off) STILL applies the bad fit — the behaviour we're fixing.
+    expect(registerPlanToImage(geos, "t9")).not.toBeNull();
+  });
+
+  it("gate on: a healthy fit (≥3 anchors, in-clamp, low residual) still fires", () => {
+    const geos = [
+      plan("tower", "The Tower", 10, 10),
+      plan("harbor", "Harbor", 30, 20),
+      plan("wood", "Dark Wood", 50, 40),
+      plan("mill", "Old Mill", 20, 30), // unmatched rider still moves
+      img("geo_tower", "Tower", 22, 22), // clean 1.4× + 8 register
+      img("geo_harbor", "Harbor", 50, 36),
+      img("geo_wood", "Dark Wood", 78, 64),
+    ];
+    const reg = registerPlanToImage(geos, "t9", { gate: true })!;
+    expect(reg).not.toBeNull();
+    expect(reg.fit.matched).toBe(3);
+    expect(reg.fit.scale).toBeCloseTo(1.4);
+    expect(reg.updated).toHaveLength(4);
+  });
+
+  it("gate on: a 2-anchor fit skips (under-determined — legacy applied it)", () => {
+    const geos = [
+      plan("tower", "The Tower", 10, 10),
+      plan("harbor", "Harbor", 30, 20),
+      img("geo_tower", "the tower", 25, 25),
+      img("geo_harbor", "Harbor", 55, 40),
+    ];
+    expect(registerPlanToImage(geos, "t9", { gate: true })).toBeNull();
+    expect(registerPlanToImage(geos, "t9")).not.toBeNull();
+  });
 });
 
 // ── Mongo wrappers + the extraction seeding bridge (fake collection) ────────

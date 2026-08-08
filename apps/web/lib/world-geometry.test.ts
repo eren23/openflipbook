@@ -9,11 +9,13 @@ import {
   applySimilarity,
   cropEntities,
   fitSimilarity,
+  isFitHealthy,
   neighborsOf,
   project,
   projectScene,
   projectTopDown,
   type ProjectInput,
+  type SimilarityFit,
 } from "./world-geometry";
 
 // P1 geometry gate (TS side, FREE). Reproduces the SAME shared golden the Python
@@ -223,5 +225,36 @@ describe("fitSimilarity (parity with recon_bench fit_alignment)", () => {
     );
     expect(out.x).toBeCloseTo(5);
     expect(out.y).toBeCloseTo(20);
+  });
+});
+
+describe("isFitHealthy (§4 safe-to-apply gate — port of register._fit_is_healthy)", () => {
+  const fit = (over: Partial<SimilarityFit>): SimilarityFit => ({
+    scale: 1.2,
+    tx: 0,
+    ty: 0,
+    flipX: false,
+    residual: 3,
+    matched: 4,
+    ...over,
+  });
+
+  it("passes a healthy fit (≥3 anchors, in-clamp scale, low residual)", () => {
+    expect(isFitHealthy(fit({}))).toBe(true);
+  });
+
+  it("rejects an under-determined fit (<3 anchors)", () => {
+    expect(isFitHealthy(fit({ matched: 2 }))).toBe(false);
+  });
+
+  it("rejects a scale saturated at the clamp (0.5 or 2.0)", () => {
+    expect(isFitHealthy(fit({ scale: 2.0 }))).toBe(false);
+    expect(isFitHealthy(fit({ scale: 0.5 }))).toBe(false);
+  });
+
+  it("rejects a high-residual (scattered) fit", () => {
+    // MAP_IMAGE_FRAME diagonal is ~116.6; the gate is 0.1× that ≈ 11.66.
+    expect(isFitHealthy(fit({ residual: 15 }))).toBe(false);
+    expect(isFitHealthy(fit({ residual: 11 }))).toBe(true); // just under
   });
 });

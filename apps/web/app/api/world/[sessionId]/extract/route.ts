@@ -297,6 +297,7 @@ export async function POST(req: Request, { params }: Params) {
               const reg = registerPlanToImage(
                 snap.entities,
                 new Date().toISOString(),
+                { gate: envFlag("WORLD_REGISTER_GATE") },
               );
               if (reg) {
                 await upsertEntityGeos(sessionId, reg.updated);
