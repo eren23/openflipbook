@@ -468,3 +468,32 @@ async def test_interior_keep_best_prefers_higher_interior_score() -> None:
     result = conclude(attempts)
     assert result.accepted is False
     assert result.image.jpeg_bytes == b"b"
+
+
+async def test_preview_emits_pre_judge_frame_for_attempt_zero() -> None:
+    # VIEW_LOOP_PREVIEW: attempt-0's render is yielded BEFORE judging (so the
+    # caller paints it immediately), then the judged verdict follows. One render.
+    render = AsyncMock(return_value=_Img(b"a"))
+    attempts = await _drain(
+        render=render, projection="top_down", region_bytes=b"r",
+        judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=AsyncMock(return_value=_j(9.0)),
+        config=_cfg(), emit_preview=True,
+    )
+    assert len(attempts) == 2
+    assert attempts[0].preview is True
+    assert attempts[0].image.jpeg_bytes == b"a"
+    assert attempts[0].conformance is None and attempts[0].same_place is None
+    assert attempts[1].preview is False and attempts[1].accepted is True
+    render.assert_awaited_once()  # the preview reuses the render — no extra call
+    # the preview is NOT a real attempt: conclude sees only the judged ones
+    assert conclude([a for a in attempts if not a.preview]).accepted is True
+
+
+async def test_preview_off_by_default_yields_no_preview() -> None:
+    attempts = await _drain(
+        render=AsyncMock(return_value=_Img(b"a")), projection="top_down",
+        region_bytes=b"r", judge_conformance=AsyncMock(return_value=_j(9.0)),
+        judge_same_place=AsyncMock(return_value=_j(9.0)), config=_cfg(),
+    )
+    assert len(attempts) == 1 and attempts[0].preview is False

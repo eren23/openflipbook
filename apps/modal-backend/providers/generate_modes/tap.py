@@ -860,6 +860,7 @@ async def stream_tap(
                 60.0,
                 ingress_timeout_s - 180.0 - (_time.perf_counter() - started),
             )
+            enter_preview = env_flag("VIEW_LOOP_PREVIEW")
             loop_attempts: list[Attempt] = []
             async for loop_att in render_loop.iter_attempts(
                 _render_enter,
@@ -884,14 +885,36 @@ async def stream_tap(
                 render_for_attempt=_render_enter_attempt,
                 abort=_abort_if_disconnected,
                 deadline_s=loop_deadline,
+                emit_preview=enter_preview,
             ):
+                if loop_att.preview:
+                    # Pre-judge preview of attempt-0 (VIEW_LOOP_PREVIEW): paint it
+                    # NOW instead of holding it behind the judge tail. The judged
+                    # verdict still follows (accept → final swaps it in, reject →
+                    # the retry frame does). Not part of loop_attempts/conclude.
+                    preview_b64 = (
+                        await _asyncio.to_thread(
+                            base64.b64encode, loop_att.image.jpeg_bytes
+                        )
+                    ).decode("ascii")
+                    yield _sse(
+                        {
+                            "type": "progress",
+                            "frame_index": loop_att.index,
+                            "jpeg_b64": preview_b64,
+                        },
+                        trace_id,
+                    )
+                    continue
                 loop_attempts.append(loop_att)
                 # Stream only verdict-REJECTED attempts (a correction is
-                # coming); a degraded attempt (no critic) is the final.
+                # coming); a degraded attempt (no critic) is the final. Skip
+                # attempt-0 when its preview already painted it (no double frame).
                 if (
                     not loop_att.accepted
                     and loop_att.conformance is not None
                     and loop_att.index + 1 < loop_cfg.max_attempts
+                    and not (enter_preview and loop_att.index == 0)
                 ):
                     # Stream the rejected attempt — the user watches the
                     # agent self-correct instead of staring at a spinner.

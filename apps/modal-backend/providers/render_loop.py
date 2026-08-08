@@ -105,6 +105,10 @@ class Attempt:
     # None = no interior judge wired (every non-INTERIOR_ENTERS path). Last +
     # defaulted so existing positional constructions stay valid.
     interior: JudgeResult | None = None
+    # A PRE-JUDGE preview (VIEW_LOOP_PREVIEW): the rendered bytes, yielded before
+    # judging so the caller can paint attempt-0 immediately instead of holding it
+    # behind the judge tail. All judge fields are None; not part of conclude().
+    preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -189,6 +193,7 @@ async def iter_attempts[ImageT: Rendered](
     abort: Callable[[str], Awaitable[None]] | None = None,
     clock: Callable[[], float] = time.monotonic,
     deadline_s: float | None = None,
+    emit_preview: bool = False,
 ) -> AsyncIterator[Attempt]:
     """Yield attempts until acceptance / budget / max attempts. The caller
     (the SSE generator) can emit a progress frame between yields. Attempt-0
@@ -224,6 +229,17 @@ async def iter_attempts[ImageT: Rendered](
                 )
                 return
         latency = clock() - started
+
+        # Pre-judge preview (VIEW_LOOP_PREVIEW): the attempt-0 bytes exist now,
+        # but judging is another ~2-5s (and a retry hides a whole second render).
+        # Yield the render for the caller to paint immediately; the judged
+        # verdict + any retry still follow and swap it. Attempt-0 only — later
+        # attempts already stream via the caller's rejected-attempt frames.
+        if emit_preview and index == 0:
+            yield Attempt(
+                index, image, suffix, None, None, None, None, False, latency, None,
+                preview=True,
+            )
 
         # The five axes are independent verdicts on the same image — judged
         # concurrently (the Ankh-Morpork re-shoot: sequential judging alone
