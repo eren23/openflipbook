@@ -44,10 +44,14 @@ class Alignment:
         return ((FRAME_W - x) if self.flip_x else x, y)
 
 
-def fit_alignment(pairs: list[tuple[Point, Point]]) -> Alignment | None:
+def fit_alignment(
+    pairs: list[tuple[Point, Point]], *, min_scale: float = 0.5
+) -> Alignment | None:
     """Least-squares uniform scale + translation over (expected, observed)
     centre pairs; tries the x-flipped register too and keeps the lower
-    residual. None when <2 pairs (nothing to anchor)."""
+    residual. None when <2 pairs (nothing to anchor). `min_scale` is the lower
+    scale clamp (default 0.5, the pos_aligned register); recovery re-fits with a
+    lower floor to reach coherent deep compressions (see gated_recovery)."""
     if len(pairs) < 2:
         return None
     best: Alignment | None = None
@@ -65,7 +69,7 @@ def fit_alignment(pairs: list[tuple[Point, Point]]) -> Alignment | None:
         )
         den = sum((e[0] - ex) ** 2 + (e[1] - ey) ** 2 for e in exp)
         s = num / den if den > 1e-9 else 1.0
-        s = max(0.5, min(2.0, s))
+        s = max(min_scale, min(2.0, s))
         tx = ox - s * ex
         ty = oy - s * ey
         residual = (
@@ -86,25 +90,34 @@ def _pos_score(dist: float) -> float:
     return max(0.0, 1.0 - dist / tol)
 
 
-# §4 Step 1 — fit-health-gated recovery. Storing inverse-registered coords is only
-# safe when the fit actually explains the drift; a clamped scale (the fitter
-# saturated at 0.5/2.0) or a high residual means it does NOT, and inverting through
-# such a fit can DOUBLE the error (phase-1 probe measured -35 mean gain on clamped
-# fits). Gate: scale STRICTLY inside the clamp, residual small in the EXPECTED
+# §4 fit-health-gated recovery. Storing inverse-registered coords is only safe
+# when the fit actually explains the drift; a saturated scale (fitter pinned the
+# clamp) or a high residual means it does NOT, and inverting through such a fit
+# can DOUBLE the error (phase-1 probe measured -35 mean gain on clamped fits).
+# Gate: scale STRICTLY inside the recovery range, residual small in the EXPECTED
 # (storage) frame, and enough matches to over-determine the 4-DOF similarity.
+#
 # The residual is measured in the storage frame — residual / scale — because
 # `invert` divides by scale, so a compression fit (scale < 1) AMPLIFIES its
 # observed-frame residual by 1/scale on the way back (the recon corpus caught a
 # scale-0.588 cell whose invert wobbled pos_raw -0.009; expected-frame residual
-# flags exactly those noise-amplifying compressions). Fail ⇒ keep raw.
+# flags exactly those noise-amplifying compressions). This gate SELF-TIGHTENS as
+# scale drops: at 0.40 it admits only observed residual ≤ 0.40·MAX ≈ 4.7 — a very
+# coherent fit — which is what lets the floor go below the pos_aligned clamp.
+#
+# _RECOVERY_MIN_SCALE (0.40) < the pos_aligned register floor (0.5): the recon
+# corpus draws some maps (Schiaparelli's Mars) at a coherent ~½ scale that pins
+# the 0.5 clamp; re-fitting recovery down to 0.40 reaches them (pos_raw 0.05→0.62)
+# while the residual gate keeps the scrambled cells (yellowstone/village) out.
 _RECOVERY_MIN_MATCHED = 3
+_RECOVERY_MIN_SCALE = 0.40
 _RECOVERY_RESIDUAL_MAX = 0.10 * hypot(FRAME_W, FRAME_H)  # ~11.7 frame units
 
 
 def _fit_is_healthy(align: Alignment) -> bool:
     return (
         align.matched >= _RECOVERY_MIN_MATCHED
-        and 0.5 < align.scale < 2.0  # strictly inside the clamp, not saturated
+        and _RECOVERY_MIN_SCALE < align.scale < 2.0  # strictly inside, not saturated
         and align.residual / align.scale <= _RECOVERY_RESIDUAL_MAX  # expected frame
     )
 
@@ -123,7 +136,7 @@ def gated_recovery(pairs: list[tuple[Point, Point]]) -> dict[str, Any]:
     if not pairs:
         return {"pos_recovered": 0.0, "gated_on": False}
     raw = sum(_pos_score(hypot(e[0] - o[0], e[1] - o[1])) for e, o in pairs) / len(pairs)
-    align = fit_alignment(pairs)
+    align = fit_alignment(pairs, min_scale=_RECOVERY_MIN_SCALE)
     if align is None or not _fit_is_healthy(align):
         return {"pos_recovered": round(raw, 4), "gated_on": False}
     recovered = sum(

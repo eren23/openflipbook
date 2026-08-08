@@ -201,6 +201,21 @@ def test_gate_uses_expected_frame_residual() -> None:
     assert _fit_is_healthy(bad) is False  # 0.9*MAX / 0.6 = 1.5*MAX > MAX
 
 
+def test_gated_recovery_reaches_coherent_deep_compression() -> None:
+    # A COHERENT ~0.45-scale compression (Schiaparelli's Mars is drawn at ~half
+    # size): the pos_aligned register (floor 0.5) clamps it away, but recovery
+    # re-fits down to _RECOVERY_MIN_SCALE=0.40, reaches the true scale, and the
+    # near-zero residual clears the (self-tightening) expected-frame gate — the
+    # recon corpus went pos_raw 0.05 -> 0.62 on exactly this shape.
+    pairs = _pairs(lambda p: (0.45 * p[0] + 30, 0.45 * p[1] + 18), PTS)
+    assert fit_alignment(pairs).scale == 0.5  # default floor 0.5 clamps it away
+    raw = sum(_pos(e, o) for e, o in pairs) / len(pairs)
+    rec = gated_recovery(pairs)
+    assert rec["gated_on"] is True  # recovery's 0.40 floor reaches scale 0.45
+    assert rec["pos_recovered"] > raw + 0.3  # a big lift, not a wobble
+    assert rec["pos_recovered"] == pytest.approx(1.0, abs=0.02)
+
+
 # --- geometric scorecard -----------------------------------------------------
 
 
