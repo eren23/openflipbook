@@ -371,50 +371,6 @@ def _geometric_world_on() -> bool:
     return env_flag("GEOMETRIC_WORLD")
 
 
-def _pose_register_on() -> bool:
-    """Register a fresh render's detected centres onto the persistent-world frame
-    before storing (POSE_REGISTER_FIX, §4). Off → store the raw detector centres
-    (current behaviour). Fits the prior stored positions (web-sent on
-    PriorEntity) ↔ this render's detections; a healthy fit corrects the render's
-    global scale/shift drift so a place stays coherent across re-renders."""
-    return env_flag("POSE_REGISTER_FIX")
-
-
-def _register_detection_centres(
-    by_label: dict[str, Any], prior_entities: list[PriorEntity]
-) -> int:
-    """POSE_REGISTER_FIX core: remap the detected centres in `by_label` onto the
-    persistent-world frame using the prior stored positions. Fits prior ↔ this
-    render on shared labels; a healthy fit rewrites EVERY detection's centre
-    (recurring + new) by one similarity. Mutates `by_label` in place and returns
-    the count remapped — 0 when there's no prior anchor or the fit isn't
-    trustworthy (register.py gates out clamped/scattered fits), so the raw
-    detector centres stand. Pure given its inputs → unit-tests without the
-    endpoint. Positions are converted 0-1 ↔ the register's frame units."""
-    from providers import register as _register
-
-    prior_xy = {
-        p.name.lower().strip(): (p.x_pct * _register.FRAME_W, p.y_pct * _register.FRAME_H)
-        for p in prior_entities
-        if p.x_pct is not None and p.y_pct is not None
-    }
-    det_xy = {
-        lbl: (float(d["x_pct"]) * _register.FRAME_W, float(d["y_pct"]) * _register.FRAME_H)
-        for lbl, d in by_label.items()
-    }
-    snapped = _register.register_positions(prior_xy, det_xy)
-    if not snapped:
-        return 0
-    for lbl, (fx, fy) in snapped.items():
-        if lbl in by_label:
-            by_label[lbl] = {
-                **by_label[lbl],
-                "x_pct": min(1.0, max(0.0, fx / _register.FRAME_W)),
-                "y_pct": min(1.0, max(0.0, fy / _register.FRAME_H)),
-            }
-    return len(snapped)
-
-
 def _world_geometry_gen_on(world_mode: bool = False) -> bool:
     """Geometry steers generation (WORLD_GEOMETRY_GEN). Defaults ON under an
     active world mode — the layout clause is the only thing pinning the map's
@@ -1424,12 +1380,6 @@ class PriorEntity(BaseModel):
     name: str
     aliases: list[str] = Field(default_factory=list)
     appearance: str = ""
-    # Stored world-frame CENTRE (0-1) of this entity, when the web knows it.
-    # Lets the extract seam register this render's detections onto the
-    # persistent world (POSE_REGISTER_FIX). Absent = not yet localized → the
-    # entity just doesn't anchor the fit.
-    x_pct: float | None = None
-    y_pct: float | None = None
 
 
 class ExtractEntitiesBody(BaseModel):
@@ -1588,15 +1538,6 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
             if labels:
                 dets = await _detector.detect(geo_img_bytes, labels)
                 by_label = {str(d.get("label", "")).lower().strip(): d for d in dets}
-
-                # §4 pose register (POSE_REGISTER_FIX, default off): snap this
-                # render's detected centres onto the persistent-world frame so a
-                # place stays coherent across re-renders. No-op when off / no
-                # prior positions / untrustworthy fit → raw detector centres stand.
-                if _pose_register_on():
-                    n_reg = _register_detection_centres(by_label, body.prior_entities)
-                    if n_reg:
-                        log("info", "extract.pose_registered", registered=n_reg)
 
                 def _match(name: str) -> dict[str, float] | None:
                     key = name.lower().strip()

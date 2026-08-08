@@ -10,9 +10,11 @@ frame. Recovery is only SAFE when the fit is healthy (`_fit_is_healthy`) — a
 saturated scale or a high residual means the similarity does not explain the
 drift, and inverting through it amplifies error.
 
-Prod home (§4 pose recovery): the recon bench scores with this
-(tests/recon_bench/_align.py re-exports); the extract seam registers detections
-onto the persistent world with it. Single source — no duplicate geometry.
+Used by the recon bench (§4 pose recovery): tests/recon_bench/_align.py imports
+Alignment / fit_alignment / the health gate from here and layers its scoring on
+top. (The LIVE prod register runs web-side — apps/web/lib/world-geometry.ts
+`fitSimilarity` + `registerPlanToImage`, gated by WORLD_REGISTER_GATE; this Python
+twin stays the bench's source of truth for that math.)
 """
 from __future__ import annotations
 
@@ -53,7 +55,7 @@ def fit_alignment(
     centre pairs; tries the x-flipped register too and keeps the lower
     residual. None when <2 pairs (nothing to anchor). `min_scale` is the lower
     scale clamp (default 0.5, the pos_aligned register); recovery re-fits with a
-    lower floor to reach coherent deep compressions (see register_positions)."""
+    lower floor to reach coherent deep compressions (gated by _fit_is_healthy)."""
     if len(pairs) < 2:
         return None
     best: Alignment | None = None
@@ -119,31 +121,3 @@ def _fit_is_healthy(align: Alignment) -> bool:
     )
 
 
-def register_positions(
-    expected: dict[str, Point],
-    detected: dict[str, Point],
-) -> dict[str, Point] | None:
-    """Snap a fresh render's detected positions onto the persistent-world frame.
-
-    The §4 read-side use of the register: `expected` is where entities already
-    live in the stored world, `detected` is this render's read of the same
-    scene. Fit the similarity on the labels present in BOTH; if the fit is
-    healthy, return ALL detected positions inverse-registered into the world
-    frame — recurring AND new, so one transform places the whole render
-    consistently (a re-render's global scale/shift drift is corrected; the
-    relative layout the detector found is kept). None when too few labels match
-    or the fit isn't trustworthy — the caller then keeps the raw detections
-    (recovery is never worse than storing raw; the phase-1 -35 clamped-fit
-    hazard can't reach a stored coord).
-
-    Positions are in frame units (x_pct * FRAME_W, y_pct * FRAME_H); the caller
-    converts to/from its 0-1 normalized coords.
-    """
-    matched = sorted(set(expected) & set(detected))
-    if len(matched) < _RECOVERY_MIN_MATCHED:
-        return None
-    pairs = [(expected[k], detected[k]) for k in matched]
-    align = fit_alignment(pairs, min_scale=_RECOVERY_MIN_SCALE)
-    if align is None or not _fit_is_healthy(align):
-        return None
-    return {label: align.invert(pos) for label, pos in detected.items()}
