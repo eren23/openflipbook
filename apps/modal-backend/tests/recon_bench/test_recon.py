@@ -9,10 +9,9 @@ from typing import Any
 
 import pytest
 
+from providers.register import Alignment, fit_alignment
 from tests.recon_bench._align import (
-    Alignment,
     _pos_score,
-    fit_alignment,
     gated_recovery,
     geo_scores,
     pose_probe_loo,
@@ -191,8 +190,8 @@ def test_gate_uses_expected_frame_residual() -> None:
     # observed residual by 1/scale in the storage frame. Gate on residual/scale:
     # the SAME observed residual is healthy at scale 1 but not when compressed.
     # (This is the recon-corpus scale-0.588 cell that wobbled pos_raw -0.009.)
-    from tests.recon_bench._align import _RECOVERY_RESIDUAL_MAX as MAX
-    from tests.recon_bench._align import _fit_is_healthy
+    from providers.register import _RECOVERY_RESIDUAL_MAX as MAX
+    from providers.register import _fit_is_healthy
 
     resid = 0.9 * MAX  # comfortably under the cap in the OBSERVED frame
     ok = Alignment(scale=1.0, tx=0, ty=0, flip_x=False, residual=resid, matched=4)
