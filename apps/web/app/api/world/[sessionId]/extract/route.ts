@@ -8,6 +8,7 @@ import {
   upsertEntityGeos,
 } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
+import { isFitHealthy } from "@/lib/world-geometry";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { isSafeId } from "@/lib/ids";
@@ -301,6 +302,7 @@ export async function POST(req: Request, { params }: Params) {
               );
               if (reg) {
                 await upsertEntityGeos(sessionId, reg.updated);
+                const healthy = isFitHealthy(reg.fit);
                 planRegistration = {
                   scale: Number(reg.fit.scale.toFixed(3)),
                   tx: Number(reg.fit.tx.toFixed(1)),
@@ -308,7 +310,24 @@ export async function POST(req: Request, { params }: Params) {
                   flip_x: reg.fit.flipX,
                   residual: Number(reg.fit.residual.toFixed(2)),
                   matched: reg.fit.matched,
+                  gate_healthy: healthy,
                 };
+                // §4 telemetry: with the gate OFF an UNHEALTHY fit is applied
+                // anyway (the -35 hazard) — the shadow signal for whether flipping
+                // WORLD_REGISTER_GATE on is warranted. Greppable in deploy logs;
+                // stops appearing once the gate is on (those fits get skipped).
+                if (!healthy) {
+                  console.warn(
+                    "[world.register] unhealthy fit applied (WORLD_REGISTER_GATE off)",
+                    JSON.stringify({
+                      session: sessionId,
+                      node: body.node_id,
+                      scale: Number(reg.fit.scale.toFixed(3)),
+                      residual: Number(reg.fit.residual.toFixed(2)),
+                      matched: reg.fit.matched,
+                    }),
+                  );
+                }
               }
             } catch {
               // registration is strictly additive polish
