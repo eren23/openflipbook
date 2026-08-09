@@ -305,7 +305,7 @@ const enterAndInteriors: Study = {
     await mapCandWait;
     await p.waitForTimeout(1500);
     // A concrete place (enter_as scene); the geo-mapped and unmapped cases
-    // both ENTER in one hop now (#167).
+    // both ENTER in one hop (#167).
     const place = mapCands.find((c) => c.enter_as === "scene") ?? { x_pct: 0.5, y_pct: 0.45 };
     let before = h.node(p);
     // Arm the SCENE page's candidates before tapping — it fires on arrival.
