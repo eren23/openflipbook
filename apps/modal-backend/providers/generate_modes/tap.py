@@ -62,6 +62,24 @@ def _classic_zoom_mode(enter_as: str | None) -> str | None:
     return _CLASSIC_ENTER_AS_TO_RENDER.get((enter_as or "").strip().lower())
 
 
+async def _race_preview(
+    q: _asyncio.Queue[bytes], task: _asyncio.Future
+) -> bytes | None:
+    """Return the queued pre-judge preview bytes if they land before `task`
+    finishes, else None. Racing against `task` (the judged render) means a
+    first-render failure — which resolves `task` without ever enqueueing —
+    can't deadlock the get. Pure/injectable, so the zoom-preview wiring in
+    stream_tap is unit-testable without the whole generate flow."""
+    get = _asyncio.ensure_future(q.get())
+    done, _pending = await _asyncio.wait(
+        {get, task}, return_when=_asyncio.FIRST_COMPLETED
+    )
+    if get in done:
+        return get.result()
+    get.cancel()
+    return None
+
+
 async def stream_tap(
     body: GenerateBody,
     trace_id: str,
@@ -639,6 +657,11 @@ async def stream_tap(
         )
     result: Any = None
     main_task: _asyncio.Task | None = None
+    # Zoom's pre-judge preview channel (VIEW_LOOP_PREVIEW): _judged_zoom is a
+    # task, not a generator, so it can't yield an SSE frame — it hands its first
+    # render to the streaming body through this queue, which the body drains and
+    # paints before the judge tail + keep-best retry. None = feature off.
+    zoom_preview_q: _asyncio.Queue[bytes] | None = None
     if use_continuation and region_ref is not None:
         # SUBMAP_REDRAW rides the pixel-honoring EDIT seam with a LOOSE-refs
         # model. The fresh path is NOT an option: fal's text-to-image endpoints
@@ -658,6 +681,9 @@ async def stream_tap(
                 model_override=redraw_model if submap_redraw else body.image_model,
             )
 
+        if env_flag("VIEW_LOOP_PREVIEW"):
+            zoom_preview_q = _asyncio.Queue()
+
         async def _judged_zoom() -> Any:
             """Judged zoom (redraw or Kontext) + one keep-best retry.
 
@@ -674,6 +700,11 @@ async def stream_tap(
             (place_closeup) skip the legibility axis.
             """
             first = await _render_zoom(zoom_instruction)
+            if zoom_preview_q is not None:
+                # Hand the first render to the SSE body to paint NOW, before the
+                # judge tail + keep-best retry (the zoom path shows nothing until
+                # `final` otherwise). Judged verdict still swaps it.
+                zoom_preview_q.put_nowait(first.jpeg_bytes)
             if not env_flag("TAP_ZOOM_JUDGE", "true") or body.verify is False:
                 return first
             from providers import judge, render_loop
@@ -1012,6 +1043,18 @@ async def stream_tap(
                 )
             result = await main_task
     elif main_task is not None:
+        if zoom_preview_q is not None:
+            # Zoom pre-judge preview (VIEW_LOOP_PREVIEW): paint the first render
+            # the instant it lands, before its judge + keep-best retry.
+            preview_bytes = await _race_preview(zoom_preview_q, main_task)
+            if preview_bytes is not None:
+                preview_b64 = (
+                    await _asyncio.to_thread(base64.b64encode, preview_bytes)
+                ).decode("ascii")
+                yield _sse(
+                    {"type": "progress", "frame_index": 0, "jpeg_b64": preview_b64},
+                    trace_id,
+                )
         result = await main_task
 
     # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the
