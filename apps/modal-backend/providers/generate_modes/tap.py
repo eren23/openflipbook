@@ -756,7 +756,13 @@ async def stream_tap(
 
             try:
                 verdict, detail = await _verdicts(first)
-            except Exception:
+            except Exception as exc:
+                log(
+                    "warn",
+                    "tap.zoom_judge_failed",
+                    attempt=1,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 return first
             log(
                 "info",
@@ -792,7 +798,13 @@ async def stream_tap(
             try:
                 second = await _render_zoom(retry_instruction)
                 verdict2, detail2 = await _verdicts(second)
-            except Exception:
+            except Exception as exc:
+                log(
+                    "warn",
+                    "tap.zoom_retry_failed",
+                    attempt=2,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 return first
             log(
                 "info",

@@ -475,7 +475,16 @@ def _extract_citations(response: Any, max_sources: int = 3) -> list[Citation]:
                     _push(entry.get("url"), entry.get("title"))
                 if len(out) >= max_sources:
                     return out
-    except Exception:
+    except Exception as exc:
+        # Runs after the plan_page span has closed, so nothing else logs this;
+        # a provider shape change would otherwise drop citations forever.
+        from obs import log
+
+        log(
+            "warn",
+            "planner.citations_parse_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
         return out
     return out
 

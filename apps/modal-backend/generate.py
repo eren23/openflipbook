@@ -1465,7 +1465,12 @@ async def extract_entities_endpoint(
     try:
         _, _, _gb64 = body.image_data_url.partition(",")
         geo_img_bytes = base64.b64decode(_gb64) if _gb64 else b""
-    except Exception:
+    except Exception as exc:
+        log(
+            "warn",
+            "extract_entities.image_decode_failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )
         geo_img_bytes = b""
     view_task: _asyncio.Task[ViewEstimate] | None = None
     if geo_img_bytes and _geometric_world_on():

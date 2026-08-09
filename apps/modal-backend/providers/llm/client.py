@@ -494,7 +494,13 @@ def _choice_content(response: Any) -> str:
         if not response.choices:
             return ""
         return response.choices[0].message.content or ""
-    except Exception:
+    except Exception as exc:
+        # The same silent-{} collapse _safe_json's salvage warn exists to kill
+        # (see _STRUCTURED_OUTPUT_FAMILIES note): a shape failure here feeds
+        # "{}" downstream, which parses clean — so log it at the source.
+        _safe_log(
+            "warn", "llm.choice_shape_error", error=f"{type(exc).__name__}: {exc}"
+        )
         return ""
 
 
@@ -514,7 +520,10 @@ def _parse_tool_json(response: Any) -> dict[str, Any]:
                 return _safe_json(args)
         # Some servers ignore tool_choice and answer in content instead.
         return _safe_json((msg.content or "{}").strip())
-    except Exception:
+    except Exception as exc:
+        _safe_log(
+            "warn", "llm.tool_shape_error", error=f"{type(exc).__name__}: {exc}"
+        )
         return {}
 
 
