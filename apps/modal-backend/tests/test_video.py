@@ -133,11 +133,3 @@ async def test_content_type_and_duration_fall_back(monkeypatch: pytest.MonkeyPat
     )
     assert clip.content_type == "video/mp4"
     assert clip.duration_seconds == 7.0  # requested duration when fal omits it
-
-
-# ── data_url_from_bytes ─────────────────────────────────────────────────────
-
-
-def test_data_url_from_bytes() -> None:
-    assert video.data_url_from_bytes(b"abc") == "data:image/jpeg;base64,YWJj"
-    assert video.data_url_from_bytes(b"abc", "image/png") == "data:image/png;base64,YWJj"

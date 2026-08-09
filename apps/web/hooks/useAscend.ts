@@ -10,6 +10,7 @@ import type {
 } from "@openflipbook/config";
 
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
+import { sseData } from "@/lib/sse";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export interface AscendRoot {
@@ -44,25 +45,11 @@ async function readAscendReady(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
 ): Promise<GenerateAscendReadyEvent | null> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const trimmed = chunk.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (!payload) continue;
-      if (signal.aborted) return null;
-      const evt = JSON.parse(payload) as GenerateEvent;
-      if (evt.type === "ascend_ready") return evt;
-      if (evt.type === "error") throw new Error(evt.message);
-    }
+  for await (const payload of sseData(body)) {
+    if (signal.aborted) return null;
+    const evt = JSON.parse(payload) as GenerateEvent;
+    if (evt.type === "ascend_ready") return evt;
+    if (evt.type === "error") throw new Error(evt.message);
   }
   return null;
 }

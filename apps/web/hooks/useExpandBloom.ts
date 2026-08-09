@@ -10,6 +10,7 @@ import type {
 } from "@openflipbook/config";
 
 import type { NeighbourItem } from "@/components/PlayPage/NeighbourTray";
+import { sseData } from "@/lib/sse";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export interface BloomState {
@@ -85,81 +86,67 @@ export function useExpandBloom(persist: PersistNeighbour): {
           if (!response.ok || !response.body) {
             throw new Error(`expand failed: HTTP ${response.status}`);
           }
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const chunks = buffer.split("\n\n");
-            buffer = chunks.pop() ?? "";
-            for (const chunk of chunks) {
-              const trimmed = chunk.trim();
-              if (!trimmed.startsWith("data:")) continue;
-              const payload = trimmed.slice(5).trim();
-              if (!payload) continue;
-              const evt = JSON.parse(payload) as GenerateEvent;
-              // Stop touching bloom state the moment this stream is superseded
-              // / closed, so a buffered late event can't revive a closed tray.
-              if (ac.signal.aborted) return;
-              if (evt.type === "neighbor") {
-                const item: NeighbourItem = {
-                  key: `${body.current_node_id}-${evt.index}-${evt.subject}`,
-                  subject: evt.subject,
+          for await (const payload of sseData(response.body)) {
+            const evt = JSON.parse(payload) as GenerateEvent;
+            // Stop touching bloom state the moment this stream is superseded
+            // / closed, so a buffered late event can't revive a closed tray.
+            if (ac.signal.aborted) return;
+            if (evt.type === "neighbor") {
+              const item: NeighbourItem = {
+                key: `${body.current_node_id}-${evt.index}-${evt.subject}`,
+                subject: evt.subject,
+                scale: evt.scale,
+                imageDataUrl: evt.image_data_url,
+                nodeId: null,
+              };
+              setBloom((prev) => ({
+                items: [...(prev?.items ?? []), item],
+                total: evt.total,
+                done: prev?.done ?? false,
+              }));
+              void persist(
+                {
+                  parent_id: body.current_node_id || null,
+                  session_id: evt.session_id,
+                  query: evt.subject,
+                  page_title: evt.page_title,
+                  image_data_url: evt.image_data_url,
+                  image_model: evt.image_model,
+                  prompt_author_model: evt.prompt_author_model,
+                  aspect_ratio: body.aspect_ratio,
+                  final_prompt: evt.final_prompt,
+                  relation: "expand",
                   scale: evt.scale,
-                  imageDataUrl: evt.image_data_url,
-                  nodeId: null,
-                };
-                setBloom((prev) => ({
-                  items: [...(prev?.items ?? []), item],
-                  total: evt.total,
-                  done: prev?.done ?? false,
-                }));
-                void persist(
-                  {
-                    parent_id: body.current_node_id || null,
-                    session_id: evt.session_id,
-                    query: evt.subject,
-                    page_title: evt.page_title,
-                    image_data_url: evt.image_data_url,
-                    image_model: evt.image_model,
-                    prompt_author_model: evt.prompt_author_model,
-                    aspect_ratio: body.aspect_ratio,
-                    final_prompt: evt.final_prompt,
-                    relation: "expand",
-                    scale: evt.scale,
-                    ...(body.around_tier ? { scale_tier: body.around_tier } : {}),
-                  },
-                  traceId,
-                ).then((saved) => {
-                  if (!saved) return;
-                  setBloom((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          items: prev.items.map((i) =>
-                            i.key === item.key ? { ...i, nodeId: saved.id } : i,
-                          ),
-                        }
-                      : prev,
-                  );
-                });
-              } else if (evt.type === "expand_done") {
-                const failed =
-                  typeof evt.failed === "number" ? evt.failed : undefined;
+                  ...(body.around_tier ? { scale_tier: body.around_tier } : {}),
+                },
+                traceId,
+              ).then((saved) => {
+                if (!saved) return;
                 setBloom((prev) =>
                   prev
                     ? {
                         ...prev,
-                        done: true,
-                        ...(failed !== undefined ? { failed } : {}),
+                        items: prev.items.map((i) =>
+                          i.key === item.key ? { ...i, nodeId: saved.id } : i,
+                        ),
                       }
                     : prev,
                 );
-              } else if (evt.type === "error") {
-                throw new Error(evt.message);
-              }
+              });
+            } else if (evt.type === "expand_done") {
+              const failed =
+                typeof evt.failed === "number" ? evt.failed : undefined;
+              setBloom((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      done: true,
+                      ...(failed !== undefined ? { failed } : {}),
+                    }
+                  : prev,
+              );
+            } else if (evt.type === "error") {
+              throw new Error(evt.message);
             }
           }
           // Stream closed cleanly. Make sure the bloom resolves even if the

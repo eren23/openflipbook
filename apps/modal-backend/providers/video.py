@@ -16,7 +16,6 @@ see `ltx_stream.py`.
 
 from __future__ import annotations
 
-import base64
 import os
 from dataclasses import dataclass
 
@@ -128,8 +127,3 @@ async def animate_image(
         model=model,
         duration_seconds=duration_s,
     )
-
-
-def data_url_from_bytes(body: bytes, mime: str = "image/jpeg") -> str:
-    b64 = base64.b64encode(body).decode("ascii")
-    return f"data:{mime};base64,{b64}"

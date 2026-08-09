@@ -129,6 +129,7 @@ import {
 } from "@/lib/geo-tap";
 import { matchEntityLabel } from "@/lib/entity-label-match";
 import { focusOnMap } from "@/lib/click-route";
+import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
@@ -914,250 +915,236 @@ export default function PlayPage() {
         if (!response.ok || !response.body) {
           throw new Error(`generation failed: HTTP ${response.status}`);
         }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         let lastTitle = body.query;
         let lastImage: string | null = null;
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split("\n\n");
-          buffer = chunks.pop() ?? "";
-          for (const chunk of chunks) {
-            const line = chunk.trim();
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            const evt = JSON.parse(payload) as GenerateEvent;
-            if (evt.type === "status") {
-              hudEmit("sse:status", {
-                stage: evt.stage,
-                page_title: evt.page_title,
-                subject: evt.subject,
-                trace_id: traceId,
-                t: nowMs(),
-              });
-              if (evt.stage === "click_resolved" && evt.subject) {
-                setStatusMsg(`Exploring "${evt.subject}"…`);
-              } else if (evt.stage === "planning") {
-                setStatusMsg("Planning page…");
-              } else if (evt.stage === "generating_image") {
-                // The pro model has no fast draft to show (OpenRouter path)
-                // and routinely takes minutes — say so instead of leaving a
-                // silent spinner (the 3-minute-riverflow mystery). Read the
-                // tier off the REQUEST body: this callback is deliberately
-                // dependency-free, so component state here would be stale.
-                const proNote =
-                  body.image_tier === "pro"
-                    ? " (pro model — usually 2–3 min)"
-                    : "";
-                setStatusMsg(
-                  evt.page_title
-                    ? `Drawing "${evt.page_title}"…${proNote}`
-                    : `Drawing image…${proNote}`
-                );
-              } else if (evt.stage === "draft") {
-                setStatusMsg("Draft preview — the full render is refining…");
-              }
-            } else if (evt.type === "progress") {
-              lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
-              setProgressiveDraft(true);
-              hudEmit("sse:progress", {
-                trace_id: traceId,
-                t: nowMs(),
-              });
-              setPage((prev) => ({
-                nodeId: prev?.nodeId ?? null,
-                sessionId: body.session_id,
-                query: body.query,
-                title: lastTitle,
-                imageDataUrl: lastImage,
-              }));
-            } else if (evt.type === "final") {
-              lastImage = evt.image_data_url;
-              lastTitle = evt.page_title;
-              const evtSources: Citation[] = Array.isArray(evt.sources)
-                ? evt.sources
-                : [];
-              hudEmit("sse:final", {
-                page_title: evt.page_title,
-                image_model: evt.image_model,
-                trace_id: traceId,
-                t: nowMs(),
-              });
-              if (typeof evt.session_spend_estimate === "number") {
-                setSessionSpend(evt.session_spend_estimate);
-              }
-              setProgressiveDraft(false);
-              setPage({
-                nodeId: null,
-                sessionId: evt.session_id,
-                query: body.query,
-                title: evt.page_title,
-                imageDataUrl: evt.image_data_url,
-                sources: evtSources,
-                // Mirror the persist body: an edit is a REVISION. Tap/fresh
-                // stay absent = descend.
-                ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
-              });
-              // Flip the morph gate so the decode-then-reveal effect runs
-              // ONLY on the final image, not on streamed progress partials.
-              setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
-              // Judged edit: surface what the critics saw, with a one-click
-              // path back to the pre-edit node (undo, made felt).
-              if (evt.edit_verdict) {
-                setEditVerdictChip({
-                  text: formatEditVerdict(evt.edit_verdict),
-                  revertTo:
-                    body.mode === "edit" ? body.current_node_id || null : null,
-                });
-              } else if (evt.render_unjudged) {
-                // A judged path shipped without a critic verdict (upstream
-                // flap killed the judges) — say so instead of letting style
-                // drift pass as verified. Same chip surface as edit verdicts.
-                setEditVerdictChip({
-                  text: "⚠ unverified render — critics were unavailable",
-                  revertTo: null,
-                });
-              }
-              if (evt.layout_suppressed) {
-                // Camera-register mismatch dropped layout steering — the
-                // debug HUD counts how often (UI_AUDIT #11's live half).
-                hudEmit("layout:suppressed", {});
-              }
-              // INTERIOR_ENTERS arrivals stamp the final with a scene_view
-              // Partial (scale_tier "room" + place_form "interior") — fold it
-              // over the request's scene_view so page state AND the persisted
-              // node carry the interior marker (the minimap chip + permalink
-              // reloads read it). Stamp absent → body.scene_view unchanged.
-              const foldedSceneView = foldSceneViewStamp(
-                body.scene_view,
-                evt.scene_view
+        for await (const payload of sseData(response.body)) {
+          const evt = JSON.parse(payload) as GenerateEvent;
+          if (evt.type === "status") {
+            hudEmit("sse:status", {
+              stage: evt.stage,
+              page_title: evt.page_title,
+              subject: evt.subject,
+              trace_id: traceId,
+              t: nowMs(),
+            });
+            if (evt.stage === "click_resolved" && evt.subject) {
+              setStatusMsg(`Exploring "${evt.subject}"…`);
+            } else if (evt.stage === "planning") {
+              setStatusMsg("Planning page…");
+            } else if (evt.stage === "generating_image") {
+              // The pro model has no fast draft to show (OpenRouter path)
+              // and routinely takes minutes — say so instead of leaving a
+              // silent spinner (the 3-minute-riverflow mystery). Read the
+              // tier off the REQUEST body: this callback is deliberately
+              // dependency-free, so component state here would be stale.
+              const proNote =
+                body.image_tier === "pro"
+                  ? " (pro model — usually 2–3 min)"
+                  : "";
+              setStatusMsg(
+                evt.page_title
+                  ? `Drawing "${evt.page_title}"…${proNote}`
+                  : `Drawing image…${proNote}`
               );
-              void persistNode(
-                {
-                  parent_id: body.current_node_id || null,
-                  session_id: evt.session_id,
-                  query: body.query,
-                  page_title: evt.page_title,
-                  image_data_url: evt.image_data_url,
-                  image_model: evt.image_model,
-                  prompt_author_model: evt.prompt_author_model,
-                  aspect_ratio: body.aspect_ratio,
-                  final_prompt: evt.final_prompt,
-                  // An edit is a REVISION of the current page, not a place
-                  // inside it — the graph chrome renders it as "✎ edited".
-                  ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
-                  click_in_parent:
-                    body.mode === "tap" && body.click
-                      ? {
-                          x_pct: body.click.x_pct,
-                          y_pct: body.click.y_pct,
-                        }
-                      : null,
-                  sources: evtSources.map((s) => ({
-                    url: s.url,
-                    title: s.title ?? null,
-                  })),
-                  scene_view: foldedSceneView,
-                },
-                traceId
-              ).then((saved) => {
-                // A newer generation or a navigation aborted this one while the
-                // node was persisting. This .then is detached from the fetch
-                // reader, so without this guard it would clobber the current
-                // page/history/URL with THIS (stale) node. (#3)
-                if (ac.signal.aborted) return;
-                if (saved) {
-                  const persisted: Page = {
-                    nodeId: saved.id,
-                    sessionId: evt.session_id,
-                    query: body.query,
-                    title: evt.page_title,
-                    imageDataUrl: evt.image_data_url,
-                    parentId: body.current_node_id || null,
-                    sources: evtSources,
-                    // Same relation the persist body sent — so the in-session
-                    // map reads this page like the atlas will after a reload.
-                    ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
-                    sceneView: foldedSceneView
-                      ? { ...foldedSceneView, node_id: saved.id }
-                      : null,
-                    ...(body.mode === "tap" && body.click
-                      ? {
-                          clickInParent: {
-                            xPct: body.click.x_pct,
-                            yPct: body.click.y_pct,
-                          },
-                        }
-                      : {}),
-                  };
-                  setPage((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          nodeId: saved.id,
-                          sceneView: foldedSceneView
-                            ? { ...foldedSceneView, node_id: saved.id }
-                            : null,
-                        }
-                      : prev
-                  );
-                  const newId = saved.id;
-                  setHistory((prev) => {
-                    const existingIdx = prev.items.findIndex(
-                      (p) => p.nodeId === newId
-                    );
-                    const items =
-                      existingIdx >= 0
-                        ? prev.items.map((p, i) =>
-                            i === existingIdx ? persisted : p
-                          )
-                        : [...prev.items, persisted];
-                    const trail = [
-                      ...prev.trail.slice(0, prev.trailIdx + 1),
-                      newId,
-                    ];
-                    return { items, trail, trailIdx: trail.length - 1 };
-                  });
-                  const url = new URL(window.location.href);
-                  url.pathname = `/n/${saved.id}`;
-                  window.history.replaceState({}, "", url.toString());
-                  void triggerExtraction({
-                    sessionId: evt.session_id,
-                    nodeId: saved.id,
-                    imageDataUrl: evt.image_data_url,
-                    caption: evt.page_title,
-                    sceneDescription: evt.final_prompt ?? null,
-                    sceneView: foldedSceneView
-                      ? { ...foldedSceneView, node_id: saved.id }
-                      : null,
-                    traceId,
-                  }).then((res) => {
-                    // Surface a silent extraction miss (error or 0/0 even after
-                    // the one retry) so the user isn't left on a page whose taps
-                    // quietly mis-behave with no signal. Reuses localizeStatus so
-                    // the "Map it" affordance is one click, overlay or not. (#6)
-                    if (ac.signal.aborted) return;
-                    if (!res || (res.added === 0 && res.updated === 0)) {
-                      setLocalizeStatus({ nodeId: saved.id, status: "failed" });
-                    }
-                  });
-                }
-              });
-            } else if (evt.type === "error") {
-              hudEmit("sse:error", {
-                message: evt.message,
-                // Capped diagnostic tail (FRIENDLY_ERRORS) — HUD/logs only,
-                // never the banner.
-                detail: evt.detail,
-                trace_id: traceId,
-                t: nowMs(),
-              });
-              throw new Error(evt.message);
+            } else if (evt.stage === "draft") {
+              setStatusMsg("Draft preview — the full render is refining…");
             }
+          } else if (evt.type === "progress") {
+            lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
+            setProgressiveDraft(true);
+            hudEmit("sse:progress", {
+              trace_id: traceId,
+              t: nowMs(),
+            });
+            setPage((prev) => ({
+              nodeId: prev?.nodeId ?? null,
+              sessionId: body.session_id,
+              query: body.query,
+              title: lastTitle,
+              imageDataUrl: lastImage,
+            }));
+          } else if (evt.type === "final") {
+            lastImage = evt.image_data_url;
+            lastTitle = evt.page_title;
+            const evtSources: Citation[] = Array.isArray(evt.sources)
+              ? evt.sources
+              : [];
+            hudEmit("sse:final", {
+              page_title: evt.page_title,
+              image_model: evt.image_model,
+              trace_id: traceId,
+              t: nowMs(),
+            });
+            if (typeof evt.session_spend_estimate === "number") {
+              setSessionSpend(evt.session_spend_estimate);
+            }
+            setProgressiveDraft(false);
+            setPage({
+              nodeId: null,
+              sessionId: evt.session_id,
+              query: body.query,
+              title: evt.page_title,
+              imageDataUrl: evt.image_data_url,
+              sources: evtSources,
+              // Mirror the persist body: an edit is a REVISION. Tap/fresh
+              // stay absent = descend.
+              ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
+            });
+            // Flip the morph gate so the decode-then-reveal effect runs
+            // ONLY on the final image, not on streamed progress partials.
+            setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+            // Judged edit: surface what the critics saw, with a one-click
+            // path back to the pre-edit node (undo, made felt).
+            if (evt.edit_verdict) {
+              setEditVerdictChip({
+                text: formatEditVerdict(evt.edit_verdict),
+                revertTo:
+                  body.mode === "edit" ? body.current_node_id || null : null,
+              });
+            } else if (evt.render_unjudged) {
+              // A judged path shipped without a critic verdict (upstream
+              // flap killed the judges) — say so instead of letting style
+              // drift pass as verified. Same chip surface as edit verdicts.
+              setEditVerdictChip({
+                text: "⚠ unverified render — critics were unavailable",
+                revertTo: null,
+              });
+            }
+            if (evt.layout_suppressed) {
+              // Camera-register mismatch dropped layout steering — the
+              // debug HUD counts how often (UI_AUDIT #11's live half).
+              hudEmit("layout:suppressed", {});
+            }
+            // INTERIOR_ENTERS arrivals stamp the final with a scene_view
+            // Partial (scale_tier "room" + place_form "interior") — fold it
+            // over the request's scene_view so page state AND the persisted
+            // node carry the interior marker (the minimap chip + permalink
+            // reloads read it). Stamp absent → body.scene_view unchanged.
+            const foldedSceneView = foldSceneViewStamp(
+              body.scene_view,
+              evt.scene_view
+            );
+            void persistNode(
+              {
+                parent_id: body.current_node_id || null,
+                session_id: evt.session_id,
+                query: body.query,
+                page_title: evt.page_title,
+                image_data_url: evt.image_data_url,
+                image_model: evt.image_model,
+                prompt_author_model: evt.prompt_author_model,
+                aspect_ratio: body.aspect_ratio,
+                final_prompt: evt.final_prompt,
+                // An edit is a REVISION of the current page, not a place
+                // inside it — the graph chrome renders it as "✎ edited".
+                ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
+                click_in_parent:
+                  body.mode === "tap" && body.click
+                    ? {
+                        x_pct: body.click.x_pct,
+                        y_pct: body.click.y_pct,
+                      }
+                    : null,
+                sources: evtSources.map((s) => ({
+                  url: s.url,
+                  title: s.title ?? null,
+                })),
+                scene_view: foldedSceneView,
+              },
+              traceId
+            ).then((saved) => {
+              // A newer generation or a navigation aborted this one while the
+              // node was persisting. This .then is detached from the fetch
+              // reader, so without this guard it would clobber the current
+              // page/history/URL with THIS (stale) node. (#3)
+              if (ac.signal.aborted) return;
+              if (saved) {
+                const persisted: Page = {
+                  nodeId: saved.id,
+                  sessionId: evt.session_id,
+                  query: body.query,
+                  title: evt.page_title,
+                  imageDataUrl: evt.image_data_url,
+                  parentId: body.current_node_id || null,
+                  sources: evtSources,
+                  // Same relation the persist body sent — so the in-session
+                  // map reads this page like the atlas will after a reload.
+                  ...(body.mode === "edit" ? { relation: "edit" as const } : {}),
+                  sceneView: foldedSceneView
+                    ? { ...foldedSceneView, node_id: saved.id }
+                    : null,
+                  ...(body.mode === "tap" && body.click
+                    ? {
+                        clickInParent: {
+                          xPct: body.click.x_pct,
+                          yPct: body.click.y_pct,
+                        },
+                      }
+                    : {}),
+                };
+                setPage((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        nodeId: saved.id,
+                        sceneView: foldedSceneView
+                          ? { ...foldedSceneView, node_id: saved.id }
+                          : null,
+                      }
+                    : prev
+                );
+                const newId = saved.id;
+                setHistory((prev) => {
+                  const existingIdx = prev.items.findIndex(
+                    (p) => p.nodeId === newId
+                  );
+                  const items =
+                    existingIdx >= 0
+                      ? prev.items.map((p, i) =>
+                          i === existingIdx ? persisted : p
+                        )
+                      : [...prev.items, persisted];
+                  const trail = [
+                    ...prev.trail.slice(0, prev.trailIdx + 1),
+                    newId,
+                  ];
+                  return { items, trail, trailIdx: trail.length - 1 };
+                });
+                const url = new URL(window.location.href);
+                url.pathname = `/n/${saved.id}`;
+                window.history.replaceState({}, "", url.toString());
+                void triggerExtraction({
+                  sessionId: evt.session_id,
+                  nodeId: saved.id,
+                  imageDataUrl: evt.image_data_url,
+                  caption: evt.page_title,
+                  sceneDescription: evt.final_prompt ?? null,
+                  sceneView: foldedSceneView
+                    ? { ...foldedSceneView, node_id: saved.id }
+                    : null,
+                  traceId,
+                }).then((res) => {
+                  // Surface a silent extraction miss (error or 0/0 even after
+                  // the one retry) so the user isn't left on a page whose taps
+                  // quietly mis-behave with no signal. Reuses localizeStatus so
+                  // the "Map it" affordance is one click, overlay or not. (#6)
+                  if (ac.signal.aborted) return;
+                  if (!res || (res.added === 0 && res.updated === 0)) {
+                    setLocalizeStatus({ nodeId: saved.id, status: "failed" });
+                  }
+                });
+              }
+            });
+          } else if (evt.type === "error") {
+            hudEmit("sse:error", {
+              message: evt.message,
+              // Capped diagnostic tail (FRIENDLY_ERRORS) — HUD/logs only,
+              // never the banner.
+              detail: evt.detail,
+              trace_id: traceId,
+              t: nowMs(),
+            });
+            throw new Error(evt.message);
           }
         }
         setPhase("ready");

@@ -17,6 +17,7 @@ import {
   type LayoutInput,
 } from "@/lib/world-layout";
 import type { SceneView } from "@openflipbook/config";
+import { clamp } from "@/lib/clamp";
 import { nodeKind } from "@/lib/node-kind";
 
 interface WorldMapProps {
@@ -385,8 +386,3 @@ export default function WorldMap({
   );
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
-}

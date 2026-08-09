@@ -23,6 +23,7 @@ import {
 } from "@/lib/world-layout";
 import HeatmapOverlay from "@/components/heatmap-overlay";
 import { anchorForTile } from "@/lib/atlas-anchors";
+import { clamp } from "@/lib/clamp";
 import { nodeKind, NODE_KIND_LEGEND } from "@/lib/node-kind";
 import type {
   NodeRelation,
@@ -869,11 +870,6 @@ export default function AtlasView({
   );
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
-}
 
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
