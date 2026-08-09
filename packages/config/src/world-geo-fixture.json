@@ -55,7 +55,8 @@
       "scale_tier",
       "view",
       "closeup",
-      "enter_index"
+      "enter_index",
+      "place_form"
     ],
     "ProjectedEntity": [
       "id",
@@ -184,7 +185,8 @@
         "source": "user"
       },
       "closeup": false,
-      "enter_index": 0
+      "enter_index": 0,
+      "place_form": "interior"
     },
     "ProjectedEntity": {
       "id": "g1",

@@ -55,6 +55,7 @@ const sceneView: SceneView = {
   scale_tier: "city",
   view: viewSpec,
   enter_index: 0,
+  place_form: "interior",
 };
 const projectedEntity: ProjectedEntity = {
   id: "g1",

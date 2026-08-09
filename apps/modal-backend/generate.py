@@ -236,6 +236,10 @@ class SceneView(BaseModel):
     # ENTER_AZIMUTH_ROTATE; None/0 is byte-identical. Mirrors the optional TS
     # `enter_index?` (schema-parity gated).
     enter_index: int | None = None
+    # The entered place's FORM ("interior" on INTERIOR_ENTERS arrivals).
+    # Mirrors the optional TS `place_form?` (schema-parity gated); without it
+    # Pydantic silently dropped the field on validation — the focus_id class.
+    place_form: str | None = None
 
 
 class ProjectedEntity(BaseModel):

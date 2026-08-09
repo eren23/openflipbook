@@ -150,3 +150,30 @@ def test_generate_body_carries_geo_round_trip_fields() -> None:
     assert body.scene_view is not None
     assert body.scene_view.focus_id == "g1"
     assert body.expected_layout[0].label == "Lighthouse"
+
+
+@pytest.mark.parametrize("shape", _FIXTURE["shared_shapes"])
+def test_fixture_keys_match_ts_interface(shape: str) -> None:
+    """The fixture must track the TS interface itself. Both mirror faces
+    compare against the FIXTURE, so an optional TS field can drift ahead of
+    fixture + witness + Pydantic with every gate green — exactly how
+    SceneView.place_form slipped (#161) while focus_id-era tests passed."""
+    assert set(_FIXTURE["keys"][shape]) == _ts_interface_fields(shape)
+
+
+@pytest.mark.parametrize(
+    ("model", "interface"),
+    [
+        ("ResolveClickBody", "ResolveClickRequestBody"),
+        ("ExtractEntitiesBody", "ExtractEntitiesRequestBody"),
+        ("EditEntitiesBody", "EditEntitiesRequestBody"),
+    ],
+)
+def test_secondary_body_mirrors_match_ts(model: str, interface: str) -> None:
+    """Full field parity for the non-generate request bodies. Their parity
+    used to rest on manual per-run diffs, which let ExtractEntitiesBody's
+    live scene_description go missing from the TS contract for months.
+    (AnimateBody/PlanWorldBody/PrecomputeBody/ModerateTextBody are internal
+    endpoints with no TS interface by design — excluded.)"""
+    py_fields = set(getattr(generate, model).model_fields.keys())
+    assert py_fields == _ts_interface_fields(interface)

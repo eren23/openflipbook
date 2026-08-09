@@ -819,6 +819,11 @@ export interface ExtractEntitiesRequestBody {
   node_id: string;
   image_data_url: string;
   caption: string;
+  // The planner's full image prompt — the rich paragraph the renderer
+  // produced from. The extractor needs it alongside the short `caption`
+  // title (a title alone is too thin). Live on the wire since world-memory;
+  // mirrors ExtractEntitiesBody.scene_description.
+  scene_description?: string | null;
   // Lightweight summary of the world's current entities so the VLM can
   // diff. Web side selects the most relevant slice (recent + name-overlap
   // candidates) before sending — full registry on every call wastes tokens.

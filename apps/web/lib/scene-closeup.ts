@@ -1,6 +1,7 @@
 import type { Entity, SceneView } from "@openflipbook/config";
 import { finerTier } from "@openflipbook/config";
 
+import type { EditRegionBox } from "./edit-mask";
 import { entityAtPoint } from "./entity-hit";
 
 /**
@@ -19,7 +20,9 @@ export type SceneCloseupSpec =
   | {
       kind: "closeup";
       name: string;
-      regionBox: { x: number; y: number; w: number; h: number };
+      // 0..1 natural-image region — the same shape + semantics as an edit
+      // region (lib/edit-mask.ts), reused rather than redeclared.
+      regionBox: EditRegionBox;
       sceneView: SceneView;
     }
   | { kind: "transition"; name: string };
