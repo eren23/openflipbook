@@ -1,7 +1,7 @@
 # Place description → logical object world (design doc)
 
 _Grounded in the code, not memory. This is a **design document** — nothing here is
-implemented yet. It is written to the same discipline as `GEOMETRIC_WORLD_AUDIT.md`:
+implemented yet. It is written to the same discipline as `docs/archive/GEOMETRIC_WORLD_AUDIT.md`:
 honest about what is a real primitive vs. a guess, every claim pinned to a file:line, and
 no marketing. Where the audit's failures (ROOT-1/ROOT-2 — the model free-styling
 placement, the world never seeding) bite this feature, I call them out and route around

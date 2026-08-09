@@ -1,7 +1,7 @@
 # Session audit — the consistency + worlds work
 
 _Honest, code-grounded review of everything shipped in this run, same discipline as
-`GEOMETRIC_WORLD_AUDIT.md`: what's solid, what's a deliberate simplification, what's deferred.
+`docs/archive/GEOMETRIC_WORLD_AUDIT.md`: what's solid, what's a deliberate simplification, what's deferred.
 Written so the next session can pick up without re-discovering the gaps._
 
 ## What shipped (merged to `main`)

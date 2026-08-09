@@ -24,7 +24,7 @@ Everything stays style-consistent (one art medium, every hop) and **size/scale-c
 This builds **on top of** the geometric world that already merged (PR #14): numeric map +
 observer poses + the affine `resolveAbsolutePos` that already gives every entity a true
 absolute coordinate "across the universe" (`apps/web/lib/world-geometry.ts:288-320`). The
-honest constraint from `GEOMETRIC_WORLD_AUDIT.md` §4b/§6.5: generated→coords geometry is
+honest constraint from `docs/archive/GEOMETRIC_WORLD_AUDIT.md` §4b/§6.5: generated→coords geometry is
 **relative, not metric** — a detection box wraps a cluster, the only exact bridge is
 `WORLD_TOPDOWN_MAPS` (bbox = footprint). So scale navigation cannot *depend* on metric
 precision; it has to layer a **coarse absolute rung** (which order of magnitude are we at)
