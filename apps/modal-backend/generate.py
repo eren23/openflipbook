@@ -35,9 +35,11 @@ if TYPE_CHECKING:
     # model_dump() yields the TypedDict).
     from providers.detector import Detection
     from providers.geometry import ProjectedEntity as ProjectedEntityDict
+    from providers.judge import JudgeResult
+    from providers.prompt_library.types import ViewSpec as ViewSpecDict
     from providers.view_estimator import ViewEstimate
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from _env import env_flag
@@ -72,7 +74,9 @@ SHARED_TOKEN_HEADER = "x-openflipbook-token"
 
 
 @fastapi_app.middleware("http")
-async def _shared_token_gate(request: Request, call_next: Any) -> Any:
+async def _shared_token_gate(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """SHARED_TOKEN (env, unset = open): when set, every endpoint except
     /health requires the matching header. The web's server-side proxies
     inject it (lib/modal.modalAuthHeaders); browsers never hold the token."""
@@ -446,7 +450,9 @@ def _heights_for_view(body: GenerateBody) -> list[tuple[str, float, str]] | None
     return [(n, h / anchor_h, anchor_name) for n, h in real[1:]]
 
 
-def _same_place_judge(judge_mod: Any) -> Any:
+def _same_place_judge(
+    judge_mod: Any,
+) -> Callable[[bytes, bytes], Awaitable[JudgeResult]]:
     """The render loop's same-place axis. Default: the zoom-aware step-in
     judge (a city-wide redraw of a tapped courtyard scores 10/10 on plain
     same-place — a wider view of a place IS that place — and sailed through
@@ -563,7 +569,7 @@ def _view_spec_for(
     subject: str | None,
     subject_context: str | None,
     place_form: str | None,
-) -> dict | None:
+) -> ViewSpecDict | None:
     """Resolve the deliberate camera: user/persisted pin > policy > None.
     VIEW_GRAMMAR=false -> None unconditionally (the strict kill-switch:
     byte-identical legacy renders, V1 must-fix 3)."""
@@ -571,7 +577,9 @@ def _view_spec_for(
         return None
     sv = body.scene_view
     if sv and sv.view is not None:
-        return sv.view.model_dump(exclude_none=True)
+        # model_dump() erases the static type; the Pydantic ViewSpec wire model
+        # dumps to exactly the provider-side TypedDict (parity-locked).
+        return cast("ViewSpecDict", sv.view.model_dump(exclude_none=True))
     from providers.prompt_library import policy as view_policy
 
     focus = _focus_world_entry(body, subject)
@@ -587,33 +595,29 @@ def _view_spec_for(
         if sv and sv.enter_index and sv.enter_index > 0 and env_flag("ENTER_AZIMUTH_ROTATE")
         else 0
     )
-    return cast(
-        "dict | None",
-        view_policy.default_view(
-            render_mode=render_mode or None,
-            world_mode=world_mode,
-            level=sv.level if sv else None,
-            scale_tier=sv.scale_tier if sv else None,
-            has_observer=bool(sv and sv.observer is not None),
-            has_region=has_region,
-            place_form=place_form,
-            from_closeup=bool(body.from_closeup),
-            subject=subject,
-            subject_context=subject_context,
-            focus_kind=str(focus.get("kind") or "") if focus else None,
-            focus_footprint=fp,
-            enter_index=enter_index,
-        ),
+    return view_policy.default_view(
+        render_mode=render_mode or None,
+        world_mode=world_mode,
+        level=sv.level if sv else None,
+        scale_tier=sv.scale_tier if sv else None,
+        has_observer=bool(sv and sv.observer is not None),
+        has_region=has_region,
+        place_form=place_form,
+        from_closeup=bool(body.from_closeup),
+        subject=subject,
+        subject_context=subject_context,
+        focus_kind=str(focus.get("kind") or "") if focus else None,
+        focus_footprint=fp,
+        enter_index=enter_index,
     )
 
 
-def _camera_clause_for(body: GenerateBody, view: dict | None) -> str:
+def _camera_clause_for(body: GenerateBody, view: ViewSpecDict | None) -> str:
     """The deliberate-camera clause for composed (fresh-path) prompts."""
     if view is None:
         return ""
     from providers import image as image_provider
     from providers.prompt_library import camera as camera_lib
-    from providers.prompt_library.types import ViewSpec as ViewSpecDict
 
     sv = body.scene_view
     obs = sv.observer.model_dump() if sv and sv.observer else None
@@ -624,14 +628,14 @@ def _camera_clause_for(body: GenerateBody, view: dict | None) -> str:
     from providers.geometry import ObserverPose as ObserverPoseDict
 
     return camera_lib.camera_clause(
-        cast("ViewSpecDict", view),
+        view,
         cast("ObserverPoseDict | None", obs),
         medium=medium,
         family=family,
     )
 
 
-def _layout_register_mismatch(body: GenerateBody, view: dict | None) -> bool:
+def _layout_register_mismatch(body: GenerateBody, view: ViewSpecDict | None) -> bool:
     """expected_layout bins are projected for a SPECIFIC camera (observer
     present -> the synthesized eye-level perspective; absent -> top-down).
     When the deliberate view names a DIFFERENT register, the bins are
@@ -728,16 +732,8 @@ async def _run_grounding(
             try:
                 from providers.segmenter import refine_detections_with_masks, segment
 
-                segs = await segment(
-                    img.jpeg_bytes, labels, boxes=cast("list[dict[str, Any]]", observed)
-                )
-                observed = cast(
-                    "list[Detection]",
-                    refine_detections_with_masks(
-                        cast("list[dict[str, Any]]", observed),
-                        cast("list[dict[str, Any]]", segs),
-                    ),
-                )
+                segs = await segment(img.jpeg_bytes, labels, boxes=observed)
+                observed = refine_detections_with_masks(observed, segs)
             except Exception as exc:  # best-effort: a SAM3 failure keeps the detector boxes
                 from obs import log
 
@@ -1128,7 +1124,7 @@ async def _event_stream(
 
 
 @fastapi_app.post("/sse/generate")
-async def sse_generate(req: Request):
+async def sse_generate(req: Request) -> Response:
     from obs import TRACE_HEADER, bind_trace
 
     limited = _rate_limited(req)
@@ -1164,7 +1160,7 @@ class AnimateBody(BaseModel):
 
 
 @fastapi_app.post("/animate")
-async def animate(req: Request, body: AnimateBody):
+async def animate(req: Request, body: AnimateBody) -> JSONResponse:
     """Cheap-fallback animation: delegate to fal-ai/ltx-video.
 
     Wraps fal errors into a JSON 502 with the original exception message so
@@ -1247,7 +1243,7 @@ class ResolveClickBody(BaseModel):
 
 
 @fastapi_app.post("/resolve-click")
-async def resolve_click(req: Request, body: ResolveClickBody):
+async def resolve_click(req: Request, body: ResolveClickBody) -> JSONResponse:
     """Hover-prefetch endpoint.
 
     Returns the click→subject+style mapping plus groundability + bounding
@@ -1327,7 +1323,7 @@ class PrecomputeBody(BaseModel):
 
 
 @fastapi_app.post("/precompute-candidates")
-async def precompute_candidates(req: Request, body: PrecomputeBody):
+async def precompute_candidates(req: Request, body: PrecomputeBody) -> JSONResponse:
     """Pre-resolve the 3-4 most click-worthy regions on a fresh page.
 
     Frontend fires this once per page-render; results warm the same cache the
@@ -1425,7 +1421,9 @@ class EditEntitiesBody(BaseModel):
 
 
 @fastapi_app.post("/extract-entities")
-async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
+async def extract_entities_endpoint(
+    req: Request, body: ExtractEntitiesBody
+) -> JSONResponse:
     """Run the world-memory extractor on a freshly-rendered page.
 
     Web-side flow: after /sse/generate emits `final` and the image is
@@ -1563,11 +1561,7 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
                     try:
                         from providers.segmenter import segment as _segment
 
-                        segs = await _segment(
-                            geo_img_bytes,
-                            labels,
-                            boxes=cast("list[dict[str, Any]]", dets),
-                        )
+                        segs = await _segment(geo_img_bytes, labels, boxes=dets)
                         seg_by = {
                             str(s.get("label", "")).lower().strip(): s for s in segs
                         }
@@ -1671,14 +1665,14 @@ async def extract_entities_endpoint(req: Request, body: ExtractEntitiesBody):
     )
 
 
-def _estimate_view_spec(view: dict[str, object]) -> dict[str, object]:
+def _estimate_view_spec(view: dict[str, object]) -> ViewSpecDict:
     from providers.prompt_library import policy as view_policy
 
-    return cast("dict[str, object]", view_policy.estimate_to_view_spec(view))
+    return view_policy.estimate_to_view_spec(view)
 
 
 @fastapi_app.post("/edit-entities")
-async def edit_entities_endpoint(req: Request, body: EditEntitiesBody):
+async def edit_entities_endpoint(req: Request, body: EditEntitiesBody) -> JSONResponse:
     """Turn an NL instruction into structured geo edits + a blast-radius (P5).
 
     Gated by GEOMETRIC_WORLD (403 when off → behaves as if absent). The web
@@ -1731,7 +1725,7 @@ class PlanWorldBody(BaseModel):
 
 
 @fastapi_app.post("/plan-world")
-async def plan_world_endpoint(req: Request, body: PlanWorldBody):
+async def plan_world_endpoint(req: Request, body: PlanWorldBody) -> JSONResponse:
     """Describe a place -> a logical object world (B1, WORLD_FROM_DESCRIPTION).
 
     Parse the description into a SceneGraph (one text-LLM call), then run the pure
@@ -1852,5 +1846,5 @@ async def trace_abort_stats(limit: int = 100) -> dict:
 
 @app.function(secrets=secrets, min_containers=0, timeout=INGRESS_TIMEOUT_S)
 @modal.asgi_app()
-def fastapi_ingress():
+def fastapi_ingress() -> FastAPI:
     return fastapi_app

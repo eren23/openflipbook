@@ -24,6 +24,8 @@ from providers import llm, model_router, spend
 if TYPE_CHECKING:
     from generate import GenerateBody
     from providers.edit_loop import EditAttempt
+    from providers.image import GeneratedImage
+    from providers.prompt_library.types import ViewSpec as ViewSpecDict
 
 
 async def stream_ascend(
@@ -74,17 +76,18 @@ async def stream_ascend(
     # keep the SOURCE's persisted view — coherence with the pixels they
     # extend; the fresh container is a NEW map and gets the policy's
     # deliberate top-down camera.
-    src_view: dict | None = None
+    src_view: ViewSpecDict | None = None
     if _view_grammar_on() and body.scene_view and body.scene_view.view:
-        src_view = body.scene_view.view.model_dump(exclude_none=True)
+        # model_dump() erases the static type; the Pydantic ViewSpec wire model
+        # dumps to exactly the provider-side TypedDict (parity-locked).
+        src_view = cast(
+            "ViewSpecDict", body.scene_view.view.model_dump(exclude_none=True)
+        )
     from providers.prompt_library import camera as camera_lib
     from providers.prompt_library import instructions as instructions_lib
     from providers.prompt_library import policy as view_policy
-    from providers.prompt_library.types import ViewSpec as ViewSpecDict
 
-    outward_rider = instructions_lib.outward_clause(
-        cast("ViewSpecDict | None", src_view)
-    )
+    outward_rider = instructions_lib.outward_clause(src_view)
     # DOM-labels mode: the container is a map too — render it label-free like
     # every other map path (the un-suppressed ascend hallucinated big baked
     # title lettering, e.g. "THE LAND OF IMAGINATION").
@@ -164,7 +167,7 @@ async def stream_ascend(
                     captured_instr = ascend_instr
                     source_url: str = body.image
 
-                    async def _render_ascend(suffix: str) -> Any:
+                    async def _render_ascend(suffix: str) -> GeneratedImage:
                         instr = (
                             captured_instr
                             if not suffix

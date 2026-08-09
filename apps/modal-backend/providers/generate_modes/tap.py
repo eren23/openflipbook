@@ -30,7 +30,9 @@ from providers import llm, model_router, spend
 if TYPE_CHECKING:
     from generate import GenerateBody, WorldContextEntity
     from providers.geometry import ProjectedEntity as ProjectedEntityDict
+    from providers.image import GeneratedImage
     from providers.judge import JudgeResult
+    from providers.prompt_library.types import ViewSpec as ViewSpecDict
     from providers.render_loop import Attempt
 
 
@@ -92,12 +94,14 @@ async def stream_tap(
     _condition_url_for_role: Callable[[GenerateBody, str], str | None],
     _world_mode_on: Callable[[bool], bool],
     _match_world_entity: Callable[[list[WorldContextEntity], str | None], dict | None],
-    _view_spec_for: Callable[..., dict | None],
-    _layout_register_mismatch: Callable[[GenerateBody, dict | None], bool],
+    _view_spec_for: Callable[..., ViewSpecDict | None],
+    _layout_register_mismatch: Callable[[GenerateBody, ViewSpecDict | None], bool],
     _layout_clause_for: Callable[..., str],
-    _camera_clause_for: Callable[[GenerateBody, dict | None], str],
+    _camera_clause_for: Callable[[GenerateBody, ViewSpecDict | None], str],
     _topdown_clause_for: Callable[[GenerateBody], str],
-    _same_place_judge: Callable[[Any], Any],
+    _same_place_judge: Callable[
+        [Any], Callable[[bytes, bytes], Awaitable[JudgeResult]]
+    ],
     _vlm_grounding_on: Callable[[], bool],
     _vlm_grounding_repair_on: Callable[[], bool],
     _run_grounding: Callable[..., Awaitable[tuple[Any, dict[str, Any] | None]]],
@@ -674,7 +678,7 @@ async def stream_tap(
         # byte-identical.
         redraw_model = model_router.resolve_model("submap_redraw")
 
-        async def _render_zoom(instr: str) -> Any:
+        async def _render_zoom(instr: str) -> GeneratedImage:
             return await image_edit_provider.continue_image(
                 region_ref,
                 instr,
@@ -684,7 +688,7 @@ async def stream_tap(
         if env_flag("VIEW_LOOP_PREVIEW"):
             zoom_preview_q = _asyncio.Queue()
 
-        async def _judged_zoom() -> Any:
+        async def _judged_zoom() -> GeneratedImage:
             """Judged zoom (redraw or Kontext) + one keep-best retry.
 
             Every zoom flavour funnels here (classic scene/closeup + submap,
@@ -727,7 +731,9 @@ async def stream_tap(
                 "TAP_ZOOM_DETAIL", "true"
             )
 
-            async def _verdicts(img: Any) -> tuple[JudgeResult, JudgeResult | None]:
+            async def _verdicts(
+                img: GeneratedImage,
+            ) -> tuple[JudgeResult, JudgeResult | None]:
                 if not detail_on:
                     return await step_in(region_bytes, img.jpeg_bytes), None
                 got = await _asyncio.gather(
@@ -834,7 +840,9 @@ async def stream_tap(
         if view_loop:
             from providers import judge, render_loop
 
-            async def _render_enter_attempt(suffix: str, attempt_index: int) -> Any:
+            async def _render_enter_attempt(
+                suffix: str, attempt_index: int
+            ) -> GeneratedImage:
                 instr = (
                     enter_instruction
                     if not suffix
@@ -852,7 +860,7 @@ async def stream_tap(
                     style_ref_url=enter_style_ref,
                 )
 
-            async def _render_enter(suffix: str) -> Any:
+            async def _render_enter(suffix: str) -> GeneratedImage:
                 return await _render_enter_attempt(suffix, 0)
 
             # The richness critic: the named interior features (the

@@ -25,6 +25,7 @@ from providers import llm, spend
 if TYPE_CHECKING:
     from generate import GenerateBody
     from providers.edit_loop import EditAttempt
+    from providers.image import GeneratedImage
 
 
 async def stream_edit(
@@ -77,7 +78,7 @@ async def stream_edit(
         )
         edit_mask: str = body.edit_mask
 
-        async def _render_inpaint(suffix: str) -> Any:
+        async def _render_inpaint(suffix: str) -> GeneratedImage:
             instr = described if not suffix else f"{described}\n\n{suffix}"
             return await inpaint_provider.inpaint_image(
                 image_data_url=body.image or "",
@@ -114,7 +115,10 @@ async def stream_edit(
                     "edit.loop.unjudged",
                     reason="source_or_mask_not_data_url",
                 )
-            inp_result = await _render_inpaint("")
+            # The loop's else-branch below reassigns this to the Rendered-typed
+            # loop image; explicit Any keeps the protocol-erasure honest (the
+            # final frame reads .mime_type/.model, which Rendered doesn't carry).
+            inp_result: Any = await _render_inpaint("")
         else:
             edit_cfg = edit_loop.edit_loop_config_from_env(body.max_attempts)
             # generate.INGRESS_TIMEOUT_S (900) minus a 180s tail for the
@@ -217,7 +221,7 @@ async def stream_edit(
         judge_source = data_url_bytes(body.image)
         if judge_source is not None:
 
-            async def _render_judged_edit(suffix: str) -> Any:
+            async def _render_judged_edit(suffix: str) -> GeneratedImage:
                 instr = polished if not suffix else f"{polished}\n\n{suffix}"
                 return await image_edit_provider.edit_image(
                     image_data_url=body.image or "",

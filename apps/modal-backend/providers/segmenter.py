@@ -24,7 +24,10 @@ import base64
 import io
 import math
 import os
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from .detector import Detection
 
 
 class SegmentEntity(TypedDict):
@@ -61,7 +64,7 @@ def _sam_model() -> str:
     return os.environ.get("FAL_SAM_MODEL", "fal-ai/sam-3/image")
 
 
-def detector_box_to_sam_box(det: dict[str, Any], img_w: int, img_h: int) -> dict[str, int]:
+def detector_box_to_sam_box(det: Detection, img_w: int, img_h: int) -> dict[str, int]:
     """Convert a detector box (centre-based, normalized 0..1: x_pct, y_pct,
     w_pct, h_pct) into a SAM3 box_prompt (pixel corners {x_min,y_min,x_max,
     y_max}, clamped to the image). SAM3 can't ground a proper-noun label like
@@ -91,20 +94,29 @@ def box_from_polygon(polygon: list[list[float]]) -> dict[str, float]:
 
 
 def refine_detections_with_masks(
-    detections: list[dict[str, Any]], segments: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+    detections: list[Detection], segments: list[SegmentEntity]
+) -> list[Detection]:
     """Tighten each detector box to its SAM3 mask's bounding box (label-matched,
     case-insensitive), keeping the detection's label + score. A detection with no
     matching mask is passed through unchanged — so this only ever sharpens the
     grounding loop's observed boxes, never drops one."""
     seg_by = {str(s.get("label", "")).lower(): s for s in segments}
-    out: list[dict[str, Any]] = []
+    out: list[Detection] = []
     for d in detections:
         seg = seg_by.get(str(d.get("label", "")).lower())
         poly = seg.get("polygon") if seg else None
         if poly and len(poly) >= MIN_VERTICES:
             box = box_from_polygon(poly)
-            out.append({"label": d.get("label", ""), "score": d.get("score", 1.0), **box})
+            out.append(
+                {
+                    "label": d.get("label", ""),
+                    "score": d.get("score", 1.0),
+                    "x_pct": box["x_pct"],
+                    "y_pct": box["y_pct"],
+                    "w_pct": box["w_pct"],
+                    "h_pct": box["h_pct"],
+                }
+            )
         else:
             out.append(d)
     return out
@@ -235,7 +247,7 @@ def parse_segments(payload: Any) -> list[SegmentEntity]:
 async def segment(
     image_bytes: bytes,
     labels: list[str],
-    boxes: list[dict[str, Any]] | None = None,
+    boxes: list[Detection] | None = None,
 ) -> list[SegmentEntity]:
     """Segment the given labels: one closed border polygon + height ranking per
     label actually present. Routes on SEGMENTER_PROVIDER (default "vlm"); the
@@ -255,7 +267,7 @@ async def segment(
 async def _segment_sam3(
     image_bytes: bytes,
     labels: list[str],
-    boxes: list[dict[str, Any]] | None,
+    boxes: list[Detection] | None,
 ) -> list[SegmentEntity]:
     """Pixel-accurate segmentation via fal-ai/sam-3, one call per label. Each
     label is BOX-PROMPTED with its detector box (proper-noun text prompts return

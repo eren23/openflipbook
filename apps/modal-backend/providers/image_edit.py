@@ -15,7 +15,10 @@ from __future__ import annotations
 import base64
 import os
 import struct
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from providers.prompt_library.types import ViewSpec
 
 from ._common import to_fal_url
 from .image import (
@@ -124,7 +127,7 @@ def build_zoom_instruction(
     layout_clause: str = "",
     *,
     style_anchor: str | None = None,
-    view: dict | None = None,
+    view: ViewSpec | None = None,
     family: str | None = None,
     label_free: bool = False,
     register: str = "map",
@@ -136,17 +139,14 @@ def build_zoom_instruction(
     tests/test_image_continue.py + the frozen goldens). With a view, the
     keep-camera fragment is spelled per projection in PRESERVE form. redraw
     (SUBMAP_REDRAW) switches to the fresh re-render wording."""
-    from typing import cast
-
     from providers.prompt_library import instructions as _instructions
-    from providers.prompt_library.types import ViewSpec as _ViewSpec
 
     return _instructions.build_zoom_instruction(
         page_title,
         facts,
         layout_clause,
         style_anchor=style_anchor,
-        view=cast("_ViewSpec | None", view),
+        view=view,
         family=family,
         label_free=label_free,
         register=register,
@@ -163,7 +163,7 @@ def build_enter_instruction(
     subject_context: str | None = None,
     surroundings: str | None = None,
     layout_clause: str = "",
-    view: dict | None = None,
+    view: ViewSpec | None = None,
     family: str | None = None,
     style_ref: bool = False,
     surroundings_pov: bool = False,
@@ -177,10 +177,7 @@ def build_enter_instruction(
     dies and the deliberate projection (eye_level / oblique / isometric /
     top_down plan) is named instead. interior (INTERIOR_ENTERS) flips every
     variant to the INDOOR register; False stays byte-identical."""
-    from typing import cast
-
     from providers.prompt_library import instructions as _instructions
-    from providers.prompt_library.types import ViewSpec as _ViewSpec
 
     return _instructions.build_enter_instruction(
         page_title,
@@ -189,7 +186,7 @@ def build_enter_instruction(
         subject_context=subject_context,
         surroundings=surroundings,
         layout_clause=layout_clause,
-        view=cast("_ViewSpec | None", view),
+        view=view,
         family=family,
         style_ref=style_ref,
         surroundings_pov=surroundings_pov,
