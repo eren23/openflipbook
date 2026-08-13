@@ -45,3 +45,33 @@ test("right-click exposes image export; /api/image serves attachment + inline", 
   expect(inline.headers()["content-disposition"] ?? "").toBeFalsy();
   expect(inline.headers()["content-type"] ?? "").toContain("image/");
 });
+
+// Phase 2: the whole-world bundle — every branch's image + graph/geometry/
+// entities JSON, session-scoped.
+test("world export returns the session DAG as a ZIP", async ({ page }) => {
+  let sessionId = "";
+  page.on("request", (req) => {
+    if (req.url().includes("/api/generate-page") && req.method() === "POST") {
+      const body = JSON.parse(req.postData() ?? "{}");
+      if (body.session_id) sessionId = body.session_id;
+    }
+  });
+  const persistPromise = page.waitForResponse(
+    (r) => r.url().includes("/api/nodes") && r.request().method() === "POST",
+    { timeout: 90_000 },
+  );
+  await page.goto("/play?q=" + encodeURIComponent("a walled coastal city"));
+  await waitForStableImage(page);
+  await persistPromise;
+  expect(sessionId).toBeTruthy();
+
+  const resp = await page.request.get(`/api/export/session/${sessionId}`);
+  expect(resp.status()).toBe(200);
+  expect(resp.headers()["content-type"] ?? "").toContain("zip");
+  expect(resp.headers()["content-disposition"] ?? "").toContain("attachment");
+  const zip = await resp.body();
+  // ZIP local-file-header magic "PK\x03\x04".
+  expect(zip.length).toBeGreaterThan(0);
+  expect(zip[0]).toBe(0x50);
+  expect(zip[1]).toBe(0x4b);
+});

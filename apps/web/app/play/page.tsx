@@ -1853,6 +1853,15 @@ export default function PlayPage() {
           },
         });
       }
+      // The whole world (not just the root→here path): every branch's image +
+      // graph/geometry/entities JSON. Session-scoped route.
+      items.push({
+        label: "Export world (ZIP)",
+        onClick: () => {
+          close();
+          window.open(`/api/export/session/${page.sessionId}`, "_blank");
+        },
+      });
       // Opt-in gallery (Wave 7): this page fronts the published session.
       const publishSessionId = page.sessionId;
       items.push({

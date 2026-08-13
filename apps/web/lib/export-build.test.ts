@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildFlipbookPdf,
   buildGif,
+  buildWorldZip,
   buildZip,
   sampleEvenly,
   type ExportPage,
+  type WorldExportNode,
 } from "./export-build";
 
 // A minimal valid JPEG (1x1, generated once with jpeg-js) — enough for the
@@ -52,6 +54,66 @@ describe("buildZip", () => {
     const graph = JSON.parse(await zip.file("graph.json")!.async("string"));
     expect(graph.exported_path).toHaveLength(2);
     expect(graph.exported_path[1].parent_id).toBe("a");
+  });
+});
+
+function worldNode(
+  id: string,
+  bytes: Uint8Array | null,
+  parent: string | null,
+  extra: Partial<WorldExportNode> = {},
+): WorldExportNode {
+  return {
+    id,
+    parent_id: parent,
+    title: `Page ${id}`,
+    query: `q ${id}`,
+    created_at: "2026-06-11T00:00:00Z",
+    relation: "descend",
+    scale_tier: null,
+    click_in_parent: null,
+    scene_view: null,
+    sources: [],
+    bytes,
+    ...extra,
+  };
+}
+
+describe("buildWorldZip", () => {
+  it("bundles every node's image + a rich graph, world-map, and entities json", async () => {
+    const jpg = await tinyJpeg();
+    const bytes = await buildWorldZip(
+      [
+        worldNode("a", jpg, null, { scale_tier: "city" }),
+        worldNode("b", jpg, "a", {
+          relation: "expand",
+          click_in_parent: { x_pct: 0.5, y_pct: 0.5 },
+        }),
+        worldNode("c", null, "b"), // missing blob → stays in the graph, no image file
+      ],
+      { entities: [{ id: "geo_a" }], bounds: { x: 0, y: 0, w: 10, h: 10 } },
+      { entities: [{ id: "e1", name: "Mira" }] },
+    );
+    const zip = await JSZip.loadAsync(bytes);
+    const names = Object.keys(zip.files);
+    // Two images (c has no bytes) + the three JSON files.
+    expect(names.filter((n) => n.endsWith(".jpg"))).toHaveLength(2);
+
+    const graph = JSON.parse(await zip.file("graph.json")!.async("string"));
+    expect(graph.nodes).toHaveLength(3);
+    expect(graph.nodes[1]).toMatchObject({
+      id: "b",
+      parent_id: "a",
+      relation: "expand",
+      click_in_parent: { x_pct: 0.5, y_pct: 0.5 },
+    });
+    expect(graph.nodes[1].image).toMatch(/^pages\/002-/);
+    expect(graph.nodes[2].image).toBeNull();
+
+    const worldMap = JSON.parse(await zip.file("world-map.json")!.async("string"));
+    expect(worldMap.entities[0].id).toBe("geo_a");
+    const entities = JSON.parse(await zip.file("entities.json")!.async("string"));
+    expect(entities.entities[0].name).toBe("Mira");
   });
 });
 

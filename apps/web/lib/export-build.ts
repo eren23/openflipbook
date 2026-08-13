@@ -56,6 +56,61 @@ export async function buildZip(pages: ExportPage[]): Promise<Uint8Array> {
   return zip.generateAsync({ type: "uint8array" });
 }
 
+/** A node in the whole-session ("world") export: the full page metadata plus
+ * its bytes (null when the blob is missing — the node still appears in the
+ * graph, just without an image file). Decoupled from the db NodeRow so the
+ * builder stays pure. */
+export interface WorldExportNode {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  query: string;
+  created_at: string;
+  relation: string;
+  scale_tier: string | null;
+  click_in_parent: unknown;
+  scene_view: unknown;
+  sources: unknown[];
+  bytes: Uint8Array | null;
+}
+
+/** The whole-world bundle: every branch's image + a rich graph.json (topology,
+ * click provenance, per-node observer pose) + the geometric world-map.json and
+ * the entities.json registry. The read side of "download your whole world" —
+ * enough to reconstruct or re-open the session anywhere. */
+export async function buildWorldZip(
+  nodes: WorldExportNode[],
+  worldMap: unknown,
+  entities: unknown,
+): Promise<Uint8Array> {
+  const zip = new JSZip();
+  const graph = nodes.map((n, i) => {
+    let image: string | null = null;
+    if (n.bytes) {
+      const slug = n.title.replace(/[^\w\- ]+/g, "").trim().slice(0, 60) || n.id;
+      image = `pages/${String(i + 1).padStart(3, "0")}-${slug}.jpg`;
+      zip.file(image, n.bytes);
+    }
+    return {
+      id: n.id,
+      parent_id: n.parent_id,
+      title: n.title,
+      query: n.query,
+      created_at: n.created_at,
+      relation: n.relation,
+      scale_tier: n.scale_tier,
+      click_in_parent: n.click_in_parent,
+      scene_view: n.scene_view,
+      sources: n.sources,
+      image,
+    };
+  });
+  zip.file("graph.json", JSON.stringify({ nodes: graph }, null, 2));
+  zip.file("world-map.json", JSON.stringify(worldMap ?? null, null, 2));
+  zip.file("entities.json", JSON.stringify(entities ?? null, null, 2));
+  return zip.generateAsync({ type: "uint8array" });
+}
+
 /** Flipbook PDF: one full-bleed page per image with a slim title strip under
  * it — the artifact the project is named after. */
 export async function buildFlipbookPdf(pages: ExportPage[]): Promise<Uint8Array> {
