@@ -1,7 +1,10 @@
 "use client";
 
+import { useRef } from "react";
+
 import type { MapCrop } from "@openflipbook/config";
 
+import { downloadBlob, svgElementToPngBlob } from "@/lib/image-export";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import {
   childrenOf,
@@ -47,6 +50,9 @@ export default function WorldMiniMap({
   interiorHere,
 }: Props) {
   const { entities: worldEntities, bounds: worldBounds } = useWorldMap(sessionId);
+  // Declared before any early return (rules of hooks); only the full-map branch
+  // below binds it to the <svg> and exposes the export button.
+  const svgRef = useRef<SVGSVGElement>(null);
 
   // The place's name: caller override, else the focus entity's own label.
   const resolvedLabel =
@@ -123,12 +129,26 @@ export default function WorldMiniMap({
   const bTL = worldToView({ x: bounds.x, y: bounds.y }, viewWindow, view);
   const bBR = worldToView({ x: bounds.x + bounds.w, y: bounds.y + bounds.h }, viewWindow, view);
 
+  // Rasterize the coordinate-frame inset to a PNG. The SVG is pure vector (no
+  // external <image>/font refs), so this can't taint the canvas. Best-effort:
+  // a rasterize failure logs and no-ops — the button is a convenience.
+  const exportPng = async () => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    try {
+      const blob = await svgElementToPngBlob(svg);
+      downloadBlob(blob, `openflipbook-map-${sessionId}.png`);
+    } catch (err) {
+      console.warn("[minimap] PNG export failed", err);
+    }
+  };
+
   return (
     <div
       className="pointer-events-none absolute right-2 top-12 rounded-lg border border-black/20 bg-stone-50/95 p-1 shadow-lg"
       data-testid="world-minimap"
     >
-      <svg width={W} height={H}>
+      <svg ref={svgRef} width={W} height={H}>
         {/* bounds = the current extent */}
         <rect
           x={Math.min(bTL.x, bBR.x)}
@@ -185,12 +205,23 @@ export default function WorldMiniMap({
           );
         })}
       </svg>
-      <div className="px-1 text-[9px] text-stone-500">
-        {local
-          ? `inside ${resolvedLabel} · ${entities.length} parts · local coords`
-          : submap
-            ? `submap · ${entities.length} here · ${Math.round(crop!.w)}×${Math.round(crop!.h)}`
-            : `world coords · ${entities.length} entities · bounds ${Math.round(bounds.w)}×${Math.round(bounds.h)}`}
+      <div className="flex items-center justify-between gap-1 px-1 text-[9px] text-stone-500">
+        <span>
+          {local
+            ? `inside ${resolvedLabel} · ${entities.length} parts · local coords`
+            : submap
+              ? `submap · ${entities.length} here · ${Math.round(crop!.w)}×${Math.round(crop!.h)}`
+              : `world coords · ${entities.length} entities · bounds ${Math.round(bounds.w)}×${Math.round(bounds.h)}`}
+        </span>
+        <button
+          type="button"
+          onClick={exportPng}
+          title="Download map as PNG"
+          data-testid="minimap-export"
+          className="pointer-events-auto shrink-0 rounded px-1 text-stone-600 hover:bg-stone-200"
+        >
+          ⤓ PNG
+        </button>
       </div>
     </div>
   );

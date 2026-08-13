@@ -19,6 +19,8 @@ interface Props {
   onPrune: () => void;
   onToggleBeacons: () => void;
   onSavePostcard: () => void;
+  onDownloadImage: () => void;
+  onCopyImage: () => void;
   onClose: () => void;
   // Rendered ABOVE the page-level actions, divider-separated. The menu stays
   // dumb: the parent owns target resolution and what each item does.
@@ -42,6 +44,8 @@ export function ContextMenu({
   onPrune,
   onToggleBeacons,
   onSavePostcard,
+  onDownloadImage,
+  onCopyImage,
   onClose,
   extraItems,
 }: Props) {
@@ -87,6 +91,22 @@ export function ContextMenu({
           onClick={onSavePostcard}
         >
           Save as postcard
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left hover:bg-[var(--color-ink)]/10 disabled:opacity-50"
+          disabled={!canSavePostcard}
+          onClick={onDownloadImage}
+        >
+          Download image
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left hover:bg-[var(--color-ink)]/10 disabled:opacity-50"
+          disabled={!canSavePostcard}
+          onClick={onCopyImage}
+        >
+          Copy image
         </button>
         <button
           type="button"

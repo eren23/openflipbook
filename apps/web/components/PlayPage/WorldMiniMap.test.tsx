@@ -1,9 +1,16 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WorldEntityGeo } from "@openflipbook/config";
 
 import WorldMiniMap from "./WorldMiniMap";
+
+// The canvas rasterizer is browser-only; mock it so the button-wiring is
+// unit-checkable (the pixels are verified in the e2e/manual pass).
+vi.mock("@/lib/image-export", () => ({
+  svgElementToPngBlob: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+  downloadBlob: vi.fn(),
+}));
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
@@ -158,6 +165,19 @@ describe("WorldMiniMap", () => {
       "inside University",
     );
     expect(screen.queryByText(/no interior mapped yet/i)).toBeNull();
+  });
+
+  it("⤓ PNG: rasterizes the coordinate frame and downloads it, named by session", async () => {
+    const { svgElementToPngBlob, downloadBlob } = await import("@/lib/image-export");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ok(mapPayload([ent("a", "University", 20, 15)]))) as unknown as typeof fetch,
+    );
+    render(<WorldMiniMap sessionId="s1" />);
+    const btn = await screen.findByTestId("minimap-export");
+    fireEvent.click(btn);
+    await waitFor(() => expect(svgElementToPngBlob).toHaveBeenCalled());
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "openflipbook-map-s1.png");
   });
 
   it("post-ascend: nested former roots still dot the world view with sane bounds", async () => {

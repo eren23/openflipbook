@@ -14,6 +14,8 @@ const base = {
   onPrune: () => {},
   onToggleBeacons: () => {},
   onSavePostcard: () => {},
+  onDownloadImage: () => {},
+  onCopyImage: () => {},
   onClose: () => {},
 };
 
@@ -47,5 +49,28 @@ describe("ContextMenu extraItems (parent-injected actions)", () => {
     render(<ContextMenu {...base} extraItems={[]} />);
     expect(screen.queryByText("🔍 Zoom in here")).toBeNull();
     expect(screen.getByText("Copy permalink")).toBeTruthy();
+  });
+
+  it("fires the image-export actions and gates them on a saved image", () => {
+    const onDownloadImage = vi.fn();
+    const onCopyImage = vi.fn();
+    const { rerender } = render(
+      <ContextMenu {...base} onDownloadImage={onDownloadImage} onCopyImage={onCopyImage} />
+    );
+    fireEvent.click(screen.getByText("Download image"));
+    fireEvent.click(screen.getByText("Copy image"));
+    expect(onDownloadImage).toHaveBeenCalledTimes(1);
+    expect(onCopyImage).toHaveBeenCalledTimes(1);
+    // No saved node image → both disabled (same gate as Save as postcard).
+    rerender(
+      <ContextMenu
+        {...base}
+        canSavePostcard={false}
+        onDownloadImage={onDownloadImage}
+        onCopyImage={onCopyImage}
+      />
+    );
+    expect(screen.getByText("Download image")).toHaveProperty("disabled", true);
+    expect(screen.getByText("Copy image")).toHaveProperty("disabled", true);
   });
 });

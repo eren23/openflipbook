@@ -100,6 +100,7 @@ import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
 import { MapLabelOverlay } from "@/components/PlayPage/MapLabelOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
+import { rasterToPngBlob } from "@/lib/image-export";
 import { HoverCrosshair } from "@/components/PlayPage/HoverCrosshair";
 import { HintPrompt } from "@/components/PlayPage/HintPrompt";
 import { EditForm } from "@/components/PlayPage/EditForm";
@@ -501,6 +502,25 @@ export default function PlayPage() {
       setShareNote(SHARE_COPIED_NOTE);
     } catch {
       setShareNote(SHARE_COPY_FAILED_NOTE);
+    }
+  };
+  // Copy the raw render to the clipboard. Same honest-note contract as
+  // copyPermalink: only claims success after the write resolves. Fetches the
+  // node's bytes same-origin (via /api/image) so the canvas→PNG re-encode the
+  // Clipboard API needs isn't blocked by a tainted cross-origin canvas.
+  const IMAGE_COPIED_NOTE = "Image copied to clipboard";
+  const IMAGE_COPY_FAILED_NOTE = "Couldn't copy the image — use Download instead";
+  const copyImage = async (nodeId: string) => {
+    try {
+      if (!navigator.clipboard || typeof ClipboardItem === "undefined")
+        throw new Error("clipboard unavailable");
+      const res = await fetch(`/api/image/${nodeId}`);
+      if (!res.ok) throw new Error(`image fetch ${res.status}`);
+      const png = await rasterToPngBlob(await res.blob());
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      setShareNote(IMAGE_COPIED_NOTE);
+    } catch {
+      setShareNote(IMAGE_COPY_FAILED_NOTE);
     }
   };
   // The click handler closes over state at dispatch time; Wander's synthetic
@@ -4228,6 +4248,16 @@ export default function PlayPage() {
             if (page?.nodeId) {
               window.open(`/api/postcard/${page.nodeId}?download=1`, "_blank");
             }
+            setContextMenu(null);
+          }}
+          onDownloadImage={() => {
+            if (page?.nodeId) {
+              window.open(`/api/image/${page.nodeId}?download=1`, "_blank");
+            }
+            setContextMenu(null);
+          }}
+          onCopyImage={() => {
+            if (page?.nodeId) void copyImage(page.nodeId);
             setContextMenu(null);
           }}
           onPrune={() => {
