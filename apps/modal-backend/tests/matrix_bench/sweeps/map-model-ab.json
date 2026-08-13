@@ -1,0 +1,38 @@
+{
+  "name": "map-model-ab",
+  "_comment": "Labelled-map model A/B: two verified geographic maps × the three nano-banana tiers × one variant. Re-picks the default map-generation model on price/effect. Trimmed from default.json (map-clean scenarios only, single variant) to stay ~$0.7 under the cap.",
+  "scenarios": [
+    "corpus:fantasy-treasure-island",
+    "corpus:forest-yellowstone-1904"
+  ],
+  "arms": [
+    "graph"
+  ],
+  "models": [
+    "fal-ai/nano-banana",
+    "fal-ai/nano-banana-2",
+    "fal-ai/nano-banana-pro"
+  ],
+  "variants": [
+    "recon_base.v1"
+  ],
+  "params": {
+    "aspect_ratio": "16:9"
+  },
+  "judges": [
+    "style_pair",
+    "map_plausibility",
+    "prompt_alignment"
+  ],
+  "composite_weights": {
+    "presence": 0.2,
+    "pos_aligned": 0.2,
+    "pos_raw": 0.05,
+    "size": 0.1,
+    "height_order": 0.1,
+    "style_pair": 0.15,
+    "map_plausibility": 0.1,
+    "prompt_alignment": 0.1
+  },
+  "budget_usd": 1.0
+}
