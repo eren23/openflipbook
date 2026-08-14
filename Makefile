@@ -169,6 +169,15 @@ eval-style:
 #   make eval-outward-drift
 eval-outward-drift:
 	cd apps/modal-backend && OUTWARD_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.outward_runner
+# MULTI-HOP DRIFT (Risk #1): walk a styled source OUTWARD k hops (each container
+# conditioned on the PREVIOUS hop — the compounding path) and score style
+# faithfulness to the ORIGINAL after every hop → a half-life (the hop drift crosses
+# the floor). Product rule falls out: cap auto-OUTWARD at half_life - 1.
+# Dry preview ($0): make eval-chain-drift-dry ; PAID: make eval-chain-drift
+eval-chain-drift-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.continuity_bench.chain_runner
+eval-chain-drift:
+	cd apps/modal-backend && CHAIN_BENCH_RUN=1 .venv/bin/python -m tests.continuity_bench.chain_runner
 # ENTER-consistency A/B: tap a landmark on a styled map and render the entered
 # scene the OLD way (fresh text-to-image, refs ignored) vs the NEW way (edit
 # endpoint on the region crop) → "same place?" judge vs the tapped region → the
