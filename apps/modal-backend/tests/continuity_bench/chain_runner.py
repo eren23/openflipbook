@@ -83,6 +83,30 @@ _CASES: list[Case] = [
 ]
 
 
+def _active_cases() -> list[Case]:
+    """CHAIN_BENCH_CASES=N runs the first N chains (0/unset = all) — the spend knob."""
+    n = int(os.environ.get("CHAIN_BENCH_CASES", "0"))
+    return _CASES[:n] if n > 0 else _CASES
+
+
+def _fit_frame(jpeg_bytes: bytes, w: int, h: int) -> bytes:
+    """Downscale a hop's output back into the base frame. Each OUTWARD zoom-out
+    canvas = its INPUT's real pixel size x factor (image_edit.expand_image_zoomout
+    reads the input dims), so feeding the growing output straight back compounds
+    the canvas past fal's 25MP cap by ~hop 2. Bounding each rung to a fixed page
+    keeps the zoom-out compounding in CONTENT, not pixels — and matches what the
+    product stores (every node is a fixed-size frame)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    im = Image.open(BytesIO(jpeg_bytes)).convert("RGB")
+    im.thumbnail((w, h), Image.LANCZOS)
+    out = BytesIO()
+    im.save(out, format="JPEG", quality=90)
+    return out.getvalue()
+
+
 def plan_chain(start_tier: str, k: int) -> list[tuple[str, str, str]]:
     """Pure: the (from_tier, to_tier, op) sequence a k-hop OUTWARD walk takes,
     stopping early at the coarsest rung. Drives both the dry preview and the run."""
@@ -169,11 +193,12 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
     src = await image_provider.generate_image(
         prompt=case.source_prompt, aspect_ratio=aspect, tier="balanced", model_override=model
     )
+    src_bytes = _fit_frame(src.jpeg_bytes, w, h)  # the fixed-frame source of truth
     _REPORTS.mkdir(parents=True, exist_ok=True)
-    (_REPORTS / f"chain_{case.name}_00_source.jpg").write_bytes(src.jpeg_bytes)
+    (_REPORTS / f"chain_{case.name}_00_source.jpg").write_bytes(src_bytes)
 
-    prev_bytes = src.jpeg_bytes
-    prev_url = image_provider.encode_data_url(src.jpeg_bytes)
+    prev_bytes = src_bytes
+    prev_url = image_provider.encode_data_url(src_bytes)
     from_tier = case.start_tier
     hops: list[HopResult] = []
 
@@ -185,7 +210,7 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
 
         # 2. The REAL ascend op, conditioned on the PREVIOUS hop (compounding).
         if op == "outpaint_zoomout":
-            img = await image_edit_provider.expand_image_zoomout(prev_url, 3.0, w, h)
+            raw = await image_edit_provider.expand_image_zoomout(prev_url, 3.0, w, h)
         else:  # scale_parent_fresh — a medium flip can't be outpainted
             plan = await llm.plan_page(
                 query=f"{case.subject} (the {to_tier} that contains it)",
@@ -193,14 +218,15 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
                 style_anchor=case.style,
                 render_mode="scale_parent",
             )
-            img = await image_provider.generate_image(
+            raw = await image_provider.generate_image(
                 plan.prompt, aspect, tier="balanced", reference_urls=[prev_url], model_override=model
             )
+        hop_bytes = _fit_frame(raw.jpeg_bytes, w, h)  # bound before it feeds the next hop
 
         # 3. Two judgements: faithfulness to the ORIGINAL, and to the last hop.
-        fs = await score_style_pair(src.jpeg_bytes, img.jpeg_bytes)
-        st = await score_style_pair(prev_bytes, img.jpeg_bytes)
-        (_REPORTS / f"chain_{case.name}_{idx + 1:02d}_{to_tier}.jpg").write_bytes(img.jpeg_bytes)
+        fs = await score_style_pair(src_bytes, hop_bytes)
+        st = await score_style_pair(prev_bytes, hop_bytes)
+        (_REPORTS / f"chain_{case.name}_{idx + 1:02d}_{to_tier}.jpg").write_bytes(hop_bytes)
         hops.append(
             HopResult(
                 to_tier=to_tier,
@@ -211,15 +237,15 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
                 step_rationale=st.rationale,
             )
         )
-        prev_bytes = img.jpeg_bytes
-        prev_url = image_provider.encode_data_url(img.jpeg_bytes)
+        prev_bytes = hop_bytes
+        prev_url = image_provider.encode_data_url(hop_bytes)
         from_tier = to_tier
 
     return ChainResult(name=case.name, hops=hops)
 
 
 async def run_bench(k: int, model: str) -> dict[str, Any]:
-    results = [await _run_chain(c, k, "16:9", model) for c in _CASES]
+    results = [await _run_chain(c, k, "16:9", model) for c in _active_cases()]
     per_case = []
     for r in results:
         summary = summarize(
@@ -266,12 +292,13 @@ def _load_env() -> None:
 
 def _print_dry_preview(model: str) -> None:
     print(f"MULTI-HOP DRIFT — dry preview (k={_HOPS} hops, floor={_FLOOR}, model={model})")
-    for c in _CASES:
+    cases = _active_cases()
+    for c in cases:
         chain = plan_chain(c.start_tier, _HOPS)
         path = c.start_tier + "".join(f" → {to}" for _f, to, _op in chain)
         ops = ", ".join(op for _f, _t, op in chain)
         print(f"  {c.name}: {path}   [{ops}]")
-    print(f"total to-bill (est): ${estimate_cost(_CASES, _HOPS)} over {len(_CASES)} chains")
+    print(f"total to-bill (est): ${estimate_cost(cases, _HOPS)} over {len(cases)} chains")
     print("set CHAIN_BENCH_RUN=1 to spend.")
 
 
