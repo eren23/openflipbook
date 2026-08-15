@@ -39,6 +39,10 @@ _REPORTS = Path(__file__).resolve().parent / "reports"
 # the hop where from_source first drops under it is the half-life.
 _FLOOR = float(os.environ.get("CHAIN_BENCH_FLOOR", "6.0"))
 _HOPS = int(os.environ.get("CHAIN_BENCH_HOPS", "4"))
+# Confirmation arm for the shipped cap (SCALE_OUTWARD_MAX_HOPS): past this hop
+# index, render the container FRESH from the ORIGINAL style text — no drifting
+# previous-hop ref — exactly what the product does past the cap. 0 = off.
+_REFRESH_AFTER = int(os.environ.get("CHAIN_BENCH_REFRESH_AFTER", "0") or 0)
 
 # Rough per-op fal prices (docs/COSTS.md) for the $0 dry preview.
 _OP_COST = {"outpaint_zoomout": 0.04, "scale_parent_fresh": 0.15}
@@ -96,9 +100,15 @@ _CASES: list[Case] = [
 
 
 def _active_cases() -> list[Case]:
-    """CHAIN_BENCH_CASES=N runs the first N chains (0/unset = all) — the spend knob."""
+    """Spend knobs: CHAIN_BENCH_ONLY=name[,name] picks chains by name;
+    CHAIN_BENCH_CASES=N then keeps the first N (0/unset = all)."""
+    cases = _CASES
+    only = os.environ.get("CHAIN_BENCH_ONLY", "").strip()
+    if only:
+        wanted = {n.strip() for n in only.split(",") if n.strip()}
+        cases = [c for c in cases if c.name in wanted]
     n = int(os.environ.get("CHAIN_BENCH_CASES", "0"))
-    return _CASES[:n] if n > 0 else _CASES
+    return cases[:n] if n > 0 else cases
 
 
 def _fit_frame(jpeg_bytes: bytes, w: int, h: int) -> bytes:
@@ -140,8 +150,10 @@ def estimate_cost(cases: list[Case], k: int) -> float:
     total = 0.0
     for c in cases:
         total += _SOURCE_COST
-        for _from, _to, op in plan_chain(c.start_tier, k):
-            total += _OP_COST.get(op, _SOURCE_COST) + 2 * _JUDGE_COST
+        for i, (_from, _to, op) in enumerate(plan_chain(c.start_tier, k)):
+            refresh = _REFRESH_AFTER > 0 and i >= _REFRESH_AFTER
+            total += (_SOURCE_COST if refresh else _OP_COST.get(op, _SOURCE_COST))
+            total += 2 * _JUDGE_COST
     return round(total, 4)
 
 
@@ -219,13 +231,25 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
         if to_tier is None:
             break  # reached the coarsest rung
         op = model_router.select_outward_op(from_tier, to_tier)
+        refresh = _REFRESH_AFTER > 0 and idx >= _REFRESH_AFTER
 
-        # 2. The REAL ascend op, conditioned on the PREVIOUS hop (compounding) and
+        # 2. The ascend op, conditioned on the PREVIOUS hop (compounding) and
         #    re-anchored to the ORIGINAL medium each hop — mirroring the product
-        #    (ascend.py:103-126): the outpaint margin carries the source style, the
-        #    fresh path passes style_anchor. This is the style-refresh the product
-        #    already ships; the bench measures THAT path, not an un-anchored one.
-        if op == "outpaint_zoomout":
+        #    (ascend.py:103-126). `refresh` (the shipped cap, SCALE_OUTWARD_MAX_HOPS)
+        #    instead drops the drifting previous-hop ref and renders fresh from the
+        #    ORIGINAL style text only — the confirmation arm.
+        if refresh:
+            plan = await llm.plan_page(
+                query=f"{case.subject} (the {to_tier} that contains it)",
+                web_search=False,
+                style_anchor=case.style,
+                render_mode="scale_parent",
+            )
+            raw = await image_provider.generate_image(
+                plan.prompt, aspect, tier="balanced", model_override=model
+            )
+            op = f"{op}+refresh"
+        elif op == "outpaint_zoomout":
             margin = (
                 f"{case.style}; extend OUTWARD into the surrounding "
                 f"{to_tier.replace('_', ' ')}, drawn in the SAME style as the "
@@ -283,6 +307,7 @@ async def run_bench(k: int, model: str) -> dict[str, Any]:
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "k_hops": k,
         "floor": _FLOOR,
+        "refresh_after": _REFRESH_AFTER or None,
         "cases": per_case,
         "bench": {
             # The conservative product cap = the WORST chain's half-life.
