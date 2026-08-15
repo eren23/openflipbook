@@ -7,7 +7,8 @@ This walks a styled source OUTWARD k hops along the scale ladder
 (`place→district→city→region→world`, `model_router.coarser_tier`), each hop the
 REAL ascend op (`select_outward_op` → BRIA outpaint on same-plane hops, a
 reference-conditioned fresh gen on a medium flip) conditioned on the PREVIOUS
-hop's output — the actual compounding path, not k independent hops. After each
+hop's output AND re-anchored to the ORIGINAL medium each hop — mirroring the
+product's ascend (ascend.py:103-126), the style-refresh mitigation itself. After each
 hop it scores two things with the existing style judge:
   - from_source: faithfulness of hop_i to the ORIGINAL medium (does the chain
     wander off the starting style?);
@@ -79,6 +80,17 @@ _CASES: list[Case] = [
         style="soft watercolour, loose washes, pale pastel palette, visible paper texture",
         start_tier="place",
         subject="a small market square with a stone well",
+    ),
+    Case(
+        name="ukiyoe_shrine",
+        source_prompt=(
+            "a ukiyo-e woodblock print of a small hillside shinto shrine, bold flat "
+            "colour areas, dark keyblock outlines, visible woodgrain, muted indigo "
+            "and vermilion"
+        ),
+        style="ukiyo-e woodblock print, bold flat colour, dark keyblock outlines, visible woodgrain",
+        start_tier="place",
+        subject="a hillside shinto shrine",
     ),
 ]
 
@@ -208,9 +220,20 @@ async def _run_chain(case: Case, k: int, aspect: str, model: str) -> ChainResult
             break  # reached the coarsest rung
         op = model_router.select_outward_op(from_tier, to_tier)
 
-        # 2. The REAL ascend op, conditioned on the PREVIOUS hop (compounding).
+        # 2. The REAL ascend op, conditioned on the PREVIOUS hop (compounding) and
+        #    re-anchored to the ORIGINAL medium each hop — mirroring the product
+        #    (ascend.py:103-126): the outpaint margin carries the source style, the
+        #    fresh path passes style_anchor. This is the style-refresh the product
+        #    already ships; the bench measures THAT path, not an un-anchored one.
         if op == "outpaint_zoomout":
-            raw = await image_edit_provider.expand_image_zoomout(prev_url, 3.0, w, h)
+            margin = (
+                f"{case.style}; extend OUTWARD into the surrounding "
+                f"{to_tier.replace('_', ' ')}, drawn in the SAME style as the "
+                "centre — one continuous view, NOT a photograph, no photorealism"
+            )
+            raw = await image_edit_provider.expand_image_zoomout(
+                prev_url, 3.0, w, h, prompt=margin
+            )
         else:  # scale_parent_fresh — a medium flip can't be outpainted
             plan = await llm.plan_page(
                 query=f"{case.subject} (the {to_tier} that contains it)",
