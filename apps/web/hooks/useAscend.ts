@@ -26,6 +26,10 @@ export interface AscendRoot {
   // DOM-labels mode: ask for a label-free container map like every other
   // map render (the un-suppressed ascend baked hallucinated title lettering).
   suppressMapLabels?: boolean;
+  // Consecutive OUTWARD hops taken in this chain (0 = first). The backend
+  // re-anchors past SCALE_OUTWARD_MAX_HOPS so a long zoom-out chain doesn't
+  // drift off the original medium.
+  outwardDepth?: number;
 }
 
 export interface Ascended {
@@ -99,6 +103,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
                 ? { session_style_anchor: root.styleAnchor }
                 : {}),
               ...(root.suppressMapLabels ? { suppress_map_labels: true } : {}),
+              ...(root.outwardDepth ? { outward_depth: root.outwardDepth } : {}),
               trace_id: traceId,
             }),
             signal: ac.signal,

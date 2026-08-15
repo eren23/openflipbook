@@ -184,6 +184,10 @@ export interface GenerateRequestBody {
   // baked text — names ride a client overlay built from entity data. Optional
   // + default-absent: old clients omit it, prompts stay byte-identical.
   suppress_map_labels?: boolean;
+  // Consecutive OUTWARD (ascend) hops in this chain (0 = first). Past
+  // SCALE_OUTWARD_MAX_HOPS the backend re-anchors to the original medium
+  // instead of the drifting previous hop (multi-hop drift). Default-absent.
+  outward_depth?: number;
   // Tap descent ladder: the SOURCE frame of this enter was a closeup of the
   // place — the establishing shot already happened, so the enter goes to
   // ground level (grounds/courtyard) instead of another aerial.

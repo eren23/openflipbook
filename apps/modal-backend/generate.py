@@ -335,6 +335,12 @@ class GenerateBody(BaseModel):
     # NO baked text — names ride a client overlay built from entity data.
     # Optional + default False: old clients omit it, prompts byte-identical.
     suppress_map_labels: bool = False
+    # How many consecutive OUTWARD (ascend) hops the client has taken in this
+    # chain (0 = first). Past SCALE_OUTWARD_MAX_HOPS the ascend re-anchors to
+    # the ORIGINAL medium instead of conditioning on the drifting previous hop
+    # (multi-hop drift, chain_runner.py: even the anchored path loses delicate
+    # media by ~hop 2). Default 0 + flag off → byte-identical to old clients.
+    outward_depth: int = 0
     # The transition tap's origin (tap descent ladder): the SOURCE frame was a
     # closeup of the entered place — the establishing shot already happened,
     # so the enter descends to ground level instead of another aerial.

@@ -1978,6 +1978,13 @@ export default function PlayPage() {
   // OUTWARD / zoom-out landed: mirror the persisted reparent into the live
   // session — insert the container P, re-point the old root C under it (so the
   // breadcrumb shows P above C), navigate to P, and refetch the geo store.
+  // Consecutive OUTWARD (ascend) hops in the current chain. Passed to the
+  // backend so a long zoom-out chain re-anchors past SCALE_OUTWARD_MAX_HOPS
+  // (multi-hop drift, chain_runner.py). Resets on any non-ascend navigation.
+  const outwardDepthRef = useRef(0);
+  useEffect(() => {
+    if (page?.relation !== "ascend") outwardDepthRef.current = 0;
+  }, [page?.nodeId, page?.relation]);
   const onAscended = useCallback(
     (a: Ascended) => {
       const parentPage: Page = {
@@ -2000,6 +2007,7 @@ export default function PlayPage() {
         return { items: [...items, parentPage], trail, trailIdx: trail.length - 1 };
       });
       setPage(parentPage);
+      outwardDepthRef.current += 1; // one more consecutive OUTWARD hop
       setPhase("ready");
       setViewMode("page");
       if (a.renderUnjudged) {
@@ -2032,6 +2040,7 @@ export default function PlayPage() {
       sceneView: page.sceneView ?? null,
       styleAnchor: styleAnchor?.style ?? null,
       suppressMapLabels: worldEnabled && worldDomLabels,
+      outwardDepth: outwardDepthRef.current,
     });
   }, [page, sessionId, startAscend, styleAnchor, worldEnabled, worldDomLabels]);
 

@@ -11,6 +11,7 @@ generate.py's stream helpers (`_sse`, `_frame_dims`, `_view_grammar_on`,
 from __future__ import annotations
 
 import asyncio as _asyncio
+import os
 import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -65,9 +66,18 @@ async def stream_ascend(
     # (SCALE_OUTWARD_OUTPAINT) for pixel-preservation, and only for a
     # same-plane hop — and now STEERS its margin with the medium so it isn't
     # photoreal. Astronomical (medium-flip) hops are always fresh.
+    # Multi-hop drift guard (chain_runner.py: even the style-anchored OUTWARD
+    # path loses delicate media by ~hop 2 because each hop conditions on the
+    # DRIFTING previous container). Past SCALE_OUTWARD_MAX_HOPS consecutive
+    # ascends, re-anchor: drop the previous-image conditioning (outpaint pixels /
+    # edit ref) and render fresh from the ORIGINAL style text. Default 0 = OFF,
+    # so nothing changes until it's flipped on.
+    _max_hops = int(os.environ.get("SCALE_OUTWARD_MAX_HOPS", "0") or 0)
+    outward_refresh = _max_hops > 0 and body.outward_depth >= _max_hops
     use_outpaint = (
         env_flag("SCALE_OUTWARD_OUTPAINT")
         and model_router.select_outward_op(from_tier, to_tier) == "outpaint_zoomout"
+        and not outward_refresh
     )
     yield _sse({"type": "status", "stage": "rendering"}, trace_id)
     await _abort_if_disconnected("pre-ascend")
@@ -125,12 +135,14 @@ async def stream_ascend(
                 style_anchor=style_lock,
                 render_mode="scale_parent",
             )
-            if env_flag("SCALE_OUTWARD_EDIT_REF", "true"):
+            if env_flag("SCALE_OUTWARD_EDIT_REF", "true") and not outward_refresh:
                 # The source ref is a no-op on the text-to-image endpoint
                 # (research 01-model-bakeoff); the edit endpoint honors it, so
                 # the container continues the source's medium + content instead
                 # of free-styling. Default ON (kill-switch =false) — the inert
-                # ref path exists only as the revert.
+                # ref path exists only as the revert. `outward_refresh` (past the
+                # hop cap) skips it too: the drifting previous hop is exactly what
+                # we must NOT condition on — fall through to the fresh text render.
                 medium = style_lock or "the same hand-drawn art style as the centre"
                 ascend_instr = (
                     f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "

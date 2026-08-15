@@ -115,6 +115,44 @@ async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
     edit.assert_not_awaited()
 
 
+async def test_ascend_refresh_past_hop_cap_drops_the_drifting_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SCALE_OUTWARD_MAX_HOPS caps consecutive OUTWARD hops: at/past it the ascend
+    # re-anchors to the original medium (fresh render) instead of conditioning on
+    # the DRIFTING previous container — even with SCALE_OUTWARD_EDIT_REF on
+    # (default). chain_runner.py: the anchored path still loses delicate media by
+    # ~hop 2 because each hop conditions on the drifting last one.
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_MAX_HOPS", "1")
+    gen = _mock_fresh(monkeypatch)
+    edit = AsyncMock()
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    events = await _collect(_event_stream(_ascend_body(outward_depth=1), "t1"))
+    assert next(e for e in events if e["type"] == "ascend_ready")
+    gen.assert_awaited_once()  # fresh — re-anchored to the original medium
+    edit.assert_not_awaited()  # NOT conditioned on the drifting previous hop
+
+
+async def test_ascend_below_hop_cap_still_conditions_on_the_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Below the cap the hop is unchanged — the first OUTWARD hops keep the
+    # ref-honouring edit (the drift only compounds later).
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_MAX_HOPS", "2")
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    events = await _collect(_event_stream(_ascend_body(outward_depth=1), "t1"))
+    assert next(e for e in events if e["type"] == "ascend_ready")
+    edit.assert_awaited_once()  # 1 < 2 → still conditions on the source
+
+
 async def test_ascend_outpaint_under_flag_steers_the_medium(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch)
     monkeypatch.setenv("SCALE_OUTWARD_OUTPAINT", "1")
