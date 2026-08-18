@@ -41,9 +41,13 @@ eyes-on before it lands.
 ## Deferred paid runs (harness ready, sequence when budget allows)
 
 - **S4 OUTWARD A/B** — does P2's edit-route beat the text-to-image no-op on medium fidelity?
-  (`docs/research/01`, `07`; the now-existing edit-route is the code S4 needed.)
-- **Multi-hop drift `chain_runner` (`half_life`)** — `docs/research/05`; the free k-hop
-  INV-1/INV-2 chain anchor can land first, the perceptual half is paid.
-- **Labelled-map model A/B** — does Recraft / gpt-image-2 win on label legibility for actual
-  maps? (`docs/research/07` — the axis the broad bakeoff didn't isolate.) `models_bakeoff.py`
-  is reusable; swap the scene set + add a label-legibility judge.
+  (`docs/research/01`, `07`; the now-existing edit-route is the code S4 needed.) *Still deferred.*
+
+### Done (kept for provenance)
+
+- **Multi-hop drift `chain_runner` (`half_life`)** — DONE. `chain_runner.py` built (#215) and run
+  (#216/#217): style-anchored OUTWARD still loses delicate media by ~hop 2; shipped the
+  flag-gated `SCALE_OUTWARD_MAX_HOPS` re-anchor cap (default off).
+- **Labelled-map model A/B** — DONE (#214, `tests/matrix_bench/sweeps/map-model-ab.json`).
+  On real corpus maps at full composite, `nano-banana-pro` earns its cost (0.762 vs ~0.66);
+  `nano-banana-2` is dominated. n=2 — re-run at higher n before any production default change.
