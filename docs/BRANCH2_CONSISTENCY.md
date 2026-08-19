@@ -40,10 +40,16 @@ eyes-on before it lands.
 
 ## Deferred paid runs (harness ready, sequence when budget allows)
 
-- **S4 OUTWARD A/B** — does P2's edit-route beat the text-to-image no-op on medium fidelity?
-  (`docs/research/01`, `07`; the now-existing edit-route is the code S4 needed.) *Still deferred.*
+*(none currently — S4 ran; see Done below.)*
 
 ### Done (kept for provenance)
+
+- **S4 OUTWARD A/B** — DONE (n=2, `outward_runner.py`, ~$0.70). Both zoom-out paths hold the
+  source MEDIUM well at a single hop: outpaint mean 9.75, fresh `scale_parent` rerender mean
+  9.25, drift only 0.5. The FRESH default is **trustworthy** (clears the 6.5 bar at both cases:
+  engraving 9.5, watercolour 9.0) — the edit-route does NOT lose the medium vs the no-op here.
+  Caveat n=2: the runner asks for N≥10 before flipping `SCALE_OUTWARD_RERENDER` on by default.
+  (Single-hop only — the COMPOUNDING loss across many hops is the separate chain_runner finding.)
 
 - **Multi-hop drift `chain_runner` (`half_life`)** — DONE. `chain_runner.py` built (#215) and run
   (#216/#217): style-anchored OUTWARD still loses delicate media by ~hop 2; shipped the
