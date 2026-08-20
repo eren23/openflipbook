@@ -206,3 +206,113 @@ def test_solver_output_passes_geometry_invariants() -> None:
 
     issues = check_geo_entities(solve_layout(_coffee_shop()).geos)
     assert issues == [], f"solver output violates invariants: {[str(i) for i in issues]}"
+
+
+# ── P4 sub-frame nesting (nest_inside; the parity twin lives in
+#    apps/web/lib/world-geometry.test.ts "solver nest_inside parity") ─────────
+
+
+def _kitchen() -> SceneGraph:
+    return SceneGraph(
+        place_label="kitchen",
+        entities=[
+            PlannedEntity("cabinet", "item", "cabinet", "an oak cabinet", footprint={"w": 6, "d": 3}),
+            PlannedEntity("mug", "item", "mug", "a clay mug", footprint={"w": 1, "d": 1}),
+        ],
+        relations=[PlannedRelation("mug", "inside", "cabinet")],
+    )
+
+
+def _resolve_abs(geos: list[dict]) -> dict[str, tuple[float, float, float]]:
+    """Python twin of world-geometry.ts resolveAbsoluteFrame: (x, y, unit)."""
+    by_id = {g["id"]: g for g in geos}
+
+    def one(g: dict) -> tuple[float, float, float]:
+        chain, seen = [], set()
+        node: dict | None = g
+        while node is not None and node["id"] not in seen:
+            seen.add(node["id"])
+            chain.append(node)
+            node = by_id.get(node.get("parent_id") or "")
+        x = y = 0.0
+        scale_accum = unit = 1.0
+        for n in reversed(chain):
+            x += n["pos"]["x"] * scale_accum
+            y += n["pos"]["y"] * scale_accum
+            unit = scale_accum
+            scale_accum *= n.get("scale") or 1.0
+        return (x, y, unit)
+
+    return {g["id"]: one(g) for g in geos}
+
+
+def test_nest_inside_reexpresses_child_in_container_frame() -> None:
+    res = solve_layout(_kitchen(), nest_inside=True)
+    cab = _by_label(res.geos, "cabinet")[0]
+    mug = _by_label(res.geos, "mug")[0]
+    assert mug["parent_id"] == cab["id"] == "geo_plan_cabinet"
+    # Interior unit: container footprint extent / canonical frame extent.
+    assert cab["scale"] == 0.06  # max(6,3)/100
+    # The mug sat on the cabinet's centre in the flat solve -> local origin,
+    # footprint re-expressed into interior units.
+    assert mug["pos"] == {"x": 0.0, "y": 0.0}
+    assert mug["footprint"] == {"w": 16.667, "d": 16.667}
+
+
+def test_nest_inside_absolute_geometry_matches_flat() -> None:
+    """The promotion is a pure re-expression: resolving the nested chain must
+    reproduce the flat solve's absolute pos and footprint for every entity —
+    the invariant that makes the world model safe (the corruption P4 feared)."""
+    flat = solve_layout(_kitchen()).geos
+    nested = solve_layout(_kitchen(), nest_inside=True).geos
+    flat_by_id = {g["id"]: g for g in flat}
+    resolved = _resolve_abs(nested)
+    for g in nested:
+        fx, fy = flat_by_id[g["id"]]["pos"]["x"], flat_by_id[g["id"]]["pos"]["y"]
+        x, y, unit = resolved[g["id"]]
+        assert abs(x - fx) < 1e-6 and abs(y - fy) < 1e-6, g["id"]
+        ffp = flat_by_id[g["id"]]["footprint"]
+        assert abs(g["footprint"]["w"] * unit - ffp["w"]) < 1e-2, g["id"]
+        assert abs(g["footprint"]["d"] * unit - ffp["d"]) < 1e-2, g["id"]
+
+
+def test_nest_inside_two_level_chain_composes() -> None:
+    """mug inside cabinet inside pantry: the nested container's scale is in
+    PARENT units, so the chain's cumulative unit equals the world divisor."""
+    g = SceneGraph(
+        place_label="cellar",
+        entities=[
+            PlannedEntity("pantry", "item", "pantry", "a walk-in pantry", footprint={"w": 20, "d": 10}),
+            PlannedEntity("cabinet", "item", "cabinet", "an oak cabinet", footprint={"w": 6, "d": 3}),
+            PlannedEntity("mug", "item", "mug", "a clay mug", footprint={"w": 1, "d": 1}),
+        ],
+        relations=[
+            PlannedRelation("cabinet", "inside", "pantry"),
+            PlannedRelation("mug", "inside", "cabinet"),
+        ],
+    )
+    flat = solve_layout(g).geos
+    nested = solve_layout(g, nest_inside=True).geos
+    by_label = {e["label"]: e for e in nested}
+    assert by_label["cabinet"]["parent_id"] == "geo_plan_pantry"
+    assert by_label["mug"]["parent_id"] == "geo_plan_cabinet"
+    flat_by_id = {e["id"]: e for e in flat}
+    resolved = _resolve_abs(nested)
+    for e in nested:
+        fx, fy = flat_by_id[e["id"]]["pos"]["x"], flat_by_id[e["id"]]["pos"]["y"]
+        x, y, unit = resolved[e["id"]]
+        assert abs(x - fx) < 1e-3 and abs(y - fy) < 1e-3, e["id"]
+        assert abs(e["footprint"]["w"] * unit - flat_by_id[e["id"]]["footprint"]["w"]) < 0.05, e["id"]
+
+
+def test_nest_inside_output_passes_geometry_invariants() -> None:
+    from providers.geometry_checks import check_geo_entities
+
+    res = solve_layout(_kitchen(), nest_inside=True)
+    assert check_geo_entities(res.geos) == []
+
+
+def test_nest_inside_default_off_is_flat() -> None:
+    assert solve_layout(_kitchen()).geos == solve_layout(_kitchen(), nest_inside=False).geos
+    for g in solve_layout(_kitchen()).geos:
+        assert g["parent_id"] is None and "scale" not in g

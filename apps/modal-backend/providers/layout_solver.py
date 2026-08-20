@@ -171,9 +171,11 @@ def _resolve_pos(it: dict, rels: list[PlannedRelation], by_ref: dict, first: dic
         iw, idp = it["fp"]["w"], it["fp"]["d"]
         if rel.relation == "inside":
             # Flat nesting (v1): sit within the container's footprint, same frame,
-            # exempt from de-overlap (a prop on a shelf, not a separate sub-world;
-            # true sub-frame nesting is deferred — see docs/PLAN_PLACE_TO_WORLD.md).
+            # exempt from de-overlap (a prop on a shelf, not a separate sub-world).
+            # The container ref is recorded either way; only a nest_inside solve
+            # (P4) re-expresses the child into the container's sub-frame at emit.
             it["nested"] = True
+            it["container"] = obj["ref"]
             return (ox, oy)
         if rel.relation == "behind":
             return (ox, oy - (od / 2 + idp / 2 + gap))
@@ -257,7 +259,21 @@ def _push_out(pos: tuple, fp: dict, rr: tuple) -> tuple[float, float]:
     return (x, y)
 
 
-def _emit(it: dict) -> dict[str, Any]:
+def _container_scale(it: dict) -> float:
+    """One unit of this container's interior frame, in its parent's units (P4).
+
+    The interior is a canonical full-size frame (the DEEPER convention:
+    deriveGeoFromExtraction learns `footprint-extent ÷ interior localExtent`
+    against a fresh MAP_IMAGE_FRAME render). The solver has no independent
+    interior layout — the flat solve stacks inside-children on the container's
+    centre — so the frame-extent denominator stands in for localExtent: it is
+    the value the first real enter would learn, and it keeps scale <= 1 for
+    any container smaller than the map (INV-4's DEEPER direction).
+    """
+    return max(float(it["fp"]["w"]), float(it["fp"]["d"]), 1e-6) / max(FRAME_W, FRAME_H)
+
+
+def _emit(it: dict, by_ref: dict, containers: set[str]) -> dict[str, Any]:
     geo: dict[str, Any] = {
         "id": f"geo_plan_{it['ref']}",  # `ref` carries the #n instance suffix -> unique
         "entity_id": None,
@@ -276,6 +292,33 @@ def _emit(it: dict) -> dict[str, Any]:
         geo["elevation"] = round(it["elevation"], 3)
     if it["heading"] is not None:
         geo["heading"] = round(it["heading"], 4)
+    # P4 sub-frame nesting (nest_inside): re-express an inside-child in its
+    # container's interior frame — parent_id + LOCAL pos/footprint in interior
+    # units. Pure re-expression: resolveAbsolutePos (pos + local x scale, the
+    # world-geometry.ts engine) returns exactly the flat solve's absolute pos,
+    # and toAbsoluteEntities recovers the flat footprint (local x scale), so
+    # the world model's absolute geometry is byte-identical to flat v1.
+    # Heights stay world units (no consumer composes height through frames).
+    if containers and it.get("container") in containers:
+        parent = by_ref[it["container"]]
+        s = _container_scale(parent)
+        px, py = parent["pos"]
+        geo["parent_id"] = f"geo_plan_{parent['ref']}"
+        geo["pos"] = {
+            "x": round((it["pos"][0] - px) / s, 3),
+            "y": round((it["pos"][1] - py) / s, 3),
+        }
+        geo["footprint"] = {
+            "w": round(it["fp"]["w"] / s, 3),
+            "d": round(it["fp"]["d"] / s, 3),
+        }
+    if containers and it["ref"] in containers:
+        # From the EMITTED footprint, so a container that is itself nested
+        # (mug inside cabinet inside room) carries a parent-unit scale and the
+        # chain composes: unit(child) = product of ancestor scales = the one
+        # world-based divisor its children's locals were expressed with.
+        fp = geo["footprint"]
+        geo["scale"] = round(max(fp["w"], fp["d"], 1e-6) / max(FRAME_W, FRAME_H), 6)
     return geo
 
 
@@ -289,7 +332,7 @@ def _dedupe(items: list[str]) -> list[str]:
     return out
 
 
-def solve_layout(graph: SceneGraph) -> SolveResult:
+def solve_layout(graph: SceneGraph, *, nest_inside: bool = False) -> SolveResult:
     w = float((graph.bounds_hint or {}).get("w") or FRAME_W)
     h = float((graph.bounds_hint or {}).get("h") or FRAME_H)
     clar: list[str] = []
@@ -378,6 +421,9 @@ def solve_layout(graph: SceneGraph) -> SolveResult:
             blocked = True
             break
 
-    # 7. emit.
-    geos = [_emit(it) for it in insts]
+    # 7. emit. nest_inside=False (the default) is byte-identical flat v1.
+    containers: set[str] = (
+        {it["container"] for it in insts if it.get("container")} if nest_inside else set()
+    )
+    geos = [_emit(it, by_ref, containers) for it in insts]
     return SolveResult(geos=geos, clarifiers=_dedupe(clar)[:2], blocked=blocked)
