@@ -179,6 +179,40 @@ describe("toAbsoluteEntities (nested → absolute frame)", () => {
     expect(out[1]!.footprint.w).toBeCloseTo(20); // 4000 × 0.005
     expect(out[1]!.footprint.d).toBeCloseTo(10);
   });
+
+  // P4 parity twin of tests/world_bench/test_layout_solver.py
+  // test_nest_inside_reexpresses_child_in_container_frame: these are the
+  // EXACT geos the Python solver emits for "a clay mug inside an oak
+  // cabinet" with nest_inside=true (cabinet root-anchored at frame centre).
+  // The engine must resolve them back to the flat solve's absolute geometry
+  // — nesting is a pure re-expression. Any convention drift fails one side.
+  it("solver nest_inside parity: nested child resolves to the flat absolute geometry", async () => {
+    const { resolveAbsolutePos, toAbsoluteEntities } = await import(
+      "./world-geometry"
+    );
+    const cabinet = {
+      id: "geo_plan_cabinet",
+      parent_id: null,
+      pos: { x: 50, y: 30 },
+      scale: 0.06, // max(6,3) / 100 (canonical frame extent)
+      footprint: { w: 6, d: 3 },
+    };
+    const mug = {
+      id: "geo_plan_mug",
+      parent_id: "geo_plan_cabinet",
+      pos: { x: 0, y: 0 }, // flat solve sat it on the cabinet's centre
+      footprint: { w: 16.667, d: 16.667 }, // 1×1 world ÷ 0.06
+    };
+    const byId = new Map(
+      [cabinet, mug].map((e) => [e.id, e] as const),
+    );
+    // Flat-v1 put the mug at the cabinet's absolute pos with a 1×1 footprint.
+    expect(resolveAbsolutePos("geo_plan_mug", byId)).toEqual({ x: 50, y: 30 });
+    const [absMug] = toAbsoluteEntities([mug], [cabinet, mug]);
+    expect(absMug!.pos).toEqual({ x: 50, y: 30 });
+    expect(absMug!.footprint.w).toBeCloseTo(1, 2);
+    expect(absMug!.footprint.d).toBeCloseTo(1, 2);
+  });
 });
 
 // TS twin of the python fit tests (tests/recon_bench/test_recon.py) — the two

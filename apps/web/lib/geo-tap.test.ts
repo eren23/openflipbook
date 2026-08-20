@@ -276,6 +276,39 @@ describe("geoTapRequest (close the geometric tap loop)", () => {
     expect(t!.focus_label).toBe("clock tower");
   });
 
+  it("P4 nest_inside: a tap on a nested sub-frame child routes back to THAT child", () => {
+    // Solver-shaped nested pair (WORLD_NEST_INSIDE): the child's pos/footprint
+    // are LOCAL to the manor's interior frame (scale 0.2) — absolute (55, 26),
+    // 3×3. The tap hit-tests through toAbsoluteEntities, so the child must win
+    // at its absolute spot even though the manor's footprint also contains it.
+    const map = {
+      entities: [
+        geo("geo_plan_manor", "Manor", 50, 30, {
+          footprint: { w: 20, d: 16 },
+          scale: 0.2,
+          height: 12,
+        }),
+        geo("geo_plan_well", "Old Well", 25, -20, {
+          parent_id: "geo_plan_manor",
+          footprint: { w: 15, d: 15 },
+        }),
+      ],
+      bounds: CROP,
+    };
+    const t = geoTapRequest(
+      map,
+      "n1",
+      { x_pct: 55 / 100, y_pct: 26 / 60 },
+      16 / 9,
+      undefined,
+      undefined,
+      { enterDirect: true },
+    );
+    expect(t!.kind).toBe("scene");
+    expect(t!.focus_id).toBe("geo_plan_well");
+    expect(t!.focus_label).toBe("Old Well");
+  });
+
   it("routes a tap through the image frame, not the entities' tight bounds (live-bug regression)", () => {
     // Entities cluster in a sub-range of the 100×60 image frame, so their tight
     // bounding box differs from the frame the tap maps through. Tapping a place's
