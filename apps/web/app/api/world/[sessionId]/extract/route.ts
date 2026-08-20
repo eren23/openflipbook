@@ -298,7 +298,7 @@ export async function POST(req: Request, { params }: Params) {
               const reg = registerPlanToImage(
                 snap.entities,
                 new Date().toISOString(),
-                { gate: envFlag("WORLD_REGISTER_GATE") },
+                { gate: envFlag("WORLD_REGISTER_GATE", "true") },
               );
               if (reg) {
                 await upsertEntityGeos(sessionId, reg.updated);
@@ -312,10 +312,10 @@ export async function POST(req: Request, { params }: Params) {
                   matched: reg.fit.matched,
                   gate_healthy: healthy,
                 };
-                // §4 telemetry: with the gate OFF an UNHEALTHY fit is applied
-                // anyway (the -35 hazard) — the shadow signal for whether flipping
-                // WORLD_REGISTER_GATE on is warranted. Greppable in deploy logs;
-                // stops appearing once the gate is on (those fits get skipped).
+                // §4 telemetry: with the gate forced OFF (WORLD_REGISTER_GATE=0,
+                // the legacy escape hatch) an UNHEALTHY fit is applied anyway —
+                // the -35 hazard. Greppable in deploy logs; never appears with
+                // the gate on (the default), those fits get skipped.
                 if (!healthy) {
                   console.warn(
                     "[world.register] unhealthy fit applied (WORLD_REGISTER_GATE off)",

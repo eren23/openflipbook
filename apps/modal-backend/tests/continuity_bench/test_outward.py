@@ -41,7 +41,7 @@ def test_summarize_drift_and_distrust() -> None:
     assert s["outpaint_medium_mean"] == 8.5
     assert s["fresh_medium_mean"] == 5.5
     assert s["drift"] == 3.0
-    assert s["fresh_trustworthy"] is False  # 5.5 < 6.5 → keep SCALE_OUTWARD_RERENDER off
+    assert s["fresh_trustworthy"] is False  # 5.5 < 6.5 → the shipped default regressed
 
 
 def test_summarize_trusts_fresh_when_it_holds() -> None:
