@@ -595,12 +595,12 @@ export function registerPlanToImage(
   ) {
     return null;
   }
-  // §4 fit-health gate (opt-in, WORLD_REGISTER_GATE): a fit whose scale saturated
-  // the [0.5,2] clamp, whose residual is high, or that rode only 2 anchors is
-  // untrustworthy — applying it re-expresses EVERY plan geo through a bad
-  // transform and corrupts the world (phase-1 probe: doubles error). Skip it and
-  // keep the plan positions. Off (default) = legacy behaviour: apply any
-  // non-identity fit with ≥2 matches.
+  // §4 fit-health gate (WORLD_REGISTER_GATE, default on): a fit whose scale
+  // saturated the [0.5,2] clamp, whose residual is high, or that rode only 2
+  // anchors is untrustworthy — applying it re-expresses EVERY plan geo through
+  // a bad transform and corrupts the world (phase-1 probe: doubles error).
+  // Skip it and keep the plan positions. WORLD_REGISTER_GATE=0 restores the
+  // legacy behaviour: apply any non-identity fit with ≥2 matches.
   if (opts?.gate && !isFitHealthy(fit)) return null;
   const updated = plans.map((p) => ({
     ...p,
