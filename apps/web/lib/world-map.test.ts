@@ -409,7 +409,7 @@ describe("registerPlanToImage (plan plane → image register)", () => {
     ).toBeNull();
   });
 
-  // §4 fit-health gate (WORLD_REGISTER_GATE): opt-in skip of untrustworthy fits.
+  // §4 fit-health gate (WORLD_REGISTER_GATE, default on): skip untrustworthy fits.
   it("gate on: a clamped-scale fit skips instead of corrupting the world", () => {
     // True scale 3.0 saturates fitSimilarity at 2.0 — applying it re-expresses
     // every plan through a bad transform (phase-1: doubles error).

@@ -27,4 +27,13 @@ describe("envFlag", () => {
     // A name that was never stubbed at all.
     expect(envFlag("FLAG_NEVER_DEFINED")).toBe(false);
   });
+
+  it("def fills in for an UNSET var only; an explicit value always wins", () => {
+    expect(envFlag("FLAG_NEVER_DEFINED", "true")).toBe(true);
+    // Empty string is SET — the kill-switch spellings beat the default.
+    for (const v of ["", "0", "false", "no"]) {
+      vi.stubEnv("FLAG_X", v);
+      expect(envFlag("FLAG_X", "true")).toBe(false);
+    }
+  });
 });
