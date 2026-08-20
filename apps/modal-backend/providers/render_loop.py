@@ -126,6 +126,11 @@ def data_url_bytes(url: str | None) -> bytes | None:
     try:
         return base64.b64decode(url.split(",", 1)[1])
     except Exception:
+        from obs import log
+
+        # A corrupt data: URL is a client bug, unlike the by-design None for
+        # remote refs above — say so, or the judge axes disarm silently.
+        log("warn", "view.loop.region_decode_failed")
         return None
 
 

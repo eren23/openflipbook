@@ -492,6 +492,7 @@ def _with_json_hint(messages: list[Any], hint: str) -> list[Any]:
 def _choice_content(response: Any) -> str:
     try:
         if not response.choices:
+            _safe_log("warn", "llm.empty_choices")
             return ""
         return response.choices[0].message.content or ""
     except Exception as exc:

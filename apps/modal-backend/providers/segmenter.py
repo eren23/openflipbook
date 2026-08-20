@@ -300,7 +300,15 @@ async def _segment_sam3(
             arguments["box_prompts"] = [detector_box_to_sam_box(det, img_w, img_h)]
         try:
             result = await _fal_subscribe(model, arguments)
-        except Exception:
+        except Exception as exc:
+            from obs import log
+
+            log(
+                "warn",
+                "segmenter.sam3.label_failed",
+                label=label,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             return None
         masks = result.get("masks") or []
         if not masks:
@@ -311,7 +319,15 @@ async def _segment_sam3(
         try:
             mask_bytes, _ = await _fetch_url_bytes(url)
             polygon = polygon_from_mask(Image.open(io.BytesIO(mask_bytes)))
-        except Exception:
+        except Exception as exc:
+            from obs import log
+
+            log(
+                "warn",
+                "segmenter.sam3.label_failed",
+                label=label,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             return None
         if len(polygon) < MIN_VERTICES:
             return None
