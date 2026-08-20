@@ -10,8 +10,6 @@ lookup are threaded in as parameters.
 
 from __future__ import annotations
 
-import asyncio as _asyncio
-import base64
 import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -21,6 +19,8 @@ from obs import log
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
 from providers import llm, spend
+from providers.generate_modes._events import EditVerdict, GenerateFinalEvent
+from providers.generate_modes._frames import progress_frame
 
 if TYPE_CHECKING:
     from generate import GenerateBody
@@ -99,7 +99,7 @@ async def stream_edit(
             if body.edit_region
             else None
         )
-        verdict: dict[str, Any] | None = None
+        verdict: EditVerdict | None = None
         if (
             body.verify is False
             or source_bytes is None
@@ -150,18 +150,8 @@ async def stream_edit(
                     and edit_att.alignment is not None
                     and edit_att.index + 1 < edit_cfg.max_attempts
                 ):
-                    frame_b64 = (
-                        await _asyncio.to_thread(
-                            base64.b64encode, edit_att.image.jpeg_bytes
-                        )
-                    ).decode("ascii")
-                    yield _sse(
-                        {
-                            "type": "progress",
-                            "frame_index": edit_att.index,
-                            "jpeg_b64": frame_b64,
-                        },
-                        trace_id,
+                    yield await progress_frame(
+                        _sse, edit_att.image.jpeg_bytes, edit_att.index, trace_id
                     )
             edit_loop_result = edit_loop.conclude_edit(edit_attempts)
             inp_result = edit_loop_result.image
@@ -173,7 +163,7 @@ async def stream_edit(
                 "attempts": len(edit_attempts),
                 "accepted": edit_loop_result.accepted,
             }
-        final_frame: dict[str, Any] = {
+        final_frame: GenerateFinalEvent = {
             "type": "final",
             "image_data_url": image_provider.encode_data_url(
                 inp_result.jpeg_bytes, inp_result.mime_type
@@ -252,18 +242,8 @@ async def stream_edit(
                     and judged_att.alignment is not None
                     and judged_att.index + 1 < judge_cfg.max_attempts
                 ):
-                    frame_b64 = (
-                        await _asyncio.to_thread(
-                            base64.b64encode, judged_att.image.jpeg_bytes
-                        )
-                    ).decode("ascii")
-                    yield _sse(
-                        {
-                            "type": "progress",
-                            "frame_index": judged_att.index,
-                            "jpeg_b64": frame_b64,
-                        },
-                        trace_id,
+                    yield await progress_frame(
+                        _sse, judged_att.image.jpeg_bytes, judged_att.index, trace_id
                     )
             judged_result = edit_loop.conclude_edit(judged_attempts)
             judged_best = judged_result.best

@@ -14,7 +14,6 @@ deadline derives from the caller's `started` + `ingress_timeout_s`.
 from __future__ import annotations
 
 import asyncio as _asyncio
-import base64
 import contextlib
 import os
 import time as _time
@@ -26,6 +25,8 @@ from obs import log
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
 from providers import llm, model_router, spend
+from providers.generate_modes._events import GenerateFinalEvent
+from providers.generate_modes._frames import progress_frame
 
 if TYPE_CHECKING:
     from generate import GenerateBody, WorldContextEntity
@@ -942,18 +943,8 @@ async def stream_tap(
                     # NOW instead of holding it behind the judge tail. The judged
                     # verdict still follows (accept → final swaps it in, reject →
                     # the retry frame does). Not part of loop_attempts/conclude.
-                    preview_b64 = (
-                        await _asyncio.to_thread(
-                            base64.b64encode, loop_att.image.jpeg_bytes
-                        )
-                    ).decode("ascii")
-                    yield _sse(
-                        {
-                            "type": "progress",
-                            "frame_index": loop_att.index,
-                            "jpeg_b64": preview_b64,
-                        },
-                        trace_id,
+                    yield await progress_frame(
+                        _sse, loop_att.image.jpeg_bytes, loop_att.index, trace_id
                     )
                     continue
                 loop_attempts.append(loop_att)
@@ -968,18 +959,8 @@ async def stream_tap(
                 ):
                     # Stream the rejected attempt — the user watches the
                     # agent self-correct instead of staring at a spinner.
-                    frame_b64 = (
-                        await _asyncio.to_thread(
-                            base64.b64encode, loop_att.image.jpeg_bytes
-                        )
-                    ).decode("ascii")
-                    yield _sse(
-                        {
-                            "type": "progress",
-                            "frame_index": loop_att.index,
-                            "jpeg_b64": frame_b64,
-                        },
-                        trace_id,
+                    yield await progress_frame(
+                        _sse, loop_att.image.jpeg_bytes, loop_att.index, trace_id
                     )
             result = render_loop.conclude(loop_attempts).image
             billed_images = max(1, len(loop_attempts))
@@ -1024,7 +1005,8 @@ async def stream_tap(
             # skip the progress and continue — main is still running.
             try:
                 draft_result = draft_task.result()
-            except Exception:
+            except Exception as exc:
+                log("warn", "tap.draft_failed", error=f"{type(exc).__name__}: {exc}")
                 draft_result = None
             if draft_result is not None:
                 # The draft is a real fal call — bill it as it lands.
@@ -1042,23 +1024,8 @@ async def stream_tap(
                     },
                     trace_id,
                 )
-                # Encode in a thread so the event loop stays free for
-                # main_task progress. Sync b64encode of a 1-3MB JPEG
-                # otherwise stalls the loop for ~5-15ms — small per call,
-                # but it's stalls in the hot path right when the user
-                # cares most about latency.
-                draft_b64 = (
-                    await _asyncio.to_thread(
-                        base64.b64encode, draft_result.jpeg_bytes
-                    )
-                ).decode("ascii")
-                yield _sse(
-                    {
-                        "type": "progress",
-                        "frame_index": 0,
-                        "jpeg_b64": draft_b64,
-                    },
-                    trace_id,
+                yield await progress_frame(
+                    _sse, draft_result.jpeg_bytes, 0, trace_id
                 )
             result = await main_task
     elif main_task is not None:
@@ -1067,13 +1034,7 @@ async def stream_tap(
             # the instant it lands, before its judge + keep-best retry.
             preview_bytes = await _race_preview(zoom_preview_q, main_task)
             if preview_bytes is not None:
-                preview_b64 = (
-                    await _asyncio.to_thread(base64.b64encode, preview_bytes)
-                ).decode("ascii")
-                yield _sse(
-                    {"type": "progress", "frame_index": 0, "jpeg_b64": preview_b64},
-                    trace_id,
-                )
+                yield await progress_frame(_sse, preview_bytes, 0, trace_id)
         result = await main_task
 
     # 3b. Geometric grounding (VLM_GROUNDING): verify the render against the
@@ -1117,7 +1078,7 @@ async def stream_tap(
         {"url": c.url, "title": c.title}
         for c in (plan.sources or [])
     ]
-    final_payload: dict[str, Any] = {
+    final_payload: GenerateFinalEvent = {
         "type": "final",
         "image_data_url": data_url,
         "page_title": plan.page_title,

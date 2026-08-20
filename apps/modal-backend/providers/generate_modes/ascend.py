@@ -21,6 +21,7 @@ from obs import log, record_error
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
 from providers import llm, model_router, spend
+from providers.generate_modes._events import GenerateAscendReadyEvent
 
 if TYPE_CHECKING:
     from generate import GenerateBody
@@ -254,7 +255,7 @@ async def stream_ascend(
     # Spend accounting: this OUTWARD hop made real paid image calls (one per
     # judged attempt) — record them so the cap actually counts them.
     spend.record_generation(body.session_id, img.model, images=billed_images)
-    ascend_payload: dict[str, Any] = {
+    ascend_payload: GenerateAscendReadyEvent = {
         "type": "ascend_ready",
         "page_title": page_title,
         "image_data_url": data_url,

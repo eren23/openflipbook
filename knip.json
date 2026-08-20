@@ -23,6 +23,10 @@
     "scripts/perfbudget": {
       "entry": ["run.ts"],
       "project": ["*.ts"]
+    },
+    "scripts/ux-bench": {
+      "entry": ["run.ts"],
+      "project": ["*.ts"]
     }
   }
 }

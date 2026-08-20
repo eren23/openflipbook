@@ -436,7 +436,7 @@ const _FIT_FRAME_W = 100;
 /** Least-squares uniform scale + translation over (from, to) point pairs;
  *  tries the x-flipped register too and keeps the lower residual. Scale clamped
  *  [minScale, 2] (default minScale 0.5); null when < 2 pairs (nothing to anchor).
- *  TS port of tests/recon_bench/_align.fit_alignment — keep the two in lockstep.
+ *  TS port of providers/register.py fit_alignment — keep the two in lockstep.
  *  The gated register lowers minScale to REGISTER_MIN_SCALE to reach coherent
  *  deep compressions (a place drawn tighter than planned) the 0.5 clamp rejects. */
 export function fitSimilarity(
