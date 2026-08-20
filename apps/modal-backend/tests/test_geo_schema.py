@@ -177,3 +177,22 @@ def test_secondary_body_mirrors_match_ts(model: str, interface: str) -> None:
     endpoints with no TS interface by design — excluded.)"""
     py_fields = set(getattr(generate, model).model_fields.keys())
     assert py_fields == _ts_interface_fields(interface)
+
+
+@pytest.mark.parametrize(
+    ("typed_dict", "interface"),
+    [
+        ("EditVerdict", "EditVerdict"),
+        ("GenerateFinalEvent", "GenerateFinalEvent"),
+        ("GenerateAscendReadyEvent", "GenerateAscendReadyEvent"),
+    ],
+)
+def test_sse_event_twins_match_ts(typed_dict: str, interface: str) -> None:
+    """The SSE final-event dicts were the last untyped wire face — the same
+    field-drift class the body gates cover. The generate modes build these
+    payloads as TypedDicts now; this pins each twin's field set to its TS
+    interface."""
+    from providers.generate_modes import _events
+
+    py_fields = set(getattr(_events, typed_dict).__annotations__.keys())
+    assert py_fields == _ts_interface_fields(interface)

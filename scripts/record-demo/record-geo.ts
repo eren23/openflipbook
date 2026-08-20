@@ -81,8 +81,8 @@ async function main(): Promise<void> {
   // ── 1. A world from scratch ────────────────────────────────────────────────
   console.log("[geo] opening play");
   // domcontentloaded, NOT networkidle: /play holds a persistent Mongo
-  // change-stream SSE open, so networkidle never fires (the record-ankh
-  // lesson) — wait for the query box instead.
+  // change-stream SSE open, so networkidle never fires — wait for the
+  // query box instead.
   await page.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
   await page.getByRole("textbox").first().waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1200);
