@@ -95,3 +95,6 @@ docs/CURSOR_KICKOFF.md
 /*-snap.md
 /tapzoom-*.png
 /.polly/
+
+# Local compose experiment overrides — never commit (temporary by definition)
+docker-compose.override.yml
