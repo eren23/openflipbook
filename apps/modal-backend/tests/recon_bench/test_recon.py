@@ -337,3 +337,41 @@ def test_corpus_scenarios_rejects_unverified() -> None:
         pytest.skip("no drafts in the corpus right now")
     with pytest.raises(SystemExit, match="not a VERIFIED"):
         corpus_scenarios([f"corpus:{drafts[0]}"])
+
+
+def test_scrub_stale_heights_drops_cached_keys_and_recomputes_composite() -> None:
+    """Cache replay keeps scores verbatim — cells scored before the #133
+    height-omission rule still carry height_order 0.0 for height-less maps
+    (the 2026-08-05 phantom gate trip). The scrub applies the rule to
+    replayed cells."""
+    from tests.matrix_bench.runner import Scenario
+    from tests.recon_bench.runner import scrub_stale_heights
+
+    weights = {"pos_raw": 0.5, "height_order": 0.5}
+    scenarios = [
+        Scenario(id="mars", desc_sha="x", payload={"entities": [{"label": "a"}]}),
+        Scenario(
+            id="manor",
+            desc_sha="y",
+            payload={"entities": [{"label": "b", "height_m": 12.0}]},
+        ),
+    ]
+    report = {
+        "cells": [
+            {  # stale: height keys on a height-less map
+                "scenario_id": "mars",
+                "scores": {"pos_raw": 0.8, "height_order": 0.0, "composite": 0.4},
+            },
+            {  # legit height-bearing cell — untouched
+                "scenario_id": "manor",
+                "scores": {"pos_raw": 0.6, "height_order": 1.0, "composite": 0.8},
+            },
+        ]
+    }
+    assert scrub_stale_heights(report, scenarios, weights) is True
+    mars, manor = report["cells"]
+    assert "height_order" not in mars["scores"]
+    assert mars["scores"]["composite"] == 0.8  # pos_raw alone
+    assert manor["scores"] == {"pos_raw": 0.6, "height_order": 1.0, "composite": 0.8}
+    # second pass: nothing left to scrub
+    assert scrub_stale_heights(report, scenarios, weights) is False

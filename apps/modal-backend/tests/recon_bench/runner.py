@@ -353,6 +353,43 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def scrub_stale_heights(
+    report: dict[str, Any],
+    scenarios: list[Scenario],
+    weights: dict[str, float],
+) -> bool:
+    """Drop height keys from replayed cells of maps with no built heights.
+
+    score_fn omits height_order/height_abs when the description carries no
+    height_m (the #133 honesty rule), but the matrix cache replays scores
+    verbatim — cells scored before that rule still carry height_order 0.0
+    (mars x4 dragged the 2026-08-05 gate to 0.650, a phantom regression).
+    Applies the same rule to replayed cells and re-derives their composite.
+    Returns True when anything changed (caller persists the report)."""
+    heightless = {
+        s.id
+        for s in scenarios
+        if not any(e.get("height_m") for e in s.payload["entities"])
+    }
+    dirty = False
+    for c in report.get("cells", []):
+        scores = c.get("scores")
+        if not scores or c.get("scenario_id") not in heightless:
+            continue
+        if "height_order" not in scores and "height_abs" not in scores:
+            continue
+        scores.pop("height_order", None)
+        scores.pop("height_abs", None)
+        used = {k: w for k, w in weights.items() if k in scores and w > 0}
+        if used:
+            total = sum(used.values())
+            scores["composite"] = round(
+                sum(scores[k] * w for k, w in used.items()) / total, 3
+            )
+        dirty = True
+    return dirty
+
+
 def _load_env() -> None:
     env_path = Path(__file__).resolve().parents[2] / ".env"
     if env_path.exists():
@@ -385,6 +422,10 @@ def main() -> int:
         report_path=report_path,
         **recon_fns(sweep),
     )
+    if scrub_stale_heights(
+        report, scenarios, dict(sweep.get("composite_weights", {}))
+    ):
+        report_path.write_text(json.dumps(report, indent=1))
     if live:
         cells = [c for c in report["cells"] if "scores" in c]
         composites = [
