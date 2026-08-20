@@ -34,8 +34,8 @@ from typing import Any
 from ._score import score_style_pair
 
 _REPORTS = Path(__file__).resolve().parent / "reports"
-# Below this mean the FRESH (rerender) container drifts too far off the source's
-# medium to trust — keep SCALE_OUTWARD_RERENDER off until it clears this.
+# Below this mean the FRESH (rerender) container — the shipped ascend default —
+# drifts too far off the source's medium: a regression against that default.
 _PASS_THRESHOLD = float(os.environ.get("OUTWARD_BENCH_THRESHOLD", "6.5"))
 
 
@@ -147,7 +147,10 @@ def summarize(results: list[CaseResult]) -> dict[str, Any]:
         "fresh_medium_mean": fresh_mean,
         # >0 → the fresh rerender drifts off-medium vs the zero-drift outpaint.
         "drift": round(outpaint_mean - fresh_mean, 4),
-        # Whether the fresh path is faithful enough to enable SCALE_OUTWARD_RERENDER.
+        # Whether the fresh path (the SHIPPED ascend default) holds the medium.
+        # A False here is a regression signal against the default, not a flag
+        # decision — the old SCALE_OUTWARD_RERENDER gate was never wired and the
+        # fresh container became the default on live evidence (ascend.py).
         "fresh_trustworthy": fresh_mean >= _PASS_THRESHOLD,
     }
 
@@ -194,8 +197,9 @@ def _cli() -> None:
     print(
         f"\nDRIFT (outpaint - fresh) = {report['summary']['drift']}; "
         f"fresh trustworthy = {report['summary']['fresh_trustworthy']} "
-        f"(threshold {_PASS_THRESHOLD}). Outpaint is the zero-drift default; only "
-        f"enable SCALE_OUTWARD_RERENDER once 'fresh_trustworthy' holds at N >= 10."
+        f"(threshold {_PASS_THRESHOLD}). Fresh is the shipped ascend default "
+        f"(outpaint is the SCALE_OUTWARD_OUTPAINT opt-in); a False "
+        f"'fresh_trustworthy' is a regression signal against that default."
     )
 
 
