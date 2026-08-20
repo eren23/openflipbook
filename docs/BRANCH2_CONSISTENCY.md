@@ -18,31 +18,23 @@ anchored** (`applyEntityEdit` move/set_height/set_appearance/remove/add/no-op te
 (project → apply → re-project → detect-diff: did the edit move the pixels and leave the
 others put?) — deferred to a paid eval; the harness + `grounding.diff` are ready.
 
-## Held for review — do NOT ship unverified
+## Held for review
 
-**P4 — promote B1 `inside` to true sub-frame nesting.** Today the solver emits `inside`
-**flat-v1** (`parent_id: null`, the child shares the container's pos — `layout_solver.py`
-`:172-177`, `:264`; deliberate + golden-tested). The DEEPER nesting model already exists
-(`parent_id` + a learned `scale`; `world-map.ts deriveGeoFromExtraction`; `resolveAbsolutePos`
-chases the parent chain). Promoting it means, behind a **default-off `nest_inside` param**
-(so the flat golden test stays green):
-- `_resolve_pos` records the container's instance ref on the `inside` child;
-- `_emit` sets `parent_id = geo_plan_<container>`, a **local** child pos, and the container's
-  learned `scale = footprint-extent ÷ interior localExtent`;
-- a new nested golden test + a **parity check** that the nested child's `resolveAbsolutePos`
-  matches the TS engine, and a **tap-routing** test that a tap on the rendered nested place
-  routes back to it.
-
-Held because it changes the deterministic solver's **frame/scale convention** — getting it
-subtly wrong corrupts the world model (the exact failure this program targets), and it needs
-a **paid render + tap verification** that can't run free. The design above is ready; it wants
-eyes-on before it lands.
+*(none — P4 shipped; see Done below.)*
 
 ## Deferred paid runs (harness ready, sequence when budget allows)
 
 *(none currently — S4 ran; see Done below.)*
 
 ### Done (kept for provenance)
+
+- **P4 sub-frame nesting** — SHIPPED (2026-08-20, `WORLD_NEST_INSIDE`, default off = flat v1
+  byte-identical). The held design's corruption risk dissolved by construction: nesting is a
+  **pure re-expression** — `resolveAbsolutePos`/`toAbsoluteEntities` return exactly the flat
+  solve's absolute pos + footprint (invariant-tested both sides, plus a nested tap-routing
+  test), so renders/taps/bounds are unchanged and the paid verification collapsed into free
+  gates. One deviation from the sketch, called out in the PR: the scale denominator is the
+  canonical frame extent, not the (degenerate-at-solve-time) interior localExtent.
 
 - **S4 OUTWARD A/B** — DONE (n=2, `outward_runner.py`, ~$0.70). Both zoom-out paths hold the
   source MEDIUM well at a single hop: outpaint mean 9.75, fresh `scale_parent` rerender mean
