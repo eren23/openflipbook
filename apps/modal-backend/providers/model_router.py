@@ -109,12 +109,13 @@ def _is_medium_flip(from_tier: str, to_tier: str) -> bool:
 def select_outward_op(from_tier: str, to_tier: str) -> str:
     """Pure: which OUTWARD op synthesizes the container that holds the source.
 
-    A same-plane surface hop (city→region) is a centered BRIA outpaint
-    (`outpaint_zoomout`) — the source's pixels are preserved and become the central
-    sub-region of a wider frame, so style is conserved by construction. A
-    medium-flip hop (planet→star_system) can't be outpainted into a new framing, so
-    it's a reference-conditioned fresh gen (`scale_parent_fresh`, the riskier path,
-    gated SCALE_OUTWARD_RERENDER). `resolve_model()` maps the label to a slug."""
+    A same-plane surface hop (city→region) CAN be a centered BRIA outpaint
+    (`outpaint_zoomout`) — pixels preserved as the central sub-region, style
+    conserved by construction — but the shipped ascend default renders the fresh
+    `scale_parent` container for every hop (outpaint is the SCALE_OUTWARD_OUTPAINT
+    opt-in; see ascend.py). A medium-flip hop (planet→star_system) can't be
+    outpainted at all, so it's always the reference-conditioned fresh gen
+    (`scale_parent_fresh`). `resolve_model()` maps the label to a slug."""
     return "scale_parent_fresh" if _is_medium_flip(from_tier, to_tier) else "outpaint_zoomout"
 
 
