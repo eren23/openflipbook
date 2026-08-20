@@ -1,0 +1,18 @@
+{
+  "name": "@openflipbook/ux-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright + VLM agent loop that scores /play task understandability (make ux-bench).",
+  "type": "module",
+  "scripts": {
+    "start": "tsx run.ts"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}
