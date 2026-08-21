@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getNode, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
+import ForkButton from "@/components/fork-button";
 import PermalinkImage from "@/components/permalink-image";
 import { formatViewVerdict } from "@/lib/view-verdict";
 
@@ -107,13 +108,31 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
     <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-4 px-4 py-6">
       <header className="flex items-baseline justify-between">
         <h1 className="text-xl font-bold">{node.page_title}</h1>
-        <a
-          href={`/play?continue=${encodeURIComponent(node.session_id)}`}
-          className="rounded-full border border-[var(--color-ink)]/40 px-3 py-1 text-xs"
-        >
-          Continue this session
-        </a>
+        <span className="flex items-center gap-2">
+          <ForkButton sessionId={node.session_id} nodeId={node.id} />
+          <a
+            href={`/play?continue=${encodeURIComponent(node.session_id)}`}
+            className="rounded-full border border-[var(--color-ink)]/40 px-3 py-1 text-xs"
+          >
+            Continue this session
+          </a>
+        </span>
       </header>
+      {node.forked_from && (
+        <p className="self-start text-xs opacity-60">
+          forked from{" "}
+          {node.forked_from.node_id ? (
+            <a
+              className="underline"
+              href={`/n/${encodeURIComponent(node.forked_from.node_id)}`}
+            >
+              this world
+            </a>
+          ) : (
+            "another world"
+          )}
+        </p>
+      )}
       {node.view_verdict && (
         // The receipt: what the render critics saw on the kept attempt —
         // the coherence machinery made visible exactly where the page gets

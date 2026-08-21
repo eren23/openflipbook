@@ -134,6 +134,10 @@ export interface NodeDoc extends Document {
   // The render receipt: the judges' scores on the kept attempt (judged
   // enter/zoom paths only). Optional + null for unjudged / legacy nodes.
   view_verdict?: ViewVerdict | null;
+  // Fork lineage, stamped on a forked session's ROOT node(s): which session
+  // (and which shared page) this world was forked from. Absent everywhere
+  // else — additive, and it rides the export ZIP's graph.json provenance.
+  forked_from?: { session_id: string; node_id: string | null } | null;
   // When entity extraction last RAN for this node (set even if it found zero
   // entities). Durable "already extracted" marker so a later revisit / reload
   // never silently re-runs the non-deterministic VLM pass. Absent on legacy
@@ -187,6 +191,8 @@ export interface NodeRow {
   // The render receipt shown on the share surfaces. Null on unjudged paths
   // and every pre-receipts node.
   view_verdict: ViewVerdict | null;
+  // Fork lineage (root nodes of forked sessions only).
+  forked_from: { session_id: string; node_id: string | null } | null;
   // Whether entity extraction has already run for this node. Read back on
   // revisit so the client never auto-re-extracts a node it has already done.
   geo_extracted: boolean;
@@ -204,6 +210,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     scale_tier,
     scene_view,
     view_verdict,
+    forked_from,
     geo_extracted_at,
     ...rest
   } = doc;
@@ -217,6 +224,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     scale_tier: scale_tier ?? null,
     scene_view: scene_view ?? null,
     view_verdict: view_verdict ?? null,
+    forked_from: forked_from ?? null,
     geo_extracted: geo_extracted_at != null,
     created_at: created_at.toISOString(),
   };
