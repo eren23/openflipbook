@@ -498,6 +498,40 @@ export async function unpublishSession(sessionId: string): Promise<boolean> {
   return res.deletedCount > 0;
 }
 
+/** The gallery-publish record for one session, or null. The embed surface
+ * gates on this: only sessions the owner deliberately published render in an
+ * iframe — a leaked session id must not make a private world frameable. */
+export async function getPublishedSession(
+  sessionId: string
+): Promise<PublishedSessionRow | null> {
+  const doc = await (await publishedSessions()).findOne({ _id: sessionId });
+  if (!doc) return null;
+  return {
+    session_id: doc._id,
+    node_id: doc.node_id,
+    title: doc.title,
+    query: doc.query,
+    poster_key: doc.poster_key,
+    published_at: doc.published_at.toISOString(),
+  };
+}
+
+/** The session's current top-of-world node: the NEWEST parentless node —
+ * after an OUTWARD ascend the old root is re-pointed under the synthesized
+ * container (setNodeParent), so the latest parentless node is the widest
+ * view. Sessions normally carry exactly one. */
+export async function getSessionRootNode(
+  sessionId: string
+): Promise<NodeRow | null> {
+  const collection = await nodes();
+  const doc = await collection
+    .find({ session_id: sessionId, parent_id: null })
+    .sort({ created_at: -1, _id: -1 })
+    .limit(1)
+    .next();
+  return doc ? toRow(doc) : null;
+}
+
 export async function listPublishedSessions(
   limit = 60
 ): Promise<PublishedSessionRow[]> {

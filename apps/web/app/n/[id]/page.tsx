@@ -67,7 +67,15 @@ export async function generateMetadata({
       description,
       ...(imageUrl ? { images: [imageUrl] } : {}),
     },
-    alternates: { canonical: `/n/${id}` },
+    alternates: {
+      canonical: `/n/${id}`,
+      // oEmbed discovery: consumers that fetch this page find the provider
+      // endpoint and swap the link for the interactive world embed
+      // (publish-gated — /api/oembed 404s for unpublished sessions).
+      types: {
+        "application/json+oembed": `/api/oembed?url=${encodeURIComponent(`/n/${id}`)}`,
+      },
+    },
   };
 }
 
