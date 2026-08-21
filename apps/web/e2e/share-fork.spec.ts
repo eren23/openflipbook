@@ -13,7 +13,10 @@ test("fork copies the world; taps grow the fork, never the source", async ({
   page.on("request", (req) => {
     if (req.url().includes("/api/generate-page") && req.method() === "POST") {
       const body = JSON.parse(req.postData() ?? "{}");
-      if (body.session_id) sessionId = body.session_id;
+      // Capture the SOURCE session once — the later tap inside the FORK also
+      // fires a generate, and letting it overwrite this made sourceCount()
+      // count the fork (the first CI run's red).
+      if (body.session_id && !sessionId) sessionId = body.session_id;
     }
   });
   const persist = page.waitForResponse(
