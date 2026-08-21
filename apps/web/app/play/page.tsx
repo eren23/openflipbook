@@ -12,6 +12,7 @@ import type {
   ObserverPose,
   ScaleTier,
   SceneView,
+  ViewVerdict,
   ViewLevel,
   WorldEntityGeo,
 } from "@openflipbook/config";
@@ -217,6 +218,7 @@ interface PersistBody {
   scale?: "component" | "peer" | "container";
   scale_tier?: ScaleTier;
   scene_view?: SceneView | null;
+  view_verdict?: ViewVerdict | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -1035,6 +1037,14 @@ export default function PlayPage() {
               // debug HUD counts how often (UI_AUDIT #11's live half).
               hudEmit("layout:suppressed", {});
             }
+            if (evt.view_verdict) {
+              // The receipt rides to the HUD in-session; its real surfaces
+              // are the /n/ share page and the embed (persisted below).
+              hudEmit("view:verdict", {
+                accepted: evt.view_verdict.accepted,
+                attempts: evt.view_verdict.attempts,
+              });
+            }
             // INTERIOR_ENTERS arrivals stamp the final with a scene_view
             // Partial (scale_tier "room" + place_form "interior") — fold it
             // over the request's scene_view so page state AND the persisted
@@ -1070,6 +1080,7 @@ export default function PlayPage() {
                   title: s.title ?? null,
                 })),
                 scene_view: foldedSceneView,
+                view_verdict: evt.view_verdict ?? null,
               },
               traceId
             ).then((saved) => {

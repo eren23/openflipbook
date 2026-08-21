@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getNode, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import PermalinkImage from "@/components/permalink-image";
+import { formatViewVerdict } from "@/lib/view-verdict";
 
 interface PermalinkPageProps {
   params: Promise<{ id: string }>;
@@ -113,6 +114,23 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
           Continue this session
         </a>
       </header>
+      {node.view_verdict && (
+        // The receipt: what the render critics saw on the kept attempt —
+        // the coherence machinery made visible exactly where the page gets
+        // shared. Absent on unjudged / pre-receipts nodes.
+        <p
+          className={
+            "self-start rounded-full border px-3 py-1 text-xs " +
+            (node.view_verdict.accepted
+              ? "border-emerald-600/40 bg-emerald-600/10 text-emerald-900"
+              : "border-[var(--color-ink)]/30 opacity-70")
+          }
+          title="Every judged render is scored by independent critics before it ships; this is the kept attempt's scorecard."
+        >
+          {node.view_verdict.accepted ? "✓ " : ""}
+          {formatViewVerdict(node.view_verdict)}
+        </p>
+      )}
       <PermalinkImage
         nodeId={node.id}
         imageUrl={imageUrl}

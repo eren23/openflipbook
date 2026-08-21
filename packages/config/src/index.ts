@@ -332,6 +332,21 @@ export interface EditVerdict {
   accepted: boolean; // false = best-effort keep-best, gates not all met
 }
 
+// The render receipt (view_verdict): what the judged render-loop / zoom
+// critics saw on the KEPT attempt. Present on `final` only when a judged
+// path ran; axes the path didn't wire are null (never fabricated zeros).
+// Degraded judges send render_unjudged instead — a receipt of dashes is
+// noise, not honesty.
+export interface ViewVerdict {
+  same_place: number | null; // 0-10: the tapped region / place, closer
+  conformance: number | null; // 0-10: the intended camera landed
+  medium: number | null; // 0-10: the art medium held
+  detail: number | null; // 0-10: map legibility at the new scale
+  interior: number | null; // 0-10: indoor arrival (INTERIOR_ENTERS)
+  attempts: number;
+  accepted: boolean; // false = keep-best, gates not all met
+}
+
 export interface GenerateFinalEvent {
   type: "final";
   image_data_url: string;
@@ -350,6 +365,8 @@ export interface GenerateFinalEvent {
   grounding?: GroundingSummary;
   // Judged mask-scoped edit verdict — present only on the EDIT_REGION path.
   edit_verdict?: EditVerdict;
+  // The render receipt — present only when a judged enter/zoom path ran.
+  view_verdict?: ViewVerdict;
   // A JUDGED render path degraded (critics unavailable — e.g. an upstream
   // flap): the kept image shipped without a verdict. Additive; absent on
   // paths that are unjudged by design (fresh, zoom_continue).
