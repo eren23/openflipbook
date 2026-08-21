@@ -114,7 +114,7 @@ async def stream_expand(
     expand_world_context = [e.model_dump() for e in body.world_context]
     yield _sse({"type": "status", "stage": "planning"}, trace_id)
     await _abort_if_disconnected("pre-expand-plan")
-    around_on = env_flag("SCALE_AROUND_LOGICAL")
+    around_on = env_flag("SCALE_AROUND_LOGICAL", "true")
     neighbors = await llm.propose_neighbors(
         image_data_url=body.image,
         parent_title=body.parent_title or body.query,

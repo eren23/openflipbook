@@ -39,7 +39,7 @@ async def stream_ascend(
     _view_grammar_on: Callable[[], bool],
     _abort_if_disconnected: Callable[[str], Awaitable[None]],
 ) -> AsyncIterator[bytes]:
-    if not (env_flag("SCALE_LADDER_NAV") and env_flag("SCALE_OUTWARD")):
+    if not (env_flag("SCALE_LADDER_NAV", "true") and env_flag("SCALE_OUTWARD", "true")):
         yield _sse(
             {"type": "error", "message": "OUTWARD disabled (SCALE_LADDER_NAV+SCALE_OUTWARD)"},
             trace_id,

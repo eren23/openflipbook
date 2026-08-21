@@ -44,7 +44,7 @@ interface AscendBody {
 export async function POST(req: Request, { params }: Params) {
   const { sessionId } = await params;
 
-  if (!(envFlag("SCALE_LADDER_NAV") && envFlag("SCALE_OUTWARD"))) {
+  if (!(envFlag("SCALE_LADDER_NAV", "true") && envFlag("SCALE_OUTWARD", "true"))) {
     return NextResponse.json(
       { error: "OUTWARD disabled (set SCALE_LADDER_NAV=1 and SCALE_OUTWARD=1)" },
       { status: 403 },

@@ -16,12 +16,11 @@ export interface WorldModeState {
 const DOM_LABELS_DEFAULT = ["1", "true", "yes"].includes(
   (process.env.NEXT_PUBLIC_DOM_LABELS ?? "").toLowerCase(),
 );
-// Seed default for NEW sessions (build-time): a deploy that lives in world
-// mode (the demo stack) starts every session with it ON instead of silently
-// reverting to classic explainers — the "why did consistency regress"
-// footgun is that world mode is per-session and used to always seed off.
-// A session's own toggle still wins once stored.
-const WORLD_DEFAULT = ["1", "true", "yes"].includes(
+// Seed default for NEW sessions (build-time). Graduated to ON (2026-08-21):
+// a fresh session starts in world mode; NEXT_PUBLIC_WORLD_MODE=0 at build
+// time restores the classic seed. A session's own toggle still wins once
+// stored, so nobody's existing session changes underneath them.
+const WORLD_DEFAULT = !["0", "false", "no"].includes(
   (process.env.NEXT_PUBLIC_WORLD_MODE ?? "").toLowerCase(),
 );
 

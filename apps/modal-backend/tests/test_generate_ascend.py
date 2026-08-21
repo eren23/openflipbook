@@ -169,10 +169,11 @@ async def test_ascend_outpaint_under_flag_steers_the_medium(monkeypatch: pytest.
     assert "engraving" in (mock.await_args.kwargs.get("prompt") or "")
 
 
-async def test_ascend_gated_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Flags unset → the branch refuses; prod byte-identical.
+async def test_ascend_kill_switch_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Graduated default: flags unset → OUTWARD is ON; an explicit =0 on
+    # either flag is the deploy kill switch and refuses like the old default.
     monkeypatch.delenv("SCALE_LADDER_NAV", raising=False)
-    monkeypatch.delenv("SCALE_OUTWARD", raising=False)
+    monkeypatch.setenv("SCALE_OUTWARD", "0")
     events = await _collect(_event_stream(_ascend_body(), "t1"))
     assert events[0]["type"] == "error"
     assert "disabled" in events[0]["message"]

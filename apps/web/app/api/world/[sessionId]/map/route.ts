@@ -16,7 +16,7 @@ interface Params {
 }
 
 function geometricWorldEnabled(): boolean {
-  return envFlag("GEOMETRIC_WORLD");
+  return envFlag("GEOMETRIC_WORLD", "true");
 }
 
 function emptyMap(sessionId: string) {

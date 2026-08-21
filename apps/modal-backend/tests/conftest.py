@@ -47,7 +47,8 @@ _SCRUB = (
     "IMAGE_API_KEY",
     "IMAGE_MODEL",
     "IMAGE_SIZE",
-    # World Mode (tap enters a place; gated off by default).
+    # World Mode (tap enters a place; graduated default ON — scrub so a host
+    # kill-switch can't flip the routing tests).
     "WORLD_MODE",
     "FAL_CONTINUE_MODEL",
     # Enter-via-edit (default ON — scrub so a host kill-switch can't silently

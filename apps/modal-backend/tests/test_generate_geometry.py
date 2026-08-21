@@ -79,13 +79,23 @@ def test_layout_clause_world_mode_explicit_false_kills(
     assert generate._layout_clause_for(_world_body([_proj("Tower")])) == ""
 
 
-def test_layout_clause_world_request_without_env_keeps_old_default(
+def test_layout_clause_world_request_graduated_default_is_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A world_mode request against a WORLD_MODE-off deploy is NOT world mode
-    — the old default (off) stands, byte-identical prompts."""
+    """Graduated default: a world_mode request against an env-unset deploy IS
+    world mode — the layout clause fires without any flag set."""
     monkeypatch.delenv("WORLD_GEOMETRY_GEN", raising=False)
     monkeypatch.delenv("WORLD_MODE", raising=False)
+    assert "SCENE LAYOUT" in generate._layout_clause_for(_world_body([_proj("Tower")]))
+
+
+def test_layout_clause_world_mode_kill_switch_keeps_classic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WORLD_MODE=0 restores the classic deploy: a world_mode request is NOT
+    world mode, byte-identical prompts."""
+    monkeypatch.delenv("WORLD_GEOMETRY_GEN", raising=False)
+    monkeypatch.setenv("WORLD_MODE", "0")
     assert generate._layout_clause_for(_world_body([_proj("Tower")])) == ""
 
 
@@ -252,10 +262,11 @@ def _edit_body() -> generate.EditEntitiesBody:
     )
 
 
-async def test_edit_entities_endpoint_403_when_flag_off(
+async def test_edit_entities_endpoint_403_when_flag_killed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("GEOMETRIC_WORLD", raising=False)
+    # Graduated default: unset = ON; GEOMETRIC_WORLD=0 is the kill switch.
+    monkeypatch.setenv("GEOMETRIC_WORLD", "0")
     resp = await generate.edit_entities_endpoint(SimpleNamespace(headers={}), _edit_body())
     assert resp.status_code == 403
 
@@ -472,7 +483,7 @@ def test_layout_register_pin_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     # committed recon_base.v2 A/B winner vs the pos_raw drift); flag off is
     # byte-identical to today's clause.
     monkeypatch.setenv("WORLD_GEOMETRY_GEN", "true")
-    monkeypatch.delenv("LAYOUT_REGISTER_PIN", raising=False)
+    monkeypatch.setenv("LAYOUT_REGISTER_PIN", "0")  # kill switch; unset = ON
     off = generate._layout_clause_for(_body([_proj("Tower")]))
     assert "strict grid" not in off
     monkeypatch.setenv("LAYOUT_REGISTER_PIN", "1")

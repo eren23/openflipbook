@@ -620,15 +620,22 @@ def test_azimuth_flag_on_rotates_a_revisit() -> None:
     assert spec is not None and spec.get("azimuth_deg") == 90.0
 
 
-def test_azimuth_flag_off_leaves_enter_index_inert() -> None:
-    """Flag OFF (default): even with enter_index set, the scene camera carries
-    no azimuth — byte-identical to today."""
+def test_azimuth_kill_switch_leaves_enter_index_inert() -> None:
+    """ENTER_AZIMUTH_ROTATE=0 (the kill switch; unset = ON since the world
+    graduation): even with enter_index set, the scene camera carries no
+    azimuth — byte-identical to the pre-rotation behaviour."""
+    import os
+
     from generate import _view_spec_for
 
-    spec = _view_spec_for(
-        _enter_index_body(1), "place_scene", world_mode=True, has_region=False,
-        subject="a tavern", subject_context="interior", place_form="interior",
-    )
+    os.environ["ENTER_AZIMUTH_ROTATE"] = "0"
+    try:
+        spec = _view_spec_for(
+            _enter_index_body(1), "place_scene", world_mode=True, has_region=False,
+            subject="a tavern", subject_context="interior", place_form="interior",
+        )
+    finally:
+        del os.environ["ENTER_AZIMUTH_ROTATE"]
     assert spec is not None and "azimuth_deg" not in spec
 
 

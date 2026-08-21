@@ -359,10 +359,11 @@ class GenerateBody(BaseModel):
     trace_id: str | None = None
 
 
-# World Mode is gated behind an env flag (default off) so it's a no-op in prod
-# until a deployer turns it on — like EXPAND_MAP_PAN / IMAGE_CONDITIONING.
+# World Mode graduated to default ON (2026-08-21) — WORLD_MODE=0 is the
+# deploy-level kill switch. The CLIENT half still decides per session
+# (`requested` = the user's toggle), so classic sessions stay classic.
 def _world_mode_on(requested: bool) -> bool:
-    return bool(requested) and env_flag("WORLD_MODE")
+    return bool(requested) and env_flag("WORLD_MODE", "true")
 
 
 def _segment_borders_on() -> bool:
@@ -382,7 +383,7 @@ def _grounding_sam3_on() -> bool:
 def _geometric_world_on() -> bool:
     """Master gate for the geometric world (GEOMETRIC_WORLD). Off → the geo
     endpoints (e.g. /edit-entities) are disabled and behave as if absent."""
-    return env_flag("GEOMETRIC_WORLD")
+    return env_flag("GEOMETRIC_WORLD", "true")
 
 
 def _world_geometry_gen_on(world_mode: bool = False) -> bool:
@@ -424,9 +425,9 @@ def _layout_clause_for(body: GenerateBody, *, view_grammar: bool = False) -> str
     )
     # LAYOUT_REGISTER_PIN (default off): append the strict-grid register
     # sentence — the committed recon_base.v2 A/B winner against the pos_raw
-    # drift (AUDIT_BOX §4). Flag-gated until the recon bench blesses a
-    # default flip; off = byte-identical prompts.
-    pin = env_flag("LAYOUT_REGISTER_PIN")
+    # drift (AUDIT_BOX §4). Bench-blessed (#132: pos_raw 0.308 -> 0.604, no
+    # cell hurt) and default ON since the world-mode graduation; =0 reverts.
+    pin = env_flag("LAYOUT_REGISTER_PIN", "true")
     if not view_grammar:
         return geometry_prompt.layout_constraints(expected, register_pin=pin)
     return geometry_prompt.layout_constraints(
@@ -598,7 +599,7 @@ def _view_spec_for(
     # rotates a scene enter to a new side. Off ⇒ 0 ⇒ byte-identical.
     enter_index = (
         int(sv.enter_index)
-        if sv and sv.enter_index and sv.enter_index > 0 and env_flag("ENTER_AZIMUTH_ROTATE")
+        if sv and sv.enter_index and sv.enter_index > 0 and env_flag("ENTER_AZIMUTH_ROTATE", "true")
         else 0
     )
     return view_policy.default_view(
