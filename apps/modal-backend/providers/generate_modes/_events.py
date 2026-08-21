@@ -20,6 +20,20 @@ class EditVerdict(TypedDict):
     accepted: bool
 
 
+class ViewVerdict(TypedDict):
+    """Mirror of TS ``ViewVerdict`` — what the render-loop / zoom critics saw
+    on the KEPT attempt. Absent axes are None (that judge was not wired for
+    the path), never fabricated zeros."""
+
+    same_place: float | None
+    conformance: float | None
+    medium: float | None
+    detail: float | None
+    interior: float | None
+    attempts: int
+    accepted: bool
+
+
 class GenerateFinalEvent(TypedDict, total=False):
     """Mirror of TS ``GenerateFinalEvent``. total=False: the additive tail
     is per-path; every build site sets the core fields in its literal."""
@@ -35,6 +49,7 @@ class GenerateFinalEvent(TypedDict, total=False):
     image_op: str
     grounding: dict[str, Any]
     edit_verdict: EditVerdict
+    view_verdict: ViewVerdict
     render_unjudged: bool
     layout_suppressed: bool
     scene_view: dict[str, Any]

@@ -25,7 +25,7 @@ from obs import log
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
 from providers import llm, model_router, spend
-from providers.generate_modes._events import GenerateFinalEvent
+from providers.generate_modes._events import GenerateFinalEvent, ViewVerdict
 from providers.generate_modes._frames import progress_frame
 
 if TYPE_CHECKING:
@@ -56,6 +56,45 @@ _CLASSIC_ENTER_AS_TO_RENDER: dict[str, str] = {
     "scene": "place_closeup",
     "submap": "place_submap",
 }
+
+
+def _score_or_none(j: JudgeResult | None) -> float | None:
+    return round(float(j.score), 1) if j is not None else None
+
+
+def _verdict_from_attempt(
+    a: Attempt, attempts: int, accepted: bool
+) -> ViewVerdict | None:
+    """The kept render-loop attempt's judge scores as the wire receipt.
+    None when EVERY axis is None (fully degraded — the render_unjudged
+    flag covers that case; a receipt of dashes would be noise)."""
+    verdict: ViewVerdict = {
+        "same_place": _score_or_none(a.same_place),
+        "conformance": _score_or_none(a.conformance),
+        "medium": _score_or_none(a.medium),
+        "detail": _score_or_none(a.detail),
+        "interior": _score_or_none(a.interior),
+        "attempts": attempts,
+        "accepted": accepted,
+    }
+    axes = (a.same_place, a.conformance, a.medium, a.detail, a.interior)
+    return verdict if any(x is not None for x in axes) else None
+
+
+def _zoom_receipt(
+    v: JudgeResult, d: JudgeResult | None, attempts: int, ok: bool
+) -> ViewVerdict:
+    """The judged-zoom receipt: step-in (same region, closer) always; map
+    legibility only when that axis ran. The loop axes stay None."""
+    return {
+        "same_place": round(float(v.score), 1),
+        "conformance": None,
+        "medium": None,
+        "detail": round(float(d.score), 1) if d is not None else None,
+        "interior": None,
+        "attempts": attempts,
+        "accepted": ok,
+    }
 
 
 def _classic_zoom_mode(enter_as: str | None) -> str | None:
@@ -661,6 +700,10 @@ async def stream_tap(
         )
     result: Any = None
     main_task: _asyncio.Task | None = None
+    # The receipt (view_verdict): what the critics saw on the KEPT attempt.
+    # Stays None on unjudged-by-design paths (fresh, judge off) and on
+    # degraded judges — those must show nothing, never zeros.
+    view_verdict: ViewVerdict | None = None
     # Zoom's pre-judge preview channel (VIEW_LOOP_PREVIEW): _judged_zoom is a
     # task, not a generator, so it can't yield an SSE frame — it hands its first
     # render to the streaming body through this queue, which the body drains and
@@ -703,6 +746,7 @@ async def stream_tap(
             failures never block the tap. view-register zooms
             (place_closeup) skip the legibility axis.
             """
+            nonlocal view_verdict
             first = await _render_zoom(zoom_instruction)
             if zoom_preview_q is not None:
                 # Hand the first render to the SSE body to paint NOW, before the
@@ -773,11 +817,13 @@ async def stream_tap(
                 accepted=_accepted(verdict, detail),
             )
             if _accepted(verdict, detail):
+                view_verdict = _zoom_receipt(verdict, detail, 1, True)
                 return first
             # One deadline-aware retry (same margin discipline as the render
             # loop: never start an attempt the ingress window can't fit).
             remaining = ingress_timeout_s - 120.0 - (_time.perf_counter() - started)
             if remaining < 45.0:
+                view_verdict = _zoom_receipt(verdict, detail, 1, False)
                 return first
             reasons: list[str] = []
             if verdict.score < accept:
@@ -805,6 +851,7 @@ async def stream_tap(
                     attempt=2,
                     error=f"{type(exc).__name__}: {exc}",
                 )
+                view_verdict = _zoom_receipt(verdict, detail, 2, False)
                 return first
             log(
                 "info",
@@ -814,7 +861,13 @@ async def stream_tap(
                 legibility=detail2.score if detail2 is not None else None,
                 accepted=_accepted(verdict2, detail2),
             )
-            return second if _total(verdict2, detail2) >= _total(verdict, detail) else first
+            if _total(verdict2, detail2) >= _total(verdict, detail):
+                view_verdict = _zoom_receipt(
+                    verdict2, detail2, 2, _accepted(verdict2, detail2)
+                )
+                return second
+            view_verdict = _zoom_receipt(verdict, detail, 2, False)
+            return first
 
         main_task = _asyncio.create_task(_judged_zoom())
     elif use_enter_edit and enter_source is not None:
@@ -962,10 +1015,14 @@ async def stream_tap(
                     yield await progress_frame(
                         _sse, loop_att.image.jpeg_bytes, loop_att.index, trace_id
                     )
-            result = render_loop.conclude(loop_attempts).image
+            loop_result = render_loop.conclude(loop_attempts)
+            result = loop_result.image
             billed_images = max(1, len(loop_attempts))
-            kept = next((a for a in loop_attempts if a.image is result), None)
-            render_unjudged = kept is not None and kept.conformance is None
+            render_unjudged = loop_result.best.conformance is None
+            if not render_unjudged:
+                view_verdict = _verdict_from_attempt(
+                    loop_result.best, len(loop_attempts), loop_result.accepted
+                )
         else:
             main_task = _asyncio.create_task(
                 image_edit_provider.edit_image(
@@ -1128,6 +1185,11 @@ async def stream_tap(
     # off → key absent → unchanged wire shape).
     if grounding_summary is not None:
         final_payload["grounding"] = grounding_summary
+    if view_verdict is not None:
+        # The receipt: the critics' scores on the KEPT attempt (judged enter
+        # and zoom paths). Additive — absent on unjudged-by-design paths and
+        # when the judges degraded (render_unjudged covers those).
+        final_payload["view_verdict"] = view_verdict
     if render_unjudged:
         # Additive: only when a judged path degraded (critics unavailable) —
         # the UI shows an "unverified render" chip so flap-era style drift

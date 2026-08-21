@@ -183,6 +183,7 @@ def test_secondary_body_mirrors_match_ts(model: str, interface: str) -> None:
     ("typed_dict", "interface"),
     [
         ("EditVerdict", "EditVerdict"),
+        ("ViewVerdict", "ViewVerdict"),
         ("GenerateFinalEvent", "GenerateFinalEvent"),
         ("GenerateAscendReadyEvent", "GenerateAscendReadyEvent"),
     ],

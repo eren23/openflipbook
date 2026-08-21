@@ -1267,3 +1267,111 @@ async def test_zoom_detail_gates_the_redraw_op_too(
     ]
     final = next(e for e in events if e["type"] == "final")
     assert final["image_op"] == "map_redraw"
+
+
+# ── The receipt (view_verdict): the critics' scores ride `final` ─────────────
+
+
+async def test_zoom_receipt_rides_final_when_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg-zoom", "image/jpeg", "m", "r1")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [8.5])  # accepted first try; legibility pinned 9.0
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+    final = next(e for e in events if e["type"] == "final")
+    assert final["view_verdict"] == {
+        "same_place": 8.5,
+        "conformance": None,
+        "medium": None,
+        "detail": 9.0,
+        "interior": None,
+        "attempts": 1,
+        "accepted": True,
+    }
+
+
+async def test_zoom_receipt_keep_best_reports_not_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "m", "r1")
+    second = GeneratedImage(b"jpeg-second", "image/jpeg", "m", "r2")
+    monkeypatch.setattr(
+        image_edit_mod, "continue_image", AsyncMock(side_effect=[first, second])
+    )
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0, 5.5])  # both below the 6.0 floor
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+    final = next(e for e in events if e["type"] == "final")
+    v = final["view_verdict"]
+    assert v["accepted"] is False and v["attempts"] == 2
+    assert v["same_place"] == 5.5  # the kept (better) attempt's score
+
+
+async def test_unjudged_enter_carries_no_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unjudged paths keep the wire byte-identical — no verdict key."""
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    events = await _collect(_event_stream(_tap_body(), "t1"))
+    final = next(e for e in events if e["type"] == "final")
+    assert "view_verdict" not in final
+
+
+def test_verdict_from_attempt_all_axes_none_is_no_receipt() -> None:
+    from providers.generate_modes.tap import _verdict_from_attempt
+    from providers.image import GeneratedImage as _GI
+    from providers.render_loop import Attempt
+
+    degraded = Attempt(
+        index=0, image=_GI(b"x", "image/jpeg", "m", "p"), instruction_suffix="",
+        conformance=None, same_place=None, detail=None, medium=None,
+        accepted=False, latency_s=0.1,
+    )
+    assert _verdict_from_attempt(degraded, 1, False) is None
+
+
+def test_verdict_from_attempt_rounds_and_keeps_nulls() -> None:
+    from providers.generate_modes.tap import _verdict_from_attempt
+    from providers.image import GeneratedImage as _GI
+    from providers.judge import JudgeResult
+    from providers.render_loop import Attempt
+
+    a = Attempt(
+        index=1, image=_GI(b"x", "image/jpeg", "m", "p"), instruction_suffix="",
+        conformance=JudgeResult(7.25, "ok", "raw"),
+        same_place=JudgeResult(9.0, "same", "raw"),
+        detail=None, medium=JudgeResult(6.0, "held", "raw"),
+        accepted=True, latency_s=0.1,
+    )
+    assert _verdict_from_attempt(a, 2, True) == {
+        "same_place": 9.0, "conformance": 7.2, "medium": 6.0,
+        "detail": None, "interior": None, "attempts": 2, "accepted": True,
+    }

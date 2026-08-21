@@ -42,7 +42,10 @@ export type HudEventName =
   | "world:extract_error"
   // Layout steering suppressed for a render (camera-register mismatch) —
   // counted by the debug HUD (UI_AUDIT #11).
-  | "layout:suppressed";
+  | "layout:suppressed"
+  // A judged render's receipt (view_verdict) landed on `final` — the share
+  // surfaces render it; the HUD just counts accepted vs keep-best.
+  | "view:verdict";
 
 type Listener = (payload: unknown) => void;
 

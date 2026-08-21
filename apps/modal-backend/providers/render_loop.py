@@ -114,6 +114,7 @@ class Attempt:
 @dataclass(frozen=True)
 class LoopResult:
     image: Rendered  # the best attempt's image (keep-best)
+    best: Attempt  # ...and the attempt it came from (the verdict's numbers)
     attempts: list[Attempt]
     accepted: bool
 
@@ -355,7 +356,7 @@ def conclude(attempts: list[Attempt]) -> LoopResult:
         raise ValueError("conclude() needs at least one attempt")
     for a in attempts:
         if a.accepted:
-            return LoopResult(image=a.image, attempts=attempts, accepted=True)
+            return LoopResult(image=a.image, best=a, attempts=attempts, accepted=True)
     best = attempts[0]
     for a in attempts[1:]:
         if (
@@ -372,7 +373,7 @@ def conclude(attempts: list[Attempt]) -> LoopResult:
             _score(best.interior),
         ):
             best = a
-    return LoopResult(image=best.image, attempts=attempts, accepted=False)
+    return LoopResult(image=best.image, best=best, attempts=attempts, accepted=False)
 
 
 async def run_view_loop[ImageT: Rendered](

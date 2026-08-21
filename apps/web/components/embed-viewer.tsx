@@ -24,9 +24,16 @@ interface ChildRow {
 interface EmbedViewerProps {
   initial: EmbedNode;
   continueUrl: string;
+  // The start node's render receipt, preformatted server-side (the embed
+  // fetches children through the slim public route, which carries none).
+  initialReceipt?: string | null;
 }
 
-export default function EmbedViewer({ initial, continueUrl }: EmbedViewerProps) {
+export default function EmbedViewer({
+  initial,
+  continueUrl,
+  initialReceipt,
+}: EmbedViewerProps) {
   const [current, setCurrent] = useState<EmbedNode>(initial);
   const [stack, setStack] = useState<EmbedNode[]>([]);
   const [children, setChildren] = useState<ChildRow[]>([]);
@@ -159,7 +166,11 @@ export default function EmbedViewer({ initial, continueUrl }: EmbedViewerProps) 
       </div>
 
       <footer className="flex items-center justify-between gap-2 px-3 py-2 text-[11px]">
-        <span className="opacity-50">an openflipbook world</span>
+        <span className="truncate opacity-50">
+          {initialReceipt && current.id === initial.id
+            ? initialReceipt
+            : "an openflipbook world"}
+        </span>
         <a
           href={continueUrl}
           target="_blank"
