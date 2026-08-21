@@ -1,6 +1,7 @@
-# World-on demo override — `make demo` stays untouched; layer this file
-# (`make demo-world`) to turn on the live-proven world/scale-nav set and pin
-# the planner to Gemini (the rate-limited qwen VLM was the old demo trap).
+# World-on demo override. MOSTLY REDUNDANT since the 2026-08-21 graduation —
+# `make demo` is world-on by default now. This overlay still pins the planner
+# to Gemini (the rate-limited qwen VLM was the old demo trap) and forces the
+# world set on even when the root .env carries WORLD_MODE=false.
 #
 #   make demo-world
 #   # or: docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build

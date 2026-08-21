@@ -213,7 +213,7 @@ export async function POST(req: Request, { params }: Params) {
     // top-down crop.
     const parentFrameId =
       sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
-    const geoOn = envFlag("GEOMETRIC_WORLD");
+    const geoOn = envFlag("GEOMETRIC_WORLD", "true");
     if (geoNodeId && geoOn && (parentFrameId || viewLevel === "map")) {
       try {
         // Map an on-node entity → a seedable geo item (or null to skip). Drops

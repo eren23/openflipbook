@@ -109,9 +109,14 @@ services:
       MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
       # World Mode: a tap ENTERS the tapped place (an immersive scene / a closer
       # sub-map) instead of explaining a topic, and places persist + reopen.
-      # Default off — turn on per-session from the UI once enabled here:
-      #   WORLD_MODE=true docker compose up -d backend
-      WORLD_MODE: ${WORLD_MODE:-false}
+      # GRADUATED to default ON (2026-08-21). One knob kills the whole set:
+      #   WORLD_MODE=false docker compose up -d
+      # The geometry + scale-ladder flags follow it unless individually set.
+      WORLD_MODE: ${WORLD_MODE:-true}
+      GEOMETRIC_WORLD: ${GEOMETRIC_WORLD:-${WORLD_MODE:-true}}
+      SCALE_LADDER_NAV: ${SCALE_LADDER_NAV:-${WORLD_MODE:-true}}
+      SCALE_OUTWARD: ${SCALE_OUTWARD:-${WORLD_MODE:-true}}
+      SCALE_AROUND_LOGICAL: ${SCALE_AROUND_LOGICAL:-${WORLD_MODE:-true}}
       # Map-pan: "expand" (Around) outpaints the world outward in 4 directions
       # instead of blooming neighbour subjects. Default off:
       #   EXPAND_MAP_PAN=true docker compose up -d backend
@@ -139,10 +144,11 @@ services:
       # carry them — they must arrive as build args or the image ships the
       # flag-off bundle (the "why did consistency regress" footgun: world
       # mode seeded OFF in every fresh docker session). Both follow the root
-      # .env's WORLD_MODE so the single-file demo stays single-file.
+      # .env's WORLD_MODE (graduated default ON) so the single-file demo
+      # stays single-file and WORLD_MODE=false restores the classic bundle.
       args:
-        NEXT_PUBLIC_WORLD_MODE: ${NEXT_PUBLIC_WORLD_MODE:-${WORLD_MODE:-false}}
-        NEXT_PUBLIC_DOM_LABELS: ${NEXT_PUBLIC_DOM_LABELS:-${WORLD_MODE:-false}}
+        NEXT_PUBLIC_WORLD_MODE: ${NEXT_PUBLIC_WORLD_MODE:-${WORLD_MODE:-true}}
+        NEXT_PUBLIC_DOM_LABELS: ${NEXT_PUBLIC_DOM_LABELS:-${WORLD_MODE:-true}}
         NEXT_PUBLIC_ON_RAMP_COACH: ${NEXT_PUBLIC_ON_RAMP_COACH:-false}
         NEXT_PUBLIC_ENTER_COACH: ${NEXT_PUBLIC_ENTER_COACH:-false}
     container_name: openflipbook-web
@@ -176,6 +182,13 @@ services:
       R2_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
       R2_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
       R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:9000/openflipbook}
+      # The web server routes gate geometry seeding + scale-nav on these —
+      # same graduated single-knob coupling as the backend block above.
+      WORLD_MODE: ${WORLD_MODE:-true}
+      GEOMETRIC_WORLD: ${GEOMETRIC_WORLD:-${WORLD_MODE:-true}}
+      SCALE_LADDER_NAV: ${SCALE_LADDER_NAV:-${WORLD_MODE:-true}}
+      SCALE_OUTWARD: ${SCALE_OUTWARD:-${WORLD_MODE:-true}}
+      SCALE_AROUND_LOGICAL: ${SCALE_AROUND_LOGICAL:-${WORLD_MODE:-true}}
     ports:
       - "3000:3000"
     depends_on:

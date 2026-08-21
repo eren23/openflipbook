@@ -18,9 +18,11 @@ afterEach(() => {
 });
 
 describe("useWorldMode", () => {
-  it("defaults off / auto / no DOM labels when nothing is stored or seeded", () => {
+  it("defaults ON (graduated) / auto / no DOM labels when nothing is stored", () => {
+    // World mode graduated 2026-08-21: a fresh session seeds world-ON unless
+    // the build carries the NEXT_PUBLIC_WORLD_MODE=0 kill switch.
     const { result } = renderHook(() => useWorldMode("s1"));
-    expect(result.current.enabled).toBe(false);
+    expect(result.current.enabled).toBe(true);
     expect(result.current.autonomy).toBe("auto");
     expect(result.current.domLabels).toBe(false);
   });
@@ -47,13 +49,13 @@ describe("useWorldMode", () => {
     const { result, rerender } = renderHook(({ sid }) => useWorldMode(sid), {
       initialProps: { sid: "s1" },
     });
-    act(() => result.current.setEnabled(true));
+    act(() => result.current.setEnabled(false)); // opt s1 OUT of the default
 
     rerender({ sid: "s2" });
-    expect(result.current.enabled).toBe(false); // fresh session, fresh default
+    expect(result.current.enabled).toBe(true); // fresh session, fresh (ON) default
 
     rerender({ sid: "s1" });
-    expect(result.current.enabled).toBe(true); // s1's own toggle survives
+    expect(result.current.enabled).toBe(false); // s1's own toggle survives
   });
 
   it("coerces stored garbage back to safe values", () => {
@@ -62,7 +64,7 @@ describe("useWorldMode", () => {
       JSON.stringify({ enabled: "yes", autonomy: "yolo", domLabels: 1 }),
     );
     const { result } = renderHook(() => useWorldMode("s1"));
-    expect(result.current.enabled).toBe(false);
+    expect(result.current.enabled).toBe(true); // non-boolean -> the (ON) default
     expect(result.current.autonomy).toBe("auto");
     expect(result.current.domLabels).toBe(false);
   });
@@ -70,7 +72,7 @@ describe("useWorldMode", () => {
   it("falls back to the default on unparseable storage", () => {
     window.localStorage.setItem(key("s1"), "{not json");
     const { result } = renderHook(() => useWorldMode("s1"));
-    expect(result.current.enabled).toBe(false);
+    expect(result.current.enabled).toBe(true);
     expect(result.current.autonomy).toBe("auto");
   });
 
@@ -96,8 +98,8 @@ describe("useWorldMode", () => {
     expect(result.current.enabled).toBe(false);
   });
 
-  it("an unrecognized env value seeds OFF", async () => {
-    vi.stubEnv("NEXT_PUBLIC_WORLD_MODE", "on"); // not in the 1/true/yes set
+  it("the build-time kill switch (=0) seeds OFF", async () => {
+    vi.stubEnv("NEXT_PUBLIC_WORLD_MODE", "0");
     vi.resetModules();
     const fresh = await import("./useWorldMode");
     const { result } = renderHook(() => fresh.useWorldMode("s1"));
