@@ -1375,3 +1375,73 @@ def test_verdict_from_attempt_rounds_and_keeps_nulls() -> None:
         "same_place": 9.0, "conformance": 7.2, "medium": 6.0,
         "detail": None, "interior": None, "attempts": 2, "accepted": True,
     }
+
+
+async def test_zoom_receipt_deadline_bail_reports_single_judged_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed first verdict with no ingress window left keeps the first
+    render WITHOUT starting a retry — the receipt says so (1 attempt, not
+    accepted) instead of pretending a second attempt ran."""
+    import generate as generate_mod
+
+    # 160s window - 120s tail margin ≈ 40s remaining < the 45s retry floor.
+    monkeypatch.setattr(generate_mod, "INGRESS_TIMEOUT_S", 160)
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg-only", "image/jpeg", "m", "r1")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0])  # below the 6.0 floor
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+    cont.assert_awaited_once()  # no retry inside a spent window
+    final = next(e for e in events if e["type"] == "final")
+    assert final["view_verdict"] == {
+        "same_place": 4.0,
+        "conformance": None,
+        "medium": None,
+        "detail": 9.0,  # the pinned-passing legibility axis
+        "interior": None,
+        "attempts": 1,
+        "accepted": False,
+    }
+
+
+async def test_zoom_receipt_retry_crash_reports_first_attempt_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retry render blowing up keeps the judged first attempt — and the
+    receipt carries ITS scores with attempts=2 (two renders were paid for)."""
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    first = GeneratedImage(b"jpeg-first", "image/jpeg", "m", "r1")
+    cont = AsyncMock(side_effect=[first, RuntimeError("fal hiccup")])
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [4.0])
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+    final = next(e for e in events if e["type"] == "final")
+    assert _b64.b64encode(b"jpeg-first").decode() in final["image_data_url"]
+    v = final["view_verdict"]
+    assert v["attempts"] == 2 and v["accepted"] is False
+    assert v["same_place"] == 4.0

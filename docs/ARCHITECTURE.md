@@ -98,6 +98,10 @@ Pure helpers, easy to unit-test.
 - `mse-player.ts` — Media Source Extensions playback for fragmented mp4.
 - `ltxf-parser.ts` — frame parser for the custom LTXF binary protocol.
 - `env.ts` — env-var validation.
+- `embed.ts` — the oEmbed URL grammar (`parseEmbedTarget`) + iframe snippet builder for the embeddable world viewer.
+- `tour.ts` — turns a session's node graph into the tour camera script (DFS creation order; descend edges dive at `click_in_parent`).
+- `fork.ts` — session deep-copy with node-id reminting; carries the loud COPIED/SKIPPED collection inventory.
+- `view-verdict.ts` — render-receipt display buckets + copy (never raw-number scolding).
 
 ### `apps/web/app/play/page.tsx`
 
@@ -112,6 +116,30 @@ pass — was 2,522 before extractions started. Still owns:
 6. Top-level JSX: composes the toolbar + the `<figure>` + map view + scrubber + HUDs + overlays.
 
 **Why these still live here:** they read or write 4+ pieces of cross-hook state and aren't separable without first introducing a `PlayContext` reducer. That extraction (`useGenerationStream` + `PlayContext` for `{page, phase, history, error}`) is the next planned slice — it's the one big lift that's intentionally bundled with a green E2E pass for visual-diff verification.
+
+## Share surfaces (2026-08)
+
+A world is reachable four ways beyond `/play`, all publish- or link-gated and
+all zero-generate (pure hydration of persisted state):
+
+- **`/n/[id]`** — the static share viewer. Carries the render receipt chip
+  (`view_verdict`, persisted per node), fork lineage, and the tour / fork /
+  continue buttons.
+- **`/embed/[sessionId]`** — the read-only navigable viewer for iframes
+  (publish-gated; `frame-ancestors *` on this path only). `/api/oembed` is the
+  JSON provider; `public/embed.js` is the script wrapper for platforms without
+  oEmbed (mounts `/n/` links via the `/embed/_from-node?node=…` sentinel).
+- **`POST /api/sessions/[id]/fork`** — deep-copies the session (nodes with
+  reminted ids, `world_state` with node-refs remapped in five places,
+  `world_map` under the new `_id`); the safer sibling of `?continue=`, which
+  grants write access to the original.
+- **Tour mode** — `components/tour-player.tsx`, launched from `/n/` and the
+  embed header; replays the world's own exploration as a camera script.
+
+Proxy rule (live-caught via `/api/animate`): any web route that forwards an
+image REFERENCE upstream must inline our own stored-image URLs first
+(`lib/r2.inlineStoredImage`) — hydrated pages carry public URLs, and on the
+docker stack those are localhost minio URLs external providers refuse.
 
 ## Backend (`apps/modal-backend/`)
 
