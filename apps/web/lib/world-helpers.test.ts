@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   EntityExtractionResult,
   ExtractedEntity,
-  EntityUpdate,
-} from "@openflipbook/config";
+  EntityUpdate, Entity } from "@openflipbook/config";
 import { __test, mergeEntityState } from "./world";
 
 // Same factory shapes as world.test.ts — kept local rather than re-exporting
@@ -34,7 +33,7 @@ function emptyResult(): EntityExtractionResult {
   return { added: [], updated: [] };
 }
 
-function ent(overrides: Partial<import("@openflipbook/config").Entity> = {}) {
+function ent(overrides: Partial<Entity> = {}) {
   return {
     id: overrides.id ?? "e1",
     kind: overrides.kind ?? ("person" as const),

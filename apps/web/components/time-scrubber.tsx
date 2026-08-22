@@ -121,6 +121,7 @@ export default function TimeScrubber({
               }
             >
               {f.imageDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs
                 <img
                   src={f.imageDataUrl}
                   alt=""

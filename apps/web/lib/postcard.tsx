@@ -41,6 +41,7 @@ export function postcardLayout(
         fontFamily: "Georgia, serif",
       }}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs */}
       <img
         src={node.imageUrl}
         alt=""
@@ -97,6 +98,7 @@ export function postcardLayout(
             ) : null}
           </div>
         </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs */}
         <img
           src={qrDataUrl}
           alt=""

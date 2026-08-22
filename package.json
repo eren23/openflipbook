@@ -53,7 +53,7 @@
     "typescript-eslint": "^8.16.0"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,mjs,cjs}": "eslint --fix --max-warnings=20",
+    "*.{ts,tsx,js,mjs,cjs}": "eslint --fix --max-warnings=12",
     "apps/modal-backend/**/*.py": "bash -lc 'cd apps/modal-backend && .venv/bin/ruff check --fix'"
   }
 }
