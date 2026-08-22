@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getNode, type NodeRow } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import ForkButton from "@/components/fork-button";
+import TourButton from "@/components/tour-button";
 import PermalinkImage from "@/components/permalink-image";
 import { formatViewVerdict } from "@/lib/view-verdict";
 
@@ -109,6 +110,10 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
       <header className="flex items-baseline justify-between">
         <h1 className="text-xl font-bold">{node.page_title}</h1>
         <span className="flex items-center gap-2">
+          <TourButton
+            sessionId={node.session_id}
+            continueUrl={`/play?continue=${encodeURIComponent(node.session_id)}`}
+          />
           <ForkButton sessionId={node.session_id} nodeId={node.id} />
           <a
             href={`/play?continue=${encodeURIComponent(node.session_id)}`}

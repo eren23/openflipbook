@@ -90,4 +90,14 @@ test("embed viewer is publish-gated, navigates generated nodes, serves oEmbed", 
   expect(payload.type).toBe("rich");
   expect(payload.html).toContain(`/embed/${sessionId}`);
   expect(payload.html).toContain("iframe");
+
+  // 6) Tour mode: the world plays itself inside the embed — the overlay
+  // opens on the root page and Escape closes it (zero generates, again).
+  await page.getByRole("button", { name: "▶ tour" }).click();
+  const tour = page.getByTestId("tour-player");
+  await expect(tour).toBeVisible({ timeout: 15_000 });
+  await expect(tour.locator("img").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tour).not.toBeVisible();
+  expect(generates).toBe(0);
 });
