@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import TourButton from "@/components/tour-button";
+
 // Read-only navigable world viewer for the /embed surface. Zero model calls:
 // every navigation is a hop to an ALREADY-GENERATED node via the public
 // children endpoint (the share-continue zero-generate hydration contract).
@@ -22,6 +24,7 @@ interface ChildRow {
 }
 
 interface EmbedViewerProps {
+  sessionId: string;
   initial: EmbedNode;
   continueUrl: string;
   // The start node's render receipt, preformatted server-side (the embed
@@ -30,6 +33,7 @@ interface EmbedViewerProps {
 }
 
 export default function EmbedViewer({
+  sessionId,
   initial,
   continueUrl,
   initialReceipt,
@@ -108,10 +112,17 @@ export default function EmbedViewer({
           )}
           <span className="truncate font-medium">{current.title}</span>
         </div>
-        <span className="shrink-0 opacity-50">
-          {dots.length > 0
-            ? `${dots.length} place${dots.length === 1 ? "" : "s"} to enter`
-            : "world frontier"}
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="opacity-50">
+            {dots.length > 0
+              ? `${dots.length} place${dots.length === 1 ? "" : "s"} to enter`
+              : "world frontier"}
+          </span>
+          <TourButton
+            sessionId={sessionId}
+            continueUrl={continueUrl}
+            className="rounded-full border border-black/25 px-2.5 py-0.5 hover:bg-black/5 disabled:opacity-50"
+          />
         </span>
       </header>
 

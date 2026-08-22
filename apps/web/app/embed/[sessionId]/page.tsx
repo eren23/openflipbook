@@ -60,6 +60,7 @@ export default async function EmbedPage({ params, searchParams }: EmbedPageProps
   const base = env.R2_PUBLIC_BASE_URL!.replace(/\/$/, "");
   return (
     <EmbedViewer
+      sessionId={sessionId}
       initial={{
         id: start.id,
         title: start.page_title || start.query || published.title,
