@@ -58,6 +58,21 @@ _CLASSIC_ENTER_AS_TO_RENDER: dict[str, str] = {
 }
 
 
+def _sanitize_hint(raw: str | None, max_len: int) -> str:
+    """Trust-but-verify on client-supplied prefetch hints. The web client
+    computes these via the same VLM the backend would call, but the SSE
+    handler will ultimately splice them into LLM prompts — so cap length +
+    strip control chars (keeping \n and \t) to keep the prompt-injection /
+    token-bomb surface small. Any rejection silently falls back to in-band
+    resolution."""
+    if not raw:
+        return ""
+    cleaned = "".join(
+        ch for ch in raw if ch == "\n" or ch == "\t" or ch >= " "
+    ).strip()
+    return cleaned[:max_len]
+
+
 def _score_or_none(j: JudgeResult | None) -> float | None:
     return round(float(j.score), 1) if j is not None else None
 
@@ -182,20 +197,6 @@ async def stream_tap(
     place_form_resolved: str | None = None
     view_subject: str | None = None
     if body.mode == "tap" and body.click and body.image:
-        # Trust-but-verify on client-supplied prefetch hints. The web
-        # client computes these via the same VLM the backend would call,
-        # but the SSE handler will ultimately splice them into LLM
-        # prompts — so cap length + strip control chars to keep prompt
-        # injection / token-bomb surface small. Any rejection silently
-        # falls back to in-band resolution.
-        def _sanitize_hint(raw: str | None, max_len: int) -> str:
-            if not raw:
-                return ""
-            cleaned = "".join(
-                ch for ch in raw if ch == "\n" or ch == "\t" or ch >= " "
-            ).strip()
-            return cleaned[:max_len]
-
         cleaned_subject = _sanitize_hint(body.prefetched_subject, 160)
         cleaned_style = _sanitize_hint(body.prefetched_style, 320)
         cleaned_subject_context = _sanitize_hint(

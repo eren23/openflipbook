@@ -1445,3 +1445,22 @@ async def test_zoom_receipt_retry_crash_reports_first_attempt_scores(
     v = final["view_verdict"]
     assert v["attempts"] == 2 and v["accepted"] is False
     assert v["same_place"] == 4.0
+
+
+def test_sanitize_hint_caps_and_strips_the_injection_surface() -> None:
+    """The prefetch-hint boundary as a table: control chars die (except the
+    newline/tab prompts legitimately carry), length caps hold post-strip,
+    absent input degrades to the empty string that means 'resolve in-band'."""
+    from providers.generate_modes.tap import _sanitize_hint
+
+    assert _sanitize_hint(None, 10) == ""
+    assert _sanitize_hint("", 10) == ""
+    assert _sanitize_hint("  a castle  ", 100) == "a castle"
+    # Control characters are stripped; \n and \t survive.
+    assert _sanitize_hint("a\x00b\x1bc\rd", 100) == "abcd"
+    assert _sanitize_hint("line one\nline two\ttabbed", 100) == (
+        "line one\nline two\ttabbed"
+    )
+    # The cap bounds a token bomb AFTER stripping/trim.
+    assert _sanitize_hint("x" * 5000, 160) == "x" * 160
+    assert len(_sanitize_hint(" " * 50 + "y" * 500, 240)) == 240
