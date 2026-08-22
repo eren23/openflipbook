@@ -28,7 +28,7 @@ export default function TourPlayer({ nodes, continueUrl, onClose }: TourPlayerPr
   const reduced = useMemo(
     () =>
       typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false),
     []
   );
 
