@@ -35,6 +35,21 @@ describe("parseEmbedTarget", () => {
     });
   });
 
+  it("tolerates real-world link shapes: trailing slash, query noise, encoded ids", () => {
+    expect(parseEmbedTarget("https://x.test/n/abc/")).toEqual({
+      kind: "node",
+      nodeId: "abc",
+    });
+    expect(parseEmbedTarget("https://x.test/n/abc?utm_source=blog#frag")).toEqual({
+      kind: "node",
+      nodeId: "abc",
+    });
+    expect(parseEmbedTarget("https://x.test/n/a%2Fb")).toEqual({
+      kind: "node",
+      nodeId: "a/b", // decoded once; a nonexistent id just 404s downstream
+    });
+  });
+
   it("rejects everything else (other routes, missing ids)", () => {
     for (const bad of [
       "https://x.test/play?continue=s1",

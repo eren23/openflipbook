@@ -62,3 +62,27 @@ describe("toRow scale_tier round-trip (B2)", () => {
     expect(row.scale_tier).toBeNull();
   });
 });
+
+describe("toRow view_verdict + forked_from round-trip", () => {
+  it("preserves a persisted render receipt and fork lineage", () => {
+    const verdict = {
+      same_place: 9.0,
+      conformance: null,
+      medium: 10.0,
+      detail: null,
+      interior: null,
+      attempts: 2,
+      accepted: false,
+    };
+    const lineage = { session_id: "session_src", node_id: "n0" };
+    const row = toRow(doc({ view_verdict: verdict, forked_from: lineage }));
+    expect(row.view_verdict).toEqual(verdict);
+    expect(row.forked_from).toEqual(lineage);
+  });
+
+  it("defaults both to null on legacy rows (every pre-receipts document)", () => {
+    const row = toRow(doc());
+    expect(row.view_verdict).toBeNull();
+    expect(row.forked_from).toBeNull();
+  });
+});
