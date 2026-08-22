@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
+import { inlineStoredImage } from "@/lib/r2";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
@@ -14,7 +15,24 @@ export async function POST(req: Request) {
     );
   }
   const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
-  const body = await req.text();
+  let body = await req.text();
+  // A ?continue=-hydrated page carries the R2 PUBLIC URL, not a data URI —
+  // on the docker stack that's a localhost minio URL fal refuses ("Input
+  // must be a valid HTTPS URL or a Data URI", live-caught 2026-08-22).
+  // Same inline-before-forward treatment the resolve-click and
+  // generate-page proxies already have; animate was the one that skipped it.
+  try {
+    const parsed = JSON.parse(body) as { image_data_url?: string };
+    if (parsed.image_data_url && !parsed.image_data_url.startsWith("data:")) {
+      const inlined = await inlineStoredImage(parsed.image_data_url);
+      if (inlined) {
+        parsed.image_data_url = inlined;
+        body = JSON.stringify(parsed);
+      }
+    }
+  } catch {
+    /* non-JSON body — forward as-is, the backend rejects it */
+  }
   let upstream: Response;
   try {
     upstream = await fetch(joinModalUrl(modalUrl, "/animate"), {
