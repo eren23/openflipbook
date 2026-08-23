@@ -516,6 +516,51 @@ export async function unpublishSession(sessionId: string): Promise<boolean> {
   return res.deletedCount > 0;
 }
 
+export interface GalleryWorldStats {
+  pages: number;
+  forks: number;
+}
+
+/** Bulk per-session stats for the gallery shelf: page counts plus how many
+ * forks each world has spawned (fork roots stamp forked_from.session_id).
+ * One aggregation per axis, not per card. */
+export async function galleryStats(
+  sessionIds: string[]
+): Promise<Map<string, GalleryWorldStats>> {
+  const out = new Map<string, GalleryWorldStats>(
+    sessionIds.map((id) => [id, { pages: 0, forks: 0 }])
+  );
+  if (sessionIds.length === 0) return out;
+  const collection = await nodes();
+  const pages = await collection
+    .aggregate<{ _id: string; n: number }>([
+      { $match: { session_id: { $in: sessionIds } } },
+      { $group: { _id: "$session_id", n: { $sum: 1 } } },
+    ])
+    .toArray();
+  for (const row of pages) {
+    const entry = out.get(row._id);
+    if (entry) entry.pages = row.n;
+  }
+  const forks = await collection
+    .aggregate<{ _id: string; n: number }>([
+      {
+        $match: {
+          parent_id: null,
+          "forked_from.session_id": { $in: sessionIds },
+        },
+      },
+      { $group: { _id: "$forked_from.session_id", n: { $sum: 1 } } },
+    ])
+    .toArray();
+  for (const row of forks) {
+    const entry = out.get(row._id);
+    if (entry) entry.forks = row.n;
+  }
+  return out;
+}
+
+
 /** The gallery-publish record for one session, or null. The embed surface
  * gates on this: only sessions the owner deliberately published render in an
  * iframe — a leaked session id must not make a private world frameable. */

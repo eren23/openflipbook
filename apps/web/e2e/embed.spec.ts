@@ -100,4 +100,14 @@ test("embed viewer is publish-gated, navigates generated nodes, serves oEmbed", 
   await page.keyboard.press("Escape");
   await expect(tour).not.toBeVisible();
   expect(generates).toBe(0);
+
+  // 7) The gallery shelf: the published world's card carries its stats and
+  // its own tour + fork actions.
+  await page.goto("/gallery");
+  const card = page.locator("li", { hasText: "2 pages" }).first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(card.getByRole("button", { name: "▶ tour" })).toBeVisible();
+  await expect(
+    card.getByRole("button", { name: "Fork this world" }),
+  ).toBeVisible();
 });

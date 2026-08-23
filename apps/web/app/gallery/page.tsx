@@ -1,13 +1,18 @@
 import Link from "next/link";
 
-import { listPublishedSessions } from "@/lib/db";
+import ForkButton from "@/components/fork-button";
+import TourButton from "@/components/tour-button";
+import { galleryStats, listPublishedSessions } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
+import { countMapEntities } from "@/lib/world-map";
 
 export const dynamic = "force-dynamic";
 
-/** The opt-in public gallery: sessions their owners chose to publish
- * (right-click → "Publish session to gallery"), newest first. Each card
- * fronts the published page and links into its permalink. */
+/** The opt-in public gallery, upgraded from a thumbnail grid to a shelf of
+ * WORLDS: each card carries the world's stats (pages / places / forks) and
+ * its own tour + fork actions beside the permalink link-through. Sessions
+ * appear here only when their owners published them (right-click →
+ * "Publish session to gallery"), newest first. */
 export default async function GalleryPage() {
   const env = readServerEnv();
   if (!env.MONGODB_URI || !env.MONGODB_DB) {
@@ -19,6 +24,11 @@ export default async function GalleryPage() {
     );
   }
   const rows = await listPublishedSessions(60);
+  const ids = rows.map((r) => r.session_id);
+  const [stats, places] = await Promise.all([
+    galleryStats(ids),
+    countMapEntities(ids).catch(() => new Map<string, number>()),
+  ]);
   const base = (env.R2_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
@@ -35,28 +45,46 @@ export default async function GalleryPage() {
         </p>
       ) : (
         <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {rows.map((row) => (
-            <li key={row.session_id}>
-              <Link
-                href={`/n/${row.node_id}`}
-                className="block overflow-hidden rounded-xl border border-[var(--color-edge)] bg-[var(--color-canvas)] shadow-sm transition-shadow hover:shadow-md"
+          {rows.map((row) => {
+            const s = stats.get(row.session_id) ?? { pages: 0, forks: 0 };
+            const placeCount = places.get(row.session_id) ?? 0;
+            return (
+              <li
+                key={row.session_id}
+                className="overflow-hidden rounded-xl border border-[var(--color-edge)] bg-[var(--color-canvas)] shadow-sm transition-shadow hover:shadow-md"
               >
-                {base && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`${base}/${row.poster_key}`}
-                    alt={row.title}
-                    className="aspect-video w-full object-cover"
-                    loading="lazy"
+                <Link href={`/n/${row.node_id}`} className="block">
+                  {base && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`${base}/${row.poster_key}`}
+                      alt={row.title}
+                      className="aspect-video w-full object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                  <div className="px-4 pt-3">
+                    <h2 className="truncate text-sm font-medium">{row.title}</h2>
+                    <p className="mt-1 truncate text-xs opacity-60">{row.query}</p>
+                    <p className="mt-1 text-xs opacity-50">
+                      {s.pages} page{s.pages === 1 ? "" : "s"}
+                      {placeCount > 0 &&
+                        ` · ${placeCount} place${placeCount === 1 ? "" : "s"}`}
+                      {s.forks > 0 &&
+                        ` · ${s.forks} fork${s.forks === 1 ? "" : "s"}`}
+                    </p>
+                  </div>
+                </Link>
+                <div className="flex items-center gap-2 px-4 pb-3 pt-2">
+                  <TourButton
+                    sessionId={row.session_id}
+                    continueUrl={`/play?continue=${encodeURIComponent(row.session_id)}`}
                   />
-                )}
-                <div className="px-4 py-3">
-                  <h2 className="truncate text-sm font-medium">{row.title}</h2>
-                  <p className="mt-1 truncate text-xs opacity-60">{row.query}</p>
+                  <ForkButton sessionId={row.session_id} nodeId={row.node_id} />
                 </div>
-              </Link>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
