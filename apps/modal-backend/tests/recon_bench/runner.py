@@ -353,6 +353,59 @@ def recon_fns(sweep: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def backfill_pose_recovery(
+    report: dict[str, Any],
+    scenarios: list[Scenario],
+    load_record: Any,
+) -> bool:
+    """Compute pos_recovered / recovery_gated_on for replayed cells that
+    predate the #200/#201 instrumentation.
+
+    The cache replays scores verbatim, so every cell scored before the pose
+    diagnostics existed lacks them — and a baseline gate reading the key
+    would silently skip (the height_order lesson, inverted: missing NEW keys
+    instead of stale OLD ones). The raw material (detections) IS cached, so
+    the diagnostic recomputes free. Only the two recovery keys are written;
+    every other score stays verbatim. Returns True when anything changed."""
+    by_id = {s.id: s for s in scenarios}
+    dirty = False
+    for c in report.get("cells", []):
+        scores = c.get("scores")
+        if not scores or "pos_recovered" in scores:
+            continue
+        scenario = by_id.get(c.get("scenario_id"))
+        record = load_record(c.get("cell_key")) if c.get("cell_key") else None
+        if scenario is None or record is None:
+            continue
+        detections = (record.get("outputs") or {}).get("detections") or []
+        # Mirror score_fn's frames exactly: expected = the ground-truth
+        # description entities, observed = the cached detections.
+        expected = {
+            _norm(e["label"]): {
+                "pos": (e["pos"]["x"], e["pos"]["y"]),
+                "diag": (e["footprint"]["w"] ** 2 + e["footprint"]["d"] ** 2)
+                ** 0.5,
+            }
+            for e in scenario.payload["entities"]
+        }
+        observed = {
+            _norm(d["label"]): {
+                "pos": (d["x_pct"] * FRAME_W, d["y_pct"] * FRAME_H),
+                "diag": (
+                    (d["w_pct"] * FRAME_W) ** 2 + (d["h_pct"] * FRAME_H) ** 2
+                ) ** 0.5,
+            }
+            for d in detections
+        }
+        geo = geo_scores(expected, observed)
+        if "pos_recovered" not in geo:
+            continue
+        scores["pos_recovered"] = round(float(geo["pos_recovered"]), 3)
+        scores["recovery_gated_on"] = 1.0 if geo.get("recovery_gated_on") else 0.0
+        dirty = True
+    return dirty
+
+
 def scrub_stale_heights(
     report: dict[str, Any],
     scenarios: list[Scenario],
@@ -422,9 +475,13 @@ def main() -> int:
         report_path=report_path,
         **recon_fns(sweep),
     )
-    if scrub_stale_heights(
+    from tests.matrix_bench._cache import CellCache
+
+    dirty = scrub_stale_heights(
         report, scenarios, dict(sweep.get("composite_weights", {}))
-    ):
+    )
+    dirty = backfill_pose_recovery(report, scenarios, CellCache().load) or dirty
+    if dirty:
         report_path.write_text(json.dumps(report, indent=1))
     if live:
         cells = [c for c in report["cells"] if "scores" in c]
@@ -447,6 +504,10 @@ def main() -> int:
                     # gate — pos_raw's 0.05 composite weight made a 10x drift
                     # nearly invisible in the fidelity number.
                     baselines.append(("recon_pos_raw", "pos_raw"))
+                    # What prod now relies on (the gated register, default ON
+                    # since #223): is the recoverable-drift class still
+                    # recoverable? Additive gate — composite untouched.
+                    baselines.append(("recon_pos_recovered", "pos_recovered"))
                 for name, key in baselines:
                     vals = [c["scores"][key] for c in cells if key in c.get("scores", {})]
                     if vals:

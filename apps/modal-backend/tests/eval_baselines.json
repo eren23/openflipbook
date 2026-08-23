@@ -1,117 +1,124 @@
 {
-  "_comment": "Committed known-good eval baselines + regression bands. test_eval_baselines.py validates this file FREE every commit; a paid runner calls tests._baseline.compare(name, fresh_metric, n) so a silent eval regression fails loud (REGRESSION below the band, IMPROVED above, LOW_N when undersampled). Re-baseline only via a reviewed diff to this file. Bands are wide because the VLM judge is a ranker (~0.6 Spearman), not a calibrated meter \u2014 gate on drop-vs-baseline, not absolute scores.",
-  "baselines": {
-    "layout_fidelity": {
-      "metric": "mean_lift",
-      "baseline": 0.33,
-      "regression_band": 0.15,
-      "n_min": 2,
-      "source": "docs/research/07 + make eval-layout (with-clause vs without)"
-    },
-    "style_medium_lock": {
-      "metric": "mean_lift",
-      "baseline": 8.5,
-      "regression_band": 2.0,
-      "n_min": 1,
-      "source": "SESSION_AUDIT.md \u00a75 + make eval-style"
-    },
-    "enter_same_place": {
-      "metric": "mean_lift",
-      "baseline": 2.33,
-      "regression_band": 2.0,
-      "n_min": 2,
-      "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter). 3-run history: +2.33, -1.0 (one noisy castle sample; goldens byte-identical), +2.33 \u2014 the band catches single bad samples by design"
-    },
-    "view_conformance": {
-      "metric": "intended_conformance_mean",
-      "baseline": 6.0,
-      "regression_band": 2.5,
-      "n_min": 2,
-      "source": "make eval-view 2026-06-10 (calibrated judge, single-shot bench mode): oblique 10.0, isometric 9.0 (the policy's auto registers); top_down/eye_level 2.5-6 single-shot (nano's aerial attractor). PRODUCTION (steep router + VIEW_LOOP, make eval-view-loop, same date): 9.75 mean \u2014 top_down 10.0, oblique 10.0, isometric 9.0, eye_level 10.0; view_trustworthy TRUE; same_place 9.0-10 every arm; 3/4 steep arms accepted at attempt 1, the 4th self-corrected at attempt 2. This baseline tracks the DEFAULT (single-shot) bench so the loop's lift stays measurable."
-    },
-    "edit_region": {
-      "metric": "alignment_mean",
-      "baseline": 10.0,
-      "regression_band": 2.0,
-      "n_min": 2,
-      "source": "make eval-edit-region first run 2026-06-10 (flux fill, single-shot, production fill register): alignment 10.0 + medium 10.0 on both cases, outside-change 0.0000 per case (the compositor's promise, gated per-case not by mean). Tracks the production arm only; extra A/B arms via EDIT_REGION_BENCH_MODELS report but never gate. Band 2.0 absorbs single judge-noise samples."
-    },
-    "recon_fidelity": {
-      "metric": "composite_mean",
-      "baseline": 0.69,
-      "regression_band": 0.12,
-      "n_min": 4,
-      "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
-    },
-    "recon_pos_raw": {
-      "metric": "pos_raw_mean",
-      "baseline": 0.45,
-      "regression_band": 0.15,
-      "n_min": 4,
-      "source": "make eval-recon 2026-07-04 (12 cells, v1+v2 arms; the LAYOUT_REGISTER_PIN A/B: v1 mean 0.308 vs v2 0.604 — the strict-grid sentence doubles raw register fidelity, every drifting cell fixed). Pre-pin history: 0.242 over the 2026-06-24 v1 cells, fitted scale clamped at 0.5 on 4/5"
-    },
-    "recon_closeup_fidelity": {
-      "metric": "composite_mean",
-      "baseline": 0.86,
-      "regression_band": 0.12,
-      "n_min": 4,
-      "source": "make eval-recon-closeup 2026-06-24 (3 verified Met closeups x graph/direct, nano-banana, recon_closeup_base.v1; object-parts feature_articulation judge — objects reconstruct higher than maps)"
-    },
-    "recon_interior_fidelity": {
-      "metric": "composite_mean",
-      "baseline": 0.80,
-      "regression_band": 0.15,
-      "n_min": 4,
-      "source": "make eval-recon-interior 2026-06-24 (3 verified interiors x graph/direct, nano-banana, recon_interior_base.v1; prose-decoupled so geo weighted low, image judges carry it — wider band as interior positions are approximate)"
-    },
-    "grounding": {
-      "metric": "grounding_mean",
-      "baseline": 0.55,
-      "regression_band": 0.15,
-      "n_min": 2,
-      "source": "make eval-grounding first baseline 2026-06-13 (2 layout scenes, detector+diff)"
-    },
-    "height_order": {
-      "metric": "height_order_mean",
-      "baseline": 0.82,
-      "regression_band": 0.15,
-      "n_min": 3,
-      "source": "re-baselined 2026-07-04 over the HEIGHT-BEARING cells of the 12-cell v1+v2 run (mean 0.821, n=8) after the honesty fix: maps with no built heights (mars, astronomical) no longer score 0.0 on a metric they can't have — the key is absent, like an absent judge. One genuine 0 (treasure/direct/v1) stays in"
-    },
-    "continuity": {
-      "metric": "hop2_step_in_mean",
-      "baseline": 7.0,
-      "regression_band": 2.0,
-      "n_min": 3,
-      "source": "chain_bench over ladder-proof hops — step-in on closeup→enter"
-    },
-    "ux_task_success": {
-      "metric": "success_rate",
-      "baseline": 0.6,
-      "regression_band": 0.2,
-      "n_min": 3,
-      "source": "ux-bench blind agent tasks — fraction completing scripted success criteria"
-    },
-    "lab_layout": {
-      "metric": "composite_mean",
-      "baseline": 0.87,
-      "regression_band": 0.15,
-      "n_min": 4,
-      "source": "scenario_lab layout sweep first live run 2026-06-13 (4 scenes x fresh/fresh_layout, nano-banana-pro; composite = layout_fidelity). Per-cell: market fresh 0.42 -> fresh_layout 0.98, lighthouse 0.67 -> 0.97 (the layout clause's lift); mean across all 8 = 0.866. Band wide — VLM ranker, and fresh arms score low by design."
-    },
-    "lab_pov": {
-      "metric": "composite_mean",
-      "baseline": 0.81,
-      "regression_band": 0.2,
-      "n_min": 2,
-      "source": "scenario_lab pov sweep first live run 2026-06-13 (loft eye_level + harbor top_down, nano-banana-pro; composite = 0.5*layout_fidelity + 0.5*view_conformance). loft eye_level 1.0, harbor top_down 0.62 (fresh render reads oblique not plan -> view_conformance 0.3). view_conformance backfilled onto the layout-cached images."
-    },
-    "lab_style": {
-      "metric": "composite_mean",
-      "baseline": 9.0,
-      "regression_band": 2.0,
-      "n_min": 2,
-      "source": "scenario_lab style sweep first live run 2026-06-13 (engraving + blueprint x edit_without_lock/edit_with_lock, nano-banana-pro/edit; composite = style_pair 0-10). All 4 cells 10.0 — nano-banana-pro/edit preserves the engraving/blueprint medium with AND without the lock clause (no lift here, unlike the watercolor case in continuity_bench). blueprint is now review.status=draft so a verified-only sweep runs engraving alone (also 10.0; baseline holds). NOTE: style_pair judges MEDIUM only, not whether the requested edit landed."
-    }
+ "_comment": "Committed known-good eval baselines + regression bands. test_eval_baselines.py validates this file FREE every commit; a paid runner calls tests._baseline.compare(name, fresh_metric, n) so a silent eval regression fails loud (REGRESSION below the band, IMPROVED above, LOW_N when undersampled). Re-baseline only via a reviewed diff to this file. Bands are wide because the VLM judge is a ranker (~0.6 Spearman), not a calibrated meter \u2014 gate on drop-vs-baseline, not absolute scores.",
+ "baselines": {
+  "layout_fidelity": {
+   "metric": "mean_lift",
+   "baseline": 0.33,
+   "regression_band": 0.15,
+   "n_min": 2,
+   "source": "docs/research/07 + make eval-layout (with-clause vs without)"
+  },
+  "style_medium_lock": {
+   "metric": "mean_lift",
+   "baseline": 8.5,
+   "regression_band": 2.0,
+   "n_min": 1,
+   "source": "SESSION_AUDIT.md \u00a75 + make eval-style"
+  },
+  "enter_same_place": {
+   "metric": "mean_lift",
+   "baseline": 2.33,
+   "regression_band": 2.0,
+   "n_min": 2,
+   "source": "make eval-enter-drift first run 2026-06-10: fresh 6.67 -> edit 9.0 same-place (medium 9.33); arms: nano-banana-2/edit 9.33, gpt-image-2/edit 8.67, kontext 3.33 (rejected for enter). 3-run history: +2.33, -1.0 (one noisy castle sample; goldens byte-identical), +2.33 \u2014 the band catches single bad samples by design"
+  },
+  "view_conformance": {
+   "metric": "intended_conformance_mean",
+   "baseline": 6.0,
+   "regression_band": 2.5,
+   "n_min": 2,
+   "source": "make eval-view 2026-06-10 (calibrated judge, single-shot bench mode): oblique 10.0, isometric 9.0 (the policy's auto registers); top_down/eye_level 2.5-6 single-shot (nano's aerial attractor). PRODUCTION (steep router + VIEW_LOOP, make eval-view-loop, same date): 9.75 mean \u2014 top_down 10.0, oblique 10.0, isometric 9.0, eye_level 10.0; view_trustworthy TRUE; same_place 9.0-10 every arm; 3/4 steep arms accepted at attempt 1, the 4th self-corrected at attempt 2. This baseline tracks the DEFAULT (single-shot) bench so the loop's lift stays measurable."
+  },
+  "edit_region": {
+   "metric": "alignment_mean",
+   "baseline": 10.0,
+   "regression_band": 2.0,
+   "n_min": 2,
+   "source": "make eval-edit-region first run 2026-06-10 (flux fill, single-shot, production fill register): alignment 10.0 + medium 10.0 on both cases, outside-change 0.0000 per case (the compositor's promise, gated per-case not by mean). Tracks the production arm only; extra A/B arms via EDIT_REGION_BENCH_MODELS report but never gate. Band 2.0 absorbs single judge-noise samples."
+  },
+  "recon_fidelity": {
+   "metric": "composite_mean",
+   "baseline": 0.69,
+   "regression_band": 0.12,
+   "n_min": 4,
+   "source": "make eval-recon 2026-06-12 (3 verified corpus maps x graph/direct, nano-banana, recon_base.v1; judge ~0.6 Spearman so the band is wide)"
+  },
+  "recon_pos_raw": {
+   "metric": "pos_raw_mean",
+   "baseline": 0.45,
+   "regression_band": 0.15,
+   "n_min": 4,
+   "source": "make eval-recon 2026-07-04 (12 cells, v1+v2 arms; the LAYOUT_REGISTER_PIN A/B: v1 mean 0.308 vs v2 0.604 \u2014 the strict-grid sentence doubles raw register fidelity, every drifting cell fixed). Pre-pin history: 0.242 over the 2026-06-24 v1 cells, fitted scale clamped at 0.5 on 4/5"
+  },
+  "recon_closeup_fidelity": {
+   "metric": "composite_mean",
+   "baseline": 0.86,
+   "regression_band": 0.12,
+   "n_min": 4,
+   "source": "make eval-recon-closeup 2026-06-24 (3 verified Met closeups x graph/direct, nano-banana, recon_closeup_base.v1; object-parts feature_articulation judge \u2014 objects reconstruct higher than maps)"
+  },
+  "recon_interior_fidelity": {
+   "metric": "composite_mean",
+   "baseline": 0.8,
+   "regression_band": 0.15,
+   "n_min": 4,
+   "source": "make eval-recon-interior 2026-06-24 (3 verified interiors x graph/direct, nano-banana, recon_interior_base.v1; prose-decoupled so geo weighted low, image judges carry it \u2014 wider band as interior positions are approximate)"
+  },
+  "grounding": {
+   "metric": "grounding_mean",
+   "baseline": 0.55,
+   "regression_band": 0.15,
+   "n_min": 2,
+   "source": "make eval-grounding first baseline 2026-06-13 (2 layout scenes, detector+diff)"
+  },
+  "height_order": {
+   "metric": "height_order_mean",
+   "baseline": 0.82,
+   "regression_band": 0.15,
+   "n_min": 3,
+   "source": "re-baselined 2026-07-04 over the HEIGHT-BEARING cells of the 12-cell v1+v2 run (mean 0.821, n=8) after the honesty fix: maps with no built heights (mars, astronomical) no longer score 0.0 on a metric they can't have \u2014 the key is absent, like an absent judge. One genuine 0 (treasure/direct/v1) stays in"
+  },
+  "continuity": {
+   "metric": "hop2_step_in_mean",
+   "baseline": 7.0,
+   "regression_band": 2.0,
+   "n_min": 3,
+   "source": "chain_bench over ladder-proof hops \u2014 step-in on closeup\u2192enter"
+  },
+  "ux_task_success": {
+   "metric": "success_rate",
+   "baseline": 0.6,
+   "regression_band": 0.2,
+   "n_min": 3,
+   "source": "ux-bench blind agent tasks \u2014 fraction completing scripted success criteria"
+  },
+  "lab_layout": {
+   "metric": "composite_mean",
+   "baseline": 0.87,
+   "regression_band": 0.15,
+   "n_min": 4,
+   "source": "scenario_lab layout sweep first live run 2026-06-13 (4 scenes x fresh/fresh_layout, nano-banana-pro; composite = layout_fidelity). Per-cell: market fresh 0.42 -> fresh_layout 0.98, lighthouse 0.67 -> 0.97 (the layout clause's lift); mean across all 8 = 0.866. Band wide \u2014 VLM ranker, and fresh arms score low by design."
+  },
+  "lab_pov": {
+   "metric": "composite_mean",
+   "baseline": 0.81,
+   "regression_band": 0.2,
+   "n_min": 2,
+   "source": "scenario_lab pov sweep first live run 2026-06-13 (loft eye_level + harbor top_down, nano-banana-pro; composite = 0.5*layout_fidelity + 0.5*view_conformance). loft eye_level 1.0, harbor top_down 0.62 (fresh render reads oblique not plan -> view_conformance 0.3). view_conformance backfilled onto the layout-cached images."
+  },
+  "lab_style": {
+   "metric": "composite_mean",
+   "baseline": 9.0,
+   "regression_band": 2.0,
+   "n_min": 2,
+   "source": "scenario_lab style sweep first live run 2026-06-13 (engraving + blueprint x edit_without_lock/edit_with_lock, nano-banana-pro/edit; composite = style_pair 0-10). All 4 cells 10.0 \u2014 nano-banana-pro/edit preserves the engraving/blueprint medium with AND without the lock clause (no lift here, unlike the watercolor case in continuity_bench). blueprint is now review.status=draft so a verified-only sweep runs engraving alone (also 10.0; baseline holds). NOTE: style_pair judges MEDIUM only, not whether the requested edit landed."
+  },
+  "recon_pos_recovered": {
+   "metric": "pos_recovered_mean",
+   "baseline": 0.53,
+   "regression_band": 0.15,
+   "n_min": 4,
+   "source": "make eval-recon 2026-08-23, backfilled from cached detections (16 cells, $0): gated recovery ON for 6/16 (mars graph 0.059->0.623, mars direct 0.051->0.669, treasure/yellowstone partial lifts), gate-off cells identical to pos_raw. Watches what prod relies on since the register gate went default-ON (#223): the recoverable-drift class staying recoverable. Additive gate; composite weights untouched."
   }
+ }
 }

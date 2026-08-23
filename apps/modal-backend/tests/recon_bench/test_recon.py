@@ -375,3 +375,44 @@ def test_scrub_stale_heights_drops_cached_keys_and_recomputes_composite() -> Non
     assert manor["scores"] == {"pos_raw": 0.6, "height_order": 1.0, "composite": 0.8}
     # second pass: nothing left to scrub
     assert scrub_stale_heights(report, scenarios, weights) is False
+
+
+def test_backfill_pose_recovery_fills_only_missing_keys() -> None:
+    """Replayed cells that predate the #200 instrumentation get the recovery
+    diagnostic recomputed from their cached detections; instrumented cells
+    and cache misses stay untouched."""
+    from tests.matrix_bench.runner import Scenario
+    from tests.recon_bench.runner import backfill_pose_recovery
+
+    payload = {
+        "entities": [
+            {"label": "Tower", "pos": {"x": 10.0, "y": 10.0}, "footprint": {"w": 4, "d": 4}},
+            {"label": "Harbor", "pos": {"x": 40.0, "y": 20.0}, "footprint": {"w": 4, "d": 4}},
+            {"label": "Wood", "pos": {"x": 70.0, "y": 45.0}, "footprint": {"w": 4, "d": 4}},
+        ]
+    }
+    scenarios = [Scenario(id="isle", desc_sha="x", payload=payload)]
+    # Detections at exactly half scale — a coherent deep compression the
+    # gated recovery should rescue (and the gate should arm).
+    dets = [
+        {"label": e["label"], "x_pct": e["pos"]["x"] * 0.5 / 100,
+         "y_pct": e["pos"]["y"] * 0.5 / 60, "w_pct": 0.02, "h_pct": 0.02}
+        for e in payload["entities"]
+    ]
+    records = {"k1": {"outputs": {"detections": dets}}}
+    report = {
+        "cells": [
+            {"cell_key": "k1", "scenario_id": "isle", "scores": {"pos_raw": 0.1}},
+            {"cell_key": "k2", "scenario_id": "isle", "scores": {"pos_raw": 0.9, "pos_recovered": 0.9}},
+            {"cell_key": "k3", "scenario_id": "isle", "scores": {"pos_raw": 0.5}},  # cache miss
+        ]
+    }
+    assert backfill_pose_recovery(report, scenarios, records.get) is True
+    filled = report["cells"][0]["scores"]
+    assert "pos_recovered" in filled and "recovery_gated_on" in filled
+    assert filled["pos_raw"] == 0.1  # existing scores stay verbatim
+    # Already-instrumented cell untouched; cache miss left alone.
+    assert report["cells"][1]["scores"] == {"pos_raw": 0.9, "pos_recovered": 0.9}
+    assert "pos_recovered" not in report["cells"][2]["scores"]
+    # Second pass: nothing left to fill.
+    assert backfill_pose_recovery(report, scenarios, records.get) is False
