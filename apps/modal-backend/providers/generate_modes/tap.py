@@ -729,7 +729,7 @@ async def stream_tap(
                 model_override=redraw_model if submap_redraw else body.image_model,
             )
 
-        if env_flag("VIEW_LOOP_PREVIEW"):
+        if env_flag("VIEW_LOOP_PREVIEW", "true"):
             zoom_preview_q = _asyncio.Queue()
 
         async def _judged_zoom() -> GeneratedImage:
@@ -965,7 +965,7 @@ async def stream_tap(
                 60.0,
                 ingress_timeout_s - 180.0 - (_time.perf_counter() - started),
             )
-            enter_preview = env_flag("VIEW_LOOP_PREVIEW")
+            enter_preview = env_flag("VIEW_LOOP_PREVIEW", "true")
             loop_attempts: list[Attempt] = []
             async for loop_att in render_loop.iter_attempts(
                 _render_enter,
