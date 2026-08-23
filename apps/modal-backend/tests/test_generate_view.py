@@ -453,7 +453,10 @@ async def test_view_loop_accept_fast_no_retry(
     events = await _collect(_event_stream(_steep_body(), "t1"))
 
     edit.assert_awaited_once()
-    assert not [e for e in events if e["type"] == "progress"]
+    # Graduated VIEW_LOOP_PREVIEW: the accepted attempt-0 paints ONCE as the
+    # preview and the final swaps it — never a second (double) frame.
+    progress = [e for e in events if e["type"] == "progress"]
+    assert [p["frame_index"] for p in progress] == [0]
 
 
 async def test_view_loop_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -486,7 +489,8 @@ async def test_view_loop_judges_aerial_enters_too(
 
     edit.assert_awaited_once()
     assert conf.await_count == 1
-    assert not [e for e in events if e["type"] == "progress"]
+    # One preview frame (graduated default), judged and kept — no doubles.
+    assert [e["frame_index"] for e in events if e["type"] == "progress"] == [0]
 
 
 async def test_view_loop_medium_drift_retries(

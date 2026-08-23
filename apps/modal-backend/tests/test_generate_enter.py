@@ -143,7 +143,10 @@ async def test_enter_skips_progressive_draft(
 ) -> None:
     # A text-only nano draft can't preview a conditioned edit — it would be a
     # second unconditioned reinvention flashing before the faithful render.
+    # VIEW_LOOP_PREVIEW is killed here so the assertion isolates the DRAFT
+    # race (the judged preview is a different, legitimate frame source).
     monkeypatch.setenv("PROGRESSIVE_DRAFT", "true")
+    monkeypatch.setenv("VIEW_LOOP_PREVIEW", "0")
     _mock_plan(monkeypatch)
     edit = _mock_edit(monkeypatch)
     gen = _mock_fresh(monkeypatch)

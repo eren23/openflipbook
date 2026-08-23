@@ -84,6 +84,7 @@ _SCRUB = (
     # The render loop (default ON for deliberate-camera enters — scrub for
     # hermeticity).
     "VIEW_LOOP",
+    "VIEW_LOOP_PREVIEW",
     "VIEW_LOOP_MAX_ATTEMPTS",
     "VIEW_LOOP_ACCEPT_CONFORMANCE",
     "VIEW_LOOP_ACCEPT_SAME_PLACE",
