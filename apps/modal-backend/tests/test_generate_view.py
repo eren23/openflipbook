@@ -404,6 +404,9 @@ async def test_enter_retry_model_swap_only_changes_retries(
     # the production router pick; only retry attempts switch to the configured
     # fal edit slug.
     monkeypatch.setenv("ENTER_RETRY_MODEL_SWAP", "true")
+    # A custom retry slug keeps attempt 0 and the retry distinguishable (the
+    # escalation DEFAULT now equals the steep pick — see ENTER_RETRY_DEFAULT).
+    monkeypatch.setenv("FAL_ENTER_RETRY_MODEL", "fal-ai/custom-retry/edit")
     _mock_plan(monkeypatch)
     edit = _mock_edit(monkeypatch)
     _mock_fresh(monkeypatch)
@@ -415,7 +418,7 @@ async def test_enter_retry_model_swap_only_changes_retries(
 
     assert [c.kwargs["model_override"] for c in edit.await_args_list] == [
         "fal-ai/nano-banana-pro/edit",
-        "fal-ai/nano-banana-2/edit",
+        "fal-ai/custom-retry/edit",
     ]
 
 

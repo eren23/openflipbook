@@ -13,6 +13,9 @@ def _fresh(monkeypatch: pytest.MonkeyPatch):
     breaker.reset_for_tests()
     monkeypatch.delenv("PROVIDER_FALLBACK", raising=False)
     monkeypatch.setenv("FAL_KEY", "test")  # dispatch is mocked; key gate is upstream
+    # These tests exercise the failover MECHANISM on the nano chain; pin the
+    # tier so the seedream balanced default doesn't change what they prove.
+    monkeypatch.setenv("FAL_IMAGE_MODEL_BALANCED", "fal-ai/nano-banana-pro")
     yield
     breaker.reset_for_tests()
 

@@ -119,9 +119,13 @@ def test_select_enter_retry_model_is_opt_in(
     )
 
     monkeypatch.setenv("ENTER_RETRY_MODEL_SWAP", "true")
+    # Retry-swap ESCALATES from the cheap seedream first attempt to the
+    # proven nano pin (2026-08-23 promotion).
     assert (
-        model_router.select_enter_retry_model("fal-ai/nano-banana-pro/edit")
-        == "fal-ai/nano-banana-2/edit"
+        model_router.select_enter_retry_model(
+            "fal-ai/bytedance/seedream/v5/lite/edit"
+        )
+        == "fal-ai/nano-banana-pro/edit"
     )
 
     monkeypatch.setenv("FAL_ENTER_RETRY_MODEL", "fal-ai/custom/edit")
