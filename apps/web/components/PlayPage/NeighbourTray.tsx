@@ -105,6 +105,7 @@ export default function NeighbourTray({
               }
             >
               {it.imageDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs
                 <img
                   src={it.imageDataUrl}
                   alt=""

@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: ESLint
-        run: pnpm lint --max-warnings=20
+        run: pnpm lint --max-warnings=12
       - name: No demo artifacts tracked
         run: |
           hits=$(git ls-files | grep -E 'scripts/record-demo/(artifacts.*/|[^/]*\.(mp4|webm)|geo-storyboard\.png)' || true)

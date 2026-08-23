@@ -40,6 +40,7 @@ export function MorphImagePair({
           progress" instead of "stuck". Once the new image takes over, this
           layer fades out. */}
       {morphFx ? (
+        // eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs
         <img
           src={morphFx.prevImg ?? imageDataUrl}
           alt=""
@@ -74,6 +75,7 @@ export function MorphImagePair({
           draggable={false}
         />
       ) : null}
+      {/* eslint-disable-next-line @next/next/no-img-element -- data-URL/R2 frame; next/image adds a loader hop and cannot optimize data URIs */}
       <img
         ref={imgRef}
         src={morphFx?.nextImg ?? imageDataUrl}

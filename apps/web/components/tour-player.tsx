@@ -96,6 +96,9 @@ export default function TourPlayer({ nodes, continueUrl, onClose }: TourPlayerPr
       className="fixed inset-0 z-50 flex items-center justify-center bg-black"
       onClick={skip}
       data-testid="tour-player"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`World tour: ${steps[0]!.node.page_title}`}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img

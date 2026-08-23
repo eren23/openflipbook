@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   EntityExtractionResult,
   ExtractedEntity,
-  EntityUpdate,
-} from "@openflipbook/config";
+  EntityUpdate, Entity } from "@openflipbook/config";
 import { __test } from "./world";
 
 function makeAdded(overrides: Partial<ExtractedEntity> = {}): ExtractedEntity {
@@ -624,7 +623,7 @@ describe("Phase 7a — state-write gate", () => {
 });
 
 describe("scoreEntitiesForContinuity", () => {
-  function ent(overrides: Partial<import("@openflipbook/config").Entity> = {}) {
+  function ent(overrides: Partial<Entity> = {}) {
     return {
       id: overrides.id ?? "e1",
       kind: overrides.kind ?? ("person" as const),

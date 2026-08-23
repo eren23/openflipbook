@@ -10,8 +10,11 @@ bands you run around risky generation-path changes.
 make eval
 ```
 
-Backend pytest (`-m "not paid"`, ~530 tests) + ruff + mypy (strict on
-`providers/`) + web vitest (~480 tests) + tsc + circular-dep check. What it
+Backend pytest (`-m "not paid"`, ~1,040 tests) + ruff + mypy (strict on
+`providers/`) + web vitest (~880 tests) + tsc + circular-dep check. Both
+suites carry raise-only coverage floors (backend `fail_under` in
+pyproject.toml, web thresholds in vitest.config) and the eslint warning cap
+is lower-only — the ratchets move with every test PR, never back. What it
 locks:
 
 - **Wire parity**: TS ↔ Pydantic shapes (`world-geo-fixture.json` keys AND
