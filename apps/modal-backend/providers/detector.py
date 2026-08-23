@@ -29,7 +29,7 @@ class Detection(TypedDict):
 def _detector_model() -> str:
     return os.environ.get(
         "WORLD_BENCH_JUDGE_MODEL",
-        os.environ.get("OPENROUTER_VLM_MODEL", "google/gemini-3-flash-preview"),
+        os.environ.get("OPENROUTER_VLM_MODEL", "google/gemini-3.7-flash"),
     )
 
 

@@ -31,8 +31,8 @@ from _env import env_flag
 from providers import llm as _llm
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
-DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_VLM_MODEL = "google/gemini-3.7-flash"
+DEFAULT_TEXT_MODEL = "google/gemini-3.7-flash"
 
 # Built-in base URLs per provider. This is DATA, not a behavior registry —
 # every target speaks the OpenAI wire protocol, so the only thing that varies
