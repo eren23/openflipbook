@@ -1767,11 +1767,13 @@ async def plan_world_endpoint(req: Request, body: PlanWorldBody) -> JSONResponse
         description_len=len(body.description or ""), answers=len(body.answers))
     try:
         graph = await llm_provider.plan_world_from_description(body.description, body.answers or None)
-        # WORLD_NEST_INSIDE (P4, default off): `inside` children come back as
-        # true sub-frame nests (parent_id + local pos + learned scale) instead
-        # of flat-v1 same-frame stacking. Absolute geometry is identical either
-        # way — the nested form is a pure re-expression.
-        result = solve_layout(graph, nest_inside=env_flag("WORLD_NEST_INSIDE"))
+        # WORLD_NEST_INSIDE (P4, default ON since 2026-08-23 — live-validated
+        # on real planner output incl. a two-level chain, worst drift 2e-5):
+        # `inside` children come back as true sub-frame nests (parent_id +
+        # local pos + learned scale) instead of flat-v1 same-frame stacking.
+        # Absolute geometry is identical either way — the nested form is a
+        # pure re-expression. =0 restores flat v1.
+        result = solve_layout(graph, nest_inside=env_flag("WORLD_NEST_INSIDE", "true"))
     except Exception as exc:
         record_error("plan_world", exc, session_id=body.session_id)
         return _err_json(exc, trace_id)
