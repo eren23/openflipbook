@@ -50,6 +50,7 @@ _SCRUB = (
     # World Mode (tap enters a place; graduated default ON — scrub so a host
     # kill-switch can't flip the routing tests).
     "WORLD_MODE",
+    "WORLD_NEST_INSIDE",
     "FAL_CONTINUE_MODEL",
     # Enter-via-edit (default ON — scrub so a host kill-switch can't silently
     # flip the routing tests) + the edit-tier knobs it can interact with.
