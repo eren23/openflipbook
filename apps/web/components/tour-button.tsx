@@ -27,13 +27,25 @@ export default function TourButton({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionId)}?limit=200`,
-        { cache: "no-store" }
-      );
-      if (!res.ok) return;
-      const json = (await res.json()) as { nodes: TourNode[] };
-      if (json.nodes.length > 0) setNodes(json.nodes);
+      // Follow the cursor so a big world tours WHOLE — a truncated graph
+      // makes children of the cut tour as fake roots. Hard ceiling mirrors
+      // the export bundle's 500.
+      const all: TourNode[] = [];
+      let cursor: string | null = null;
+      do {
+        const url =
+          `/api/sessions/${encodeURIComponent(sessionId)}?limit=200` +
+          (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          nodes: TourNode[];
+          next_cursor: string | null;
+        };
+        all.push(...json.nodes);
+        cursor = json.next_cursor;
+      } while (cursor && all.length < 500);
+      if (all.length > 0) setNodes(all);
     } finally {
       setBusy(false);
     }
