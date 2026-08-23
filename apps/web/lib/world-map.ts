@@ -615,6 +615,22 @@ export function registerPlanToImage(
   return { updated, fit };
 }
 
+/** Bulk entity counts for the gallery shelf — one projected read over the
+ *  requested sessions (world_map is keyed by _id = session id). */
+export async function countMapEntities(
+  sessionIds: string[]
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (sessionIds.length === 0) return out;
+  const col = await collection();
+  const docs = await col
+    .find({ _id: { $in: sessionIds } })
+    .project<{ _id: string; entities?: unknown[] }>({ entities: 1 })
+    .toArray();
+  for (const d of docs) out.set(d._id, d.entities?.length ?? 0);
+  return out;
+}
+
 export const __test = {
   applyGeoUpsert,
   recomputeBounds,
