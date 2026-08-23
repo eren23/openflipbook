@@ -22,10 +22,13 @@ MODEL_SLOTS: dict[str, tuple[str | None, str | None]] = {
     "fresh": (None, None),  # tier-based via image.py (FAL_IMAGE_MODEL_*)
     "zoom_continue": ("fal-ai/flux-pro/kontext", "FAL_CONTINUE_MODEL"),
     # Entering a place: an instruction-driven EDIT of the tapped region crop —
-    # nano edit slugs honour image_urls (verified via scripts/verify-fal-models.py)
+    # these edit slugs honour image_urls (verified via scripts/verify-fal-models.py)
     # and tolerate a view change, where Kontext strict-zooms. The enter eval
-    # (tests/continuity_bench/enter_runner.py) A/Bs the candidates.
-    "enter_scene": ("fal-ai/nano-banana-pro/edit", "FAL_ENTER_MODEL"),
+    # (tests/continuity_bench/enter_runner.py) A/Bs the candidates. 2026-08-23
+    # A/B: seedream v5 lite/edit TIED nano-banana-pro/edit on same-place
+    # (8.67 vs 8.67, per-case 8/9/9 both) at $0.035 vs $0.15 — promoted;
+    # FAL_ENTER_MODEL=fal-ai/nano-banana-pro/edit restores the old pin.
+    "enter_scene": ("fal-ai/bytedance/seedream/v5/lite/edit", "FAL_ENTER_MODEL"),
     # World-mode map-zoom REDRAW (SUBMAP_REDRAW): same loose-refs pedigree as
     # enter_scene — honours the region crop, re-synthesizes detail, keeps map
     # lettering legible. Kontext here would defeat the purpose (pixel-freeze).
@@ -131,7 +134,9 @@ def select_outward_op(from_tier: str, to_tier: str) -> str:
 # speed; FAL_ENTER_MODEL_STEEP restores gpt in one env if rings resurface.
 STEEP_ENTER_PROJECTIONS = frozenset({"eye_level", "top_down"})
 STEEP_ENTER_DEFAULT = "fal-ai/nano-banana-pro/edit"
-ENTER_RETRY_DEFAULT = "fal-ai/nano-banana-2/edit"
+# With the cheap seedream first attempt, retry-swap now means ESCALATE: a
+# failed judged attempt re-rolls on the proven (4x pricier) nano pin.
+ENTER_RETRY_DEFAULT = "fal-ai/nano-banana-pro/edit"
 
 
 def select_enter_model(projection: str | None) -> str | None:
@@ -147,8 +152,8 @@ def select_enter_retry_model(first_model: str | None) -> str | None:
     """Retry-only model for VIEW_LOOP enters.
 
     Disabled keeps the original model on every attempt. Enabled swaps only
-    attempts after index 0 to a cheaper/faster fal edit slug from the existing
-    nano family; the first attempt remains the production router pick."""
+    attempts after index 0 to the retry slug (default: the stronger nano
+    pin); the first attempt remains the production router pick."""
     if not env_flag("ENTER_RETRY_MODEL_SWAP", "false"):
         return first_model
     return os.environ.get("FAL_ENTER_RETRY_MODEL") or ENTER_RETRY_DEFAULT
@@ -177,6 +182,11 @@ CAPABILITIES: tuple[tuple[str, ModelCaps], ...] = (
     # (verified no-op; PR #109 removed the inert ref-upload) -> supports_refs=False.
     # Real reference conditioning lives only on the /edit + continue endpoints.
     ("fal-ai/nano-banana-pro", ModelCaps("nano-banana-pro", True, False, True, 0.15, 25)),
+    # seedream v5 (fal, 2026-07-08): lite/edit tied nano-banana-pro/edit on the
+    # judged enter bench at 1/4 the price (up to 10 refs, 9MP out); pro t2i tied
+    # the map composite (0.740 vs 0.737) 43% faster with native map lettering.
+    ("fal-ai/bytedance/seedream/v5/lite/edit", ModelCaps("seedream 5 lite edit", True, True, True, 0.035, 15)),
+    ("bytedance/seedream/v5/pro/text-to-image", ModelCaps("seedream 5 pro", False, False, True, 0.0675, 20)),
     ("fal-ai/nano-banana-2", ModelCaps("nano-banana-2", True, False, True, 0.08, 18)),
     ("fal-ai/nano-banana", ModelCaps("nano-banana", True, False, False, 0.039, 10)),
     ("fal-ai/flux-pro/kontext", ModelCaps("flux kontext", True, False, True, 0.04, 20)),
@@ -211,6 +221,7 @@ def registry() -> list[dict[str, object]]:
 # continue ops carry semantics (refs, masks) a substitute may not honour.
 FALLBACK_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("openrouter:sourceful/riverflow-v2.5-pro", ("fal-ai/nano-banana-pro", "fal-ai/nano-banana")),
+    ("bytedance/seedream/v5/pro", ("fal-ai/nano-banana-pro", "fal-ai/nano-banana")),
     ("fal-ai/nano-banana-pro", ("fal-ai/nano-banana-2", "fal-ai/nano-banana")),
     ("fal-ai/nano-banana-2", ("fal-ai/nano-banana",)),
     ("fal-ai/nano-banana", ("fal-ai/nano-banana-2",)),

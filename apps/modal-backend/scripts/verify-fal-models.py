@@ -40,6 +40,8 @@ SLUGS = [
     "fal-ai/nano-banana-2",
     "fal-ai/nano-banana-2/edit",
     "fal-ai/bytedance/seedream/v4/text-to-image",
+    "fal-ai/bytedance/seedream/v5/lite/edit",
+    "bytedance/seedream/v5/pro/text-to-image",
     "fal-ai/flux-pro/kontext",
     "fal-ai/flux-pro/v1/fill",
     "fal-ai/bria/expand",

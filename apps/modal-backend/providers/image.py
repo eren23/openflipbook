@@ -57,7 +57,12 @@ class _EmptyFalResult(RuntimeError):
 
 TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana",
-    "balanced": "fal-ai/nano-banana-pro",
+    # Balanced = seedream v5 pro t2i (2026-08-23 A/B, tests/matrix_bench/sweeps/
+    # map-seedream-ab.json): composite 0.740 vs nano-banana-pro's 0.737 on the
+    # four verified corpus maps, 43% faster (114s vs 199s/cell), $0.0675 vs
+    # $0.15, and the map LETTERING is native-crisp (the oldest failure axis).
+    # FAL_IMAGE_MODEL_BALANCED=fal-ai/nano-banana-pro restores the old pin.
+    "balanced": "bytedance/seedream/v5/pro/text-to-image",
     # Pro = the bakeoff QUALITY winner (docs/research/07: "richest detail", held
     # the medium best — the dense, intricate maps). It's slow (~150-290s) and
     # occasionally returns an empty response, but it is NOW reliable: a single

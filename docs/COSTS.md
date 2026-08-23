@@ -19,9 +19,9 @@ front:
 | Slot / tier | Default slug | Price | Budget alternative | Budget price |
 |---|---|---|---|---|
 | fresh `fast` | `fal-ai/nano-banana` | **$0.039**/img | — (already the floor) | — |
-| fresh `balanced` (default) | `fal-ai/nano-banana-pro` | **$0.15**/img (1K-2K; 4K $0.30; +$0.015 web search) | `fal-ai/nano-banana-2` | $0.08/img |
+| fresh `balanced` (default) | `bytedance/seedream/v5/pro/text-to-image` | **$0.0675**/img (to 1536²; 2048² $0.135) | `fal-ai/nano-banana-pro` (old pin) | $0.15/img |
 | fresh `pro` | `openrouter:sourceful/riverflow-v2.5-pro` | **~$0.24**/img (+152s) | `nano-banana-pro` | $0.15 |
-| enter (`enter_scene`) | `fal-ai/nano-banana-pro/edit` | **$0.15**/img | `nano-banana-2/edit` | $0.08 |
+| enter (`enter_scene`) | `fal-ai/bytedance/seedream/v5/lite/edit` | **$0.035**/img (10 refs, 9MP) | `fal-ai/nano-banana-pro/edit` (old pin, retry default) | $0.15 |
 | inpaint (`inpaint`) | `fal-ai/flux-pro/v1/fill` | **$0.05/MP** → ~$0.10/edit at 16:9 | none — it's the only true compositor (the mask smoke proved gpt/nano don't honor masks); lower the resolution to drop the MP | scales with px |
 | zoom (`zoom_continue`) | `fal-ai/flux-pro/kontext` | **$0.04**/img | — | — |
 | outpaint (`outpaint`) | `fal-ai/bria/expand` | **~$0.04**/img | — | — |
@@ -53,17 +53,22 @@ already <2% of the total, so the win is marginal. The judges' real cost is
 
 | Operation | fal calls | OpenRouter calls | ≈ cost | the calls |
 |---|---|---|---|---|
-| **Fresh map** | 1 × $0.15 | 4 | **$0.16** | plan + extract + detect + view |
-| **Enter (1 attempt)** | 1 × $0.15 | 9 | **$0.16** | click + plan + **4 judges** + 3 extraction |
-| **Enter (2 attempts)** | 2 × $0.15 | 13 | **$0.32** | + 1 edit + **4 more judges** |
+| **Fresh map** | 1 × $0.0675 | 4 | **$0.08** | plan + extract + detect + view |
+| **Enter (1 attempt)** | 1 × $0.035 | 9 | **$0.05** | click + plan + **4 judges** + 3 extraction |
+| **Enter (2 attempts)** | 2 × $0.035 | 13 | **$0.09** | + 1 edit + **4 more judges** |
 | **Mask edit (1 attempt)** | 1 × ~$0.10 | 5 | **$0.11** | polish + **2 judges** + 2 extraction |
 | **Mask edit (2 attempts)** | 2 × ~$0.10 | 7 | **$0.21** | + 1 inpaint + **2 more judges** |
 | **Judged whole-image edit** | 1 × $0.15 | 5 | **$0.16** | polish + 2 judges + 2 extraction |
 | **Extraction (after EVERY final)** | 0 | 1–3 | **~$0.006** | extract (+ detect + view if geo) |
 
 **A full demo run** (map + 1 mask edit + 2 enters, ~1.5 attempts each) ≈
-**$0.6–1.0**. The Ankh-Morpork re-shoot's ~10 takes was ~$6–9 of fal, almost
-all of it nano-banana-pro/edit on the enters.
+**$0.3–0.5**. Before the 2026-08-23 seedream promotion (map $0.15,
+enter $0.15/attempt on the nano pins) the same run was $0.6–1.0 — the
+Ankh-Morpork re-shoot's ~10 takes was ~$6–9 of fal, almost all of it
+nano-banana-pro/edit on the enters. Bench receipts for the swap:
+tests/continuity_bench (enter same-place tie 8.67/8.67) and
+tests/matrix_bench/sweeps/map-seedream-ab.json (composite 0.740 vs 0.737,
+43% faster).
 
 ### A budget profile (env, no code change)
 
@@ -107,7 +112,8 @@ the upload, parallelize the judges, and a one-shot fast mode. The budget
 profile above is the cheap-and-fast lever today; the upload cache + concurrent
 judges are the code wins worth doing next.
 
-Sources: fal model pages (nano-banana-pro $0.15, nano-banana-2 $0.08,
+Sources: fal model pages (seedream v5 lite/edit $0.035, seedream v5 pro
+$0.0675, nano-banana-pro $0.15, nano-banana-2 $0.08,
 flux-pro/v1/fill $0.05/MP, flux-pro/kontext $0.04, nano-banana $0.039),
 OpenRouter (gemini-3-flash-preview $0.50/$3, gemini-3.1-flash-lite $0.25/$1.50),
 repo `prompt_tokens` logs + Makefile eval cost anchors (eval-view ~$2.5,

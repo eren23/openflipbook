@@ -24,6 +24,10 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
     ("fal-ai/nano-banana-pro", 0.15),
     ("fal-ai/nano-banana-2", 0.08),
     ("fal-ai/nano-banana", 0.039),
+    # seedream v5 lives under BOTH owner prefixes on fal (fal-ai/... is an alias).
+    ("fal-ai/bytedance/seedream/v5/lite", 0.035),
+    ("bytedance/seedream/v5/lite", 0.035),
+    ("bytedance/seedream/v5/pro", 0.0675),
     ("fal-ai/flux-pro/v1/fill", 0.10),
     ("fal-ai/flux-pro/kontext", 0.04),
     ("fal-ai/bria", 0.04),
