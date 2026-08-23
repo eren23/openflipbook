@@ -174,7 +174,7 @@ def test_model_env_override(monkeypatch) -> None:
 
     monkeypatch.delenv("WORLD_BENCH_JUDGE_MODEL", raising=False)
     monkeypatch.delenv("OPENROUTER_VLM_MODEL", raising=False)
-    assert _model() == "google/gemini-3-flash-preview"
+    assert _model() == "google/gemini-3.7-flash"
     monkeypatch.setenv("OPENROUTER_VLM_MODEL", "qwen/qwen-vl")
     assert _model() == "qwen/qwen-vl"
     monkeypatch.setenv("WORLD_BENCH_JUDGE_MODEL", "judge/x")

@@ -34,7 +34,7 @@ alternative" column is just a documented value for those.
 
 | Role | Default | Price | Budget alternative | Budget price |
 |---|---|---|---|---|
-| planner / instruction polish | `google/gemini-3-flash-preview` | **$0.50/M in · $3/M out** | `google/gemini-3.1-flash-lite-preview` | **$0.25 / $1.50** (½) |
+| planner / instruction polish | `google/gemini-3.7-flash` | **$0.375/M in · $1.875/M out** (25-37% under the old 3-flash-preview pin) | `google/gemini-3.1-flash-lite-preview` | **$0.25 / $1.50** |
 | VLM (click resolve, extract, detect, view) | same | same | flash-lite | ½ |
 | judges (conformance / same-place / detail / medium / alignment) | same (`CONTINUITY_BENCH_JUDGE_MODEL` override) | same | flash-lite | ½ |
 
