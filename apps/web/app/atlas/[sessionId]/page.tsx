@@ -10,6 +10,9 @@ import AtlasView, {
   type AtlasEntity,
   type AtlasNode,
 } from "@/components/atlas-view";
+import FogMap from "@/components/fog-map";
+import { buildTravelogue } from "@/lib/travelogue";
+import type { MapCrop } from "@openflipbook/config";
 
 interface AtlasPageProps {
   params: Promise<{ sessionId: string }>;
@@ -183,9 +186,11 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
   // an unseeded session (or a Mongo hiccup) just renders the atlas without
   // anchors, exactly as before.
   let geoMap: { entities: WorldEntityGeo[] } = { entities: [] };
+  let mapBounds: MapCrop | null = null;
   try {
     const map = await getWorldMap(sessionId);
     geoMap = { entities: map.entities };
+    mapBounds = map.bounds;
   } catch {
     geoMap = { entities: [] };
   }
@@ -193,15 +198,58 @@ export default async function AtlasPage({ params }: AtlasPageProps) {
   const latest = nodes[nodes.length - 1];
   const root = nodes.find((n) => n.parentId == null) ?? nodes[0];
 
+  // The artifact half: the journey retold + the map you earned. Rendered as
+  // a native <details> overlay so the atlas canvas stays untouched.
+  const travelogue = buildTravelogue(
+    rows.map((row) => ({
+      id: row.id,
+      parentId: row.parent_id,
+      title: row.page_title || row.query,
+      createdAt: row.created_at,
+      relation: row.relation,
+    }))
+  );
+
   return (
-    <AtlasView
-      sessionId={sessionId}
-      nodes={nodes}
-      latestNodeId={latest?.id ?? null}
-      rootTitle={root?.title ?? "session"}
-      entities={atlasEntities}
-      sceneViews={sceneViews}
-      geoMap={geoMap}
-    />
+    <>
+      <AtlasView
+        sessionId={sessionId}
+        nodes={nodes}
+        latestNodeId={latest?.id ?? null}
+        rootTitle={root?.title ?? "session"}
+        entities={atlasEntities}
+        sceneViews={sceneViews}
+        geoMap={geoMap}
+      />
+      <details className="fixed bottom-4 left-4 z-40 w-80 max-w-[85vw] rounded-xl border border-black/20 bg-[var(--color-canvas,#faf7f1)] shadow-lg">
+        <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium">
+          📜 Travelogue
+        </summary>
+        <div className="max-h-[55vh] overflow-y-auto px-4 pb-4">
+          {mapBounds && geoMap.entities.length > 0 && (
+            <FogMap
+              entities={geoMap.entities}
+              bounds={mapBounds}
+              className="mb-3 h-auto w-full rounded-lg border border-black/10"
+            />
+          )}
+          <ol className="space-y-1.5 text-xs leading-snug">
+            {travelogue.map((entry) => (
+              <li key={entry.nodeId}>
+                <a
+                  href={`/n/${encodeURIComponent(entry.nodeId)}`}
+                  className="hover:underline"
+                >
+                  <span className="opacity-45">
+                    {entry.ts.slice(0, 10)}{" "}
+                  </span>
+                  {entry.line}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </details>
+    </>
   );
 }
