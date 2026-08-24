@@ -117,6 +117,33 @@ async def test_wan_clamps_duration_into_num_frames(
     assert "duration" not in arguments
 
 
+async def test_descent_uses_the_dedicated_slot_and_sends_both_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An end frame routes to DESCENT_ANIMATE_MODEL (NOT the tier table, NOT
+    # FAL_ANIMATE_MODEL — an ambient override may not honour end_image_url)
+    # and sends exactly first+last frame + prompt, no knobs.
+    monkeypatch.setenv("FAL_ANIMATE_MODEL", "fal-ai/ambient-override")
+    clip, subscribe = await _animate(
+        monkeypatch, tier="pro", end_image_data_url="data:image/png;base64,BBBB"
+    )
+    model, arguments = subscribe.await_args.args
+    assert model == video.DESCENT_ANIMATE_MODEL
+    assert arguments == {
+        "image_url": "https://fal.media/in.png",
+        "end_image_url": "https://fal.media/in.png",
+        "prompt": "gentle pan",
+    }
+    assert clip.model == video.DESCENT_ANIMATE_MODEL
+
+    monkeypatch.setenv("FAL_DESCENT_MODEL", "fal-ai/custom-descent")
+    _, subscribe = await _animate(
+        monkeypatch, end_image_data_url="data:image/png;base64,BBBB"
+    )
+    model, _ = subscribe.await_args.args
+    assert model == "fal-ai/custom-descent"
+
+
 async def test_no_video_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError, match="no video payload"):
         await _animate(monkeypatch, result={"images": []})

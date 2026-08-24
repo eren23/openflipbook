@@ -24,6 +24,14 @@ from .image import _fal_subscribe
 
 DEFAULT_ANIMATE_MODEL = "fal-ai/ltx-video/image-to-video"
 PRO_ANIMATE_MODEL = "fal-ai/ltx-2/image-to-video"
+# First+last-frame DESCENT clips (the tap hard-cut becomes a camera move):
+# start = the parent map, end = the entered page. 2026-08-23 probe: this slug
+# and minimax/h3/image-to-video both honour `end_image_url` and land square
+# on the arrival frame in-style; ltx-2.3 fast is the cheaper pick (~$0.04/s).
+# Descent has its OWN slot (FAL_DESCENT_MODEL) — the tier table and the
+# FAL_ANIMATE_MODEL override stay ambient-only, because a model without
+# end_image_url support would silently drop the arrival frame.
+DESCENT_ANIMATE_MODEL = "fal-ai/ltx-2.3/image-to-video/fast"
 
 # Video tier → fal model. Mirrors the image-tier pattern in providers/image.py.
 # `balanced` defaults to Wan 2.2 i2v which has the best motion quality among
@@ -74,6 +82,7 @@ async def animate_image(
     prompt: str,
     duration: int = 5,
     tier: str | None = None,
+    end_image_data_url: str | None = None,
 ) -> AnimatedClip:
     from obs import span
 
@@ -92,8 +101,21 @@ async def animate_image(
         raise RuntimeError("FAL_KEY is not set")
 
     image_url = await to_fal_url(image_data_url)
+    if end_image_data_url:
+        # Descent transition: dedicated slot, no tier/override routing (see
+        # DESCENT_ANIMATE_MODEL). No duration/resolution knobs — the probe ran
+        # clean on schema defaults, and ltx-2.3's enums differ from ltx-2's.
+        model = os.environ.get("FAL_DESCENT_MODEL") or DESCENT_ANIMATE_MODEL
+        arguments = {
+            "image_url": image_url,
+            "end_image_url": await to_fal_url(end_image_data_url),
+            "prompt": prompt,
+        }
+        async with span("video.animate", model=model, duration=duration):
+            result = await _fal_subscribe(model, arguments)
+        return _clip_from_result(result, model, duration)
     model = _animate_model(tier)
-    arguments: dict = {
+    arguments = {
         "image_url": image_url,
         "prompt": prompt,
     }
@@ -111,7 +133,10 @@ async def animate_image(
 
     async with span("video.animate", model=model, duration=duration):
         result = await _fal_subscribe(model, arguments)
+    return _clip_from_result(result, model, duration)
 
+
+def _clip_from_result(result: dict, model: str, duration: int) -> AnimatedClip:
     video = result.get("video")
     if not isinstance(video, dict):
         raise RuntimeError(f"fal animate returned no video payload: {result!r:.300}")

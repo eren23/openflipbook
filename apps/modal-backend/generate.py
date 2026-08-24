@@ -1164,6 +1164,10 @@ class AnimateBody(BaseModel):
     duration: int = 5
     video_tier: str | None = None
     trace_id: str | None = None
+    # Descent transition: when set, image_data_url is the PARENT map (first
+    # frame) and this is the entered page (last frame) — the clip is the
+    # camera move between them, not an ambient animation.
+    end_image_data_url: str | None = None
 
 
 @fastapi_app.post("/animate")
@@ -1190,25 +1194,37 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
         prompt_len=len(body.prompt or ""),
         image_kb=img_size_kb,
         duration=body.duration,
+        descent=bool(body.end_image_data_url),
     )
-    motion_prompt = await llm_provider.rewrite_motion_prompt(
-        page_title=body.prompt or "",
-        image_data_url=body.image_data_url,
-        duration_seconds=body.duration,
-    )
-    if motion_prompt and motion_prompt != body.prompt:
-        log(
-            "info",
-            "animate.prompt_rewritten",
-            orig_len=len(body.prompt or ""),
-            new_len=len(motion_prompt),
+    if body.end_image_data_url:
+        # A descent clip carries a fixed camera brief — the ambient motion
+        # rewriter would fight the first→last-frame move.
+        motion_prompt = (
+            "Smooth cinematic camera descent: the view dives from the "
+            f"overhead map down into {body.prompt or 'the place below'}, "
+            "ending exactly on the final frame. Keep the art style constant "
+            "throughout; no new objects."
         )
+    else:
+        motion_prompt = await llm_provider.rewrite_motion_prompt(
+            page_title=body.prompt or "",
+            image_data_url=body.image_data_url,
+            duration_seconds=body.duration,
+        )
+        if motion_prompt and motion_prompt != body.prompt:
+            log(
+                "info",
+                "animate.prompt_rewritten",
+                orig_len=len(body.prompt or ""),
+                new_len=len(motion_prompt),
+            )
     try:
         clip = await video_provider.animate_image(
             image_data_url=body.image_data_url,
             prompt=motion_prompt or body.prompt,
             duration=body.duration,
             tier=body.video_tier,
+            end_image_data_url=body.end_image_data_url,
         )
     except Exception as exc:
         record_error("animate", exc, image_kb=img_size_kb)
