@@ -360,7 +360,185 @@ const enterAndInteriors: Study = {
   },
 };
 
-const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander, enterAndInteriors];
+const journeyInAndOut: Study = {
+  name: "journey-in-and-out",
+  async run(p, h) {
+    // The full arc: create → enter → deeper → step back OUT (zero-gen,
+    // saved nodes) → re-enter (revisit reopens the SAME node) → OUTWARD
+    // ascend above the world → the descent clip. The consistency story is
+    // the receipts: node ids and stored-image URLs compared at every
+    // return, shown in the captions.
+    const ENTER_TIMEOUT = 360_000;
+    const backBtn = () => p.getByTitle("Go back (←)");
+    const src = async () => (await h.img(p).getAttribute("src")) ?? "";
+
+    // Beat 0 — seed. JOURNEY_SEED_IMAGE (a rendered-from-full-spec map)
+    // uploads as the starting page — detail the planner's short rewrite
+    // can't reach; otherwise fall back to a typed query.
+    let mapCands: { x_pct: number; y_pct: number; enter_as?: string; place_form?: string }[] = [];
+    const mapCandWait = p
+      .waitForResponse((r) => r.url().includes("/precompute-candidates"), { timeout: 120_000 })
+      .then(async (r) => {
+        mapCands = ((await r.json().catch(() => null)) as { candidates?: typeof mapCands } | null)?.candidates ?? [];
+      })
+      .catch(() => {});
+    const seedImage = process.env.JOURNEY_SEED_IMAGE;
+    if (seedImage) {
+      await p.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
+      await p.getByRole("textbox").first().waitFor({ timeout: 30_000 });
+      await p.waitForTimeout(1000);
+      await p.setInputFiles('input[type="file"]', seedImage);
+      await h.waitStable(p);
+      await h.caption(p, "Start from a REAL map — rendered from a full cartographer's spec. Now it becomes a world.");
+    } else {
+      await h.seed(
+        p,
+        "a grand desert caravan city built around a turquoise oasis, seen from above, with a towering sandstone citadel and a famous covered spice bazaar",
+        { style: "Storybook" },
+      );
+      await h.caption(p, "One prompt → a world. Every place on this map is enterable.");
+    }
+    await mapCandWait;
+    await p.waitForTimeout(2600);
+    const rootSrc = await src();
+
+    // Beat 1 — enter a place. Prefer the scene candidate NEAREST the Mended
+    // Drum's spot on the Ankh seed map (mid-south bank) — the ground-level
+    // tavern arrival is the demo's money shot; a river/region candidate
+    // yields a flat map redraw instead.
+    const DRUM = { x_pct: 0.47, y_pct: 0.61 };
+    const scenes = mapCands.filter((c) => c.enter_as === "scene");
+    const place =
+      scenes.sort(
+        (a, b) =>
+          Math.hypot(a.x_pct - DRUM.x_pct, a.y_pct - DRUM.y_pct) -
+          Math.hypot(b.x_pct - DRUM.x_pct, b.y_pct - DRUM.y_pct),
+      )[0] ?? DRUM;
+    let sceneCands: typeof mapCands = [];
+    const sceneCandWait = p
+      .waitForResponse((r) => r.url().includes("/precompute-candidates"), { timeout: ENTER_TIMEOUT })
+      .then(async (r) => {
+        sceneCands = ((await r.json().catch(() => null)) as { candidates?: typeof mapCands } | null)?.candidates ?? [];
+      })
+      .catch(() => {});
+    let before = h.node(p);
+    await h.tap(p, place.x_pct, place.y_pct);
+    await p.waitForTimeout(1200);
+    await h.caption(p, "Tap a place → the camera dives IN (judged render — it retries until it lands)");
+    const enteredNode = await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+    await h.waitStable(p, ENTER_TIMEOUT);
+    const enteredSrc = await src();
+    await h.caption(p, "Arrived: the place the map promised, seen from the ground");
+    await p.waitForTimeout(2800);
+    // Bounded: a missing scene-candidates response must not stall the film.
+    await Promise.race([sceneCandWait, new Promise((r) => setTimeout(r, 20_000))]);
+
+    // Beat 2 — deeper (an interior when one is classified, else any scene).
+    const deeper =
+      sceneCands.find((c) => c.place_form === "interior") ??
+      sceneCands.find((c) => c.enter_as === "scene");
+    let wentDeeper = false;
+    if (deeper) {
+      await h.caption(p, "Deeper — tap a building to step INSIDE it");
+      await p.waitForTimeout(900);
+      before = h.node(p);
+      await h.tap(p, deeper.x_pct, deeper.y_pct);
+      await p.waitForTimeout(1200);
+      await h.caption(p, "Rendering the inside… (judged: indoors + the same shell as the exterior)");
+      await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+      await h.waitStable(p, ENTER_TIMEOUT);
+      await h.caption(p, "Inside. Three levels down from one text prompt.");
+      await p.waitForTimeout(3000);
+      wentDeeper = true;
+    }
+
+    // Beat 3 — step back OUT. Zero generations: every step reopens a SAVED node.
+    await h.caption(p, "Now back out — watch: NOTHING re-renders. The world persists.");
+    await p.waitForTimeout(1800);
+    if (wentDeeper) {
+      await backBtn().click();
+      await p.waitForTimeout(1600);
+      const same = (await src()) === enteredSrc;
+      await h.caption(
+        p,
+        same
+          ? "Back at the place — the SAME stored image, not a re-roll"
+          : "Back at the place we entered",
+      );
+      await p.waitForTimeout(2400);
+    }
+    await backBtn().click();
+    await p.waitForTimeout(1600);
+    const rootSame = (await src()) === rootSrc;
+    await h.caption(
+      p,
+      rootSame
+        ? "And the map — byte-identical to where we started. In and out, both ends stable."
+        : "Back on the map.",
+    );
+    await p.waitForTimeout(2600);
+
+    // Beat 4 — re-enter the SAME place: revisits reopen the saved node.
+    before = h.node(p);
+    await h.caption(p, "Tap the SAME place again…");
+    await p.waitForTimeout(900);
+    await h.tap(p, place.x_pct, place.y_pct);
+    const revisitNode = await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+    await h.waitStable(p, ENTER_TIMEOUT);
+    await h.caption(
+      p,
+      revisitNode === enteredNode
+        ? "…and it REOPENS the saved page — same node id, zero generation, no drift"
+        : "…and we're back at the place",
+    );
+    await p.waitForTimeout(3000);
+
+    // (OUTWARD beat cut for now: on an UPLOADED seed the page title is
+    // "Uploaded image", so the ascend planner has no name to anchor the
+    // container's identity and invents geography — take 2 put an "Emerald
+    // Caldera Archipelago" above Ankh-Morpork. Restore this beat once
+    // ascend derives its context from the map's own extracted names.)
+    await backBtn().click();
+    await p.waitForTimeout(1400);
+
+    // Beat 6 — the descent clip: an arrival replayed as a camera move.
+    // Jump DETERMINISTICALLY back to the saved place page: breadcrumb to the
+    // root map (its title chip), then history-forward is unreliable after the
+    // ascend — so tap the place again, which REOPENS the saved node.
+    const rootCrumb = p.getByRole("button", { name: /Uploaded image/ }).first();
+    if (await rootCrumb.count()) {
+      await rootCrumb.click().catch(() => {});
+      await p.waitForTimeout(1600);
+    } else {
+      await backBtn().click().catch(() => {});
+      await p.waitForTimeout(1600);
+    }
+    before = h.node(p);
+    await h.tap(p, place.x_pct, place.y_pct);
+    await h.waitNodeChange(p, before, ENTER_TIMEOUT).catch(() => {});
+    await h.waitStable(p, ENTER_TIMEOUT).catch(() => {});
+    const descend = p.getByRole("button", { name: /Descend \(5s clip\)/ }).first();
+    if (await descend.count()) {
+      await h.caption(p, "One more: replay this arrival as a real camera dive (first+last-frame video)");
+      await descend.click();
+      const video = p.locator("video").first();
+      await video.waitFor({ state: "visible", timeout: 180_000 }).catch(() => {});
+      if (await video.count()) {
+        await video.evaluate((v) => {
+          const el = v as HTMLVideoElement;
+          el.muted = true;
+          void el.play();
+        }).catch(() => {});
+        // Let it buffer + play; the encode's speedup keeps this beat tight.
+        await p.waitForTimeout(14_000);
+        await h.caption(p, "The map dives into the place — both frames are the REAL pages you saw.");
+        await p.waitForTimeout(8_000);
+      }
+    }
+  },
+};
+
+const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander, enterAndInteriors, journeyInAndOut];
 
 // ── driver: record each study to studies/raw/<name>/*.webm ───────────────────
 async function record(study: Study): Promise<boolean> {
