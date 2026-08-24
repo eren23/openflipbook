@@ -14,6 +14,7 @@ export type LocaleStrings = {
   go: string;
   generating: string;
   animateClip: string;
+  descendClip: string;
   animateStream: string;
   animateStop: string;
   generatingClip: string;
@@ -35,6 +36,7 @@ const en: LocaleStrings = {
   go: "Go",
   generating: "…",
   animateClip: "Animate (5s clip)",
+  descendClip: "Descend (5s clip)",
   animateStream: "Animate (stream)",
   animateStop: "Stop",
   generatingClip: "Generating clip…",
@@ -57,6 +59,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ Subir",
     go: "Ir",
     animateClip: "Animar (5s)",
+    descendClip: "Descender (5s)",
     animateStream: "Animar (stream)",
     animateStop: "Detener",
     generatingClip: "Generando clip…",
@@ -76,6 +79,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ Importer",
     go: "Aller",
     animateClip: "Animer (5s)",
+    descendClip: "Descendre (5s)",
     animateStream: "Animer (stream)",
     animateStop: "Arrêter",
     generatingClip: "Génération du clip…",
@@ -95,6 +99,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ Hochladen",
     go: "Los",
     animateClip: "Animieren (5s)",
+    descendClip: "Abstieg (5s)",
     animateStream: "Animieren (Stream)",
     animateStop: "Stopp",
     generatingClip: "Erzeuge Clip…",
@@ -114,6 +119,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ Yükle",
     go: "Git",
     animateClip: "Animasyon (5s)",
+    descendClip: "İniş (5s)",
     animateStream: "Animasyon (akış)",
     animateStop: "Durdur",
     generatingClip: "Klip oluşturuluyor…",
@@ -133,6 +139,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ アップロード",
     go: "実行",
     animateClip: "アニメ化 (5s)",
+    descendClip: "降下 (5s)",
     animateStream: "アニメ化 (ストリーム)",
     animateStop: "停止",
     generatingClip: "クリップ生成中…",
@@ -152,6 +159,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ 上传",
     go: "开始",
     animateClip: "动画 (5秒)",
+    descendClip: "俯冲 (5秒)",
     animateStream: "动画 (流式)",
     animateStop: "停止",
     generatingClip: "正在生成片段…",
@@ -171,6 +179,7 @@ const STRINGS: Record<string, Partial<LocaleStrings>> = {
     upload: "⬆ رفع",
     go: "ابدأ",
     animateClip: "تحريك (٥ث)",
+    descendClip: "هبوط (٥ث)",
     animateStream: "تحريك (بث)",
     animateStop: "إيقاف",
     generatingClip: "جارٍ توليد المقطع…",

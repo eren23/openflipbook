@@ -1007,6 +1007,11 @@ export default function PlayPage() {
               query: body.query,
               title: evt.page_title,
               imageDataUrl: evt.image_data_url,
+              // The LIVE page must carry its parent like the history copy
+              // does — the zoom heuristic, the OUTWARD root gate, and the
+              // descent clip all read page.parentId (it was silently absent
+              // here, so entered pages looked like roots until a reload).
+              parentId: body.current_node_id || null,
               sources: evtSources,
               // Mirror the persist body: an edit is a REVISION. Tap/fresh
               // stay absent = descend.
@@ -3290,6 +3295,58 @@ export default function PlayPage() {
     setStreamStatus("playing");
   }, [fallbackVideoUrl]);
 
+  const requestClip = useCallback(async (body: Record<string, unknown>) => {
+    animateAbortRef.current?.abort();
+    const ac = new AbortController();
+    animateAbortRef.current = ac;
+    const timeoutId = window.setTimeout(() => ac.abort(), 180_000);
+    setStreamStatus("connecting");
+    try {
+      const res = await fetch("/api/animate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      });
+      const data = (await res.json()) as {
+        video_url?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.video_url) {
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      setFallbackVideoUrl(data.video_url);
+      setShowVideo(true);
+      setStreamStatus("playing");
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        setStreamStatus("error");
+        setError("Animate timed out after 3 minutes. Try again or stop.");
+      } else {
+        setStreamStatus("error");
+        setError((err as Error).message);
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (animateAbortRef.current === ac) animateAbortRef.current = null;
+    }
+  }, []);
+
+  // Descent clip: first frame = the parent map, last frame = this page — the
+  // tap hard-cut replayed as a real camera move (fal ltx-2.3 first+last mode).
+  const descentParentImage = page?.parentId
+    ? history.items.find((p) => p.nodeId === page.parentId)?.imageDataUrl
+    : undefined;
+  const descendClip = useCallback(() => {
+    if (!page?.imageDataUrl || !descentParentImage) return;
+    void requestClip({
+      image_data_url: descentParentImage,
+      end_image_data_url: page.imageDataUrl,
+      prompt: page.title,
+      video_tier: videoTier,
+    });
+  }, [page, descentParentImage, requestClip, videoTier]);
+
   const connectStream = useCallback(async () => {
     if (!page?.imageDataUrl) return;
     const wsUrl = getWSUrl();
@@ -3317,45 +3374,12 @@ export default function PlayPage() {
     // Cheap fallback via fal. fal LTX video gen typically takes 30-90s; cap
     // the wait at 3 minutes so a stuck request surfaces rather than hanging
     // the UI silently.
-    animateAbortRef.current?.abort();
-    const ac = new AbortController();
-    animateAbortRef.current = ac;
-    const timeoutId = window.setTimeout(() => ac.abort(), 180_000);
-    setStreamStatus("connecting");
-    try {
-      const res = await fetch("/api/animate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_data_url: page.imageDataUrl,
-          prompt: page.title,
-          video_tier: videoTier,
-        }),
-        signal: ac.signal,
-      });
-      const data = (await res.json()) as {
-        video_url?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.video_url) {
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      setFallbackVideoUrl(data.video_url);
-      setShowVideo(true);
-      setStreamStatus("playing");
-    } catch (err) {
-      if ((err as Error).name === "AbortError") {
-        setStreamStatus("error");
-        setError("Animate timed out after 3 minutes. Try again or stop.");
-      } else {
-        setStreamStatus("error");
-        setError((err as Error).message);
-      }
-    } finally {
-      window.clearTimeout(timeoutId);
-      if (animateAbortRef.current === ac) animateAbortRef.current = null;
-    }
-  }, [page, videoTier]);
+    await requestClip({
+      image_data_url: page.imageDataUrl,
+      prompt: page.title,
+      video_tier: videoTier,
+    });
+  }, [page, videoTier, requestClip]);
 
   return (
     <main
@@ -4094,6 +4118,18 @@ export default function PlayPage() {
                       ? t.generatingClip
                       : `… ${streamStatus}`}
               </button>
+              {streamStatus === "off" &&
+                descentParentImage &&
+                page?.imageDataUrl && (
+                  <button
+                    type="button"
+                    onClick={descendClip}
+                    className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
+                    title="Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"
+                  >
+                    ⤵ {t.descendClip}
+                  </button>
+                )}
             </div>
             {editMode ? (
               <EditForm

@@ -22,14 +22,22 @@ export async function POST(req: Request) {
   // Same inline-before-forward treatment the resolve-click and
   // generate-page proxies already have; animate was the one that skipped it.
   try {
-    const parsed = JSON.parse(body) as { image_data_url?: string };
-    if (parsed.image_data_url && !parsed.image_data_url.startsWith("data:")) {
-      const inlined = await inlineStoredImage(parsed.image_data_url);
-      if (inlined) {
-        parsed.image_data_url = inlined;
-        body = JSON.stringify(parsed);
+    const parsed = JSON.parse(body) as {
+      image_data_url?: string;
+      end_image_data_url?: string;
+    };
+    let changed = false;
+    for (const key of ["image_data_url", "end_image_data_url"] as const) {
+      const url = parsed[key];
+      if (url && !url.startsWith("data:")) {
+        const inlined = await inlineStoredImage(url);
+        if (inlined) {
+          parsed[key] = inlined;
+          changed = true;
+        }
       }
     }
+    if (changed) body = JSON.stringify(parsed);
   } catch {
     /* non-JSON body — forward as-is, the backend rejects it */
   }
