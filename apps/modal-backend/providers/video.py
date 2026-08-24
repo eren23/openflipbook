@@ -106,7 +106,7 @@ async def animate_image(
         # DESCENT_ANIMATE_MODEL). No duration/resolution knobs — the probe ran
         # clean on schema defaults, and ltx-2.3's enums differ from ltx-2's.
         model = os.environ.get("FAL_DESCENT_MODEL") or DESCENT_ANIMATE_MODEL
-        arguments = {
+        arguments: dict = {
             "image_url": image_url,
             "end_image_url": await to_fal_url(end_image_data_url),
             "prompt": prompt,
