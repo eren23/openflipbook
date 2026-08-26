@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx record.ts",
+    "journey-film": "python3 compose-journey-film.py",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {

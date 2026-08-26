@@ -56,6 +56,7 @@ scripts/record-demo/*.mp4
 scripts/record-demo/*.webm
 scripts/record-demo/geo-storyboard.png
 scripts/record-demo/studies/
+apps/modal-backend/scripts/record-demo/
 
 # Vitest coverage HTML/json output.
 apps/web/coverage/

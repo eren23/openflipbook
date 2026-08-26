@@ -52,6 +52,7 @@ That is the whole contract — `{ name, run(page, helpers) }`.
 cd scripts/record-demo
 DEMO_BASE_URL=http://localhost:3001 ./node_modules/.bin/tsx record-features.ts          # all
 DEMO_BASE_URL=http://localhost:3001 ./node_modules/.bin/tsx record-features.ts wander    # one
+JOURNEY_SEED_IMAGE=studies/seed/ankh-morpork.jpg ./node_modules/.bin/tsx record-features.ts journey-in-and-out
 ./encode-studies.sh                    # WebM → MP4 (1.6x) + 1 fps audit frames
 ```
 
@@ -66,3 +67,20 @@ Notes:
 - Studies burn **real** fal/OpenRouter spend — one page per hop. Record
   individually (`… record-features.ts <name>`) to keep any one run off a stack
   that a long batch has bogged down, and watch the fal balance.
+
+## Journey film cut
+
+The `journey-in-and-out` study is the audit capture. For the short watchable
+cut, compose the saved map and the app-generated first/last-frame descent clip:
+
+```bash
+cd scripts/record-demo
+python3 compose-journey-film.py \
+  --map studies/seed/ankh-morpork.jpg \
+  --dive /path/to/dive_ankh_map_to_mended_drum.mp4 \
+  --output studies/journey-film.mp4
+```
+
+`compose-journey-film.py` uses Pillow-rendered caption overlays because the
+local ffmpeg build does not ship `drawtext`. If plain `python3` does not have
+Pillow, the script falls back to `apps/modal-backend/.venv/bin/python`.
