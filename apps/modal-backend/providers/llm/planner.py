@@ -290,7 +290,10 @@ async def plan_page(
             schema=PLAN_SCHEMA,
             schema_name="page_plan",
             temperature=0.7,
-            max_tokens=900,
+            # 900 was sized for gemini-3-flash-preview; 3.7-flash pretty-prints
+            # past it (live 2026-08-26: finish_reason=length -> salvage -> the
+            # page title fell back to the raw query). Headroom is ~$0.001/plan.
+            max_tokens=1400,
             extra_body=_web_plugin_extra(text_model, online=web_search) or None,
             span_ctx=ctx,
             response_sink=response_sink,

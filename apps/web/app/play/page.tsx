@@ -133,6 +133,7 @@ import { matchEntityLabel } from "@/lib/entity-label-match";
 import { focusOnMap } from "@/lib/click-route";
 import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
+import { buildOutwardContext } from "@/lib/outward-context";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -2057,8 +2058,24 @@ export default function PlayPage() {
       styleAnchor: styleAnchor?.style ?? null,
       suppressMapLabels: worldEnabled && worldDomLabels,
       outwardDepth: outwardDepthRef.current,
+      outwardContext: buildOutwardContext({
+        nodeId: page.nodeId,
+        title: page.title,
+        query: page.query,
+        entities: worldState.entities,
+        geos: geoMap.entities,
+      }),
     });
-  }, [page, sessionId, startAscend, styleAnchor, worldEnabled, worldDomLabels]);
+  }, [
+    page,
+    sessionId,
+    startAscend,
+    styleAnchor,
+    worldEnabled,
+    worldDomLabels,
+    worldState.entities,
+    geoMap.entities,
+  ]);
 
   useKeyboardShortcuts({
     onBack: goBack,

@@ -341,6 +341,10 @@ class GenerateBody(BaseModel):
     # (multi-hop drift, chain_runner.py: even the anchored path loses delicate
     # media by ~hop 2). Default 0 + flag off → byte-identical to old clients.
     outward_depth: int = 0
+    # OUTWARD identity anchor for uploaded / generic roots. The web client builds
+    # this from extracted Codex/geometric labels so an upload titled "Uploaded
+    # image" still zooms out from the established map, not the placeholder.
+    outward_context: str | None = None
     # The transition tap's origin (tap descent ladder): the SOURCE frame was a
     # closeup of the entered place — the establishing shot already happened,
     # so the enter descends to ground level instead of another aerial.
