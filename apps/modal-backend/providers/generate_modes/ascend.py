@@ -30,6 +30,97 @@ if TYPE_CHECKING:
     from providers.prompt_library.types import ViewSpec as ViewSpecDict
 
 
+_GENERIC_SOURCE_LABELS = {
+    "",
+    "uploaded image",
+    "uploaded map",
+    "image upload",
+    "untitled image",
+    "untitled map",
+}
+
+
+def _clean_text(value: str | None, limit: int = 800) -> str:
+    text = " ".join((value or "").split())
+    if limit > 3 and len(text) > limit:
+        return text[: limit - 3].rstrip() + "..."
+    return text
+
+
+def _is_generic_source_label(value: str | None) -> bool:
+    return _clean_text(value).lower() in _GENERIC_SOURCE_LABELS
+
+
+def _outward_world_context(body: GenerateBody) -> list[dict[str, Any]]:
+    """Planner-ready source entities, capped before they hit prompt text."""
+
+    out: list[dict[str, Any]] = []
+    for entity in body.world_context[:8]:
+        data = entity.model_dump(exclude_none=True)
+        name = _clean_text(str(data.get("name", "")), 120)
+        if not name or _is_generic_source_label(name):
+            continue
+        data["name"] = name
+        out.append(data)
+    return out
+
+
+def _source_entity_names(world_context: list[dict[str, Any]]) -> list[str]:
+    def _kind(entry: dict[str, Any]) -> str:
+        return _clean_text(str(entry.get("kind", ""))).lower()
+
+    names: list[str] = []
+    for entry in [
+        *(e for e in world_context if _kind(e) == "place"),
+        *(e for e in world_context if _kind(e) != "place"),
+    ]:
+        name = _clean_text(str(entry.get("name", "")), 120)
+        if not name or _is_generic_source_label(name):
+            continue
+        key = name.lower()
+        if any(existing.lower() == key for existing in names):
+            continue
+        names.append(name)
+        if len(names) >= 8:
+            break
+    return names
+
+
+def _outward_source_label(
+    body: GenerateBody, world_context: list[dict[str, Any]], source_identity: str
+) -> str:
+    label = _clean_text(body.query, 160)
+    if label and not _is_generic_source_label(label):
+        return label
+    names = _source_entity_names(world_context)
+    if names:
+        return f"the established source map of {names[0]}"
+    if source_identity:
+        return "this established source map"
+    return "this place"
+
+
+def _outward_identity_clause(
+    body: GenerateBody, world_context: list[dict[str, Any]]
+) -> str:
+    parts: list[str] = []
+    outward_context = _clean_text(body.outward_context, 1000)
+    if outward_context:
+        parts.append(outward_context)
+    names = _source_entity_names(world_context)
+    if names:
+        summary = f"Known source entities: {', '.join(names)}."
+        if summary.lower() not in outward_context.lower():
+            parts.append(summary)
+    if not parts:
+        return ""
+    parts.append(
+        "The wider container MUST contain this exact source at its centre "
+        "and must not rename it as a different world."
+    )
+    return " ".join(parts)
+
+
 async def stream_ascend(
     body: GenerateBody,
     trace_id: str,
@@ -60,6 +151,11 @@ async def stream_ascend(
         return
     pw, ph = _frame_dims(body.aspect_ratio)
     style_lock = (body.session_style_anchor or "").strip() or None
+    outward_world_context = _outward_world_context(body)
+    source_identity = _outward_identity_clause(body, outward_world_context)
+    outward_source_label = _outward_source_label(
+        body, outward_world_context, source_identity
+    )
     # DEFAULT = the fresh `scale_parent` container: a seamless wider view of
     # the SAME world in the SAME medium, the source as a small sub-region
     # (live-verified far more coherent than the outpaint, which leaves the
@@ -117,6 +213,8 @@ async def stream_ascend(
                 f"{to_tier.replace('_', ' ')}, drawn in the SAME style as the "
                 "centre — one continuous view, NOT a photograph, no photorealism"
             )
+            if source_identity:
+                margin += ". SOURCE IDENTITY LOCK: " + source_identity
             if outward_rider:
                 margin += ". " + outward_rider
             if no_lettering:
@@ -127,13 +225,17 @@ async def stream_ascend(
             page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
             final_prompt = f"outward outpaint: {from_tier} -> {to_tier}"
         else:
+            plan_query = (
+                f"the {to_tier.replace('_', ' ')} that contains "
+                f"{outward_source_label}"
+            )
+            if source_identity:
+                plan_query += ". " + source_identity
             plan = await llm.plan_page(
-                query=(
-                    f"the {to_tier.replace('_', ' ')} that contains "
-                    f"{body.query or 'this place'}"
-                ),
+                query=plan_query,
                 web_search=False,
                 style_anchor=style_lock,
+                world_context=outward_world_context or None,
                 render_mode="scale_parent",
             )
             if env_flag("SCALE_OUTWARD_EDIT_REF", "true") and not outward_refresh:
@@ -150,6 +252,8 @@ async def stream_ascend(
                     f"keeping this exact view as the centre. {medium}; one continuous "
                     "view in that style, NOT a photograph, no photorealism."
                 )
+                if source_identity:
+                    ascend_instr += " SOURCE IDENTITY LOCK: " + source_identity
                 if outward_rider:
                     ascend_instr += " " + outward_rider
                 if no_lettering:
@@ -214,6 +318,8 @@ async def stream_ascend(
                 # Fresh container = a NEW map: state the deliberate
                 # top-down camera (None on astro rungs → legacy bytes).
                 ascend_prompt = plan.prompt
+                if source_identity:
+                    ascend_prompt += "\n\nSOURCE IDENTITY LOCK: " + source_identity
                 if no_lettering:
                     ascend_prompt += f"\n\n{no_lettering}"
                 if _view_grammar_on():

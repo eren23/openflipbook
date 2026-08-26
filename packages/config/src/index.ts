@@ -188,6 +188,11 @@ export interface GenerateRequestBody {
   // SCALE_OUTWARD_MAX_HOPS the backend re-anchors to the original medium
   // instead of the drifting previous hop (multi-hop drift). Default-absent.
   outward_depth?: number;
+  // OUTWARD identity anchor for uploaded / generic roots. Built from the
+  // current page's extracted Codex/geometric names so an upload titled
+  // "Uploaded image" still zooms out from the established map, not from the
+  // placeholder title.
+  outward_context?: string;
   // Tap descent ladder: the SOURCE frame of this enter was a closeup of the
   // place — the establishing shot already happened, so the enter goes to
   // ground level (grounds/courtyard) instead of another aerial.

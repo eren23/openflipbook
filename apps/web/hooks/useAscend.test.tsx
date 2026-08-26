@@ -137,17 +137,23 @@ describe("useAscend", () => {
     const bare = bodyOf(fn.mock.calls[0]!);
     expect("session_style_anchor" in bare).toBe(false);
     expect("suppress_map_labels" in bare).toBe(false);
+    expect("outward_context" in bare).toBe(false);
 
     act(() =>
       result.current.start(
         "s1",
-        root({ styleAnchor: "woodcut, sepia", suppressMapLabels: true }),
+        root({
+          styleAnchor: "woodcut, sepia",
+          suppressMapLabels: true,
+          outwardContext: "Known names on the source map: Ankh-Morpork.",
+        }),
       ),
     );
     await waitFor(() => expect(onAscended).toHaveBeenCalledTimes(2));
     const armed = bodyOf(fn.mock.calls[2]!);
     expect(armed.session_style_anchor).toBe("woodcut, sepia");
     expect(armed.suppress_map_labels).toBe(true);
+    expect(armed.outward_context).toBe("Known names on the source map: Ankh-Morpork.");
   });
 
   it("surfaces render_unjudged=true through the callback", async () => {

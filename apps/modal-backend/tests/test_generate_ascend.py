@@ -98,6 +98,54 @@ async def test_ascend_container_continues_source_via_edit_by_default(
     outpaint.assert_not_awaited()  # NOT the outpaint
 
 
+async def test_ascend_uploaded_root_uses_extracted_source_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Uploaded roots are titled "Uploaded image" in the graph. OUTWARD must plan
+    # from the map's extracted identity instead of inventing a container for the
+    # placeholder label.
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/nano-banana-pro", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+
+    body = _ascend_body(
+        query="Uploaded image",
+        outward_context=(
+            "Known names on the source map: Ankh-Morpork, The Mended Drum, "
+            "The Shades."
+        ),
+        world_context=[
+            {
+                "id": "e1",
+                "kind": "place",
+                "name": "Ankh-Morpork",
+                "appearance": "walled river city map split by the Ankh",
+            },
+            {
+                "id": "e2",
+                "kind": "place",
+                "name": "The Mended Drum",
+                "appearance": "tavern south of the river near The Shades",
+            },
+        ],
+    )
+    await _collect(_event_stream(body, "t1"))
+
+    plan_kwargs = llm_mod.plan_page.await_args.kwargs
+    assert "Uploaded image" not in plan_kwargs["query"]
+    assert "Ankh-Morpork" in plan_kwargs["query"]
+    assert "The Mended Drum" in plan_kwargs["query"]
+    assert plan_kwargs["world_context"][0]["name"] == "Ankh-Morpork"
+
+    instr = edit.await_args.args[1]
+    assert "SOURCE IDENTITY LOCK" in instr
+    assert "Ankh-Morpork" in instr
+    assert "The Mended Drum" in instr
+
+
 async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,6 +161,28 @@ async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
     assert ready["page_title"] == "The Vallen Sea and Coastline"
     gen.assert_awaited_once()  # the fresh scale_parent container
     edit.assert_not_awaited()
+
+
+async def test_ascend_fresh_container_carries_outward_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_EDIT_REF", "false")
+    gen = _mock_fresh(monkeypatch)
+
+    await _collect(
+        _event_stream(
+            _ascend_body(
+                query="Uploaded image",
+                outward_context="Known names on the source map: Ankh-Morpork.",
+            ),
+            "t1",
+        )
+    )
+
+    prompt = gen.await_args.args[0]
+    assert "SOURCE IDENTITY LOCK" in prompt
+    assert "Ankh-Morpork" in prompt
 
 
 async def test_ascend_refresh_past_hop_cap_drops_the_drifting_ref(
@@ -160,13 +230,20 @@ async def test_ascend_outpaint_under_flag_steers_the_medium(monkeypatch: pytest.
     mock = AsyncMock(return_value=img)
     monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", mock)
 
-    body = _ascend_body(session_style_anchor="hand-drawn engraving, sepia ink, cross-hatching")
+    body = _ascend_body(
+        session_style_anchor="hand-drawn engraving, sepia ink, cross-hatching",
+        query="Uploaded image",
+        outward_context="Known names on the source map: Ankh-Morpork.",
+    )
     events = await _collect(_event_stream(body, "t1"))
     ready = next(e for e in events if e["type"] == "ascend_ready")
     assert ready["image_model"] == "fal-ai/bria/expand"
     mock.assert_awaited_once()
     # The medium MUST reach BRIA, or the painted margin comes back photoreal.
-    assert "engraving" in (mock.await_args.kwargs.get("prompt") or "")
+    prompt = mock.await_args.kwargs.get("prompt") or ""
+    assert "engraving" in prompt
+    assert "SOURCE IDENTITY LOCK" in prompt
+    assert "Ankh-Morpork" in prompt
 
 
 async def test_ascend_kill_switch_refuses(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -30,6 +30,9 @@ export interface AscendRoot {
   // re-anchors past SCALE_OUTWARD_MAX_HOPS so a long zoom-out chain doesn't
   // drift off the original medium.
   outwardDepth?: number;
+  // Semantic identity for generic/uploaded roots. Without this, the backend
+  // only sees "Uploaded image" and may invent a container for a placeholder.
+  outwardContext?: string | null;
 }
 
 export interface Ascended {
@@ -104,6 +107,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
                 : {}),
               ...(root.suppressMapLabels ? { suppress_map_labels: true } : {}),
               ...(root.outwardDepth ? { outward_depth: root.outwardDepth } : {}),
+              ...(root.outwardContext ? { outward_context: root.outwardContext } : {}),
               trace_id: traceId,
             }),
             signal: ac.signal,
