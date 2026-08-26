@@ -493,13 +493,24 @@ const journeyInAndOut: Study = {
     );
     await p.waitForTimeout(3000);
 
-    // (OUTWARD beat cut for now: on an UPLOADED seed the page title is
-    // "Uploaded image", so the ascend planner has no name to anchor the
-    // container's identity and invents geography — take 2 put an "Emerald
-    // Caldera Archipelago" above Ankh-Morpork. Restore this beat once
-    // ascend derives its context from the map's own extracted names.)
+    // Beat 5 — OUTWARD: the region that CONTAINS the whole map. The ascend
+    // now anchors on the map's own extracted identity (outward_context,
+    // PR #244) — take 2's "Emerald Caldera Archipelago" failure mode is
+    // fixed, so the beat is back.
     await backBtn().click();
     await p.waitForTimeout(1400);
+    await h.caption(p, "And OUTWARD — the wider region that CONTAINS this whole map");
+    await p.waitForTimeout(1200);
+    before = h.node(p);
+    const ascend = p.getByRole("button", { name: /zoom out \/ step back/ }).first();
+    if (await ascend.count()) {
+      await ascend.click();
+      await h.caption(p, "Rendering the world above… (anchored on the map's OWN names, judged)");
+      await h.waitNodeChange(p, before, ENTER_TIMEOUT);
+      await h.waitStable(p, ENTER_TIMEOUT);
+      await h.caption(p, "The city's own region — same world, one scale step out.");
+      await p.waitForTimeout(3400);
+    }
 
     // Beat 6 — the descent clip: an arrival replayed as a camera move.
     // Jump DETERMINISTICALLY back to the saved place page: breadcrumb to the
