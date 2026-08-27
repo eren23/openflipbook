@@ -609,7 +609,9 @@ async def precompute_click_candidates(
                 # 8 items x (~90 tokens incl. the 30-word style sentence) plus
                 # the new one-word place_form enum — 900 was sized before that
                 # field (#127 right-sizing); 1000 keeps the same headroom.
-                max_tokens=1000,
+                # 8 pretty-printed candidate objects; the #157-159 truncation
+                # surface. Headroom for 3.7-flash.
+                max_tokens=1600,
                 span_ctx=ctx,
             )
         out = _validate_candidates(parsed.get("candidates", []), max_candidates)
