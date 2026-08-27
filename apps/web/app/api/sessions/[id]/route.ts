@@ -52,6 +52,7 @@ export async function GET(req: Request, { params }: Params) {
       relation: row.relation,
       scene_view: row.scene_view,
       geo_extracted: row.geo_extracted,
+      descent_video_url: row.descent_video_url,
       created_at: row.created_at,
     })),
   });

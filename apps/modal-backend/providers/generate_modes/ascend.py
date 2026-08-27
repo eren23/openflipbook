@@ -336,7 +336,13 @@ async def stream_ascend(
                 img = await image_provider.generate_image(
                     ascend_prompt, body.aspect_ratio, reference_urls=[body.image]
                 )
-            page_title = plan.page_title or f"The surrounding {to_tier.replace('_', ' ')}".title()
+            # A degenerate plan (salvaged/failed reply) falls back to the RAW
+            # query — which for OUTWARD is the whole identity clause. A page
+            # title is a label, not a prompt: anything implausibly long takes
+            # the tier default instead (live-caught: a 500-char breadcrumb).
+            page_title = plan.page_title
+            if not page_title or len(page_title) > 90:
+                page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
             final_prompt = plan.prompt
     except Exception as exc:
         log("warn", "ascend.failed", error=f"{type(exc).__name__}: {exc}")

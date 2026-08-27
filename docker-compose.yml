@@ -151,6 +151,8 @@ services:
         NEXT_PUBLIC_DOM_LABELS: ${NEXT_PUBLIC_DOM_LABELS:-${WORLD_MODE:-true}}
         NEXT_PUBLIC_ON_RAMP_COACH: ${NEXT_PUBLIC_ON_RAMP_COACH:-false}
         NEXT_PUBLIC_ENTER_COACH: ${NEXT_PUBLIC_ENTER_COACH:-false}
+        # DESCENT_AUTO: background arrival clips (~$0.24/edge). Default off.
+        NEXT_PUBLIC_DESCENT_AUTO: ${NEXT_PUBLIC_DESCENT_AUTO:-}
     container_name: openflipbook-web
     restart: unless-stopped
     # Same posture as the backend: the root .env (single-file demo) carries

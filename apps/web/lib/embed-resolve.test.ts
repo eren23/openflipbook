@@ -36,6 +36,7 @@ function node(id: string, session: string): NodeRow {
     view_verdict: null,
     forked_from: null,
     geo_extracted: false,
+    descent_video_url: null,
     created_at: "2026-08-22T00:00:00.000Z",
   };
 }

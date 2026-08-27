@@ -25,6 +25,9 @@ export interface Page {
   // silently re-runs the non-deterministic VLM pass. Absent on freshly-created
   // pages this session → the in-memory attempt guard covers them instead.
   geoExtracted?: boolean;
+  // The persisted arrival clip (DESCENT_AUTO) — replaying the descent is
+  // instant when set; absent = the Descend button generates on demand.
+  descentVideoUrl?: string | null;
   // How this page hangs off its parent ("expand" = bloomed neighbour,
   // "edit" = revision, "ascend" = OUTWARD container). Absent = descend (a
   // tap-in / fresh page) — same default the server applies on the wire, so
@@ -44,6 +47,8 @@ export interface SessionNodeWire {
   sources?: { url: string; title: string | null }[] | null;
   scene_view?: SceneView | null;
   geo_extracted?: boolean;
+  // DESCENT_AUTO's stored arrival clip; absent on legacy servers/rows.
+  descent_video_url?: string | null;
   // Optional for back-compat with servers that predate the field; the node
   // rows always carry it in Mongo (defaulted "descend" by toRow).
   relation?: NodeRelation;
@@ -92,6 +97,7 @@ export function nodeToPage(n: SessionNodeWire): Page {
     sources: Array.isArray(n.sources) ? n.sources : [],
     sceneView: n.scene_view ?? null,
     geoExtracted: n.geo_extracted ?? false,
+    ...(n.descent_video_url ? { descentVideoUrl: n.descent_video_url } : {}),
     // Explicit "descend" rides through too (not collapsed to absent) — the
     // atlas gets the same concrete value off NodeRow, and world-layout keys
     // its zoom-in nesting shrink on the explicit form.
