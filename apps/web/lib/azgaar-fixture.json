@@ -1,0 +1,131 @@
+{
+  "info": {
+    "version": "1.149.2",
+    "description": "Azgaar's Fantasy Map Generator output: azgaar.github.io/Fantasy-map-generator",
+    "exportedAt": "2026-08-27T20:02:22.600Z",
+    "mapName": "Bones",
+    "width": 1164,
+    "height": 1157,
+    "seed": "916170902",
+    "mapId": 1787860879069
+  },
+  "pack": {
+    "burgs": [
+      0,
+      {
+        "cell": 1360,
+        "x": 50.67,
+        "y": 586.24,
+        "i": 1,
+        "state": 1,
+        "culture": 1,
+        "name": "Chawleigh",
+        "feature": 8,
+        "capital": 1,
+        "port": 1,
+        "population": 49.385,
+        "type": "Naval",
+        "citadel": 1,
+        "walls": 1,
+        "shanty": 1,
+        "temple": 1,
+        "group": "capital",
+        "market": 2,
+        "plaza": 1
+      },
+      {
+        "cell": 1846,
+        "x": 615.96,
+        "y": 661.13,
+        "i": 2,
+        "state": 2,
+        "culture": 4,
+        "name": "Hertford",
+        "feature": 21,
+        "capital": 1,
+        "port": 1,
+        "population": 4.906,
+        "type": "Naval",
+        "citadel": 1,
+        "walls": 1,
+        "shanty": 0,
+        "temple": 0,
+        "group": "capital",
+        "market": 15,
+        "plaza": 0
+      },
+      {
+        "cell": 277,
+        "x": 734.94,
+        "y": 272.74,
+        "i": 3,
+        "state": 3,
+        "culture": 8,
+        "name": "Louth",
+        "feature": 2,
+        "capital": 1,
+        "population": 6.617,
+        "type": "Generic",
+        "citadel": 1,
+        "walls": 1,
+        "shanty": 0,
+        "temple": 0,
+        "group": "capital",
+        "market": 11,
+        "plaza": 0
+      },
+      {
+        "cell": 1638,
+        "x": 696.58,
+        "y": 634.85,
+        "i": 4,
+        "state": 2,
+        "culture": 4,
+        "name": "Ely",
+        "feature": 21,
+        "population": 1.271,
+        "type": "Generic",
+        "citadel": 0,
+        "walls": 0,
+        "shanty": 0,
+        "temple": 0,
+        "group": "town",
+        "market": 0,
+        "plaza": 1
+      },
+      {
+        "cell": 900,
+        "x": 320.5,
+        "y": 410.0,
+        "i": 5,
+        "state": 1,
+        "culture": 1,
+        "name": "Removedton",
+        "removed": true,
+        "population": 2.0,
+        "type": "Generic"
+      }
+    ],
+    "states": [
+      { "i": 0, "name": "Neutrals" },
+      {
+        "i": 1,
+        "name": "Chawleigh",
+        "fullName": "Kingdom of Chawleigh",
+        "capital": 1,
+        "center": 1360,
+        "pole": [180.4, 620.9]
+      },
+      {
+        "i": 2,
+        "name": "Hertfordia",
+        "fullName": "Duchy of Hertfordia",
+        "capital": 2,
+        "center": 1846,
+        "pole": [640.2, 700.1]
+      }
+    ],
+    "markers": [],
+    "provinces": [0]
+  }
+}

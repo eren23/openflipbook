@@ -135,6 +135,7 @@ import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { buildOutwardContext } from "@/lib/outward-context";
 import { shouldAutoDescend } from "@/lib/descent-clip";
+import { parseAzgaarExport } from "@/lib/azgaar-import";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -1437,14 +1438,57 @@ export default function PlayPage() {
 
   const onDragLeave = useCallback(() => setIsDraggingFile(false), []);
 
+  // Map-generator import: dropping an Azgaar "export JSON (full)" file onto
+  // the canvas seeds the world map with the generator's OWN named places at
+  // their exact positions — pair it with the exported PNG uploaded as the
+  // page. Parsing happens client-side; only the capped list crosses the wire.
+  const acceptImportJson = useCallback(
+    async (file: File) => {
+      try {
+        const parsed = parseAzgaarExport(JSON.parse(await file.text()));
+        if (!parsed) {
+          setError(
+            "That JSON isn't an Azgaar full export. In the generator: Export → to JSON → full.",
+          );
+          return;
+        }
+        const res = await fetch(
+          `/api/world/${encodeURIComponent(sessionId)}/import-map`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              map_name: parsed.mapName,
+              entities: parsed.entities,
+            }),
+          },
+        );
+        const data = (await res.json()) as { imported?: number; error?: string };
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        setStatusMsg(
+          `Imported ${data.imported} places from “${parsed.mapName}” — names and positions are live.`,
+        );
+        void geoRefetch();
+      } catch (err) {
+        setError(`Map import failed: ${(err as Error).message}`);
+      }
+    },
+    [sessionId, geoRefetch]
+  );
+
   const onDrop = useCallback(
     (e: DragEvent<HTMLElement>) => {
       e.preventDefault();
       setIsDraggingFile(false);
       const file = e.dataTransfer.files?.[0];
-      if (file) void acceptUploadedImage(file);
+      if (!file) return;
+      if (file.name.endsWith(".json") || file.type === "application/json") {
+        void acceptImportJson(file);
+        return;
+      }
+      void acceptUploadedImage(file);
     },
-    [acceptUploadedImage]
+    [acceptUploadedImage, acceptImportJson]
   );
 
   const submitQuery = useCallback(
