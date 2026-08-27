@@ -371,19 +371,44 @@ async def stream_tap(
             entities=len(world_context_payload),
             first_name=world_context_payload[0].get("name"),
         )
-    plan = await llm.plan_page(
-        query=effective_query,
-        web_search=effective_web_search,
-        style_anchor=style_anchor,
-        output_locale=body.output_locale,
-        parent_title=body.parent_title,
-        parent_query=body.parent_query,
-        subject_context=subject_context,
-        world_context=world_context_payload,
-        render_mode=render_mode or "explainer",
-        surroundings=surroundings_for_plan,
-        label_free=body.suppress_map_labels,
+    # DETAILED_MAP (default off): a ROOT world map skips the planner's
+    # <=120-word compression — one LLM call expands the query into a full
+    # cartographer's spec (positioned districts, label tiers, detail
+    # density) rendered verbatim, routed to the long-spec model below.
+    # Fail-open: a thin/failed spec falls back to the ordinary plan.
+    detailed_map = (
+        env_flag("DETAILED_MAP", "false")
+        and render_mode == "place_submap"
+        and not body.condition_image_urls  # a ROOT map, not a zoom/continue
+        and body.mode != "edit"
     )
+    plan = None
+    if detailed_map:
+        map_spec = await llm.expand_map_spec(
+            effective_query,
+            style_anchor=style_anchor,
+            output_locale=body.output_locale,
+            label_free=body.suppress_map_labels,
+        )
+        if map_spec is not None:
+            # facts stay empty: the spec embeds its own labels, so the
+            # "Labels to include" append below is a natural no-op.
+            plan = llm.PagePlan(map_spec.page_title, map_spec.spec, [], [])
+        detailed_map = plan is not None
+    if plan is None:
+        plan = await llm.plan_page(
+            query=effective_query,
+            web_search=effective_web_search,
+            style_anchor=style_anchor,
+            output_locale=body.output_locale,
+            parent_title=body.parent_title,
+            parent_query=body.parent_query,
+            subject_context=subject_context,
+            world_context=world_context_payload,
+            render_mode=render_mode or "explainer",
+            surroundings=surroundings_for_plan,
+            label_free=body.suppress_map_labels,
+        )
 
     composed_prompt = plan.prompt
     if style_anchor:
@@ -1034,12 +1059,20 @@ async def stream_tap(
                 )
             )
     else:
+        # DETAILED_MAP routes the long spec to the compliance winner: on the
+        # 2026-08-24 full-spec A/B nano-banana-pro nailed labels/layout where
+        # seedream mangled tier-2 text. An explicit user model still wins.
+        detailed_model = (
+            os.environ.get("DETAILED_MAP_MODEL") or "fal-ai/nano-banana-pro"
+            if detailed_map
+            else None
+        )
         main_task = _asyncio.create_task(
             image_provider.generate_image(
                 prompt=main_prompt,
                 aspect_ratio=body.aspect_ratio,
                 tier=body.image_tier,
-                model_override=body.image_model,
+                model_override=body.image_model or detailed_model,
                 reference_urls=cond_refs,
             )
         )

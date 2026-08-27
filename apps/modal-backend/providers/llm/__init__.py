@@ -86,6 +86,10 @@ from .extraction import (
     _parse_extraction,
     extract_entities,
 )
+from .map_spec import (
+    MapSpec,
+    expand_map_spec,
+)
 from .planner import (
     PLAN_SCHEMA,
     Citation,
