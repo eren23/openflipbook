@@ -134,6 +134,7 @@ import { focusOnMap } from "@/lib/click-route";
 import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { buildOutwardContext } from "@/lib/outward-context";
+import { shouldAutoDescend } from "@/lib/descent-clip";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
@@ -3312,7 +3313,7 @@ export default function PlayPage() {
     setStreamStatus("playing");
   }, [fallbackVideoUrl]);
 
-  const requestClip = useCallback(async (body: Record<string, unknown>) => {
+  const requestClip = useCallback(async (body: Record<string, unknown>): Promise<string | null> => {
     animateAbortRef.current?.abort();
     const ac = new AbortController();
     animateAbortRef.current = ac;
@@ -3335,6 +3336,7 @@ export default function PlayPage() {
       setFallbackVideoUrl(data.video_url);
       setShowVideo(true);
       setStreamStatus("playing");
+      return data.video_url;
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         setStreamStatus("error");
@@ -3343,6 +3345,7 @@ export default function PlayPage() {
         setStreamStatus("error");
         setError((err as Error).message);
       }
+      return null;
     } finally {
       window.clearTimeout(timeoutId);
       if (animateAbortRef.current === ac) animateAbortRef.current = null;
@@ -3351,18 +3354,89 @@ export default function PlayPage() {
 
   // Descent clip: first frame = the parent map, last frame = this page — the
   // tap hard-cut replayed as a real camera move (fal ltx-2.3 first+last mode).
+  // A node with a STORED clip (DESCENT_AUTO or an earlier generate) replays
+  // instantly instead of re-billing fal.
   const descentParentImage = page?.parentId
     ? history.items.find((p) => p.nodeId === page.parentId)?.imageDataUrl
     : undefined;
+  const rememberDescentClip = useCallback((nodeId: string, url: string) => {
+    setPage((prev) =>
+      prev && prev.nodeId === nodeId ? { ...prev, descentVideoUrl: url } : prev,
+    );
+    setHistory((prev) => ({
+      ...prev,
+      items: prev.items.map((p) =>
+        p.nodeId === nodeId ? { ...p, descentVideoUrl: url } : p,
+      ),
+    }));
+    void fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descent_video_url: url }),
+    }).catch(() => {});
+  }, []);
   const descendClip = useCallback(() => {
+    if (page?.descentVideoUrl) {
+      setFallbackVideoUrl(page.descentVideoUrl);
+      setShowVideo(true);
+      setStreamStatus("playing");
+      return;
+    }
     if (!page?.imageDataUrl || !descentParentImage) return;
+    const forNode = page.nodeId;
     void requestClip({
       image_data_url: descentParentImage,
       end_image_data_url: page.imageDataUrl,
       prompt: page.title,
       video_tier: videoTier,
+    }).then((url) => {
+      if (url && forNode) rememberDescentClip(forNode, url);
     });
-  }, [page, descentParentImage, requestClip, videoTier]);
+  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip]);
+
+  // DESCENT_AUTO (default off): generate the arrival clip in the BACKGROUND
+  // as soon as an entered page settles, so the replay is instant and the
+  // clip persists on the node (once per edge). Additive: nothing plays by
+  // itself — the Descend button just lights up pre-armed.
+  const descentAutoFiredRef = useRef<Set<string>>(new Set());
+  const descentAutoEnabled = process.env.NEXT_PUBLIC_DESCENT_AUTO === "1";
+  useEffect(() => {
+    if (
+      !shouldAutoDescend({
+        enabled: descentAutoEnabled,
+        nodeId: page?.nodeId ?? null,
+        parentImage: descentParentImage,
+        currentImage: page?.imageDataUrl,
+        storedUrl: page?.descentVideoUrl,
+        alreadyFired: descentAutoFiredRef.current.has(page?.nodeId ?? ""),
+      })
+    ) {
+      return;
+    }
+    const nodeId = page!.nodeId!;
+    descentAutoFiredRef.current.add(nodeId);
+    void fetch("/api/animate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_data_url: descentParentImage,
+        end_image_data_url: page!.imageDataUrl,
+        prompt: page!.title,
+        video_tier: videoTier,
+      }),
+    })
+      .then(async (res) => {
+        const data = (await res.json()) as { video_url?: string };
+        if (res.ok && data.video_url) rememberDescentClip(nodeId, data.video_url);
+      })
+      .catch(() => {});
+  }, [
+    descentAutoEnabled,
+    page,
+    descentParentImage,
+    videoTier,
+    rememberDescentClip,
+  ]);
 
   const connectStream = useCallback(async () => {
     if (!page?.imageDataUrl) return;

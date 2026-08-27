@@ -71,6 +71,35 @@ def _mock_fresh(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return gen
 
 
+async def test_ascend_degenerate_plan_title_falls_back_to_the_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A salvaged/failed plan falls back to the RAW query — for OUTWARD that
+    # is the whole identity clause. The page title must never be that wall
+    # of text (live-caught: a 500-char breadcrumb on the fork session).
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    gen = _mock_fresh(monkeypatch)
+    monkeypatch.setattr(
+        llm_mod,
+        "plan_page",
+        AsyncMock(
+            return_value=PagePlan(
+                "the region that contains " + "x" * 300, "a wider map", [], []
+            )
+        ),
+    )
+    edit = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r")
+    )
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    del gen
+
+    events = await _collect(_event_stream(_ascend_body(), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["page_title"] == "The Surrounding Region"
+
+
 async def test_ascend_container_continues_source_via_edit_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

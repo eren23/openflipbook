@@ -143,6 +143,8 @@ export interface NodeDoc extends Document {
   // never silently re-runs the non-deterministic VLM pass. Absent on legacy
   // rows → treated as "not yet extracted".
   geo_extracted_at?: Date | null;
+  // DESCENT_AUTO's stored arrival clip. Absent on every legacy row.
+  descent_video_url?: string | null;
   created_at: Date;
 }
 
@@ -196,6 +198,10 @@ export interface NodeRow {
   // Whether entity extraction has already run for this node. Read back on
   // revisit so the client never auto-re-extracts a node it has already done.
   geo_extracted: boolean;
+  // DESCENT_AUTO: the background-generated arrival clip (parent map diving
+  // into this page). Null until (and unless) the flag-gated client stores
+  // one; served back so every future visitor replays it instantly.
+  descent_video_url: string | null;
   created_at: string;
 }
 
@@ -212,6 +218,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     view_verdict,
     forked_from,
     geo_extracted_at,
+    descent_video_url,
     ...rest
   } = doc;
   return {
@@ -226,6 +233,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     view_verdict: view_verdict ?? null,
     forked_from: forked_from ?? null,
     geo_extracted: geo_extracted_at != null,
+    descent_video_url: descent_video_url ?? null,
     created_at: created_at.toISOString(),
   };
 }
@@ -431,6 +439,15 @@ export async function updateNodeEstimatedView(
  *  "already attempted" guard — read back via `NodeRow.geo_extracted` so a
  *  revisit / reload never silently re-runs the non-deterministic VLM pass.
  *  Best-effort + idempotent; the caller never blocks on it. */
+export async function setNodeDescentClip(id: string, url: string): Promise<boolean> {
+  const collection = await nodes();
+  const res = await collection.updateOne(
+    { _id: id },
+    { $set: { descent_video_url: url } },
+  );
+  return res.matchedCount > 0;
+}
+
 export async function markNodeGeoExtracted(id: string): Promise<void> {
   const collection = await nodes();
   await collection.updateOne(
