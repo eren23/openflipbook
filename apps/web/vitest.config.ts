@@ -36,9 +36,9 @@ export default defineConfig({
       // FAILS; a PR that raises coverage bumps the floor to the new number.
       // Never lower these to make a PR pass — that defeats the ratchet.
       thresholds: {
-        lines: 77,
-        statements: 77,
-        functions: 80,
+        lines: 78,
+        statements: 78,
+        functions: 81,
         branches: 86,
       },
     },
