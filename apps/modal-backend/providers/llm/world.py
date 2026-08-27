@@ -153,7 +153,8 @@ async def propose_neighbors(
             schema=NEIGHBORS_SCHEMA,
             schema_name="neighbors",
             temperature=0.4,
-            max_tokens=1200,
+            # Array-bearing JSON reply; headroom for 3.7-flash pretty-printing.
+            max_tokens=1800,
             span_ctx=ctx,
         )
     return _build_neighbors(parsed, max_neighbors)
@@ -344,7 +345,9 @@ async def edit_entities_nl(
             schema=ENTITY_EDIT_SCHEMA,
             schema_name="entity_edits",
             temperature=0.0,
-            max_tokens=900,
+            # Array-bearing JSON reply; sized for the old 3-flash pin —
+            # 3.7-flash pretty-prints (the plan_page truncation class, #244).
+            max_tokens=1400,
             span_ctx=ctx,
         )
     edits = parse_entity_edits(parsed, valid_ids)
