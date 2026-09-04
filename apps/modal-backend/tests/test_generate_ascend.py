@@ -499,3 +499,72 @@ async def test_ascend_suppresses_lettering_in_dom_labels_mode(
     assert next(e for e in events if e["type"] == "ascend_ready")
     instr = edit.await_args.args[1]
     assert NO_LETTERING in instr
+
+
+async def test_ascend_edit_instruction_locks_cartographic_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #252: the container edit must demand cartographic continuity (exact
+    # linework, labels, palette) — the generic "same art style" let
+    # nano-banana restyle the map into a soft label-free watercolor.
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    instr = edit.await_args_list[0].args[1]
+    assert "ONE SINGLE" in instr
+    assert "EXACT CENTRE" in instr
+    assert "do NOT draw a map-within-a-map" in instr
+    assert "inked linework, lettering and palette" in instr
+
+
+async def test_ascend_style_lock_off_restores_generic_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Kill-switch: SCALE_OUTWARD_STYLE_LOCK=false = the pre-#252 instruction.
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_STYLE_LOCK", "false")
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    instr = edit.await_args_list[0].args[1]
+    assert "THIS EXACT MAP" not in instr
+    assert "keeping this exact view as the centre" in instr
+
+
+async def test_ascend_medium_floor_retries_borderline_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #252: a container scoring 6.5 style (a soft restyle) used to SHIP at the
+    # shared 6.0 floor. The raised ascend floor (7.0 default) retries it;
+    # SCALE_OUTWARD_ACCEPT_MEDIUM=6.0 restores the accept-at-6.0 behaviour.
+    from providers import judge as judge_mod
+    from providers.judge import JudgeResult
+
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setattr(
+        judge_mod,
+        "score_prompt_alignment",
+        AsyncMock(return_value=JudgeResult(9.0, "zoomed out", "")),
+    )
+    monkeypatch.setattr(
+        judge_mod,
+        "score_style_pair",
+        AsyncMock(return_value=JudgeResult(6.5, "soft restyle", "")),
+    )
+
+    # Default raised floor 7.0: 6.5 < 7.0 -> retry -> two edit calls.
+    edit = AsyncMock(return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    assert edit.await_count == 2
+
+    # Restore the old floor: 6.5 >= 6.0 -> accepted on the first attempt.
+    monkeypatch.setenv("SCALE_OUTWARD_ACCEPT_MEDIUM", "6.0")
+    edit2 = AsyncMock(return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit2)
+    await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t2"))
+    assert edit2.await_count == 1

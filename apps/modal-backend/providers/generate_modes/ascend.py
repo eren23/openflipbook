@@ -247,11 +247,40 @@ async def stream_ascend(
                 # hop cap) skips it too: the drifting previous hop is exactly what
                 # we must NOT condition on — fall through to the fresh text render.
                 medium = style_lock or "the same hand-drawn art style as the centre"
-                ascend_instr = (
-                    f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
-                    f"keeping this exact view as the centre. {medium}; one continuous "
-                    "view in that style, NOT a photograph, no photorealism."
-                )
+                # #252: the container is ALWAYS a wider top-down MAP continuing a
+                # map source, but the generic "same art style" let nano-banana
+                # crayon-restyle it (style judge medium 4.5, accepted at the
+                # 6.0 floor). Demand cartographic continuity + the no-inset
+                # framing (A/B on the Ankh map: 4.5 -> 7.5). NOT gated on a map
+                # scene_view: uploaded-map roots carry scene_view=null (verified
+                # in Mongo), so a map-level guard would skip the exact demo
+                # case. Kill-switch SCALE_OUTWARD_STYLE_LOCK=false = pre-#252.
+                if env_flag("SCALE_OUTWARD_STYLE_LOCK", "true"):
+                    # This exact wording is A/B-chosen. The composition clause
+                    # ("ONE SINGLE continuous chart", no-inset/no-desk) is robust
+                    # across renders; the explicit "its exact palette" holds
+                    # COLOR better than the canonical medium_lock() helper, which
+                    # went monochrome (medium 6.0 vs this wording's 7.5) — output
+                    # beats code-reuse here. The raised floor below retries any
+                    # palette dip regardless.
+                    ascend_instr = (
+                        "Zoom OUT / pull the camera back to reveal the surrounding "
+                        f"{to_tier.replace('_', ' ')} around this map, as ONE SINGLE "
+                        "continuous hand-inked cartographer's chart at one consistent "
+                        "scale on one sheet. The original walled place stays at the "
+                        "EXACT CENTRE — same shape and same labels — now drawn smaller "
+                        "and ringed by its surrounding lands. Keep the source's exact "
+                        f"style ({medium}): the same inked linework, lettering and "
+                        "palette. This is a FLAT top-down map only: do NOT draw a "
+                        "map-within-a-map or an inset, no desk or table, no hand, no "
+                        "photo border, NOT a photograph, no soft watercolor."
+                    )
+                else:
+                    ascend_instr = (
+                        f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
+                        f"keeping this exact view as the centre. {medium}; one continuous "
+                        "view in that style, NOT a photograph, no photorealism."
+                    )
                 if source_identity:
                     ascend_instr += " SOURCE IDENTITY LOCK: " + source_identity
                 if outward_rider:
@@ -277,8 +306,24 @@ async def stream_ascend(
                     )
                     render_unjudged = True
                 else:
+                    import dataclasses
+
                     ascend_cfg = edit_loop.edit_loop_config_from_env(
                         body.max_attempts
+                    )
+                    # #252: a map container scoring AT the shared 6.0 medium
+                    # floor shipped a watercolor restyle. Raise the ascend
+                    # loop's style floor (env SCALE_OUTWARD_ACCEPT_MEDIUM; set
+                    # 6.0 to restore the shared floor) so a borderline break
+                    # retries and keeps the best-styled attempt.
+                    try:
+                        _asc_floor = float(
+                            os.environ.get("SCALE_OUTWARD_ACCEPT_MEDIUM", 7.0)
+                        )
+                    except (TypeError, ValueError):
+                        _asc_floor = 7.0
+                    ascend_cfg = dataclasses.replace(
+                        ascend_cfg, accept_medium=_asc_floor
                     )
                     ascend_deadline = _time.monotonic() + 720.0
                     captured_instr = ascend_instr
