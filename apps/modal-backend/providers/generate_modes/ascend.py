@@ -247,11 +247,35 @@ async def stream_ascend(
                 # hop cap) skips it too: the drifting previous hop is exactly what
                 # we must NOT condition on — fall through to the fresh text render.
                 medium = style_lock or "the same hand-drawn art style as the centre"
-                ascend_instr = (
-                    f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
-                    f"keeping this exact view as the centre. {medium}; one continuous "
-                    "view in that style, NOT a photograph, no photorealism."
-                )
+                # #252: the container is ALWAYS a wider map continuing a map
+                # source, but the generic "same art style" let nano-banana
+                # restyle it into a soft label-free watercolor (medium judge
+                # 6.0 — accepted at the floor). Demand cartographic continuity
+                # explicitly. Kill-switch SCALE_OUTWARD_STYLE_LOCK=false =
+                # the pre-#252 instruction, byte-identical.
+                if env_flag("SCALE_OUTWARD_STYLE_LOCK", "true"):
+                    # A/B'd against the old generic wording (style-judge medium
+                    # 4.5 crayon-restyle -> 7.5 here): "ONE SINGLE continuous
+                    # chart" + the explicit no-inset/no-desk clause kill the
+                    # map-within-a-map framing nano-banana falls into.
+                    ascend_instr = (
+                        "Zoom OUT / pull the camera back to reveal the surrounding "
+                        f"{to_tier.replace('_', ' ')} around this map, as ONE SINGLE "
+                        "continuous hand-inked cartographer's chart at one consistent "
+                        "scale on one sheet. The original walled place stays at the "
+                        "EXACT CENTRE — same shape and same labels — now drawn smaller "
+                        "and ringed by its surrounding lands. Keep the source's exact "
+                        f"style ({medium}): the same inked linework, lettering and "
+                        "palette. This is a FLAT top-down map only: do NOT draw a "
+                        "map-within-a-map or an inset, no desk or table, no hand, no "
+                        "photo border, NOT a photograph, no soft watercolor."
+                    )
+                else:
+                    ascend_instr = (
+                        f"Zoom OUT to reveal the surrounding {to_tier.replace('_', ' ')}, "
+                        f"keeping this exact view as the centre. {medium}; one continuous "
+                        "view in that style, NOT a photograph, no photorealism."
+                    )
                 if source_identity:
                     ascend_instr += " SOURCE IDENTITY LOCK: " + source_identity
                 if outward_rider:
@@ -277,8 +301,24 @@ async def stream_ascend(
                     )
                     render_unjudged = True
                 else:
+                    import dataclasses
+
                     ascend_cfg = edit_loop.edit_loop_config_from_env(
                         body.max_attempts
+                    )
+                    # #252: a map container scoring AT the shared 6.0 medium
+                    # floor shipped a watercolor restyle. Raise the ascend
+                    # loop's style floor (env SCALE_OUTWARD_ACCEPT_MEDIUM; set
+                    # 6.0 to restore the shared floor) so a borderline break
+                    # retries and keeps the best-styled attempt.
+                    try:
+                        _asc_floor = float(
+                            os.environ.get("SCALE_OUTWARD_ACCEPT_MEDIUM", 7.0)
+                        )
+                    except (TypeError, ValueError):
+                        _asc_floor = 7.0
+                    ascend_cfg = dataclasses.replace(
+                        ascend_cfg, accept_medium=_asc_floor
                     )
                     ascend_deadline = _time.monotonic() + 720.0
                     captured_instr = ascend_instr
