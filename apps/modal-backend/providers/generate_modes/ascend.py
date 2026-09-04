@@ -247,17 +247,22 @@ async def stream_ascend(
                 # hop cap) skips it too: the drifting previous hop is exactly what
                 # we must NOT condition on — fall through to the fresh text render.
                 medium = style_lock or "the same hand-drawn art style as the centre"
-                # #252: the container is ALWAYS a wider map continuing a map
-                # source, but the generic "same art style" let nano-banana
-                # restyle it into a soft label-free watercolor (medium judge
-                # 6.0 — accepted at the floor). Demand cartographic continuity
-                # explicitly. Kill-switch SCALE_OUTWARD_STYLE_LOCK=false =
-                # the pre-#252 instruction, byte-identical.
+                # #252: the container is ALWAYS a wider top-down MAP continuing a
+                # map source, but the generic "same art style" let nano-banana
+                # crayon-restyle it (style judge medium 4.5, accepted at the
+                # 6.0 floor). Demand cartographic continuity + the no-inset
+                # framing (A/B on the Ankh map: 4.5 -> 7.5). NOT gated on a map
+                # scene_view: uploaded-map roots carry scene_view=null (verified
+                # in Mongo), so a map-level guard would skip the exact demo
+                # case. Kill-switch SCALE_OUTWARD_STYLE_LOCK=false = pre-#252.
                 if env_flag("SCALE_OUTWARD_STYLE_LOCK", "true"):
-                    # A/B'd against the old generic wording (style-judge medium
-                    # 4.5 crayon-restyle -> 7.5 here): "ONE SINGLE continuous
-                    # chart" + the explicit no-inset/no-desk clause kill the
-                    # map-within-a-map framing nano-banana falls into.
+                    # This exact wording is A/B-chosen. The composition clause
+                    # ("ONE SINGLE continuous chart", no-inset/no-desk) is robust
+                    # across renders; the explicit "its exact palette" holds
+                    # COLOR better than the canonical medium_lock() helper, which
+                    # went monochrome (medium 6.0 vs this wording's 7.5) — output
+                    # beats code-reuse here. The raised floor below retries any
+                    # palette dip regardless.
                     ascend_instr = (
                         "Zoom OUT / pull the camera back to reveal the surrounding "
                         f"{to_tier.replace('_', ' ')} around this map, as ONE SINGLE "

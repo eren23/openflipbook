@@ -515,8 +515,8 @@ async def test_ascend_edit_instruction_locks_cartographic_style(
     instr = edit.await_args_list[0].args[1]
     assert "ONE SINGLE" in instr
     assert "EXACT CENTRE" in instr
-    assert "inked linework" in instr
     assert "do NOT draw a map-within-a-map" in instr
+    assert "inked linework, lettering and palette" in instr
 
 
 async def test_ascend_style_lock_off_restores_generic_instruction(
