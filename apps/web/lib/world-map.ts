@@ -27,6 +27,7 @@ import {
   localBounds,
   localExtent,
   mapPolygonToCrop,
+  resolveAbsoluteFrame,
   siblingsOf,
   toAbsoluteEntities,
   type SimilarityFit,
@@ -160,21 +161,27 @@ function slugLabel(label: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-/** Re-root (parent_id = null) any survivor whose parent points at a removed id.
- *  Without this, `resolveAbsolutePos` treats the orphan as a root and composes
- *  its LOCAL pos as if it were absolute — silently mis-placing it and skewing
- *  `recomputeBounds`. Pure; entities whose parent survives are returned as-is. */
-function rerootOrphans(
+/** Remove entries and re-express orphaned survivors in the absolute frame.
+ *  Resolve against the original tree before deleting ancestors; position,
+ *  footprint and child-frame scale must all survive a container rollback. */
+function removeAndReroot(
   entities: WorldEntityGeo[],
   removedIds: Iterable<string>,
 ): WorldEntityGeo[] {
   const removed = new Set(removedIds);
   if (removed.size === 0) return entities;
-  return entities.map((e) =>
-    e.parent_id != null && removed.has(e.parent_id)
-      ? { ...e, parent_id: null }
-      : e,
-  );
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  return entities.filter((e) => !removed.has(e.id)).map((e) => {
+    if (e.parent_id == null || !removed.has(e.parent_id)) return e;
+    const frame = resolveAbsoluteFrame(e.id, byId)!;
+    return {
+      ...e,
+      parent_id: null,
+      pos: frame.pos,
+      footprint: { w: e.footprint.w * frame.unit, d: e.footprint.d * frame.unit },
+      scale: (e.scale ?? 1) * frame.unit,
+    };
+  });
 }
 
 /** Apply one structured geo edit to the entity list. Pure + total: an edit whose
@@ -212,11 +219,8 @@ export function applyEntityEdit(
   }
   if (edit.op === "remove") {
     // Drop the target AND re-root its children — leaving a dangling parent_id
-    // silently mis-places them (see rerootOrphans).
-    return rerootOrphans(
-      entities.filter((e) => e.id !== edit.target),
-      [edit.target],
-    );
+    // silently mis-places them (see removeAndReroot).
+    return removeAndReroot(entities, [edit.target]);
   }
   return entities.map((e) => {
     if (e.id !== edit.target) return e;
@@ -380,17 +384,13 @@ export async function removeEntityGeos(
   ids: string[],
 ): Promise<WorldMapSnapshot> {
   if (ids.length === 0) return getWorldMap(sessionId);
-  const removeSet = new Set(ids);
   const col = await collection();
   const next = await optimisticReplace<WorldMapDoc>(
     col,
     sessionId,
     (existing) => {
       const now = new Date();
-      const kept = rerootOrphans(
-        (existing ? existing.entities : []).filter((e) => !removeSet.has(e.id)),
-        ids,
-      );
+      const kept = removeAndReroot(existing ? existing.entities : [], ids);
       return {
         _id: sessionId,
         entities: kept,

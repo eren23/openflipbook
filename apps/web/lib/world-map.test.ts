@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EntityGeoEdit, SceneView, WorldEntityGeo } from "@openflipbook/config";
+import { resolveAbsoluteFrame } from "./world-geometry";
+import { reparentRoots } from "./scale-tree";
 
 // In-memory Mongo stand-in so the optimistic read-modify-write wrappers run for
 // real (findOne / insertOne-with-dup / replaceOne-filtered-on-updated_at)
@@ -206,6 +208,28 @@ describe("applyEntityEdit (P5 structured geo edits)", () => {
     // Children must NOT keep pointing at the removed parent — else
     // resolveAbsolutePos mis-places them as roots in their own local frame.
     expect(out.every((e) => (e.parent_id ?? null) === null)).toBe(true);
+    expect(out.find((e) => e.id === child.id)!.pos).toEqual({ x: 11, y: 12 });
+    expect(out.find((e) => e.id === sibling.id)!.pos).toEqual({ x: 13, y: 14 });
+  });
+
+  it("removing a scaled nested container preserves surviving descendants' positions and extents", () => {
+    const ancestor = { ...geo("ancestor", "user", 10, 20), scale: 0.5 };
+    const parent = { ...geo("parent", "user", 4, 8), parent_id: "ancestor", scale: 0.2 };
+    const child = { ...geo("child", "user", 5, 15), parent_id: "parent", scale: 2 };
+    const grandchild = { ...geo("grandchild", "user", 1, 3), parent_id: "child" };
+    const original = [ancestor, parent, child, grandchild];
+    const out = applyEntityEdit(original, { op: "remove", target: "parent" }, "t");
+    const beforeById = new Map(original.map((e) => [e.id, e]));
+    const afterById = new Map(out.map((e) => [e.id, e]));
+    for (const entity of out) {
+      const before = resolveAbsoluteFrame(entity.id, beforeById)!;
+      const after = resolveAbsoluteFrame(entity.id, afterById)!;
+      expect(after.pos.x).toBeCloseTo(before.pos.x);
+      expect(after.pos.y).toBeCloseTo(before.pos.y);
+      expect(entity.footprint.w * after.unit).toBeCloseTo(beforeById.get(entity.id)!.footprint.w * before.unit);
+    }
+    expect(afterById.get("child")!.scale).toBeCloseTo(0.2);
+    expect(afterById.get("grandchild")!.parent_id).toBe("child");
   });
 
   it("add appends a user entity with defaults + deterministic id", () => {
@@ -531,6 +555,41 @@ describe("world-map Mongo wrappers (optimistic read-modify-write)", () => {
     const after = await removeEntityGeos("s3", ["geo_p"]);
     expect(after.entities.map((e) => e.id)).toEqual(["geo_c"]);
     expect(after.entities[0]!.parent_id ?? null).toBeNull();
+    expect(after.entities[0]!.pos).toEqual({ x: 11, y: 11 });
+  });
+
+  it("rolling back an OUTWARD container restores original geometry", async () => {
+    const originals = [
+      { ...geo("town", "user", 20, 30), scale_tier: "city" as const, scale: 0.5 },
+      { ...geo("tavern", "user", 4, 8), parent_id: "town" },
+    ];
+    const parent = { ...geo("container", "user", 50, 28), scale_tier: "region" as const };
+    const reparented = reparentRoots(originals, parent, "t1");
+    await upsertEntityGeos("rollback", reparented.geos);
+    const restored = await removeEntityGeos("rollback", [parent.id]);
+    expect(restored.entities.map((e) => e.id)).toEqual(originals.map((e) => e.id));
+    for (const original of originals) {
+      const actual = restored.entities.find((e) => e.id === original.id)!;
+      expect(actual.parent_id ?? null).toBe(original.parent_id ?? null);
+      expect(actual.pos.x).toBeCloseTo(original.pos.x);
+      expect(actual.pos.y).toBeCloseTo(original.pos.y);
+      expect(actual.footprint.w).toBeCloseTo(original.footprint.w);
+      expect(actual.footprint.d).toBeCloseTo(original.footprint.d);
+      expect(actual.scale ?? 1).toBeCloseTo(original.scale ?? 1);
+    }
+  });
+
+  it("removing multiple ancestors resolves survivors against the complete original tree", async () => {
+    const original = [
+      { ...geo("outer", "user", 10, 20), scale: 0.5 },
+      { ...geo("inner", "user", 4, 8), parent_id: "outer", scale: 0.2 },
+      { ...geo("survivor", "user", 5, 15), parent_id: "inner" },
+    ];
+    await upsertEntityGeos("multi-remove", original);
+    const out = await removeEntityGeos("multi-remove", ["outer", "inner"]);
+    expect(out.entities).toHaveLength(1);
+    expect(out.entities[0]!.pos).toEqual({ x: 12.5, y: 25.5 });
+    expect(out.entities[0]!.footprint.w).toBeCloseTo(0.6);
   });
 });
 

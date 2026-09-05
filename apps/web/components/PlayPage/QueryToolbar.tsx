@@ -67,7 +67,7 @@ export function QueryToolbar({
     <>
       <form
         onSubmit={onSubmit}
-        className="flex flex-wrap items-center gap-2 rounded-full border border-[var(--color-edge)] bg-[var(--color-canvas)]/80 px-4 py-2 shadow-sm"
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-edge)] bg-[var(--color-canvas)]/80 px-4 py-2 shadow-sm sm:rounded-full"
       >
         <input
           autoFocus

@@ -11,6 +11,7 @@ generate.py's stream helpers (`_sse`, `_frame_dims`, `_view_grammar_on`,
 from __future__ import annotations
 
 import asyncio as _asyncio
+import math
 import os
 import time as _time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -203,7 +204,8 @@ async def stream_ascend(
         from providers.prompt_library.style import NO_LETTERING
 
         no_lettering = NO_LETTERING
-    render_unjudged = False
+    render_unjudged = True
+    render_rejected = False
     billed_images = 1
     try:
         if use_outpaint:
@@ -315,12 +317,14 @@ async def stream_ascend(
                     # floor shipped a watercolor restyle. Raise the ascend
                     # loop's style floor (env SCALE_OUTWARD_ACCEPT_MEDIUM; set
                     # 6.0 to restore the shared floor) so a borderline break
-                    # retries and keeps the best-styled attempt.
+                    # retries instead of publishing a borderline restyle.
                     try:
                         _asc_floor = float(
                             os.environ.get("SCALE_OUTWARD_ACCEPT_MEDIUM", 7.0)
                         )
                     except (TypeError, ValueError):
+                        _asc_floor = 7.0
+                    if not math.isfinite(_asc_floor) or not 0 <= _asc_floor <= 10:
                         _asc_floor = 7.0
                     ascend_cfg = dataclasses.replace(
                         ascend_cfg, accept_medium=_asc_floor
@@ -358,7 +362,19 @@ async def stream_ascend(
                     billed_images = max(1, len(ascend_attempts))
                     # Critic degraded (judge failure → single blind attempt):
                     # the render shipped without a verdict — flag it.
-                    render_unjudged = asc_res.best.alignment is None
+                    render_unjudged = (
+                        asc_res.best.alignment is None or asc_res.best.medium is None
+                    )
+                    # A known failure must not become a new persistent root.
+                    # Keep the explicit unverified fallback for critic outages,
+                    # but never let an available critic's rejection pass through.
+                    render_rejected = (
+                        asc_res.best.alignment is not None
+                        and asc_res.best.alignment.score < ascend_cfg.accept_alignment
+                    ) or (
+                        asc_res.best.medium is not None
+                        and asc_res.best.medium.score < ascend_cfg.accept_medium
+                    )
             else:
                 # Fresh container = a NEW map: state the deliberate
                 # top-down camera (None on astro rungs → legacy bytes).
@@ -406,12 +422,21 @@ async def stream_ascend(
                 {"type": "error", "message": f"ascend failed: {exc}"}, trace_id
             )
         return
-    data_url = await _asyncio.to_thread(
-        image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
-    )
     # Spend accounting: this OUTWARD hop made real paid image calls (one per
     # judged attempt) — record them so the cap actually counts them.
     spend.record_generation(body.session_id, img.model, images=billed_images)
+    if render_rejected:
+        yield _sse(
+            {
+                "type": "error",
+                "message": "The wider view did not pass the quality checks. Your world is unchanged.",
+            },
+            trace_id,
+        )
+        return
+    data_url = await _asyncio.to_thread(
+        image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
+    )
     ascend_payload: GenerateAscendReadyEvent = {
         "type": "ascend_ready",
         "page_title": page_title,

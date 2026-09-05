@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   GenerateAscendReadyEvent,
@@ -77,6 +77,8 @@ export function useAscend(onAscended: (a: Ascended) => void): {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const start = useCallback(
     (sessionId: string, root: AscendRoot) => {
@@ -158,7 +160,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
           });
           setPending(false);
         } catch (err) {
-          if ((err as Error).name === "AbortError") return;
+          if (ac.signal.aborted || (err as Error).name === "AbortError") return;
           setError((err as Error).message);
           setPending(false);
         }

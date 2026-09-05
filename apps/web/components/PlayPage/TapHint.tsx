@@ -18,7 +18,7 @@ interface Props {
  */
 export function TapHint({ text }: Props) {
   return (
-    <figcaption className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-sm text-white">
+    <figcaption className="pointer-events-none absolute inset-x-0 bottom-3 hidden justify-center text-sm text-white sm:flex">
       <span className="max-w-[60%] truncate rounded-full bg-black/55 px-3 py-1 backdrop-blur">
         {text}
       </span>

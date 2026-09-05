@@ -568,3 +568,88 @@ async def test_ascend_medium_floor_retries_borderline_style(
     monkeypatch.setattr(image_edit_mod, "edit_image", edit2)
     await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t2"))
     assert edit2.await_count == 1
+
+
+@pytest.mark.parametrize("alignment,medium", [(9.0, 6.0), (6.0, 9.0)])
+async def test_ascend_rejected_attempts_do_not_replace_the_world(
+    monkeypatch: pytest.MonkeyPatch, alignment: float, medium: float
+) -> None:
+    from providers import judge, spend
+    from providers.judge import JudgeResult
+
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(return_value=GeneratedImage(b"bad", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    monkeypatch.setattr(judge, "score_prompt_alignment", AsyncMock(return_value=JudgeResult(alignment, "alignment", "")))
+    monkeypatch.setattr(judge, "score_style_pair", AsyncMock(return_value=JudgeResult(medium, "style", "")))
+    record = MagicMock()
+    monkeypatch.setattr(spend, "record_generation", record)
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+
+    assert edit.await_count == 2
+    assert not any(e["type"] == "ascend_ready" for e in events)
+    assert "unchanged" in next(e["message"] for e in events if e["type"] == "error")
+    record.assert_called_once_with("s1", "m", images=2)
+
+
+async def test_ascend_accepted_retry_is_the_only_published_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from providers import judge
+    from providers.judge import JudgeResult
+
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(side_effect=[
+        GeneratedImage(b"bad", "image/jpeg", "m", "r1"),
+        GeneratedImage(b"good", "image/jpeg", "m", "r2"),
+    ])
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    monkeypatch.setattr(judge, "score_prompt_alignment", AsyncMock(return_value=JudgeResult(9, "aligned", "")))
+    monkeypatch.setattr(judge, "score_style_pair", AsyncMock(side_effect=[
+        JudgeResult(6, "wrong palette", ""), JudgeResult(8, "same style", ""),
+    ]))
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["image_data_url"] == image_mod.encode_data_url(b"good", "image/jpeg")
+    assert "wrong palette" in edit.await_args_list[1].args[1]
+
+
+async def test_ascend_style_judge_failure_is_marked_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from providers import judge
+    from providers.judge import JudgeResult
+
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    edit = AsyncMock(return_value=GeneratedImage(b"jpeg", "image/jpeg", "m", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    monkeypatch.setattr(judge, "score_prompt_alignment", AsyncMock(return_value=JudgeResult(9, "aligned", "")))
+    monkeypatch.setattr(judge, "score_style_pair", AsyncMock(side_effect=RuntimeError("offline")))
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    ready = next(e for e in events if e["type"] == "ascend_ready")
+    assert ready["render_unjudged"] is True
+    edit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("floor", ["nan", "inf", "-inf", "-1", "11", "", "garbage"])
+async def test_ascend_invalid_medium_floor_cannot_disable_style_gate(
+    monkeypatch: pytest.MonkeyPatch, floor: str
+) -> None:
+    from providers import judge
+    from providers.judge import JudgeResult
+
+    _enable(monkeypatch)
+    _mock_fresh(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_ACCEPT_MEDIUM", floor)
+    monkeypatch.setattr(image_edit_mod, "edit_image", AsyncMock(return_value=GeneratedImage(b"bad", "image/jpeg", "m", "r")))
+    monkeypatch.setattr(judge, "score_prompt_alignment", AsyncMock(return_value=JudgeResult(9, "aligned", "")))
+    monkeypatch.setattr(judge, "score_style_pair", AsyncMock(return_value=JudgeResult(6, "wrong style", "")))
+
+    events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
+    assert not any(e["type"] == "ascend_ready" for e in events)
