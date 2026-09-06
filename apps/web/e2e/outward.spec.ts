@@ -50,10 +50,16 @@ for (const viewport of [
     const parent = await saveResponse.json() as { parent_node_id: string };
     await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
     await waitForStableImage(page);
+    const minimapExpand = page.getByTitle("Open the full map (M)");
+    await expect(minimapExpand).toBeVisible();
     await page.keyboard.press("t");
+    await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeVisible();
+    await expect(minimapExpand).toBeHidden();
     await page.getByRole("button", { name: `Jump to ${originalNode.page_title}`, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/n/${root.id}`));
     await page.getByRole("button", { name: "Close time-scrubber", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeHidden();
+    await expect(minimapExpand).toBeVisible();
     await page.getByRole("navigation", { name: "Location", exact: true }).getByRole("button").first().click();
     await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
     expect(generations).toBe(2);

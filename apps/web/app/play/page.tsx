@@ -4486,7 +4486,9 @@ export default function PlayPage() {
 
       <DebugHud />
 
-      {viewMode !== "map" && history.items.length >= 2 && (
+      {/* Both navigation overlays occupy the bottom edge; keep the active
+          scrubber unobstructed, including its close button on narrow screens. */}
+      {viewMode !== "map" && !scrubberOpen && history.items.length >= 2 && (
         <SessionMinimap
           pages={history.items
             .filter((p): p is Page & { nodeId: string } => Boolean(p.nodeId))
