@@ -98,7 +98,7 @@ export function SpeedPreset({
   );
 
   return (
-    <div className="relative flex items-center gap-1.5 text-xs">
+    <div className="relative flex min-w-0 max-w-full flex-wrap items-center gap-1.5 text-xs">
       <div
         role="group"
         aria-label="Speed / quality preset"
@@ -141,7 +141,7 @@ export function SpeedPreset({
       </div>
       <span
         data-testid="cost-chip"
-        className="whitespace-nowrap opacity-60"
+        className="opacity-60"
         title={`Projected spend per action — tap ${tap} · edit ${edit} · new page ${fresh}. Ranges span retries; see docs/COSTS.md.${
           typeof sessionSpend === "number"
             ? ` Session so far ≈ $${sessionSpend.toFixed(2)} (backend estimate).`

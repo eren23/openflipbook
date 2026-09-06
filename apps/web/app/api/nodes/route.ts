@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import type { ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
-import { insertNode } from "@/lib/db";
+import { getNode, insertNode } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
 import { getIdempotentResult, saveIdempotentResult } from "@/lib/idempotency";
+import { isSafeId } from "@/lib/ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,8 +41,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = (await req.json()) as CreateBody;
-  if (!body.image_data_url || !body.session_id || !body.page_title) {
+  const body = (await req.json().catch(() => null)) as CreateBody | null;
+  if (
+    !body ||
+    typeof body.image_data_url !== "string" || !body.image_data_url ||
+    !isSafeId(body.session_id) ||
+    typeof body.page_title !== "string" || !body.page_title.trim()
+  ) {
     return NextResponse.json(
       { error: "missing required fields: session_id, page_title, image_data_url" },
       { status: 400 }
@@ -52,16 +58,27 @@ export async function POST(req: Request) {
   const auth = await requireOwner(body.session_id);
   if (!auth.ok) return auth.res;
 
+  if (body.parent_id != null) {
+    if (!isSafeId(body.parent_id)) {
+      return NextResponse.json({ error: "invalid parent_id" }, { status: 400 });
+    }
+    const parent = await getNode(body.parent_id);
+    if (!parent || parent.session_id !== body.session_id) {
+      return NextResponse.json({ error: "parent_id not found in this session" }, { status: 404 });
+    }
+  }
+
   // Idempotent create: a retry with the same Idempotency-Key returns the
   // already-persisted node instead of inserting a duplicate (and skips the
   // re-upload).
-  const idemKey = req.headers.get("idempotency-key");
+  const requestKey = req.headers.get("idempotency-key");
+  const idemKey = requestKey ? `node:${body.session_id}:${requestKey}` : null;
   if (idemKey) {
     const cached = await getIdempotentResult<{
       id: string;
       image_url: string;
       created_at: string;
-    }>(`node:${idemKey}`);
+    }>(idemKey);
     if (cached) return NextResponse.json(cached);
   }
 
@@ -96,6 +113,6 @@ export async function POST(req: Request) {
     image_url: uploaded.url,
     created_at: row.created_at,
   };
-  if (idemKey) await saveIdempotentResult(`node:${idemKey}`, result);
+  if (idemKey) await saveIdempotentResult(idemKey, result);
   return NextResponse.json(result);
 }

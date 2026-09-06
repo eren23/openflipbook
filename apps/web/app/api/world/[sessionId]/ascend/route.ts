@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ScaleTier, SceneView, WorldEntityGeo } from "@openflipbook/config";
-import { tierTransitionValid } from "@openflipbook/config";
+import { SCALE_TIER_METERS, tierTransitionValid } from "@openflipbook/config";
 
 import { deleteNode, getNode, insertNode, recordError, updateNodeParent } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
@@ -10,6 +10,7 @@ import { reparentRoots } from "@/lib/scale-tree";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { isSafeId } from "@/lib/ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,10 +59,16 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  const body = (await req.json()) as AscendBody;
-  if (!body.child_node_id || !body.image_data_url || !body.parent_tier) {
+  const body = (await req.json().catch(() => null)) as AscendBody | null;
+  if (
+    !body ||
+    !isSafeId(body.child_node_id) ||
+    typeof body.image_data_url !== "string" || !body.image_data_url ||
+    typeof body.parent_tier !== "string" || !Object.hasOwn(SCALE_TIER_METERS, body.parent_tier) ||
+    typeof body.page_title !== "string" || !body.page_title.trim()
+  ) {
     return NextResponse.json(
-      { error: "missing required fields: child_node_id, image_data_url, parent_tier" },
+      { error: "invalid or missing fields: child_node_id, image_data_url, parent_tier, page_title" },
       { status: 400 },
     );
   }
@@ -70,7 +77,7 @@ export async function POST(req: Request, { params }: Params) {
 
   // Double-ascend guard: C must exist and still be a root.
   const child = await getNode(body.child_node_id);
-  if (!child) {
+  if (!child || child.session_id !== sessionId) {
     return NextResponse.json({ error: "child_node_id not found" }, { status: 404 });
   }
   if (child.parent_id !== null) {
@@ -85,10 +92,14 @@ export async function POST(req: Request, { params }: Params) {
   // than the child, or metric-inconsistent) would corrupt the ladder — reject it
   // here rather than persist a bad transition. tierTransitionValid was test-only
   // until now (SESSION_AUDIT: "no runtime INV-2 enforcement").
-  if (child.scale_tier && !tierTransitionValid(child.scale_tier, body.parent_tier)) {
+  const childTier = child.scale_tier ?? child.scene_view?.scale_tier ?? "city";
+  if (
+    !tierTransitionValid(childTier, body.parent_tier) ||
+    SCALE_TIER_METERS[body.parent_tier] <= SCALE_TIER_METERS[childTier]
+  ) {
     return NextResponse.json(
       {
-        error: `invalid OUTWARD tier transition: ${child.scale_tier} -> ${body.parent_tier}`,
+        error: `invalid OUTWARD tier transition: ${childTier} -> ${body.parent_tier}`,
       },
       { status: 400 },
     );

@@ -3621,8 +3621,8 @@ export default function PlayPage() {
               )}
             </div>
           )}
-          <div className="flex items-center justify-between gap-3 text-xs opacity-80">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs opacity-80">
+          <div className="flex flex-wrap items-center gap-2 whitespace-nowrap">
             <button
               type="button"
               onClick={goBack}
@@ -3659,7 +3659,7 @@ export default function PlayPage() {
               ↗ atlas
             </a>
           </div>
-          <span className="opacity-60">
+          <span className="whitespace-nowrap opacity-60">
             step {history.trailIdx + 1} of {history.trail.length}
             {history.items.length > history.trail.length
               ? ` · ${history.items.length} pages explored`
@@ -3679,7 +3679,7 @@ export default function PlayPage() {
                 shared.clearIncoming();
                 if (id) selectFromMap(id);
               }}
-              className="rounded-full border border-emerald-600/40 bg-emerald-50 px-3 py-1 text-xs text-emerald-900 hover:bg-emerald-100"
+              className="max-w-full truncate rounded-full border border-emerald-600/40 bg-emerald-50 px-3 py-1 text-xs text-emerald-900 hover:bg-emerald-100"
               title="A co-viewer added this page — click to open it"
             >
               ✦ new: {shared.incoming.title.slice(0, 32)} →
@@ -4102,13 +4102,8 @@ export default function PlayPage() {
                 </div>
               )}
 
-            {/* Capped + wrapping: at ≤390px this row is wider than the frame
-                and used to hang off BOTH edges — Around/⊞ geo were fully
-                off-screen and untappable (UI_AUDIT #13). Right-anchored with
-                intrinsic width, so desktop renders identically. z-10 matches
-                the World pill so, on any residual overlap at narrow widths,
-                this later-in-DOM toolbar wins the stack and stays tappable. */}
-            <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-2">
+            {/* Reserve space for the World button at narrow widths. */}
+            <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-4.5rem)] flex-wrap justify-end gap-2 sm:max-w-[calc(100%-1.5rem)]">
               {wanderNote && (
                 <span className="flex items-center rounded-full bg-black/70 px-2.5 py-1 text-xs text-white/95">
                   {wanderNote}
@@ -4317,8 +4312,8 @@ export default function PlayPage() {
 
       {page?.nodeId && (
         <div className="flex flex-col items-center gap-1 text-xs">
-          <div className="flex items-center gap-2 opacity-60">
-            <span>
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-2 opacity-60">
+            <span className="min-w-0 break-all">
               Permalink: <code>/n/{page.nodeId}</code>
             </span>
             <button

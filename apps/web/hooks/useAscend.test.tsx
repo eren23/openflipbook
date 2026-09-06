@@ -235,4 +235,42 @@ describe("useAscend", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.pending).toBe(false);
   });
+
+  it("aborts generation when the navigation surface unmounts", async () => {
+    let signal: AbortSignal | null = null;
+    const onAscended = vi.fn();
+    const fn = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      signal = init?.signal ?? null;
+      return new Promise((_, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+    vi.stubGlobal("fetch", fn);
+    const { result, unmount } = renderHook(() => useAscend(onAscended));
+    act(() => result.current.start("s1", root()));
+    unmount();
+    expect(signal!.aborted).toBe(true);
+    expect(onAscended).not.toHaveBeenCalled();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale non-abort error after a new request starts", async () => {
+    let rejectOld!: (error: Error) => void;
+    let resolveNew!: (response: unknown) => void;
+    const fn = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNew = resolve; }))
+      .mockResolvedValue({ ok: true, json: async () => ({ parent_node_id: "new-parent" }) });
+    vi.stubGlobal("fetch", fn);
+    const onAscended = vi.fn();
+    const { result } = renderHook(() => useAscend(onAscended));
+    act(() => result.current.start("s1", root()));
+    act(() => result.current.start("s1", root({ nodeId: "new-child" })));
+    await act(async () => { rejectOld(new Error("late network failure")); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.pending).toBe(true);
+    await act(async () => { resolveNew({ ok: true, body: sseBody([READY]) }); });
+    await waitFor(() => expect(onAscended).toHaveBeenCalledTimes(1));
+    expect(onAscended.mock.calls[0]![0].childNodeId).toBe("new-child");
+  });
 });
