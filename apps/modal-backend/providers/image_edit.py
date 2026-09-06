@@ -12,9 +12,11 @@ handles both gen and edit on the same endpoint.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import struct
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -392,6 +394,9 @@ async def expand_image_zoomout(
     height: int = 900,
     model_override: str | None = None,
     prompt: str | None = None,
+    *,
+    preserve_source: bool = False,
+    on_generated: Callable[[str], None] | None = None,
 ) -> GeneratedImage:
     """OUTWARD / zoom-out (B2): paint the CONTAINER around the source — the source
     centered on a `factor`x larger canvas with the full margin outpainted, so it
@@ -399,12 +404,38 @@ async def expand_image_zoomout(
     but the painted MARGIN drifts to photoreal unless `prompt` carries the source's
     medium — so callers MUST pass it. Same BRIA machinery as `expand_image`; only
     the canvas is centered, not edge-pinned. `factor` is clamped to ~1.5-4x. This is
-    the opt-in (SCALE_OUTWARD_OUTPAINT) path; the seamless default is `scale_parent`."""
+    the opt-in (SCALE_OUTWARD_OUTPAINT) path; the default is `scale_parent`.
+    `preserve_source` locally restores native source pixels and emits PNG; it
+    requires inline bytes and rejects a provider canvas with the wrong size.
+    `on_generated` accounts for each paid output before download/compositing."""
     from obs import span
     from providers import mock
+    from providers.outward_pixels import OutwardCanvas
+    from providers.render_loop import data_url_bytes
+
+    f = _clamp_zoom_factor(factor)
+    layout = None
+    if preserve_source:
+        source_bytes = data_url_bytes(image_data_url)
+        if not source_bytes:
+            raise ValueError("Lossless OUTWARD requires an inline source image")
+        layout = await asyncio.to_thread(OutwardCanvas.prepare, source_bytes, f)
+        image_data_url = "data:image/png;base64," + base64.b64encode(layout.source_png).decode()
 
     if mock.on():
         m = mock.mock_image(prompt or f"zoomout {factor}x", op="zoomout")
+        if layout is not None:
+            # Mock only the synthesized margins; run the real compositing path.
+            import io
+
+            from PIL import Image
+
+            with Image.open(io.BytesIO(m.jpeg_bytes)) as raw:
+                canvas = raw.resize(layout.canvas_size)
+            buf = io.BytesIO()
+            canvas.save(buf, "PNG")
+            pixels = await asyncio.to_thread(layout.composite, buf.getvalue())
+            return GeneratedImage(pixels, "image/png", m.model, m.request_id)
         return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = (
@@ -412,7 +443,6 @@ async def expand_image_zoomout(
         or os.environ.get("FAL_OUTPAINT_MODEL")
         or EXPAND_MODEL_DEFAULT
     )
-    f = _clamp_zoom_factor(factor)
     # BRIA needs the parent's REAL pixel size or it rescales/seams the original.
     w, h = _dims_from_data_url(image_data_url) or (width, height)
     image_url = await to_fal_url(image_data_url)
@@ -420,8 +450,14 @@ async def expand_image_zoomout(
         result = await _fal_subscribe(
             model, _zoomout_args_for(image_url, f, w, h, prompt), require_images=True
         )
+        if on_generated is not None:
+            # Record paid results even when downloading or compositing fails.
+            on_generated(model)
         image_info = _expand_first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
+        if layout is not None:
+            jpeg_bytes = await asyncio.to_thread(layout.composite, jpeg_bytes)
+            mime = "image/png"
         ctx["bytes"] = len(jpeg_bytes)
     return GeneratedImage(
         jpeg_bytes=jpeg_bytes,

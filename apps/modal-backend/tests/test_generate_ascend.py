@@ -653,3 +653,79 @@ async def test_ascend_invalid_medium_floor_cannot_disable_style_gate(
 
     events = await _collect(_event_stream(_ascend_body(image=_DECODABLE), "t1"))
     assert not any(e["type"] == "ascend_ready" for e in events)
+
+
+@pytest.mark.parametrize("verdict", ["pass", "reject", "offline", "nan"])
+async def test_preserving_outward_judges_the_composite_before_publishing(
+    monkeypatch: pytest.MonkeyPatch, verdict: str,
+) -> None:
+    import io
+
+    from PIL import Image
+
+    from providers import judge, spend
+    from providers.judge import JudgeResult
+    from providers.render_loop import data_url_bytes
+
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_PRESERVE_SOURCE", "1")
+    monkeypatch.setenv("SCALE_OUTWARD_MAX_HOPS", "1")
+    monkeypatch.setenv("MOCK_PROVIDERS", "0")
+    monkeypatch.setenv("FAL_KEY", "test")
+    source = Image.new("RGB", (32, 24), "blue")
+    buf = io.BytesIO()
+    source.save(buf, "PNG")
+    source_url = image_mod.encode_data_url(buf.getvalue(), "image/png")
+    margin = io.BytesIO()
+    Image.new("RGB", (64, 48), "red").save(margin, "PNG")
+    sub = AsyncMock(return_value={"image": {"url": "https://provider.test/out.png"}})
+    monkeypatch.setattr(image_edit_mod, "_fal_subscribe", sub)
+    monkeypatch.setattr(image_edit_mod, "to_fal_url", AsyncMock(return_value="fal://source"))
+    monkeypatch.setattr(image_edit_mod, "_fetch_image_bytes", AsyncMock(return_value=(margin.getvalue(), "image/png")))
+    alignment = AsyncMock(return_value=JudgeResult(9, "continuous map", ""))
+    monkeypatch.setattr(judge, "score_prompt_alignment", alignment)
+    medium = AsyncMock(return_value=JudgeResult(
+        {"pass": 8, "reject": 5, "nan": float("nan"), "offline": 8}[verdict], "medium", "",
+    ))
+    if verdict == "offline":
+        medium.side_effect = RuntimeError("judge unavailable")
+    monkeypatch.setattr(judge, "score_style_pair", medium)
+    record = MagicMock()
+    monkeypatch.setattr(spend, "record_generation", record)
+    planner = AsyncMock()
+    monkeypatch.setattr(llm_mod, "plan_page", planner)
+
+    # Uploaded roots have no scene_view. Even past the refresh cap, the
+    # explicit preservation flag must not fall back to a fresh re-invention.
+    events = await _collect(_event_stream(_ascend_body(
+        image=source_url, scene_view=None, outward_depth=5, max_attempts=1,
+    ), "preserve-test"))
+    judged = alignment.await_args.args[1]
+    composite = Image.open(io.BytesIO(judged))
+    assert composite.size == (64, 48)
+    assert composite.crop((16, 12, 48, 36)).convert("RGB").tobytes() == source.tobytes()
+    assert "rectangular seam" in alignment.await_args.args[0]
+    assert medium.await_args.args[1] == judged
+    record.assert_called_once_with("s1", "fal-ai/bria/expand")
+    planner.assert_not_awaited()
+    if verdict == "pass":
+        ready = next(e for e in events if e["type"] == "ascend_ready")
+        assert data_url_bytes(ready["image_data_url"]) == judged
+        assert ready["image_data_url"].startswith("data:image/png;")
+    else:
+        assert not any(e["type"] == "ascend_ready" for e in events)
+        assert "unchanged" in next(e["message"] for e in events if e["type"] == "error")
+
+
+async def test_preserving_flag_does_not_outpaint_an_astronomical_hop(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable(monkeypatch)
+    monkeypatch.setenv("SCALE_OUTWARD_PRESERVE_SOURCE", "1")
+    monkeypatch.setenv("SCALE_OUTWARD_EDIT_REF", "false")
+    gen = _mock_fresh(monkeypatch)
+    outpaint = AsyncMock()
+    monkeypatch.setattr(image_edit_mod, "expand_image_zoomout", outpaint)
+    await _collect(_event_stream(_ascend_body(
+        scene_view=SceneView(node_id="n0", level="map", scale_tier="planet"),
+    ), "astro"))
+    gen.assert_awaited_once()
+    outpaint.assert_not_awaited()

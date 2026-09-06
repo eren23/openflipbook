@@ -11,6 +11,7 @@ generate.py's stream helpers (`_sse`, `_frame_dims`, `_view_grammar_on`,
 from __future__ import annotations
 
 import asyncio as _asyncio
+import dataclasses
 import math
 import os
 import time as _time
@@ -122,6 +123,54 @@ def _outward_identity_clause(
     return " ".join(parts)
 
 
+async def _judge_ascend(
+    render: Callable[[str], Awaitable[GeneratedImage]],
+    source_url: str,
+    instruction: str,
+    max_attempts: int | None,
+    abort: Callable[[str], Awaitable[None]],
+) -> tuple[GeneratedImage, bool, bool, int]:
+    """Return the final image, unjudged/rejected flags, and billed attempts."""
+    from providers import edit_loop, judge
+    from providers.render_loop import data_url_bytes
+
+    source_bytes = data_url_bytes(source_url)
+    if source_bytes is None:
+        return await render(""), True, False, 1
+    cfg = edit_loop.edit_loop_config_from_env(max_attempts)
+    try:
+        floor = float(os.environ.get("SCALE_OUTWARD_ACCEPT_MEDIUM", 7.0))
+    except (TypeError, ValueError):
+        floor = 7.0
+    if not math.isfinite(floor) or not 0 <= floor <= 10:
+        floor = 7.0
+    cfg = dataclasses.replace(cfg, accept_medium=floor)
+    attempts: list[EditAttempt] = []
+    async for attempt in edit_loop.iter_edit_attempts(
+        render,
+        source_bytes=source_bytes,
+        mask_png=None,
+        region_box=None,
+        judge_alignment=judge.score_prompt_alignment,
+        judge_medium=judge.score_style_pair,
+        instruction=instruction,
+        config=cfg,
+        abort=abort,
+        deadline_s=_time.monotonic() + 720.0,
+    ):
+        attempts.append(attempt)
+    best = edit_loop.conclude_edit(attempts).best
+    unjudged = best.alignment is None or best.medium is None
+    rejected = (
+        best.alignment is not None
+        and (not math.isfinite(best.alignment.score) or not cfg.accept_alignment <= best.alignment.score <= 10)
+    ) or (
+        best.medium is not None
+        and (not math.isfinite(best.medium.score) or not cfg.accept_medium <= best.medium.score <= 10)
+    )
+    return cast("GeneratedImage", best.image), unjudged, rejected, len(attempts)
+
+
 async def stream_ascend(
     body: GenerateBody,
     trace_id: str,
@@ -172,10 +221,10 @@ async def stream_ascend(
     # so nothing changes until it's flipped on.
     _max_hops = int(os.environ.get("SCALE_OUTWARD_MAX_HOPS", "0") or 0)
     outward_refresh = _max_hops > 0 and body.outward_depth >= _max_hops
-    use_outpaint = (
-        env_flag("SCALE_OUTWARD_OUTPAINT")
-        and model_router.select_outward_op(from_tier, to_tier) == "outpaint_zoomout"
-        and not outward_refresh
+    same_plane = model_router.select_outward_op(from_tier, to_tier) == "outpaint_zoomout"
+    preserve_source = env_flag("SCALE_OUTWARD_PRESERVE_SOURCE") and same_plane
+    use_outpaint = same_plane and (
+        preserve_source or (env_flag("SCALE_OUTWARD_OUTPAINT") and not outward_refresh)
     )
     yield _sse({"type": "status", "stage": "rendering"}, trace_id)
     await _abort_if_disconnected("pre-ascend")
@@ -221,11 +270,37 @@ async def stream_ascend(
                 margin += ". " + outward_rider
             if no_lettering:
                 margin += ". " + no_lettering
-            img = await image_edit_provider.expand_image_zoomout(
-                body.image, 3.0, pw, ph, prompt=margin
+            if preserve_source:
+                margin += (
+                    ". One continuous flat chart, with matching palette, linework and scale "
+                    "across the original image boundary. Continue roads, rivers and terrain "
+                    "across that boundary. No inset, frame, poster, desk, photograph, "
+                    "or visible rectangular seam."
+                )
+            source_url = body.image
+
+            def _record_outpaint(model: str) -> None:
+                spend.record_generation(body.session_id, model)
+
+            async def _render_outpaint(suffix: str) -> GeneratedImage:
+                prompt = margin if not suffix else f"{margin}\n\n{suffix}"
+                if preserve_source:
+                    # 2x leaves 25% source area, above BRIA's recommended 15%.
+                    return await image_edit_provider.expand_image_zoomout(
+                        source_url, 2.0, pw, ph, prompt=prompt, preserve_source=True,
+                        on_generated=_record_outpaint,
+                    )
+                return await image_edit_provider.expand_image_zoomout(
+                    source_url, 3.0, pw, ph, prompt=prompt
+                )
+
+            img, render_unjudged, render_rejected, billed_images = await _judge_ascend(
+                _render_outpaint, source_url, margin, body.max_attempts, _abort_if_disconnected
             )
+            # The preservation experiment must not publish unreviewed seams.
+            render_rejected |= preserve_source and render_unjudged
             page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
-            final_prompt = f"outward outpaint: {from_tier} -> {to_tier}"
+            final_prompt = margin
         else:
             plan_query = (
                 f"the {to_tier.replace('_', ' ')} that contains "
@@ -296,85 +371,15 @@ async def stream_ascend(
                 # (did it zoom out as asked) + medium (same hand as the
                 # source), keep-best, critic feedback folded into the retry,
                 # deadline mirroring generate.INGRESS_TIMEOUT_S - 180s.
-                from providers import edit_loop, judge
-                from providers.render_loop import data_url_bytes
+                source_url = body.image
 
-                source_bytes = data_url_bytes(body.image)
-                if source_bytes is None:
-                    # Remote-ref source can't feed the medium judge — render
-                    # once and say so instead of pretending it was verified.
-                    img = await image_edit_provider.edit_image(
-                        body.image, ascend_instr
-                    )
-                    render_unjudged = True
-                else:
-                    import dataclasses
+                async def _render_ascend(suffix: str) -> GeneratedImage:
+                    instr = ascend_instr if not suffix else f"{ascend_instr}\n\n{suffix}"
+                    return await image_edit_provider.edit_image(source_url, instr)
 
-                    ascend_cfg = edit_loop.edit_loop_config_from_env(
-                        body.max_attempts
-                    )
-                    # #252: a map container scoring AT the shared 6.0 medium
-                    # floor shipped a watercolor restyle. Raise the ascend
-                    # loop's style floor (env SCALE_OUTWARD_ACCEPT_MEDIUM; set
-                    # 6.0 to restore the shared floor) so a borderline break
-                    # retries instead of publishing a borderline restyle.
-                    try:
-                        _asc_floor = float(
-                            os.environ.get("SCALE_OUTWARD_ACCEPT_MEDIUM", 7.0)
-                        )
-                    except (TypeError, ValueError):
-                        _asc_floor = 7.0
-                    if not math.isfinite(_asc_floor) or not 0 <= _asc_floor <= 10:
-                        _asc_floor = 7.0
-                    ascend_cfg = dataclasses.replace(
-                        ascend_cfg, accept_medium=_asc_floor
-                    )
-                    ascend_deadline = _time.monotonic() + 720.0
-                    captured_instr = ascend_instr
-                    source_url: str = body.image
-
-                    async def _render_ascend(suffix: str) -> GeneratedImage:
-                        instr = (
-                            captured_instr
-                            if not suffix
-                            else f"{captured_instr}\n\n{suffix}"
-                        )
-                        return await image_edit_provider.edit_image(
-                            source_url, instr
-                        )
-
-                    ascend_attempts: list[EditAttempt] = []
-                    async for asc_att in edit_loop.iter_edit_attempts(
-                        _render_ascend,
-                        source_bytes=source_bytes,
-                        mask_png=None,
-                        region_box=None,
-                        judge_alignment=judge.score_prompt_alignment,
-                        judge_medium=judge.score_style_pair,
-                        instruction=ascend_instr,
-                        config=ascend_cfg,
-                        abort=_abort_if_disconnected,
-                        deadline_s=ascend_deadline,
-                    ):
-                        ascend_attempts.append(asc_att)
-                    asc_res = edit_loop.conclude_edit(ascend_attempts)
-                    img = cast("Any", asc_res.best.image)
-                    billed_images = max(1, len(ascend_attempts))
-                    # Critic degraded (judge failure → single blind attempt):
-                    # the render shipped without a verdict — flag it.
-                    render_unjudged = (
-                        asc_res.best.alignment is None or asc_res.best.medium is None
-                    )
-                    # A known failure must not become a new persistent root.
-                    # Keep the explicit unverified fallback for critic outages,
-                    # but never let an available critic's rejection pass through.
-                    render_rejected = (
-                        asc_res.best.alignment is not None
-                        and asc_res.best.alignment.score < ascend_cfg.accept_alignment
-                    ) or (
-                        asc_res.best.medium is not None
-                        and asc_res.best.medium.score < ascend_cfg.accept_medium
-                    )
+                img, render_unjudged, render_rejected, billed_images = await _judge_ascend(
+                    _render_ascend, source_url, ascend_instr, body.max_attempts, _abort_if_disconnected
+                )
             else:
                 # Fresh container = a NEW map: state the deliberate
                 # top-down camera (None on astro rungs → legacy bytes).
@@ -424,7 +429,8 @@ async def stream_ascend(
         return
     # Spend accounting: this OUTWARD hop made real paid image calls (one per
     # judged attempt) — record them so the cap actually counts them.
-    spend.record_generation(body.session_id, img.model, images=billed_images)
+    if not preserve_source:
+        spend.record_generation(body.session_id, img.model, images=billed_images)
     if render_rejected:
         yield _sse(
             {
