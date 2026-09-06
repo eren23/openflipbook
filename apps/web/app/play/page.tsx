@@ -1972,14 +1972,9 @@ export default function PlayPage() {
     [page?.nodeId, history.items],
   );
 
-  const navigateToTrailIdx = (
-    prev: typeof history,
-    nextIdx: number
-  ): typeof history => {
-    const id = prev.trail[nextIdx];
-    if (!id) return prev;
-    const target = prev.items.find((p) => p.nodeId === id);
-    if (!target) return prev;
+  // Navigation is an event-side effect. Running this inside setHistory's
+  // updater can update Next's Router while React is rendering PlayPage.
+  const showHistoryPage = useCallback((target: Page) => {
     setPage(target);
     setPhase("ready");
     setError(null);
@@ -1991,41 +1986,35 @@ export default function PlayPage() {
       url.pathname = `/n/${target.nodeId}`;
       window.history.replaceState({}, "", url.toString());
     }
-    return { ...prev, trailIdx: nextIdx };
-  };
+  }, [setMorphFx]);
+
+  const navigateToTrailIdx = useCallback((nextIdx: number) => {
+    if (nextIdx === history.trailIdx) return;
+    const id = history.trail[nextIdx];
+    const target = history.items.find((p) => p.nodeId === id);
+    if (!id || !target) return;
+    showHistoryPage(target);
+    setHistory((prev) => ({ ...prev, trailIdx: nextIdx }));
+  }, [history, showHistoryPage]);
 
   const goBack = useCallback(() => {
     setEditVerdictChip(null);
-    setHistory((prev) =>
-      prev.trailIdx <= 0 ? prev : navigateToTrailIdx(prev, prev.trailIdx - 1)
-    );
-  }, []);
+    if (history.trailIdx > 0) navigateToTrailIdx(history.trailIdx - 1);
+  }, [history.trailIdx, navigateToTrailIdx]);
 
   const goForward = useCallback(() => {
     setEditVerdictChip(null);
-    setHistory((prev) =>
-      prev.trailIdx >= prev.trail.length - 1
-        ? prev
-        : navigateToTrailIdx(prev, prev.trailIdx + 1)
-    );
-  }, []);
+    if (history.trailIdx < history.trail.length - 1) {
+      navigateToTrailIdx(history.trailIdx + 1);
+    }
+  }, [history.trailIdx, history.trail.length, navigateToTrailIdx]);
 
   const selectFromMap = useCallback((nodeId: string) => {
     setEditVerdictChip(null);
+    const target = history.items.find((p) => p.nodeId === nodeId);
+    if (!target) return;
+    showHistoryPage(target);
     setHistory((prev) => {
-      const target = prev.items.find((p) => p.nodeId === nodeId);
-      if (!target) return prev;
-      setPage(target);
-      setPhase("ready");
-      setError(null);
-      setStatusMsg(null);
-      setMorphFx(null);
-      abortRef.current?.abort();
-      if (target.nodeId) {
-        const url = new URL(window.location.href);
-        url.pathname = `/n/${target.nodeId}`;
-        window.history.replaceState({}, "", url.toString());
-      }
       // Append to trail (truncating forward) so back/forward walks the
       // visited path even after a map jump.
       const trail = [
@@ -2035,7 +2024,7 @@ export default function PlayPage() {
       return { ...prev, trail, trailIdx: trail.length - 1 };
     });
     setViewMode("page");
-  }, []);
+  }, [history.items, showHistoryPage]);
 
   // OUTWARD / zoom-out landed: mirror the persisted reparent into the live
   // session — insert the container P, re-point the old root C under it (so the
@@ -4401,11 +4390,7 @@ export default function PlayPage() {
               title: p.title,
             }))}
           currentIdx={history.trailIdx}
-          onJump={(idx) => {
-            setHistory((prev) =>
-              idx === prev.trailIdx ? prev : navigateToTrailIdx(prev, idx)
-            );
-          }}
+          onJump={navigateToTrailIdx}
           onClose={() => setScrubberOpen(false)}
         />
       )}
@@ -4501,7 +4486,9 @@ export default function PlayPage() {
 
       <DebugHud />
 
-      {viewMode !== "map" && history.items.length >= 2 && (
+      {/* Both navigation overlays occupy the bottom edge; keep the active
+          scrubber unobstructed, including its close button on narrow screens. */}
+      {viewMode !== "map" && !scrubberOpen && history.items.length >= 2 && (
         <SessionMinimap
           pages={history.items
             .filter((p): p is Page & { nodeId: string } => Boolean(p.nodeId))

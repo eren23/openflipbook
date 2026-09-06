@@ -22,6 +22,11 @@ for (const viewport of [
     await page.setViewportSize(viewport);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("Cannot update a component")) {
+        errors.push(message.text());
+      }
+    });
     let sessionId = "";
     let generations = 0;
     page.on("request", (req) => {
@@ -45,6 +50,18 @@ for (const viewport of [
     const parent = await saveResponse.json() as { parent_node_id: string };
     await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
     await waitForStableImage(page);
+    const minimapExpand = page.getByTitle("Open the full map (M)");
+    await expect(minimapExpand).toBeVisible();
+    await page.keyboard.press("t");
+    await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeVisible();
+    await expect(minimapExpand).toBeHidden();
+    await page.getByRole("button", { name: `Jump to ${originalNode.page_title}`, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/n/${root.id}`));
+    await page.getByRole("button", { name: "Close time-scrubber", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeHidden();
+    await expect(minimapExpand).toBeVisible();
+    await page.getByRole("navigation", { name: "Location", exact: true }).getByRole("button").first().click();
+    await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
     expect(generations).toBe(2);
 
     const savedSource = await (await page.request.get(`/api/nodes/${root.id}`)).json();
@@ -69,6 +86,10 @@ for (const viewport of [
     const returnedScreenshot = testInfo.outputPath(`${viewport.name}-returned.png`);
     await page.screenshot({ path: returnedScreenshot, fullPage: true });
     await testInfo.attach(`${viewport.name}-returned`, { path: returnedScreenshot, contentType: "image/png" });
+    await page.getByRole("button", { name: "forward →", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
+    await waitForStableImage(page);
+    expect(generations).toBe(2);
     expect(errors).toEqual([]);
   });
 }
