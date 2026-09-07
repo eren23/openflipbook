@@ -80,6 +80,16 @@ function worldNode(
 }
 
 describe("buildWorldZip", () => {
+  it("bundles immutable references separately from later page revisions", async () => {
+    const original = new Uint8Array([1, 2, 3]);
+    const zip = await JSZip.loadAsync(await buildWorldZip([], {}, {}, [
+      { image_key: "original.png", bytes: original, contentType: "image/png" },
+      { image_key: "missing.jpg", bytes: null, contentType: "image/jpeg" },
+    ]));
+    const refs = JSON.parse(await zip.file("references.json")!.async("string"));
+    expect(refs).toEqual([{ image_key: "original.png", image: "references/001.png" }, { image_key: "missing.jpg", image: null }]);
+    expect(await zip.file(refs[0].image)!.async("uint8array")).toEqual(original);
+  });
   it("bundles every node's image + a rich graph, world-map, and entities json", async () => {
     const jpg = await tinyJpeg();
     const bytes = await buildWorldZip(

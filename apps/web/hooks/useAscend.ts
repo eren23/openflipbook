@@ -7,11 +7,19 @@ import type {
   GenerateEvent,
   ScaleTier,
   SceneView,
+  GenerateErrorEvent,
 } from "@openflipbook/config";
 
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { sseData } from "@/lib/sse";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
+import { isVerifiedView } from "@/lib/place-identity";
+
+const STRICT_WORLD = /^(1|true|yes|on)$/i.test(process.env.NEXT_PUBLIC_WORLD_IDENTITY_STRICT ?? "");
+
+class RejectedAscend extends Error {
+  constructor(public event: GenerateErrorEvent) { super(event.message); }
+}
 
 export interface AscendRoot {
   nodeId: string;
@@ -56,7 +64,7 @@ async function readAscendReady(
     if (signal.aborted) return null;
     const evt = JSON.parse(payload) as GenerateEvent;
     if (evt.type === "ascend_ready") return evt;
-    if (evt.type === "error") throw new Error(evt.message);
+    if (evt.type === "error") throw new RejectedAscend(evt);
   }
   return null;
 }
@@ -69,16 +77,25 @@ async function readAscendReady(
  * route (which atomically inserts the parent node, re-roots the geo store, and
  * re-points the old root), then `onAscended` updates the live session.
  */
-export function useAscend(onAscended: (a: Ascended) => void): {
+export function useAscend(onAscended: (a: Ascended) => void, activeNodeId?: string | null): {
   start: (sessionId: string, root: AscendRoot) => void;
   pending: boolean;
   error: string | null;
+  candidate: string | null;
+  dismiss: () => void;
 } {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [candidate, setCandidate] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    abortRef.current?.abort();
+    setPending(false);
+    setError(null);
+    setCandidate(null);
+  }, [activeNodeId]);
 
   const start = useCallback(
     (sessionId: string, root: AscendRoot) => {
@@ -87,6 +104,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
       abortRef.current = ac;
       setPending(true);
       setError(null);
+      setCandidate(null);
 
       void (async () => {
         const traceId = newTraceId();
@@ -94,12 +112,13 @@ export function useAscend(onAscended: (a: Ascended) => void): {
           // 1. Backend: synthesize the container image (outpaint / fresh).
           const res = await fetch("/api/generate-page", {
             method: "POST",
-            headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId },
+            headers: { "Content-Type": "application/json", [TRACE_HEADER]: traceId, "Idempotency-Key": traceId },
             body: JSON.stringify({
               query: root.query,
               session_id: sessionId,
               current_node_id: root.nodeId,
               mode: "ascend",
+              ...(STRICT_WORLD ? { strict_world: true, world_mode: true } : {}),
               image: root.imageDataUrl,
               scene_view: root.sceneView ?? null,
               aspect_ratio: root.aspectRatio,
@@ -118,6 +137,9 @@ export function useAscend(onAscended: (a: Ascended) => void): {
           const ready = await readAscendReady(res.body, ac.signal);
           if (ac.signal.aborted) return;
           if (!ready) throw new Error("no container was produced");
+          if (STRICT_WORLD && (!isVerifiedView(ready.view_verdict, { outward: true }) || ready.render_unjudged)) {
+            throw new RejectedAscend({ type: "error", message: "The wider view could not be verified. Your world is unchanged.", candidate_image_data_url: ready.image_data_url });
+          }
 
           // 2. Web route: persist the reparent atomically (both stores).
           const saveRes = await fetch(`/api/world/${sessionId}/ascend`, {
@@ -161,6 +183,7 @@ export function useAscend(onAscended: (a: Ascended) => void): {
           setPending(false);
         } catch (err) {
           if (ac.signal.aborted || (err as Error).name === "AbortError") return;
+          if (err instanceof RejectedAscend) setCandidate(err.event.candidate_image_data_url ?? null);
           setError((err as Error).message);
           setPending(false);
         }
@@ -169,5 +192,5 @@ export function useAscend(onAscended: (a: Ascended) => void): {
     [onAscended],
   );
 
-  return { start, pending, error };
+  return { start, pending, error, candidate, dismiss: () => { setError(null); setCandidate(null); } };
 }

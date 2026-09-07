@@ -511,6 +511,7 @@ export function geoTapForEntity(
   entity: WorldEntityGeo,
   aspect: number,
   currentView?: SceneView | null,
+  override?: GeoTapOverride,
 ): GeoTap {
   const byId = new Map(map.entities.map((e) => [e.id, e]));
   // Stand at the frame centre looking at the place — the same default a
@@ -523,10 +524,11 @@ export function geoTapForEntity(
     map.entities,
     nodeId,
     route.focus_id,
-    route.observer,
-    route.level,
+    override?.observer ?? route.observer,
+    override?.level ?? route.level,
     aspect,
     childTierFor(currentView, byId, entity.id),
+    override?.view,
   );
 }
 

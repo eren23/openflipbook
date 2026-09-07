@@ -16,6 +16,8 @@ import {
   spendOverCap,
 } from "@/lib/spend-ledger";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
+import { resolvePlaceGeneration } from "@/lib/place-generation";
+import { PlaceError } from "@/lib/places";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +46,7 @@ export async function POST(req: Request) {
   // Parse once so we can inject world_context. Fall back to the raw text
   // path if anything looks malformed — we don't want this enrichment to
   // ever block generation.
-  const rawText = await req.text();
+  let rawText = await req.text();
   let upstreamBody = rawText;
   // Ownership gate BEFORE any paid model call: the first generate claims the
   // session, later ones must own it (blocks a stranger spending on / poisoning
@@ -61,6 +63,15 @@ export async function POST(req: Request) {
     // cookie happen on the reliable /api/nodes write.
     const auth = await verifyOwnerReadonly(guardBody.session_id);
     if (!auth.ok) return auth.res;
+  }
+  if (guardBody && (guardBody.target_geo_id || guardBody.strict_world || guardBody.place_reference)) {
+    try {
+      guardBody = await resolvePlaceGeneration(guardBody);
+      rawText = JSON.stringify(guardBody);
+      upstreamBody = rawText;
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof PlaceError ? error.message : "Could not load this place" }, { status: error instanceof PlaceError ? error.status : 503 });
+    }
   }
   // Idempotency: refuse a re-sent generation (same key) BEFORE any paid work, so
   // a retry / double-submit / proxy replay can't re-run the model stack. The key
@@ -187,6 +198,7 @@ export async function POST(req: Request) {
         ...modalAuthHeaders(),
       },
       body: upstreamBody,
+      signal: req.signal,
     });
 
     if (!upstream.ok || !upstream.body) {

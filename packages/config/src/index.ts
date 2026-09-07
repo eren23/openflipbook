@@ -89,6 +89,10 @@ export type RenderMode =
 export type EnterAs = "scene" | "submap" | "explainer";
 
 export interface GenerateRequestBody {
+  target_geo_id?: string;
+  // Server-resolved; clients never choose the canonical reference bytes.
+  place_reference?: PlaceRenderReference;
+  strict_world?: boolean;
   query: string;
   aspect_ratio: AspectRatio;
   web_search: boolean;
@@ -395,6 +399,9 @@ export interface GenerateFinalEvent {
 
 export interface GenerateErrorEvent {
   type: "error";
+  candidate_image_data_url?: string;
+  view_verdict?: ViewVerdict;
+  session_spend_estimate?: number;
   // Short, human, safe-to-render message (FRIENDLY_ERRORS maps known failure
   // classes; the raw exception never reaches the browser).
   message: string;
@@ -466,6 +473,7 @@ export interface GenerateExpandDoneEvent {
 // container's rung, `from_tier` the source's.
 export interface GenerateAscendReadyEvent {
   type: "ascend_ready";
+  view_verdict?: ViewVerdict;
   page_title: string;
   image_data_url: string;
   image_model: string;
@@ -634,6 +642,28 @@ export interface WorldVec2 {
   y: number;
 }
 
+export interface PlaceIdentityAnchor {
+  node_id: string;
+  image_key: string;
+  bbox: EntityBBox;
+}
+
+export interface PlaceRenderReference {
+  geo_id: string;
+  label: string;
+  visual: string;
+  image_data_url: string;
+  bbox: EntityBBox;
+}
+
+export interface PlaceUpdate {
+  expected_updated_at: string;
+  label?: string;
+  visual?: string;
+  identity_locked?: boolean;
+  reference?: { node_id: string; bbox: EntityBBox } | null;
+}
+
 // An entity placed on the map: where it is, how tall, how much ground it covers.
 //
 // Nested frames (the sub-entity consistency model): a place you can ENTER (the
@@ -643,6 +673,8 @@ export interface WorldVec2 {
 // ONCE and stays consistent across every view of it, and editing one ripples to
 // its siblings. Top-level city entities have `parent_id: null` (pos == world).
 export interface WorldEntityGeo {
+  identity_anchor?: PlaceIdentityAnchor | null;
+  identity_locked?: boolean;
   id: string;
   // The Codex Entity.id this geometry belongs to, or null for a map-only prop.
   entity_id: string | null;

@@ -1,4 +1,4 @@
-import { MongoClient, type Collection, type Db, type Document } from "mongodb";
+import { MongoClient, type ClientSession, type Collection, type Db, type Document } from "mongodb";
 import type { ScaleTier, SceneView, ViewSpec, ViewVerdict } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
@@ -89,6 +89,17 @@ async function ensureIndexes(db: Db): Promise<void> {
       { name: "world_map_entity_idx", sparse: true }
     ),
   ]);
+}
+
+/** Cross-collection identity edits must either update both registries or neither. */
+export async function withDbTransaction<T>(run: (db: Db, session: ClientSession) => Promise<T>): Promise<T> {
+  const db = await getDb();
+  const session = globalThis.__endlessCanvasMongo!.client.startSession();
+  try {
+    return await session.withTransaction(() => run(db, session), { maxCommitTimeMS: 10_000 });
+  } finally {
+    await session.endSession();
+  }
 }
 
 async function nodes(): Promise<Collection<NodeDoc>> {

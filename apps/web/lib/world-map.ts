@@ -18,6 +18,7 @@ import { tierStep } from "@openflipbook/config";
 import { getDb, recordError } from "./db";
 import { envFlag } from "./env-flag";
 import { optimisticReplace } from "./optimistic-update";
+import { preservePlaceIdentity } from "./place-identity";
 import {
   applySimilarity,
   estimateGeoFromBBox,
@@ -122,8 +123,9 @@ export function applyGeoUpsert(
   nowIso: string,
 ): WorldEntityGeo[] {
   const byId = new Map(existing.map((e) => [e.id, e]));
-  for (const g of incoming) {
-    const prev = byId.get(g.id);
+  for (const incomingGeo of incoming) {
+    const prev = byId.get(incomingGeo.id);
+    const g = prev ? preservePlaceIdentity(prev, incomingGeo) : incomingGeo;
     if (!prev) {
       byId.set(g.id, { ...g, updated_at: nowIso });
       continue;
@@ -224,6 +226,7 @@ export function applyEntityEdit(
   }
   return entities.map((e) => {
     if (e.id !== edit.target) return e;
+    if (e.identity_locked && edit.op === "set_appearance") return e;
     const next: WorldEntityGeo = { ...e, source: "user", updated_at: nowIso };
     if (edit.op === "move") {
       next.pos = { x: e.pos.x + edit.dx, y: e.pos.y + edit.dy };

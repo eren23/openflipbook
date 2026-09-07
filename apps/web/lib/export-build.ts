@@ -82,6 +82,7 @@ export async function buildWorldZip(
   nodes: WorldExportNode[],
   worldMap: unknown,
   entities: unknown,
+  references: { image_key: string; bytes: Uint8Array | null; contentType: string }[] = [],
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   const graph = nodes.map((n, i) => {
@@ -108,6 +109,13 @@ export async function buildWorldZip(
   zip.file("graph.json", JSON.stringify({ nodes: graph }, null, 2));
   zip.file("world-map.json", JSON.stringify(worldMap ?? null, null, 2));
   zip.file("entities.json", JSON.stringify(entities ?? null, null, 2));
+  const referenceFiles = references.map((ref, i) => {
+    const ext = ref.contentType === "image/png" ? "png" : ref.contentType === "image/webp" ? "webp" : "jpg";
+    const image = ref.bytes ? `references/${String(i + 1).padStart(3, "0")}.${ext}` : null;
+    if (image && ref.bytes) zip.file(image, ref.bytes);
+    return { image_key: ref.image_key, image };
+  });
+  zip.file("references.json", JSON.stringify(referenceFiles, null, 2));
   return zip.generateAsync({ type: "uint8array" });
 }
 

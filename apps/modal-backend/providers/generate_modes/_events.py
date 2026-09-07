@@ -70,4 +70,5 @@ class GenerateAscendReadyEvent(TypedDict, total=False):
     from_tier: str
     session_id: str
     render_unjudged: bool
+    view_verdict: ViewVerdict
     trace_id: str

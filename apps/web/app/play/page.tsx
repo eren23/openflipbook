@@ -148,6 +148,10 @@ import {
   type SessionNodeWire,
 } from "@/lib/session-pages";
 import { useImageMorph } from "@/hooks/useImageMorph";
+import { ScanSearch, X } from "lucide-react";
+import { isVerifiedView } from "@/lib/place-identity";
+import PlaceInspector from "@/components/PlayPage/PlaceInspector";
+import { placeCandidates } from "@/lib/place-selection";
 import {
   isHoverResolved,
   PRECOMPUTE_PER_PAGE,
@@ -157,6 +161,7 @@ import {
 } from "@/hooks/usePrefetchCache";
 
 type Phase = "idle" | "generating" | "ready" | "error";
+const STRICT_WORLD_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_IDENTITY_STRICT ?? "").toLowerCase());
 
 // Select-area mask edits (E1). Build-time gate so the UI never offers a drag
 // whose mask a flag-off backend would silently ignore (a whole-image edit
@@ -242,7 +247,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 async function persistNode(
   body: PersistBody,
-  traceId: string | null
+  traceId: string | null,
+  signal?: AbortSignal,
 ): Promise<{ id: string; image_url: string } | null> {
   try {
     const headers: Record<string, string> = {
@@ -258,6 +264,7 @@ async function persistNode(
       method: "POST",
       headers,
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
     if (!res.ok) return null;
     return (await res.json()) as { id: string; image_url: string };
@@ -412,7 +419,10 @@ export default function PlayPage() {
   useEffect(() => setCoachMounted(true), []);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [failedCandidate, setFailedCandidate] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
+  const currentNodeRef = useRef(page?.nodeId);
+  useEffect(() => { currentNodeRef.current = page?.nodeId; }, [page?.nodeId]);
   const { morphFx, setMorphFx } = useImageMorph(page?.imageDataUrl);
   const [sessionId] = useState(initialSessionId);
   // Surface the live session id to the landing's "open last atlas" link.
@@ -596,6 +606,11 @@ export default function PlayPage() {
   const [quickbarQuery, setQuickbarQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectMode, setInspectMode] = useState(false);
+  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [placeChoice, setPlaceChoice] = useState<{ places: WorldEntityGeo[]; click: NormalizedClick } | null>(null);
+  const closeInspector = useCallback(() => { setInspectorOpen(false); setInspectMode(false); }, []);
   const [geoOverlayOn, setGeoOverlayOn] = useState(false);
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
@@ -632,7 +647,7 @@ export default function PlayPage() {
   } | null>(null);
   const localizeAttemptedRef = useRef<Set<string>>(new Set());
   const { bindTrace } = useTraceEmitter();
-  const { state: worldState, mutate: mutateWorldEntity } =
+  const { state: worldState, mutate: mutateWorldEntity, refresh: refreshWorldState } =
     useWorldState(sessionId);
   // Geometric world map (entity coordinates). Empty unless GEOMETRIC_WORLD seeded
   // it; drives the geometry overlay/minimap + the geometric tap (close the loop).
@@ -714,6 +729,7 @@ export default function PlayPage() {
   const pinnedRenderModeRef = useRef<"place_submap" | "place_closeup" | null>(
     null
   );
+  const placeIntentRef = useRef<{ id: string; newView: boolean; override?: GeoTapOverride; note?: string } | null>(null);
   const [hoverPos, setHoverPos] = useState<{
     xPx: number;
     yPx: number;
@@ -912,11 +928,15 @@ export default function PlayPage() {
       // replay it verbatim (minus trace_id: the API route claims the
       // Idempotency-Key per trace, so a same-trace replay would 409).
       lastGenerateRef.current = body;
+      const strict = body.strict_world === true;
+      let completed = false;
+      let errorReported = false;
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
       setPhase("generating");
       setError(null);
+      setFailedCandidate(null);
       setEditVerdictChip(null);
       setStatusMsg(
         body.mode === "tap" ? "Resolving what you tapped…" : "Planning page…"
@@ -938,11 +958,13 @@ export default function PlayPage() {
           signal: ac.signal,
         });
         if (!response.ok || !response.body) {
-          throw new Error(`generation failed: HTTP ${response.status}`);
+          const failure = await response.json().catch(() => null) as { error?: unknown } | null;
+          throw new Error(typeof failure?.error === "string" ? failure.error : `generation failed: HTTP ${response.status}`);
         }
         let lastTitle = body.query;
         let lastImage: string | null = null;
         for await (const payload of sseData(response.body)) {
+          if (ac.signal.aborted || abortRef.current !== ac) return;
           const evt = JSON.parse(payload) as GenerateEvent;
           if (evt.type === "status") {
             hudEmit("sse:status", {
@@ -975,6 +997,7 @@ export default function PlayPage() {
               setStatusMsg("Draft preview — the full render is refining…");
             }
           } else if (evt.type === "progress") {
+            if (strict) continue;
             lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
             setProgressiveDraft(true);
             hudEmit("sse:progress", {
@@ -989,6 +1012,11 @@ export default function PlayPage() {
               imageDataUrl: lastImage,
             }));
           } else if (evt.type === "final") {
+            if (strict && (!isVerifiedView(evt.view_verdict, { interior: evt.scene_view?.place_form === "interior" || body.scene_view?.place_form === "interior" }) || evt.render_unjudged || evt.layout_suppressed)) {
+              setFailedCandidate(evt.image_data_url);
+              throw new Error("This view could not be verified. Your world is unchanged.");
+            }
+            completed = true;
             lastImage = evt.image_data_url;
             lastTitle = evt.page_title;
             const evtSources: Citation[] = Array.isArray(evt.sources)
@@ -1004,7 +1032,7 @@ export default function PlayPage() {
               setSessionSpend(evt.session_spend_estimate);
             }
             setProgressiveDraft(false);
-            setPage({
+            if (!strict) setPage({
               nodeId: null,
               sessionId: evt.session_id,
               query: body.query,
@@ -1022,7 +1050,7 @@ export default function PlayPage() {
             });
             // Flip the morph gate so the decode-then-reveal effect runs
             // ONLY on the final image, not on streamed progress partials.
-            setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+            if (!strict) setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
             // Judged edit: surface what the critics saw, with a one-click
             // path back to the pre-edit node (undo, made felt).
             if (evt.edit_verdict) {
@@ -1062,7 +1090,7 @@ export default function PlayPage() {
               body.scene_view,
               evt.scene_view
             );
-            void persistNode(
+            const persistence = persistNode(
               {
                 parent_id: body.current_node_id || null,
                 session_id: evt.session_id,
@@ -1090,13 +1118,18 @@ export default function PlayPage() {
                 scene_view: foldedSceneView,
                 view_verdict: evt.view_verdict ?? null,
               },
-              traceId
+              traceId,
+              ac.signal,
             ).then((saved) => {
               // A newer generation or a navigation aborted this one while the
               // node was persisting. This .then is detached from the fetch
               // reader, so without this guard it would clobber the current
               // page/history/URL with THIS (stale) node. (#3)
               if (ac.signal.aborted) return;
+              if (!saved && strict) {
+                setFailedCandidate(evt.image_data_url);
+                throw new Error("The view could not be saved. Your current view is unchanged.");
+              }
               if (saved) {
                 const persisted: Page = {
                   nodeId: saved.id,
@@ -1121,7 +1154,10 @@ export default function PlayPage() {
                       }
                     : {}),
                 };
-                setPage((prev) =>
+                if (strict) {
+                  setPage(persisted);
+                  setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+                } else setPage((prev) =>
                   prev
                     ? {
                         ...prev,
@@ -1174,7 +1210,10 @@ export default function PlayPage() {
                 });
               }
             });
+            if (strict) await persistence;
           } else if (evt.type === "error") {
+            if (strict && evt.candidate_image_data_url) setFailedCandidate(evt.candidate_image_data_url);
+            if (typeof evt.session_spend_estimate === "number") setSessionSpend(evt.session_spend_estimate);
             hudEmit("sse:error", {
               message: evt.message,
               // Capped diagnostic tail (FRIENDLY_ERRORS) — HUD/logs only,
@@ -1183,12 +1222,16 @@ export default function PlayPage() {
               trace_id: traceId,
               t: nowMs(),
             });
+            errorReported = true;
             throw new Error(evt.message);
           }
         }
+        if (ac.signal.aborted || abortRef.current !== ac) return;
+        if (strict && !completed) throw new Error("Generation ended before verification. Your world is unchanged.");
         setPhase("ready");
         setStatusMsg(null);
       } catch (err) {
+        if (ac.signal.aborted || abortRef.current !== ac) return;
         if ((err as Error).name === "AbortError") {
           setMorphFx(null);
           setProgressiveDraft(false);
@@ -1196,6 +1239,7 @@ export default function PlayPage() {
         }
         setError((err as Error).message);
         setPhase("error");
+        if (!errorReported) hudEmit("sse:error", { message: (err as Error).message, trace_id: traceId, t: nowMs() });
         // Freeze-death marker (live-caught 2026-07-20): Chromium suspends a
         // background tab's fetches (ERR_NETWORK_IO_SUSPENDED), so a 60-120s
         // generation dies the moment the user tab-switches — and the backend
@@ -1204,6 +1248,7 @@ export default function PlayPage() {
         // auto-retry once on return instead of greeting the user with an
         // error banner for something they never watched fail.
         erroredWhileHiddenRef.current =
+          !strict &&
           typeof document !== "undefined" &&
           document.visibilityState === "hidden";
         setMorphFx(null);
@@ -1769,6 +1814,26 @@ export default function PlayPage() {
     );
   }, []);
 
+  const enterInspectedPlace = useCallback(async (place: WorldEntityGeo, newView: boolean) => {
+    if (!page?.nodeId || phase === "generating") return;
+    setInspectorOpen(false); setInspectMode(false);
+    let override: GeoTapOverride | undefined;
+    let note = "";
+    if (newView) {
+      const tap = geoTapForEntity({ entities: geoMap.entities, bounds: geoMap.bounds }, page.nodeId, place, 16 / 9, page.sceneView);
+      const result = await promptForClickDetail({ xPx: 160, yPx: 100, entities: tap.layout_entities, crop: geoMap.bounds,
+        initial: { observer: tap.scene_view.observer!, level: tap.scene_view.level, focusLabel: place.label, canSubmap: false, mode: "scene" } });
+      if (!result) return;
+      note = result.note;
+      override = { observer: result.observer, level: result.level, ...(result.view ? { view: result.view } : {}) };
+    }
+    if (currentNodeRef.current !== page.nodeId) return;
+    const bbox = worldState.entities.find(e => e.id === place.entity_id)?.appearance_bboxes[page.nodeId];
+    const frame = page.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
+    placeIntentRef.current = { id: place.id, newView, note, ...(override ? { override } : {}) };
+    dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (place.pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (place.pos.y-frame.y)/frame.h)));
+  }, [page, phase, geoMap.entities, geoMap.bounds, worldState.entities, promptForClickDetail, dispatchTapAt]);
+
   // Wander (auto-explore): reuse the ranked precompute candidates + the tap flow
   // to let the world explore itself, hands-free. Toggled by the ▶ button.
   const stopWander = useCallback((reason?: WanderStopReason) => {
@@ -1975,6 +2040,8 @@ export default function PlayPage() {
   // Navigation is an event-side effect. Running this inside setHistory's
   // updater can update Next's Router while React is rendering PlayPage.
   const showHistoryPage = useCallback((target: Page) => {
+    setFailedCandidate(null);
+    setPlaceChoice(null);
     setPage(target);
     setPhase("ready");
     setError(null);
@@ -2074,8 +2141,8 @@ export default function PlayPage() {
     },
     [sessionId, geoRefetch],
   );
-  const { start: startAscend, pending: ascendPending, error: ascendError } =
-    useAscend(onAscended);
+  const { start: startAscend, pending: ascendPending, error: ascendError, candidate: ascendCandidate, dismiss: dismissAscend } =
+    useAscend(onAscended, page?.nodeId);
   // OUTWARD is offered only from a ROOT page (a top-level map): it synthesizes the
   // container ABOVE it. Gated by worldEnabled (client) + SCALE_OUTWARD (server).
   const canAscend = Boolean(
@@ -2126,9 +2193,12 @@ export default function PlayPage() {
       setQuickbarOpen(false);
       setContextMenu(null);
       setCodexOpen(false);
+      setInspectorOpen(false);
+      setInspectMode(false);
+      setPlaceChoice(null);
     },
     anyOverlayOpen:
-      helpOpen || quickbarOpen || codexOpen || contextMenu !== null,
+      helpOpen || quickbarOpen || codexOpen || inspectorOpen || placeChoice !== null || contextMenu !== null,
   });
 
   // Hydrate the session graph from the server when landing with ?continue=.
@@ -2439,6 +2509,8 @@ export default function PlayPage() {
       // synchronously inside dispatchTapAt, so set-then-dispatch can't race.
       const pinnedRenderMode = pinnedRenderModeRef.current;
       pinnedRenderModeRef.current = null;
+      const placeIntent = placeIntentRef.current;
+      placeIntentRef.current = null;
       if (phase === "generating") return;
       if (editMode) return;
       if (clickInFlightRef.current) return;
@@ -2450,6 +2522,16 @@ export default function PlayPage() {
       }
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
+      const hits = worldEnabled ? placeCandidates(geoMap.entities, worldState.entities, currentNodeId ?? "", page.sceneView, click) : [];
+      if (worldEnabled && inspectMode && !placeIntent) {
+        setSelectedPlaceId(hits[0]?.id ?? null); setInspectorOpen(true);
+        return;
+      }
+      if (hits.length > 1 && !placeIntent && !pinnedRenderMode) {
+        setPlaceChoice({ places: hits, click });
+        return;
+      }
+      const selectedPlace = placeIntent ? geoMap.entities.find(e => e.id === placeIntent.id) : hits[0];
       // Claim the slot synchronously before any await — protects the window
       // between setMorphFx and React installing a new effect with
       // phase==="generating".
@@ -2460,9 +2542,9 @@ export default function PlayPage() {
       if (worldEnabled && !evt.metaKey && !evt.ctrlKey) {
         // An explicit "Zoom in here" outranks the revisit shortcut — the
         // user said closer, not back.
-        const revisitId = pinnedRenderMode
+        const revisitId = pinnedRenderMode || placeIntent?.newView
           ? null
-          : findRevisitTarget(history.items, currentNodeId, click);
+          : findRevisitTarget(history.items, currentNodeId, click, undefined, selectedPlace ? { geoId: selectedPlace.id, kind: TAP_ENTER_DIRECT_ENABLED || placeIntent || page.sceneView?.closeup ? "scene" : "closeup" } : undefined);
         if (revisitId) {
           clickInFlightRef.current = false;
           selectFromMap(revisitId);
@@ -2473,9 +2555,9 @@ export default function PlayPage() {
       // and await the user's note (or null on cancel). Captured before any
       // ripple/morph state so the bubble is the first thing they see; on
       // cancel we release the in-flight slot so the next click is honored.
-      let hint = "";
+      let hint = placeIntent?.note ?? "";
       // The user's set-your-view override from the click-detail popover (if any).
-      let geoOverride: GeoTapOverride | undefined;
+      let geoOverride: GeoTapOverride | undefined = placeIntent?.override;
       // World Mode "semi": resolve the tap up front and, when the model has
       // clarifying questions, ask them in the hint bubble before entering.
       let worldResolved:
@@ -2492,6 +2574,7 @@ export default function PlayPage() {
       if (
         worldEnabled &&
         worldAutonomy === "semi" &&
+        !selectedPlace &&
         !evt.metaKey &&
         !evt.ctrlKey
       ) {
@@ -2722,8 +2805,9 @@ export default function PlayPage() {
           geoBounds = fresh.bounds;
         }
       }
-      const geoTap =
-        worldEnabled && geoEntities.length > 0
+      const geoTap = selectedPlace && (placeIntent || TAP_ENTER_DIRECT_ENABLED)
+        ? geoTapForEntity({ entities: geoEntities, bounds: geoBounds }, page.nodeId ?? "", selectedPlace, 16 / 9, page.sceneView, geoOverride)
+        : worldEnabled && geoEntities.length > 0
           ? geoTapRequest(
               { entities: geoEntities, bounds: geoBounds },
               page.nodeId ?? "",
@@ -2779,7 +2863,7 @@ export default function PlayPage() {
       // bbox beats the bearing-recovered geometry, so this WINS over geoTap
       // when both resolve (spread last below).
       const sceneCloseup =
-        worldEnabled && page.sceneView && page.sceneView.level !== "map"
+        worldEnabled && !selectedPlace && page.sceneView && page.sceneView.level !== "map"
           ? sceneCloseupSpec(
               worldState.entities,
               page.nodeId,
@@ -2833,6 +2917,8 @@ export default function PlayPage() {
         session_id: page.sessionId,
         current_node_id: page.nodeId ?? "",
         mode: "tap",
+        ...(worldEnabled && STRICT_WORLD_ENABLED ? { strict_world: true } : {}),
+        ...(worldTap?.focus_id ? { target_geo_id: worldTap.focus_id } : {}),
         image: annotated,
         parent_query: page.query,
         parent_title: page.title,
@@ -3295,7 +3381,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, loopWire, devModel, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap]);
+  }, [page, phase, generate, imageTier, loopWire, devModel, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap, inspectMode, geoMap.entities, geoMap.bounds, worldState.entities]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -3583,8 +3669,21 @@ export default function PlayPage() {
               ↻ Try again
             </button>
           )}
+          <button aria-label="Dismiss generation error" title="Dismiss" onClick={() => { setFailedCandidate(null); setError(null); setPhase("ready"); }} className="shrink-0 p-2"><X size={18} /></button>
         </div>
       )}
+      {failedCandidate && <section aria-label="Unpublished candidate" className="flex flex-wrap items-center gap-3 border-b border-[var(--color-edge)] py-3">
+        {/* eslint-disable-next-line @next/next/no-img-element -- rejected render, never installed on the canvas */}
+        <img src={failedCandidate} alt="Unpublished candidate" className="h-24 w-40 rounded object-contain" />
+        <span className="text-sm">Not added to your world</span>
+      </section>}
+      {ascendCandidate && <section aria-label="Unpublished wider view" className="flex flex-wrap items-center gap-3 border-b border-[var(--color-edge)] py-3">
+        {/* eslint-disable-next-line @next/next/no-img-element -- rejected candidate */}
+        <img src={ascendCandidate} alt="Unpublished wider view" className="h-24 w-40 rounded object-contain" />
+        <span className="min-w-0 flex-1 text-sm">{ascendError}</span>
+        <button onClick={handleAscend} disabled={ascendPending} className="rounded border px-3 py-2 text-sm">Retry</button>
+        <button aria-label="Dismiss wider view" title="Dismiss" onClick={dismissAscend} className="p-2"><X size={18} /></button>
+      </section>}
 
       {page?.imageDataUrl && history.items.length > 0 && (
         <div className="flex flex-col gap-1.5">
@@ -3725,6 +3824,7 @@ export default function PlayPage() {
             setContextMenu({ xPx: e.clientX, yPx: e.clientY, clickPct, hit });
           }}
         >
+          <div className="relative aspect-[16/9] w-full">
           {page.sources && page.sources.length > 0 && (
             <CitationsChip sources={page.sources} />
           )}
@@ -3778,7 +3878,6 @@ export default function PlayPage() {
               <span className="hidden sm:inline">World — tap enters places</span>
             </button>
           )}
-          <div className="relative aspect-[16/9] w-full">
             <div className="relative h-full w-full">
               {fallbackVideoUrl && showVideo ? (
                 <video
@@ -3925,8 +4024,8 @@ export default function PlayPage() {
               )}
               {clickDetail && (
                 <ClickDetailPopover
-                  xPx={clickDetail.xPx}
-                  yPx={clickDetail.yPx}
+                  xPx={clickDetail.xPx + (imgRef.current?.getBoundingClientRect().left ?? 0)}
+                  yPx={clickDetail.yPx + (imgRef.current?.getBoundingClientRect().top ?? 0)}
                   entities={clickDetail.entities}
                   crop={clickDetail.crop}
                   initial={clickDetail.initial}
@@ -4091,8 +4190,22 @@ export default function PlayPage() {
                 </div>
               )}
 
-            {/* Reserve space for the World button at narrow widths. */}
-            <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-4.5rem)] flex-wrap justify-end gap-2 sm:max-w-[calc(100%-1.5rem)]">
+            {editMode ? (
+              <EditForm
+                instruction={editInstruction}
+                setInstruction={setEditInstruction}
+                onSubmit={submitEdit}
+                busy={phase === "generating"}
+                placeholder={t.editPlaceholder}
+                applyLabel={t.apply}
+                style={editFormStyle}
+              />
+            ) : (
+              <TapHint text={t.tapHint} />
+            )}
+          </div>
+            {/* On phones, wrapped controls must not cover the tappable map. */}
+            <div role="toolbar" aria-label="Image tools" className="relative z-10 flex flex-wrap items-center gap-2 border-t border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 sm:absolute sm:right-3 sm:top-3 sm:max-w-[calc(100%-1.5rem)] sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:pointer-events-none [&>button]:pointer-events-auto [&>div]:pointer-events-auto">
               {wanderNote && (
                 <span className="flex items-center rounded-full bg-black/70 px-2.5 py-1 text-xs text-white/95">
                   {wanderNote}
@@ -4163,6 +4276,7 @@ export default function PlayPage() {
                   </span>
                 )}
               </button>
+              {worldEnabled && <button type="button" aria-label="Inspect places" title="Inspect places" aria-pressed={inspectMode} disabled={phase === "generating"} onClick={() => { setInspectMode(v => !v); setInspectorOpen(v => !v); setCodexOpen(false); }} className="grid h-8 w-8 shrink-0 place-items-center rounded bg-emerald-700 text-white disabled:opacity-50"><ScanSearch size={17} /></button>}
               <button
                 type="button"
                 onClick={() => {
@@ -4250,20 +4364,6 @@ export default function PlayPage() {
                   </button>
                 )}
             </div>
-            {editMode ? (
-              <EditForm
-                instruction={editInstruction}
-                setInstruction={setEditInstruction}
-                onSubmit={submitEdit}
-                busy={phase === "generating"}
-                placeholder={t.editPlaceholder}
-                applyLabel={t.apply}
-                style={editFormStyle}
-              />
-            ) : (
-              <TapHint text={t.tapHint} />
-            )}
-          </div>
         </figure>
       ) : phase !== "generating" &&
         history.items.length === 0 &&
@@ -4351,10 +4451,15 @@ export default function PlayPage() {
         chipsEnabled={entityChipsEnabled}
         onToggleChips={() => setEntityChipsEnabled((v) => !v)}
         overrideEnabled={worldState.overrideEnabled}
-        onMutate={mutateWorldEntity}
+        onMutate={async mutation => { const result = await mutateWorldEntity(mutation); if (result.ok) await geoRefetch(); return result; }}
         geoEditSessionId={sessionId}
         geoEditPrefill={geoEditPrefill}
         onGeoApplyToImage={geoApplyToImage}
+        onInspectPlace={entityId => {
+          const place = geoMap.entities.find(e => e.kind === "place" && e.entity_id === entityId);
+          if (!place) return;
+          setSelectedPlaceId(place.id); setCodexOpen(false); setInspectorOpen(true);
+        }}
       />
 
       {/* Hide the coach while the Around tray is open — both are pinned to
@@ -4485,6 +4590,12 @@ export default function PlayPage() {
       )}
 
       <DebugHud />
+      {inspectorOpen && <PlaceInspector sessionId={sessionId} places={geoMap.entities.filter(e => e.kind === "place")} pages={history.items} selectedId={selectedPlaceId} onSelect={setSelectedPlaceId} onClose={closeInspector} onOpen={id => { closeInspector(); selectFromMap(id); }} onEnter={(place, fresh) => { void enterInspectedPlace(place, fresh); }} onSaved={async () => { await geoRefetch(); await refreshWorldState(); }} busy={phase === "generating"} />}
+      {placeChoice && <div role="dialog" aria-label="Choose a place" className="fixed bottom-4 left-1/2 z-[65] w-[min(340px,92vw)] -translate-x-1/2 rounded-lg border border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 shadow-xl">
+        <h2 className="mb-2 text-sm font-medium">Choose a place</h2>
+        {placeChoice.places.map(p => <button key={p.id} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-emerald-600/15" onClick={() => { placeIntentRef.current = { id: p.id, newView: false }; const point = placeChoice.click; setPlaceChoice(null); dispatchTapAt(point.x_pct, point.y_pct); }}>{p.label}</button>)}
+        <button className="mt-2 text-sm" onClick={() => setPlaceChoice(null)}>Cancel</button>
+      </div>}
 
       {/* Both navigation overlays occupy the bottom edge; keep the active
           scrubber unobstructed, including its close button on narrow screens. */}

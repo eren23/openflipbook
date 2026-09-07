@@ -259,7 +259,25 @@ class ProjectedEntity(BaseModel):
     size: str
 
 
+class PlaceReferenceBox(BaseModel):
+    x_pct: float = Field(ge=0, le=1, allow_inf_nan=False)
+    y_pct: float = Field(ge=0, le=1, allow_inf_nan=False)
+    w_pct: float = Field(gt=0, le=1, allow_inf_nan=False)
+    h_pct: float = Field(gt=0, le=1, allow_inf_nan=False)
+
+
+class PlaceRenderReference(BaseModel):
+    geo_id: str
+    label: str
+    visual: str
+    image_data_url: str
+    bbox: PlaceReferenceBox
+
+
 class GenerateBody(BaseModel):
+    target_geo_id: str | None = None
+    place_reference: PlaceRenderReference | None = None
+    strict_world: bool = False
     query: str
     aspect_ratio: str = "16:9"
     web_search: bool = True

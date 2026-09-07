@@ -1,4 +1,5 @@
 import type { Document } from "mongodb";
+import type { WorldEntityGeo } from "@openflipbook/config";
 
 import { getDb, type NodeDoc } from "./db";
 
@@ -93,7 +94,10 @@ export async function forkSession(
   if (worldMap) {
     await db
       .collection<Document & { _id: string }>("world_map")
-      .insertOne({ ...worldMap, _id: newSessionId });
+      .insertOne({ ...worldMap, _id: newSessionId, entities: (worldMap.entities as WorldEntityGeo[] ?? []).map(e => ({
+        ...e,
+        ...(e.identity_anchor ? { identity_anchor: { ...e.identity_anchor, node_id: idMap.get(e.identity_anchor.node_id) ?? e.identity_anchor.node_id } } : {}),
+      })) });
   }
 
   // world_state: keyed by _id = session id; entities reference node ids in

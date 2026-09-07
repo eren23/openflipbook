@@ -73,13 +73,20 @@ export async function GET(_req: Request, { params }: Params) {
     });
   }
 
-  const bytes = await buildWorldZip(nodes, worldMap, entities);
+  const referenceKeys = [...new Set(worldMap.entities.flatMap(e => e.identity_anchor ? [e.identity_anchor.image_key] : []))];
+  const references = [];
+  for (const image_key of referenceKeys.slice(0, NODE_CAP)) {
+    const stored = await getStoredBytes(image_key);
+    references.push({ image_key, bytes: stored?.bytes ?? null, contentType: stored?.contentType ?? "image/jpeg" });
+  }
+  const bytes = await buildWorldZip(nodes, worldMap, entities, references);
   const stamp = sessionId.slice(0, 8);
   return new Response(Buffer.from(bytes), {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="openflipbook-world-${stamp}.zip"`,
       ...(truncated ? { "X-Export-Truncated": String(NODE_CAP) } : {}),
+      ...(referenceKeys.length > NODE_CAP ? { "X-Export-References-Truncated": String(NODE_CAP) } : {}),
     },
   });
 }

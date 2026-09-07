@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   MapCrop,
@@ -87,6 +88,19 @@ export default function ClickDetailPopover({
   const [note, setNote] = useState("");
   const [projection, setProjection] = useState<string>("auto");
   const rootRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: xPx, top: yPx });
+  useLayoutEffect(() => {
+    const fit = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      setPosition({
+        left: Math.max(12, Math.min(xPx - (rect?.width ?? 288) / 2, window.innerWidth - (rect?.width ?? 288) - 12)),
+        top: Math.max(12, Math.min(yPx, window.innerHeight - (rect?.height ?? 440) - 12)),
+      });
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [xPx, yPx]);
 
   // Dismiss on Escape or a click outside. onCancel resolves the pending
   // promptForClickDetail promise with null, which is the ONLY thing that frees
@@ -127,11 +141,12 @@ export default function ClickDetailPopover({
       },
     }));
 
-  return (
+  // The image frame clips overflow; the camera picker must live outside it.
+  return createPortal(
     <div
       ref={rootRef}
-      className="absolute z-30 w-72 -translate-x-1/2 rounded-xl border border-black/15 bg-stone-50/95 p-2 shadow-xl backdrop-blur"
-      style={{ left: xPx, top: yPx }}
+      className="fixed z-[70] max-h-[calc(100dvh-24px)] w-72 max-w-[calc(100vw-24px)] overflow-y-auto rounded-lg border border-black/15 bg-stone-50/95 p-2 shadow-xl backdrop-blur"
+      style={position}
       data-testid="click-detail-popover"
       role="dialog"
       aria-label="set your view before entering"
@@ -281,6 +296,6 @@ export default function ClickDetailPopover({
           {mode === "scene" ? "enter" : "map it"}
         </button>
       </div>
-    </div>
+    </div>, document.body
   );
 }
