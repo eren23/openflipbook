@@ -113,6 +113,7 @@ services:
       #   WORLD_MODE=false docker compose up -d
       # The geometry + scale-ladder flags follow it unless individually set.
       WORLD_MODE: ${WORLD_MODE:-true}
+      WORLD_IDENTITY_STRICT: ${WORLD_IDENTITY_STRICT:-false}
       GEOMETRIC_WORLD: ${GEOMETRIC_WORLD:-${WORLD_MODE:-true}}
       SCALE_LADDER_NAV: ${SCALE_LADDER_NAV:-${WORLD_MODE:-true}}
       SCALE_OUTWARD: ${SCALE_OUTWARD:-${WORLD_MODE:-true}}
@@ -148,6 +149,7 @@ services:
       # stays single-file and WORLD_MODE=false restores the classic bundle.
       args:
         NEXT_PUBLIC_WORLD_MODE: ${NEXT_PUBLIC_WORLD_MODE:-${WORLD_MODE:-true}}
+        NEXT_PUBLIC_WORLD_IDENTITY_STRICT: ${NEXT_PUBLIC_WORLD_IDENTITY_STRICT:-false}
         NEXT_PUBLIC_DOM_LABELS: ${NEXT_PUBLIC_DOM_LABELS:-${WORLD_MODE:-true}}
         NEXT_PUBLIC_ON_RAMP_COACH: ${NEXT_PUBLIC_ON_RAMP_COACH:-false}
         NEXT_PUBLIC_ENTER_COACH: ${NEXT_PUBLIC_ENTER_COACH:-false}
@@ -187,6 +189,7 @@ services:
       # The web server routes gate geometry seeding + scale-nav on these —
       # same graduated single-knob coupling as the backend block above.
       WORLD_MODE: ${WORLD_MODE:-true}
+      WORLD_IDENTITY_STRICT: ${WORLD_IDENTITY_STRICT:-false}
       GEOMETRIC_WORLD: ${GEOMETRIC_WORLD:-${WORLD_MODE:-true}}
       SCALE_LADDER_NAV: ${SCALE_LADDER_NAV:-${WORLD_MODE:-true}}
       SCALE_OUTWARD: ${SCALE_OUTWARD:-${WORLD_MODE:-true}}

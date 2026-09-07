@@ -161,6 +161,18 @@ async def stream_tap(
     _vlm_grounding_repair_on: Callable[[], bool],
     _run_grounding: Callable[..., Awaitable[tuple[Any, dict[str, Any] | None]]],
 ) -> AsyncIterator[bytes]:
+    strict = body.strict_world
+    canonical_bytes: bytes | None = None
+    if strict:
+        from providers.place_identity import reference_crop
+
+        if not env_flag("WORLD_IDENTITY_STRICT") or not body.world_mode or body.mode != "tap":
+            yield _sse({"type": "error", "message": "Strict world generation is not enabled for this request."}, trace_id)
+            return
+        if not body.place_reference or body.target_geo_id != body.place_reference.geo_id:
+            yield _sse({"type": "error", "message": "A saved place reference is required."}, trace_id)
+            return
+        canonical_bytes = reference_crop(body.place_reference.image_data_url, body.place_reference.bbox)
     # 1. Resolve click → subject phrase + style anchor (style is empty for
     #    text-only queries; only set on tap mode). When the client has
     #    already prefetched on hover, skip the VLM round-trip entirely.
@@ -462,6 +474,8 @@ async def stream_tap(
                 break
         if region_ref is None:
             region_ref = body.condition_image_urls[0]
+    if canonical_bytes is not None:
+        region_ref = image_provider.encode_data_url(canonical_bytes, "image/png")
     # The model router owns the op decision: a place_submap entry with a
     # region crop zoom-continues; a place_scene entry routes through the
     # edit endpoint; everything else is a fresh gen.
@@ -683,6 +697,7 @@ async def stream_tap(
     target_tier = (body.image_tier or "balanced").lower()
     wants_draft = (
         progressive_enabled
+        and not strict
         and target_tier != "fast"
         and not body.image_model  # honour explicit model_override
         # The draft race is a fal tier optimisation (cheap fast-tier model
@@ -735,7 +750,50 @@ async def stream_tap(
     # render to the streaming body through this queue, which the body drains and
     # paints before the judge tail + keep-best retry. None = feature off.
     zoom_preview_q: _asyncio.Queue[bytes] | None = None
-    if use_continuation and region_ref is not None:
+    strict_grounding: dict[str, Any] | None = None
+    if strict:
+        from providers.place_identity import verify_and_render
+        from providers.render_budget import RenderBudget
+
+        if not (use_continuation or use_enter_edit) or canonical_bytes is None or not body.image or not body.place_reference or layout_suppressed or not view_spec:
+            yield _sse({"type": "error", "message": "This view cannot be verified. Your world is unchanged."}, trace_id)
+            return
+        model = (body.image_model or model_router.resolve_model("submap_redraw")) if use_continuation else enter_model_slug
+        if not model or not image_edit_provider.supports_identity_reference(model):
+            yield _sse({"type": "error", "message": "The selected model cannot honor a place reference."}, trace_id)
+            return
+        budget = RenderBudget(body.session_id, min(2, body.max_attempts or 2), _time.monotonic() + max(0, ingress_timeout_s - 120 - (_time.perf_counter() - started)))
+        instruction = (zoom_instruction if use_continuation else enter_instruction) + (
+            "\nImage 1 is the current world context. Image 2 is the canonical crop of "
+            f"{body.place_reference.label}. Render this SPECIFIC place, not a similar one. "
+            f"Preserve its layout and distinctive features: {body.place_reference.visual}. "
+            "Context is not permission to invent, move or rename landmarks."
+        )
+        source_image = body.image
+
+        async def _strict_render(suffix: str, index: int) -> GeneratedImage:
+            return await image_edit_provider.edit_image(
+                source_image, instruction + "\n" + suffix, model_override=model,
+                identity_ref_url=region_ref, budget=budget,
+            )
+
+        async def _strict_ground(img: GeneratedImage) -> dict[str, Any] | None:
+            _, report = await _run_grounding(img, [e.model_dump() for e in body.expected_layout], repair_on=False, abort=_abort_if_disconnected)
+            return report
+
+        verified = await verify_and_render(
+            _strict_render, budget=budget, reference=canonical_bytes,
+            label=body.place_reference.label, visual=body.place_reference.visual,
+            projection=str(view_spec["projection"]), facts=plan.facts,
+            abort=_abort_if_disconnected, interior=interior_enter,
+            zoom=use_continuation, map_zoom=use_continuation and zoom_register == "map",
+            grounding=_strict_ground if body.expected_layout else None,
+        )
+        if not verified.verdict["accepted"]:
+            yield _sse({**verified.rejection(), "session_spend_estimate": spend.session_total(body.session_id)}, trace_id)
+            return
+        result, view_verdict, strict_grounding = verified.image, verified.verdict, verified.grounding
+    elif use_continuation and region_ref is not None:
         # SUBMAP_REDRAW rides the pixel-honoring EDIT seam with a LOOSE-refs
         # model. The fresh path is NOT an option: fal's text-to-image endpoints
         # accept-but-ignore reference images (supports_refs=False, #109 removed
@@ -1135,8 +1193,8 @@ async def stream_tap(
     # Skipped on a layout-register mismatch: verifying (and REPAIRING)
     # against bins projected for a different camera would actively fight
     # the deliberate view (V1 must-fix 5).
-    grounding_summary: dict | None = None
-    if _vlm_grounding_on() and body.expected_layout and not layout_suppressed:
+    grounding_summary: dict | None = strict_grounding
+    if not strict and _vlm_grounding_on() and body.expected_layout and not layout_suppressed:
         await _abort_if_disconnected("pre-grounding")
         yield _sse(
             {
@@ -1184,7 +1242,7 @@ async def stream_tap(
             else composed_prompt
         ),
         "sources": sources_payload,
-        "session_spend_estimate": spend.record_generation(
+        "session_spend_estimate": spend.session_total(body.session_id) if strict else spend.record_generation(
             body.session_id, result.model, images=billed_images
         ),
     }
@@ -1202,6 +1260,9 @@ async def stream_tap(
     )
     if executed_op != "fresh":
         final_payload["image_op"] = executed_op
+    if strict and body.scene_view:
+        # Persist the server-resolved camera and focus, not the client's hint.
+        final_payload["scene_view"] = body.scene_view.model_dump()
     # INTERIOR ENTERS arrival stamp (additive; absent otherwise → unchanged
     # wire shape): the arrival is INDOORS at the room rung — echo the
     # request's scene_view with scale_tier/place_form stamped so the client

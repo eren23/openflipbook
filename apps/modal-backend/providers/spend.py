@@ -87,6 +87,27 @@ def record_generation(session_id: str, model: str | None, images: int = 1) -> fl
     )
 
 
+def reserve(session_id: str, amount: float) -> float:
+    """Atomic, conservative pre-submission accounting for strict renders."""
+    global _daily_total, _daily_key
+    with _lock:
+        day = _today()
+        if day != _daily_key:
+            _daily_key, _daily_total = day, 0.0
+        total = _session_totals.get(session_id, 0.0)
+        if daily_cap() > 0 and _daily_total + amount > daily_cap():
+            raise RuntimeError("Daily spend cap would be exceeded")
+        if session_cap() > 0 and total + amount > session_cap():
+            raise RuntimeError("Session spend cap would be exceeded")
+        _daily_total += amount
+        total += amount
+        _session_totals[session_id] = total
+        _session_totals.move_to_end(session_id)
+        while len(_session_totals) > _MAX_SESSIONS:
+            _session_totals.popitem(last=False)
+        return total
+
+
 def session_total(session_id: str) -> float:
     with _lock:
         return _session_totals.get(session_id, 0.0)
