@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from providers.prompt_library.types import ViewSpec
+    from providers.render_budget import RenderBudget
 
 from ._common import to_fal_url
 from .image import (
@@ -82,26 +83,36 @@ async def edit_image(
     tier: str | None = None,
     model_override: str | None = None,
     style_ref_url: str | None = None,
+    identity_ref_url: str | None = None,
+    budget: RenderBudget | None = None,
 ) -> GeneratedImage:
     from obs import span
     from providers import mock
 
     if mock.on():
         m = mock.mock_image(instruction, op="edit")
+        if budget is not None:
+            budget.reserve(m.model)
         return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
     model = _resolve_edit_model(tier, model_override)
+    if identity_ref_url and not supports_identity_reference(model):
+        raise ValueError("This edit model cannot honor the place reference")
     image_url = await to_fal_url(image_data_url)
     # The style exemplar only helps the nano models (they accept a 2nd ref);
     # Kontext is singular-ref, so it leans on the instruction's medium clause.
     style_fal: str | None = None
     if style_ref_url and "nano-banana" in model:
         style_fal = await to_fal_url(style_ref_url)
+    args = _edit_args_for(model, instruction, image_url, style_fal)
+    if identity_ref_url:
+        args["image_urls"].insert(1, await to_fal_url(identity_ref_url))
     async with span("image.edit", model=model, instr_len=len(instruction)) as ctx:
         result = await _fal_subscribe(
             model,
-            _edit_args_for(model, instruction, image_url, style_fal),
+            args,
             require_images=True,
+            **({"budget": budget} if budget is not None else {}),
         )
         image_info = _first_image(result)
         jpeg_bytes, mime = await _fetch_image_bytes(image_info)
@@ -112,6 +123,12 @@ async def edit_image(
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
     )
+
+
+def supports_identity_reference(model: str) -> bool:
+    # Only the multi-image edit families already used by our router. Unknown
+    # endpoints must not silently fall back to text-only identity hints.
+    return any(name in model for name in ("nano-banana", "seedream", "gpt-image"))
 
 
 # --- Continuation (zoom-in that keeps the surroundings) ----------------------

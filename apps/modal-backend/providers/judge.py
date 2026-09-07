@@ -243,6 +243,20 @@ async def score_entity_consistency(
     )
 
 
+async def score_outward_place(source: bytes, candidate: bytes) -> JudgeResult:
+    return await _ask_judge(
+        "Judge identity and spatial continuity in a camera pull-back. Image 2 must "
+        "contain the exact place from image 1, smaller at its centre, with the same "
+        "distinctive structures, labels and relative positions. Surrounding terrain "
+        "must connect continuously. Reject a similar invented city, an inset map, "
+        "a framed painting, or a pasted sheet even if style matches. 10 = the exact "
+        "place in continuous wider surroundings; 5 = similar but reinvented; 0 = unrelated. "
+        'Return JSON exactly: {"score": <0-10 number>, "rationale": "<one short sentence>"}.',
+        "Image 1 is the source. Image 2 is the proposed wider view. Score 0-10.",
+        [_image_block(source), _image_block(candidate)],
+    )
+
+
 async def score_continuation(region_crop: bytes, candidate: bytes) -> JudgeResult:
     """B3 — visual coherence of an ENTERED place vs the map region it came from.
 

@@ -661,7 +661,7 @@ def _is_retryable(exc: BaseException) -> bool:
 
 
 async def _fal_subscribe(
-    model: str, arguments: dict, *, require_images: bool = False
+    model: str, arguments: dict, *, require_images: bool = False, budget: Any = None
 ) -> dict:
     """fal_client.subscribe_async with bounded exponential backoff.
 
@@ -692,11 +692,13 @@ async def _fal_subscribe(
         reraise=True,
     ):
         with attempt:
+            if budget is not None:
+                budget.reserve(model)
             result = await asyncio.wait_for(
                 fal_client.subscribe_async(
                     model, arguments=arguments, with_logs=False
                 ),
-                timeout=deadline_s,
+                timeout=min(deadline_s, budget.remaining_seconds()) if budget is not None else deadline_s,
             )
             # Two success shapes exist: `images: [...]` (nano/kontext/fill) and
             # BRIA Expand's singular `image` object — accept either, so a

@@ -180,6 +180,10 @@ async def stream_ascend(
     _view_grammar_on: Callable[[], bool],
     _abort_if_disconnected: Callable[[str], Awaitable[None]],
 ) -> AsyncIterator[bytes]:
+    strict = body.strict_world
+    if strict and (not env_flag("WORLD_IDENTITY_STRICT") or not body.world_mode):
+        yield _sse({"type": "error", "message": "Strict world generation is not enabled."}, trace_id)
+        return
     if not (env_flag("SCALE_LADDER_NAV", "true") and env_flag("SCALE_OUTWARD", "true")):
         yield _sse(
             {"type": "error", "message": "OUTWARD disabled (SCALE_LADDER_NAV+SCALE_OUTWARD)"},
@@ -256,8 +260,44 @@ async def stream_ascend(
     render_unjudged = True
     render_rejected = False
     billed_images = 1
+    strict_verdict = None
     try:
-        if use_outpaint:
+        if strict:
+            from providers.place_identity import verify_and_render
+            from providers.render_budget import RenderBudget
+            from providers.render_loop import data_url_bytes
+
+            source_bytes = data_url_bytes(body.image)
+            if source_bytes is None or not same_plane or use_outpaint:
+                yield _sse({"type": "error", "message": "This wider-view mode cannot be verified. Your world is unchanged."}, trace_id)
+                return
+            budget = RenderBudget(body.session_id, min(2, body.max_attempts or 2), _time.monotonic() + 600)
+            source_image = body.image
+            final_prompt = (
+                f"Pull the camera back to reveal the surrounding {to_tier.replace('_', ' ')} "
+                "as ONE SINGLE continuous flat chart. Keep the EXACT source place smaller "
+                "at the centre: the same structures, shape, lettering and relative positions. "
+                "Continue roads, rivers and terrain into the margins in the source's exact "
+                "palette and inked linework. No inset, frame, pasted sheet, desk, photograph "
+                f"or invented replacement city. {style_lock or ''} {source_identity} {outward_rider} {no_lettering}"
+            )
+
+            async def _strict_outward(suffix: str, index: int) -> GeneratedImage:
+                return await image_edit_provider.edit_image(source_image, final_prompt + "\n" + suffix, model_override=body.image_model, budget=budget)
+
+            verified = await verify_and_render(
+                _strict_outward, budget=budget, reference=source_bytes,
+                label=outward_source_label, visual=source_identity, projection="top_down",
+                facts=[], abort=_abort_if_disconnected, outward=True,
+            )
+            if not verified.verdict["accepted"]:
+                yield _sse({**verified.rejection(), "session_spend_estimate": spend.session_total(body.session_id)}, trace_id)
+                return
+            img = verified.image
+            strict_verdict = verified.verdict
+            render_unjudged = False
+            page_title = f"The surrounding {to_tier.replace('_', ' ')}".title()
+        elif use_outpaint:
             medium = style_lock or "the same hand-drawn art style as the centre"
             margin = (
                 f"{medium}; extend OUTWARD into the surrounding "
@@ -429,7 +469,7 @@ async def stream_ascend(
         return
     # Spend accounting: this OUTWARD hop made real paid image calls (one per
     # judged attempt) — record them so the cap actually counts them.
-    if not preserve_source:
+    if not preserve_source and not strict:
         spend.record_generation(body.session_id, img.model, images=billed_images)
     if render_rejected:
         yield _sse(
@@ -454,6 +494,8 @@ async def stream_ascend(
         "from_tier": from_tier,
         "session_id": body.session_id,
     }
+    if strict_verdict is not None:
+        ascend_payload["view_verdict"] = strict_verdict
     if render_unjudged:
         # Additive: present only when the critics could not gate this render
         # (judge failure / remote-ref source) — the UI shows an "unverified
