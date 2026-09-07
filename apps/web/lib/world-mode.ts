@@ -1,4 +1,5 @@
-import type { EnterAs, RenderMode } from "@openflipbook/config";
+import type { EnterAs, RenderMode, SceneView } from "@openflipbook/config";
+import { placeViewKind } from "./place-identity";
 
 /**
  * World Mode client helpers (pure).
@@ -38,6 +39,7 @@ export function zoomModeForLevel(
 }
 
 export interface RevisitCandidate {
+  sceneView?: SceneView | null;
   nodeId: string | null;
   parentId?: string | null;
   clickInParent?: { xPct: number; yPct: number };
@@ -52,11 +54,18 @@ export function findRevisitTarget(
   parentNodeId: string | null,
   click: { x_pct: number; y_pct: number },
   radius: number = REVISIT_RADIUS,
+  target?: { geoId: string; kind: string },
 ): string | null {
   if (!parentNodeId) return null;
+  if (target) {
+    const saved = items.find(it => it.nodeId && it.sceneView?.focus_id === target.geoId && placeViewKind(it.sceneView) === target.kind);
+    if (saved) return saved.nodeId;
+  }
   let best: { id: string; d: number } | null = null;
   for (const it of items) {
     if (!it.nodeId || it.parentId !== parentNodeId || !it.clickInParent) continue;
+    // Nearby clicks cannot substitute a different known landmark or view.
+    if (it.sceneView?.focus_id) continue;
     const dx = it.clickInParent.xPct - click.x_pct;
     const dy = it.clickInParent.yPct - click.y_pct;
     const d = Math.hypot(dx, dy);

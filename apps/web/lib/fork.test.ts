@@ -101,6 +101,15 @@ function seed() {
 }
 
 describe("forkSession", () => {
+  it("remaps a curated anchor's node but preserves its original bytes and crop", async () => {
+    seed();
+    const anchor = { node_id: "root1", image_key: "original-before-edit.png", bbox: { x_pct: .1, y_pct: .2, w_pct: .3, h_pct: .4 } };
+    mongo.store("world_map").get(SRC)!.entities = [{ id: "geo_tower", identity_locked: true, identity_anchor: anchor }];
+    const forked = (await forkSession(SRC, "root1"))!;
+    const root = [...mongo.store("nodes").values()].find(n => n.session_id === forked.session_id && n.parent_id === null)!;
+    const geos = mongo.store("world_map").get(forked.session_id)!.entities as Record<string, unknown>[];
+    expect(geos[0]).toMatchObject({ id: "geo_tower", identity_locked: true, identity_anchor: { ...anchor, node_id: root._id } });
+  });
   it("copies nodes + world_map + world_state under a fresh session, ids reminted", async () => {
     seed();
     const forked = await forkSession(SRC, "child1");

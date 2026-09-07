@@ -7,6 +7,7 @@ import {
 } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { requireOwner } from "@/lib/session-owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,8 @@ export async function GET(_req: Request, { params }: Params) {
 // anything else upserts explicit `geos`. Gated behind GEOMETRIC_WORLD.
 export async function POST(req: Request, { params }: Params) {
   const { sessionId } = await params;
+  const owner = await requireOwner(sessionId);
+  if (!owner.ok) return owner.res;
   if (!geometricWorldEnabled()) {
     return NextResponse.json({ error: "geometric world disabled" }, { status: 403 });
   }
@@ -75,7 +78,13 @@ export async function POST(req: Request, { params }: Params) {
       );
       return NextResponse.json(snap);
     }
-    return NextResponse.json(await upsertEntityGeos(sessionId, body.geos ?? []));
+    const geos = (body.geos ?? []).map(g => {
+      const clean = { ...g };
+      delete clean.identity_anchor;
+      delete clean.identity_locked;
+      return clean;
+    });
+    return NextResponse.json(await upsertEntityGeos(sessionId, geos));
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 502 });
   }

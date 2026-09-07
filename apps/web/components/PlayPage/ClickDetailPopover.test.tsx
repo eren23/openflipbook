@@ -57,6 +57,14 @@ function setup(initialOver: Partial<Parameters<typeof ClickDetailPopover>[0]["in
 }
 
 describe("ClickDetailPopover", () => {
+  it("escapes the clipped image frame and stays within the viewport", () => {
+    setup();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.className).toContain("fixed");
+    expect(Number.parseFloat(dialog.style.left)).toBeGreaterThanOrEqual(12);
+    expect(Number.parseFloat(dialog.style.top)).toBeGreaterThanOrEqual(12);
+  });
   it("seeds from the routed tap: focus label, active level, live preview", () => {
     setup();
     expect(screen.getByText("Tower of Art")).toBeTruthy();

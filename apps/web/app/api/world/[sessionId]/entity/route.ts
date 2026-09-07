@@ -6,8 +6,11 @@ import {
   renameEntity,
   setEntityAppearance,
   undoDeleteEntity,
+  getWorldState,
 } from "@/lib/world";
-import { removeEntityGeos } from "@/lib/world-map";
+import { getWorldMap, removeEntityGeos } from "@/lib/world-map";
+import { PlaceError, updatePlace } from "@/lib/places";
+import { parsePlaceUpdate } from "@/lib/place-identity";
 import { requireOwner } from "@/lib/session-owner";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
@@ -58,6 +61,18 @@ export async function POST(req: Request, { params }: Params) {
   const auth = await requireOwner(sessionId);
   if (!auth.ok) return auth.res;
   try {
+    if (mutation.op === "rename" || mutation.op === "pin" || mutation.op === "set_appearance") {
+      const place = (await getWorldMap(sessionId)).entities.find(e => e.kind === "place" && e.entity_id === mutation.id);
+      if (place) {
+        const patch = parsePlaceUpdate({ expected_updated_at: place.updated_at,
+          ...(mutation.op === "rename" ? { label: mutation.name } : mutation.op === "pin" ? { identity_locked: mutation.pinned } : { visual: mutation.appearance }),
+        });
+        if (!patch) throw new PlaceError("Invalid place update");
+        if (mutation.op === "set_appearance" && mutation.reference_image_url) throw new PlaceError("Choose the saved reference in the place inspector");
+        await updatePlace(sessionId, place.id, patch);
+        return NextResponse.json(await getWorldState(sessionId));
+      }
+    }
     switch (mutation.op) {
       case "rename": {
         const snapshot = await renameEntity(
@@ -118,7 +133,7 @@ export async function POST(req: Request, { params }: Params) {
   } catch (err) {
     return NextResponse.json(
       { error: (err as Error).message },
-      { status: 400 }
+      { status: err instanceof PlaceError ? err.status : 400 }
     );
   }
 }

@@ -10,8 +10,10 @@ import type {
 } from "@openflipbook/config";
 
 import GeoEditSection from "./GeoEditSection";
+import { ScanSearch } from "lucide-react";
 
 interface Props {
+  onInspectPlace?: (entityId: string) => void;
   open: boolean;
   onClose: () => void;
   entities: Entity[];
@@ -91,6 +93,7 @@ export function CodexPanel({
   geoEditSessionId,
   geoEditPrefill,
   onGeoApplyToImage,
+  onInspectPlace,
 }: Props) {
   const [tab, setTab] = useState<TabKind>("all");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -254,6 +257,7 @@ export function CodexPanel({
           <ul className="space-y-2">
             {visible.map((e) => (
               <EntityCard
+                onInspectPlace={onInspectPlace}
                 key={e.id}
                 entity={e}
                 editable={Boolean(overrideEnabled && onMutate)}
@@ -344,6 +348,7 @@ function EntityCard({
   editable,
   onMutate,
   onDeleted,
+  onInspectPlace,
 }: {
   entity: Entity;
   editable: boolean;
@@ -351,6 +356,7 @@ function EntityCard({
     | ((mutation: WorldEntityMutation) => Promise<{ ok: boolean; error?: string }>)
     | undefined;
   onDeleted?: ((id: string, name: string) => void) | undefined;
+  onInspectPlace?: ((entityId: string) => void) | undefined;
 }) {
   const resolving = !entity.appearance;
   const stateEntries = Object.entries(entity.state);
@@ -496,6 +502,7 @@ function EntityCard({
           <span>conf {Math.round(entity.confidence * 100)}</span>
         )}
       </div>
+      {entity.kind === "place" && onInspectPlace && <button aria-label={`Inspect ${entity.name}`} title="Inspect place" onClick={() => onInspectPlace(entity.id)} className="mt-2 flex items-center gap-2 rounded border border-[var(--color-edge)] px-2 py-1 text-xs"><ScanSearch size={14} />Inspect</button>}
       {editable && (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-1 pl-11 text-[11px]">
           <CardActionButton
