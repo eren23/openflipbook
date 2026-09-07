@@ -1,0 +1,247 @@
+{
+  "complete": true,
+  "promotion": false,
+  "reserved_usd": 4.2,
+  "results": [
+    {
+      "case": "fishing_lighthouse-enter-baseline",
+      "source_hash": "e730ccee2ca8a4385bd46e708c232169a9d5032b0135d48bfae494438e2d8acd",
+      "complete": true,
+      "accepted": true,
+      "identity": 0,
+      "medium": 8.5,
+      "identity_reason": "The North Point Lighthouse is completely absent in the second image, which depicts a harbor dock scene instead.",
+      "medium_reason": "Both feature an illustrated map-like aesthetic with clean black ink linework, muted watercolor-style coloring, and integrated labels.",
+      "receipt": {
+        "same_place": 0,
+        "conformance": 10,
+        "medium": 9,
+        "detail": 10,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 38.82
+    },
+    {
+      "case": "fishing_lighthouse-enter-strict",
+      "source_hash": "e730ccee2ca8a4385bd46e708c232169a9d5032b0135d48bfae494438e2d8acd",
+      "complete": true,
+      "accepted": true,
+      "identity": 9,
+      "medium": 9.5,
+      "identity_reason": "The lighthouse in image 2 shares the same cylindrical stone design, dark lantern cap, and labeled text 'North Point Lighthouse' beside it on the coastal cliff.",
+      "medium_reason": "The candidate matches the reference perfectly in medium, fine ink linework, muted watercolor washes, perspective, and labeled cartographic typography.",
+      "receipt": {
+        "same_place": 9,
+        "conformance": 10,
+        "medium": 9.5,
+        "detail": 9,
+        "interior": null,
+        "attempts": 1,
+        "accepted": true
+      },
+      "seconds": 39.17
+    },
+    {
+      "case": "fishing_lighthouse-closeup-baseline",
+      "source_hash": "e730ccee2ca8a4385bd46e708c232169a9d5032b0135d48bfae494438e2d8acd",
+      "complete": true,
+      "accepted": true,
+      "identity": 10,
+      "medium": 10,
+      "identity_reason": "Image 1 is an identical close-up crop of the North Point Lighthouse shown on the full map in Image 2.",
+      "medium_reason": "The candidate image is the full artwork from which the reference is directly cropped, making the style completely identical in line work, coloring, and medium.",
+      "receipt": {
+        "same_place": 0,
+        "conformance": null,
+        "medium": null,
+        "detail": 9,
+        "interior": null,
+        "attempts": 2,
+        "accepted": false
+      },
+      "seconds": 34.27
+    },
+    {
+      "case": "fishing_lighthouse-closeup-strict",
+      "source_hash": "e730ccee2ca8a4385bd46e708c232169a9d5032b0135d48bfae494438e2d8acd",
+      "complete": true,
+      "accepted": false,
+      "identity": 0,
+      "medium": 8,
+      "identity_reason": "The entity North Point Lighthouse is absent in the second image, which instead depicts Beacon Rock Lighthouse.",
+      "medium_reason": "Both feature hand-drawn fantasy map illustrations with black ink outlines and a warm, teal-accented palette, though Image 2 incorporates more visible cross-hatching texture.",
+      "receipt": {
+        "same_place": 0,
+        "conformance": 1,
+        "medium": 8,
+        "detail": 9,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 36.38
+    },
+    {
+      "case": "oasis_citadel-enter-baseline",
+      "source_hash": "cc34afe4b4a73b4fc745aff2a7ce0685d0d01526e8baf2d59724f7d7f50f15d4",
+      "complete": true,
+      "accepted": true,
+      "identity": 0,
+      "medium": 7.5,
+      "identity_reason": "Image 2 depicts an entirely different location, 'The Sunbaked Oasis of Zaffar', with a different layout, perspective, and core features.",
+      "medium_reason": "Both share a warm parchment-toned palette, black ink linework, and textured shading, though Image 2 shifts from a 2D top-down map perspective to an isometric 3D view.",
+      "receipt": {
+        "same_place": 0,
+        "conformance": 10,
+        "medium": 6.8,
+        "detail": 10,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 41.05
+    },
+    {
+      "case": "oasis_citadel-enter-strict",
+      "source_hash": "cc34afe4b4a73b4fc745aff2a7ce0685d0d01526e8baf2d59724f7d7f50f15d4",
+      "complete": true,
+      "accepted": false,
+      "identity": 7,
+      "medium": 6,
+      "identity_reason": "The citadel in the perspective view reflects the general sandstone material, crenelated walls, and fortress layout shown in the top-down plan.",
+      "medium_reason": "Both feature clean ink outlines and warm architectural rendering, but the candidate shifts from a top-down parchment map palette to a full-color isometric landscape with prominent greens and blues.",
+      "receipt": {
+        "same_place": 8,
+        "conformance": 10,
+        "medium": 5,
+        "detail": 9,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 49.16
+    },
+    {
+      "case": "oasis_citadel-closeup-baseline",
+      "source_hash": "cc34afe4b4a73b4fc745aff2a7ce0685d0d01526e8baf2d59724f7d7f50f15d4",
+      "complete": true,
+      "accepted": true,
+      "identity": 8,
+      "medium": 10,
+      "identity_reason": "The outer citadel walls, towers, and layout match identically, though the central structure inside the citadel has been redesigned with minarets and domes.",
+      "medium_reason": "Both images share the exact same hand-drawn cartographic style, warm parchment palette, ink linework, and top-down perspective.",
+      "receipt": {
+        "same_place": 5,
+        "conformance": null,
+        "medium": null,
+        "detail": 9,
+        "interior": null,
+        "attempts": 2,
+        "accepted": false
+      },
+      "seconds": 38.52
+    },
+    {
+      "case": "oasis_citadel-closeup-strict",
+      "source_hash": "cc34afe4b4a73b4fc745aff2a7ce0685d0d01526e8baf2d59724f7d7f50f15d4",
+      "complete": true,
+      "accepted": false,
+      "identity": 9,
+      "medium": 8.5,
+      "identity_reason": "The layout of the fortress at the top of the map in image 2 matches the detailed layout in image 1 with identical towers, keep structure, and wall configurations.",
+      "medium_reason": "Both share a classic hand-drawn fantasy cartography style with detailed ink outlines, top-down perspective, and warm parchment-toned watercolor washes.",
+      "receipt": {
+        "same_place": 10,
+        "conformance": 0,
+        "medium": 8,
+        "detail": 10,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 45.05
+    },
+    {
+      "case": "harbor_lighthouse-enter-baseline",
+      "source_hash": "45acbbd0142df4ec916fe39eb4dfa619547ac9a42464fc32a01a10911026c146",
+      "complete": true,
+      "accepted": true,
+      "identity": 0,
+      "medium": 8.5,
+      "identity_reason": "The Crystal Lighthouse is entirely absent from the second image.",
+      "medium_reason": "Both images share a matching fantasy map-illustration style with crisp ink line work, isometric perspective, and similar architectural rendering, though the candidate's palette is slightly more muted.",
+      "receipt": {
+        "same_place": 1,
+        "conformance": 10,
+        "medium": 8.5,
+        "detail": 10,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 44.4
+    },
+    {
+      "case": "harbor_lighthouse-enter-strict",
+      "source_hash": "45acbbd0142df4ec916fe39eb4dfa619547ac9a42464fc32a01a10911026c146",
+      "complete": true,
+      "accepted": false,
+      "identity": 5,
+      "medium": 9.5,
+      "identity_reason": "While both depict a lighthouse on the left cliff with blue crystal elements, Image 2 features an enclosed lantern with a solid crystal cone roof rather than the floating crystal diamond and flanking stone wings of Image 1.",
+      "medium_reason": "The candidate matches the reference image's hand-drawn ink linework, fantasy cartographic perspective, and watercolor-like digital shading almost perfectly.",
+      "receipt": {
+        "same_place": 4,
+        "conformance": 10,
+        "medium": 9.5,
+        "detail": 9,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 53.56
+    },
+    {
+      "case": "harbor_lighthouse-closeup-baseline",
+      "source_hash": "45acbbd0142df4ec916fe39eb4dfa619547ac9a42464fc32a01a10911026c146",
+      "complete": true,
+      "accepted": true,
+      "identity": 10,
+      "medium": 10,
+      "identity_reason": "Image 1 is a direct close-up crop of the exact same lighthouse featured in the map overview of Image 2.",
+      "medium_reason": "Image 1 is a direct crop from the same illustrated fantasy map as Image 2, sharing identical linework, rendering, and palette.",
+      "receipt": {
+        "same_place": 0,
+        "conformance": null,
+        "medium": null,
+        "detail": 9.5,
+        "interior": null,
+        "attempts": 2,
+        "accepted": false
+      },
+      "seconds": 41.19
+    },
+    {
+      "case": "harbor_lighthouse-closeup-strict",
+      "source_hash": "45acbbd0142df4ec916fe39eb4dfa619547ac9a42464fc32a01a10911026c146",
+      "complete": true,
+      "accepted": false,
+      "identity": 9,
+      "medium": 7,
+      "identity_reason": "The Crystal Lighthouse appears on the left headland labeled clearly on the map with a matching tower structure and floating crystal top consistent with the close-up.",
+      "medium_reason": "Both share the same hand-drawn ink cartography line work and architectural stylization, though the candidate has a much more muted, desaturated map palette compared to the vibrant reference.",
+      "receipt": {
+        "same_place": 8,
+        "conformance": 0,
+        "medium": 8.5,
+        "detail": 9.5,
+        "interior": null,
+        "attempts": 1,
+        "accepted": false
+      },
+      "seconds": 40.97
+    }
+  ]
+}
