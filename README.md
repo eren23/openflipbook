@@ -1,6 +1,6 @@
 # openflipbook
 
-> **An open-source [flipbook.page](https://flipbook.page) clone, image-is-the-UI.** Every page is an AI-generated illustration. Tap anywhere on the image and a vision model resolves what you tapped, turns it into the next page, and keeps going. Seed from a text query or drop in any image. Bring your own API keys; clone, run, hack.
+> **Explore illustrated worlds. Keep the places you create.** Start with a map or a prompt, enter a place, and return to its saved view. Edit names and canonical references, branch your world, and share a read-only journey. Open source and self-hosted, inspired by [flipbook.page](https://flipbook.page).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/eren23/openflipbook?style=social)](https://github.com/eren23/openflipbook/stargazers)
@@ -11,9 +11,20 @@
 
 ## Demo
 
+![Crescent Bay Fishing Village, an original map generated in openflipbook](apps/modal-backend/tests/click_bench/fixtures/images/real/fishing_village.jpg)
+
+[World walkthrough](docs/WORLD_WALKTHROUGH.md) | [Place identity and its limits](docs/PLACE_IDENTITY.md) | [H3 Max vs LTX transition pilot](docs/research/12-transition-video-pilot.md)
+
+This is a saved product output, not a promise that every newly generated viewpoint will match it. Revisits retrieve saved images; new perspectives can still drift. The walkthrough separates persistence, generation accuracy, and animated transitions.
+
+<details>
+<summary>Earlier classic explainer demo</summary>
+
 ![openflipbook demo — tap any region of an AI-generated page; a vision model resolves what you tapped and renders the next page](apps/web/public/demo.gif)
 
 Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click-to-explore hops. [Full-quality MP4 with audio](https://github.com/eren23/openflipbook/raw/main/apps/web/public/demo.mp4). Recorded with the Playwright driver under [`scripts/record-demo/`](scripts/record-demo/) — run `pnpm record-demo` to re-capture against your own stack.
+
+</details>
 
 ## Why this exists
 
@@ -21,15 +32,16 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
 
 ## TL;DR
 
-- **One image per page**, rendered by fal (default balanced tier: [`nano-banana-pro`](https://fal.ai/models/fal-ai/nano-banana-pro)). Text inside the page is pixels, not DOM.
-- **Click → next page.** [`google/gemini-3-flash-preview`](https://openrouter.ai/google/gemini-3-flash-preview) via OpenRouter resolves the clicked region to a phrase; the same model family plans the page with web-search grounding.
+- **One image per page**, rendered by swappable image providers. Balanced fresh maps currently use Seedream; entered scenes have their own edit-model route. See [image tiers](apps/modal-backend/providers/image.py) and [model routing](apps/modal-backend/providers/model_router.py). Text inside the page is pixels, not DOM.
+- **Click → next page.** A vision model resolves the clicked region; a planner turns it into the next image request. Current defaults live in the [LLM provider](apps/modal-backend/providers/llm/client.py).
 - **Seed from your own image.** Upload / drag-and-drop works as a starting point.
 - **Optional animation toggle.**
-  - Default: one-shot 5s MP4 from `fal-ai/ltx-video/image-to-video`. Cheap (~$0.02/clip), no GPU on your side.
+  - Ambient animation: a one-shot MP4; no GPU required on your side. Arrival transitions use a separate first-and-last-frame model slot. Both cost money when generated, but saved arrival clips replay without another model call.
   - Streaming: the same LTXF binary WebSocket protocol Flipbook uses, deployed to your own Modal account — true fragmented-MP4 streaming into a `<video>` tag via Media Source Extensions.
 - **Permalinks.** `/n/:id` hydrates from Mongo + R2 without regenerating.
 - **Embeddable worlds.** Publish a world (right-click → Publish) and it becomes frameable: `/embed/:sessionId` is a read-only interactive viewer — tap the dots to walk the already-generated pages, zero model calls, works in any iframe. Platforms that speak oEmbed unfurl `/n/` links into it automatically; everyone else gets the one-line `<script src=".../embed.js">` + `<div data-openflipbook="...">` wrapper. Deployer recipes (Discourse, the oEmbed registry, Iframely/Notion) live in [docs/EMBEDDING.md](docs/EMBEDDING.md).
-- **Pin a style.** Hit the 📌 on any page and every new page in the session inherits that look (palette, line work, perspective). Persists across reload.
+- **Pin a style.** Carry a saved style reference into subsequent generation requests. The pin persists across reload; the model can still fail to match it.
+- **Place Inspector.** Rename mapped places, preserve old names as aliases, lock identity metadata, choose a canonical image crop, and revisit saved views. See [the identity contract](docs/PLACE_IDENTITY.md).
 - **Citations.** When the planner runs with `:online`, the source URLs ride through to a tiny `📎` chip in the corner of the page — one click, you can see what it actually read.
 - **Shift-drag to circle a region.** Freehand stroke on the image, release, and the next page focuses on what you scribbled. Same VLM as the click path, just more pointed.
 - **Time-scrubber (`T`).** Linear film-strip of every page in your trail; drag the scrubber to time-travel through your own exploration.
@@ -37,7 +49,7 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
 - **Progressive render.** On the balanced/pro tiers the cheap fast model paints a draft in parallel, so you get something on screen seconds before the final lands. Toggle off with `PROGRESSIVE_DRAFT=false` if you'd rather save the extra fal call.
 - **Edit a page in place.** Describe a change and the page revises itself instead of spawning a child. With `EDIT_REGION` on you drag the exact region, the mask rides the edit, and a judge scores the result — verdict chip + one-click revert included.
 - **World Mode (on by default).** Pages are places: tap a glowing region to *enter* it as a scene, go deeper, ascend back out, or pan to a logical neighbour — all rungs on one metric scale ladder. Every page gets its entities and camera extracted into a live geo overlay and a persistent world map, so revisiting a place brings back *that* place. `WORLD_MODE=false` restores the classic explainer flow, and each session has its own toggle.
-- **Critic loop.** Long renders (entering a scene, masked edits) are judged by a panel of VLM critics — wrong camera, wrong place, or wrong art medium gets rejected and retried with the critic's rationale folded into the prompt. You watch it self-correct instead of staring at a spinner.
+- **Critic loop.** Critics score place, camera, and style and can request another attempt. Ordinary loops may keep a below-threshold best attempt. Experimental strict mode instead rejects failed outputs without changing the world, but its judges still have false positives; strict mode remains off by default.
 - **BYO keys.** No hosted backend. Clone it, run it, pay your own bills.
 
 ```
@@ -47,15 +59,15 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
              │                                           │ tap on a region
              ▼                                           ▼
     ┌───────────────────┐   plan page    ┌──────────────────────────┐
-    │  OpenRouter Gemini │ ─────────────▶ │  fal nano-banana-pro      │
-    │  3 Flash (+ search)│                │  renders labelled image   │
+    │ OpenRouter planner│ ─────────────▶ │ image provider / router  │
+    │ + optional search │                │ renders labelled image  │
     └───────────────────┘                └──────────────┬───────────┘
              ▲                                          │
              │  subject phrase                          │
              │                                          ▼
     ┌────────┴──────────┐    click +    ┌──────────────────────────┐
-    │ OpenRouter Gemini 3  image ◀── │ next page conditioning    │
-    │ Flash (VLM)          │               └──────────────────────────┘
+    │ click vision model│ ◀── image ── │ next page conditioning    │
+    │ + world context   │               └──────────────────────────┘
                                                        │
                                                        ▼
                                ┌────────────────────────────────────┐
@@ -71,6 +83,8 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
 **Read the backstory:** [`docs/STORY.md`](docs/STORY.md) — what we hoped Flipbook would be, what it actually is, and how the internals look once you crack the bundle open.
 
 ## Quickstart
+
+To test navigation without API keys or model charges, run `make demo-mock` with Docker. Its placeholder images test the plumbing, not visual quality.
 
 The fastest path — Docker, local Mongo + blob storage, cloud AI (two keys):
 
