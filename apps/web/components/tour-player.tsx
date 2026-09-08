@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { buildTour, type TourNode, type TourStep } from "@/lib/tour";
+import { buildTour, type TourPlayerProps, type TourStep } from "@/lib/tour";
 import { SPATIAL_TRANSITIONS_ENABLED } from "@/lib/spatial-mode";
 import SpatialTourPlayer from "./spatial-tour-player";
 
@@ -15,12 +15,6 @@ import SpatialTourPlayer from "./spatial-tour-player";
 const HOLD_MS = 2600;
 const DIVE_MS = 950;
 const CUT_MS = 500;
-
-export interface TourPlayerProps {
-  nodes: TourNode[];
-  continueUrl: string;
-  onClose: () => void;
-}
 
 export default function TourPlayer(props: TourPlayerProps) {
   return SPATIAL_TRANSITIONS_ENABLED ? <SpatialTourPlayer {...props} /> : <LegacyTourPlayer {...props} />;

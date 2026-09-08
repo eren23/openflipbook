@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, RotateCcw, X } from "lucide-react";
 import { useSpatialNavigation } from "@/hooks/useSpatialNavigation";
-import { buildTour } from "@/lib/tour";
+import { buildTour, type TourPlayerProps } from "@/lib/tour";
 import { spatialNode } from "@/lib/spatial-mode";
-import type { TourPlayerProps } from "./tour-player";
 import { SpatialTransitionLayer } from "./SpatialTransitionLayer";
 
 export default function SpatialTourPlayer({ nodes, continueUrl, onClose }: TourPlayerProps) {
