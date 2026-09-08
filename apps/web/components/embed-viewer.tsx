@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, RotateCw } from "lucide-react";
 
 import TourButton from "@/components/tour-button";
+import { objectContainRect } from "@/lib/image-click";
 
 // Read-only navigable world viewer for the /embed surface. Zero model calls:
 // every navigation is a hop to an ALREADY-GENERATED node via the public
@@ -40,143 +42,247 @@ export default function EmbedViewer({
 }: EmbedViewerProps) {
   const [current, setCurrent] = useState<EmbedNode>(initial);
   const [stack, setStack] = useState<EmbedNode[]>([]);
-  const [children, setChildren] = useState<ChildRow[]>([]);
+  const [childState, setChildState] = useState<{
+    nodeId: string;
+    status: "ready" | "error";
+    rows: ChildRow[];
+  } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [loadedNode, setLoadedNode] = useState<string | null>(null);
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const [imageRetry, setImageRetry] = useState(0);
+  const [stage, setStage] = useState({ width: 0, height: 0 });
+  const [label, setLabel] = useState<string | null>(null);
   const [hint, setHint] = useState<{ x: number; y: number } | null>(null);
   const hintTimer = useRef<number | null>(null);
 
+  const measure = useCallback(() => {
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (rect) setStage({ width: rect.width, height: rect.height });
+  }, []);
+
+  useEffect(() => {
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (stageRef.current) observer.observe(stageRef.current);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  useEffect(() => () => {
+    if (hintTimer.current) window.clearTimeout(hintTimer.current);
+  }, []);
+
+  useEffect(() => {
+    // A cached SSR image can finish before hydration installs onLoad.
+    if (imageRef.current?.complete && imageRef.current.naturalWidth > 0) {
+      setLoadedNode(current.id);
+      measure();
+    }
+  }, [current.id, imageRetry, measure]);
+
   useEffect(() => {
     let cancelled = false;
-    setChildren([]);
+    setChildState(null);
     (async () => {
       try {
         const res = await fetch(
           `/api/nodes/${encodeURIComponent(current.id)}/children`,
           { cache: "no-store" }
         );
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("Places unavailable");
         const json = (await res.json()) as { children: ChildRow[] };
-        if (!cancelled) setChildren(json.children ?? []);
+        if (!Array.isArray(json.children)) throw new Error("Invalid places");
+        if (!cancelled) setChildState({ nodeId: current.id, status: "ready", rows: json.children });
       } catch {
-        /* frontier stays dotless; the continue link is always visible */
+        if (!cancelled) setChildState({ nodeId: current.id, status: "error", rows: [] });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [current.id]);
+  }, [current.id, retry]);
+
+  const clearOverlays = () => {
+    setLoadedNode(null);
+    setFailedImage(null);
+    setHint(null);
+    setLabel(null);
+    if (hintTimer.current) window.clearTimeout(hintTimer.current);
+  };
 
   const enter = (c: ChildRow) => {
     setStack((s) => [...s, current]);
     setCurrent({ id: c.id, title: c.page_title, imageUrl: c.image_url });
-    setHint(null);
+    clearOverlays();
   };
 
   const back = () => {
-    setStack((s) => {
-      const prev = s[s.length - 1];
-      if (prev) setCurrent(prev);
-      return s.slice(0, -1);
-    });
-    setHint(null);
+    const prev = stack[stack.length - 1];
+    if (prev) setCurrent(prev);
+    setStack((s) => s.slice(0, -1));
+    clearOverlays();
   };
+
+  const status = childState?.nodeId === current.id ? childState.status : "loading";
+  const content = loadedNode === current.id && imageRef.current
+    ? objectContainRect(stage.width, stage.height, imageRef.current.naturalWidth, imageRef.current.naturalHeight)
+    : null;
 
   // A tap that misses every dot = unexplored ground: show a transient hint
   // anchored at the tap instead of doing nothing.
   const onGroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setHint({
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    });
+    if (!content || status !== "ready") return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < content.offsetX || x > content.offsetX + content.width ||
+        y < content.offsetY || y > content.offsetY + content.height) return;
+    setHint({ x, y });
     if (hintTimer.current) window.clearTimeout(hintTimer.current);
     hintTimer.current = window.setTimeout(() => setHint(null), 2600);
   };
 
-  const dots = children.filter(
+  const dots = (status === "ready" ? childState!.rows : []).filter(
     (c): c is ChildRow & { click_in_parent: { x_pct: number; y_pct: number } } =>
-      c.click_in_parent != null
+      c?.click_in_parent != null && typeof c.id === "string" &&
+      typeof c.page_title === "string" && typeof c.image_url === "string" &&
+      [c.click_in_parent.x_pct, c.click_in_parent.y_pct].every(
+        (v) => Number.isFinite(v) && v >= 0 && v <= 1
+      )
   );
+
+  const positioned = content ? dots.map((c) => ({
+    ...c,
+    x: content.offsetX + c.click_in_parent.x_pct * content.width,
+    y: content.offsetY + c.click_in_parent.y_pct * content.height,
+  })) : [];
+  const activeLabel = positioned.find((c) => c.id === label);
+  const overlayStyle = (point: { x: number; y: number }) => ({
+    width: Math.max(0, Math.min(280, stage.width - 16)),
+    left: Math.max(8, Math.min(point.x - 140, stage.width - 288)),
+    top: Math.max(8, Math.min(point.y + 24, stage.height - 88)),
+    maxHeight: Math.max(0, stage.height - Math.max(8, Math.min(point.y + 24, stage.height - 88)) - 8),
+    overflow: "hidden" as const,
+  });
 
   return (
     <div className="flex h-dvh flex-col bg-[#faf7f1] text-[#1c1917]">
-      <header className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+      <header className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs">
         <div className="flex min-w-0 items-center gap-2">
           {stack.length > 0 && (
             <button
               type="button"
               onClick={back}
-              className="rounded-full border border-black/25 px-2.5 py-0.5 hover:bg-black/5"
+              aria-label="Back"
+              title="Back"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded border border-black/25 hover:bg-black/5"
             >
-              ← back
+              <ArrowLeft size={16} aria-hidden="true" />
             </button>
           )}
           <span className="truncate font-medium">{current.title}</span>
         </div>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="opacity-50">
-            {dots.length > 0
+          <span className="opacity-60" role="status">
+            {status === "loading" ? "Loading places..." : status === "error" ? "Places unavailable" : dots.length > 0
               ? `${dots.length} place${dots.length === 1 ? "" : "s"} to enter`
               : "world frontier"}
           </span>
+          {status === "error" && (
+            <button type="button" aria-label="Retry places" title="Retry places"
+              className="flex h-11 w-11 items-center justify-center rounded border border-black/25"
+              onClick={() => { setChildState(null); setRetry((n) => n + 1); }}>
+              <RotateCw size={16} aria-hidden="true" />
+            </button>
+          )}
           <TourButton
             sessionId={sessionId}
             continueUrl={continueUrl}
-            className="rounded-full border border-black/25 px-2.5 py-0.5 hover:bg-black/5 disabled:opacity-50"
+            className="min-h-11 rounded border border-black/25 px-2.5 py-0.5 hover:bg-black/5 disabled:opacity-50"
           />
         </span>
       </header>
 
       <div
+        ref={stageRef}
         className="relative min-h-0 flex-1 cursor-pointer overflow-hidden"
         onClick={onGroundClick}
         data-testid="embed-stage"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          key={`${current.id}:${imageRetry}`}
+          ref={imageRef}
           src={current.imageUrl}
           alt={current.title}
           className="h-full w-full object-contain"
           draggable={false}
+          onLoad={(e) => {
+            if (e.currentTarget !== imageRef.current) return;
+            setLoadedNode(current.id);
+            setFailedImage(null);
+            measure();
+          }}
+          onError={(e) => {
+            if (e.currentTarget !== imageRef.current) return;
+            setLoadedNode(null);
+            setFailedImage(current.id);
+          }}
         />
-        {dots.map((c) => (
+        {failedImage === current.id && (
+          <div className="absolute inset-0 flex items-center justify-center gap-2" role="alert">
+            Image unavailable
+            <button type="button" aria-label="Retry image" title="Retry image"
+              className="flex h-11 w-11 items-center justify-center rounded border border-black/25"
+              onClick={(e) => { e.stopPropagation(); setFailedImage(null); setImageRetry((n) => n + 1); }}>
+              <RotateCw size={16} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+        {positioned.map((c) => (
           <button
             key={c.id}
             type="button"
             title={`Enter ${c.page_title}`}
+            aria-label={`Enter ${c.page_title}`}
+            onMouseEnter={() => setLabel(c.id)}
+            onMouseLeave={() => setLabel(null)}
+            onFocus={() => setLabel(c.id)}
+            onBlur={() => setLabel(null)}
             onClick={(e) => {
               e.stopPropagation();
               enter(c);
             }}
-            className="group absolute -translate-x-1/2 -translate-y-1/2"
+            className="group absolute flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded focus-visible:outline-2"
             style={{
-              left: `${c.click_in_parent.x_pct * 100}%`,
-              top: `${c.click_in_parent.y_pct * 100}%`,
+              left: c.x,
+              top: c.y,
             }}
           >
             <span className="block h-3.5 w-3.5 rounded-full border-2 border-white bg-amber-500 shadow-md transition-transform group-hover:scale-125" />
-            <span className="pointer-events-none absolute left-1/2 top-4 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-white group-hover:block">
-              {c.page_title}
-            </span>
           </button>
         ))}
-        {hint && (
+        {activeLabel && !hint && (
+          <span role="tooltip" className="pointer-events-none absolute z-10 break-words rounded bg-black/80 px-2 py-1 text-xs text-white [overflow-wrap:anywhere]"
+            style={overlayStyle(activeLabel)}>{activeLabel.page_title}</span>
+        )}
+        {hint && content && (
           <a
             href={continueUrl}
             target="_blank"
             rel="noopener"
             onClick={(e) => e.stopPropagation()}
-            className="absolute z-20 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/80 px-3 py-1 text-[11px] text-white shadow-lg"
-            style={{
-              left: `${hint.x * 100}%`,
-              top: `${Math.min(hint.y * 100 + 4, 92)}%`,
-            }}
+            className="absolute z-20 rounded bg-black/80 px-3 py-2 text-xs text-white shadow-lg [overflow-wrap:anywhere]"
+            style={overlayStyle(hint)}
           >
             unexplored — continue this world on openflipbook →
           </a>
         )}
       </div>
 
-      <footer className="flex items-center justify-between gap-2 px-3 py-2 text-[11px]">
+      <footer className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px]">
         <span className="truncate opacity-50">
           {initialReceipt && current.id === initial.id
             ? initialReceipt
@@ -186,7 +292,7 @@ export default function EmbedViewer({
           href={continueUrl}
           target="_blank"
           rel="noopener"
-          className="rounded-full border border-black/25 px-3 py-1 font-medium hover:bg-black/5"
+          className="flex min-h-11 items-center rounded border border-black/25 px-3 py-1 font-medium hover:bg-black/5"
         >
           Continue this world →
         </a>
