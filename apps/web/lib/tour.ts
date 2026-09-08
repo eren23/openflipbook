@@ -4,7 +4,12 @@
 // page, then DIVE into the tap point and crossfade to the child. No model
 // calls, no new data; the graph is the screenplay.
 
+import type { SceneView, TransitionContextV1 } from "@openflipbook/config";
+
 export interface TourNode {
+  image_key?: string;
+  scene_view?: SceneView | null;
+  transition_context?: TransitionContextV1 | null;
   id: string;
   parent_id: string | null;
   page_title: string;

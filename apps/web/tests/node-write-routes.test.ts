@@ -57,6 +57,18 @@ beforeEach(() => {
 });
 
 describe("node write session boundaries", () => {
+  it('persists server-bound transition context and returns it to fresh page state', async () => {
+    mocks.getNode.mockResolvedValue({ ...child, image_key: 'original.png', scene_view: null });
+    const res = await createNode(request({ ...createBody, parent_id: 'child', click_in_parent: { x_pct: .8, y_pct: .3 } }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).transition_context).toMatchObject({ source_node_id: 'child', source_image_key: 'original.png', source_view: null, target_point: { x_pct: .8, y_pct: .3 } });
+    expect(mocks.insertNode).toHaveBeenCalledWith(expect.objectContaining({ transition_context: expect.objectContaining({ version: 1 }) }));
+  });
+  it('refuses forged transition identity before upload', async () => {
+    const res = await createNode(request({ ...createBody, parent_id: 'child', transition_context: { version: 1, source_node_id: 'other' } }));
+    expect(res.status).toBe(400);
+    expect(mocks.uploadJpeg).not.toHaveBeenCalled();
+  });
   it("refuses to reparent a root from another session before any writes", async () => {
     mocks.getNode.mockResolvedValue({ ...child, session_id: "other" });
     const res = await ascend(request(ascendBody), params);

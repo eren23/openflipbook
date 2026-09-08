@@ -1,7 +1,9 @@
-import type { Citation, NodeRelation, SceneView } from "@openflipbook/config";
+import type { Citation, NodeRelation, SceneView, TransitionContextV1 } from "@openflipbook/config";
 
 /** The in-session page graph node (play page state + history + map views). */
 export interface Page {
+  imageKey?: string;
+  transitionContext?: TransitionContextV1 | null;
   nodeId: string | null;
   sessionId: string;
   query: string;
@@ -37,6 +39,8 @@ export interface Page {
 
 /** One node as served by GET /api/sessions/[id] (the ?continue= hydration). */
 export interface SessionNodeWire {
+  image_key?: string;
+  transition_context?: TransitionContextV1 | null;
   id: string;
   parent_id: string | null;
   session_id: string;
@@ -93,6 +97,8 @@ export function nodeToPage(n: SessionNodeWire): Page {
     query: n.query,
     title: n.page_title,
     imageDataUrl: n.image_url,
+    ...(n.image_key ? { imageKey: n.image_key } : {}),
+    transitionContext: n.transition_context ?? null,
     parentId: n.parent_id,
     sources: Array.isArray(n.sources) ? n.sources : [],
     sceneView: n.scene_view ?? null,

@@ -68,6 +68,7 @@ export async function GET(_req: Request, { params }: Params) {
       scale_tier: r.scale_tier,
       click_in_parent: r.click_in_parent,
       scene_view: r.scene_view,
+      transition_context: r.transition_context ?? null,
       sources: r.sources,
       bytes: stored ? stored.bytes : null,
     });
