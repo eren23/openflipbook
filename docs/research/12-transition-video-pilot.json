@@ -1,0 +1,206 @@
+{
+  "complete": true,
+  "reserved_usd": "1.44",
+  "cap_usd": "2.00",
+  "promotion": false,
+  "billing": {
+    "status": "unavailable"
+  },
+  "results": [
+    {
+      "case": "fishing_lighthouse",
+      "model": "minimax/h3-max/image-to-video",
+      "fingerprint": "c63f6dc51948c623c3c64be588fbdd389aa28ead7036cead836461832c438feb",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into North Point Lighthouse, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "768P",
+        "prompt_expansion_mode": "balanced",
+        "enable_safety_checker": true
+      },
+      "source_sha256": "a4761ffd74bfd713d5733cff8a4cf99b5a392b6e5311b0df9d2cdb4fea5d9107",
+      "destination_sha256": "f6b7d29b0a0df170137e13a63fb2a340eeccbb51926636826fe88edd99f3e939",
+      "request_id": "01a07e77-bea1-76d2-9ab9-7663ae8d3954",
+      "reserved_usd": "0.12",
+      "output": "fishing_lighthouse-h3-c63f6dc519.mp4",
+      "video_sha256": "fe7bb7e5c24caedb4020fa83b8dc8eaf8bba5b19e83dd591b9f6372ac8e6ba7e",
+      "metadata": {
+        "width": 1344,
+        "height": 768,
+        "duration_seconds": 6.592,
+        "fps": "24/1"
+      },
+      "expanded_prompt": "How the reference pictures align with the target video \u2014 Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] This is a 2D-animated cinematic shot in a detailed, hand-drawn illustrative style. The scene opens on <Picture 1>, a stylized map of \"Crescent Bay Fishing Village\" framed by an ornate golden border. The map displays a coastal town with terracotta-roofed houses, a dense pine forest labeled \"Whispering Pines Ridge,\" a \"Central Market Square,\" and the \"North Point Lighthouse\" perched on a rocky cliff overlooking the teal waters of \"Crescent Basin.\" The camera immediately begins a continuous, aggressive Push In with large amplitude at fast speed, diving deep into the map. The camera targets the North Point Lighthouse, moving past the labels and the curved coastline. As the camera descends, the 2D map elements transition into a three-dimensional illustrative space, maintaining the same artistic style, saturated colors, and ink-line definition. The camera glides over the rocky cliffs and descends toward the waterfront. The movement continues in one seamless trajectory, descending and panning slightly to reveal the bustling docks. By the end of the shot, the camera settles into the exact composition of <Picture 2>, focusing on a series of weathered wooden piers and colorful coastal buildings. The final view captures the \"Smoked Herring Market\" and various houses in shades of yellow, red, and teal, with \"Brass Lanterns\" glowing warmly and \"Tidal Pools\" visible beneath the wooden pilings. The text \"THE WAKING DOCKS OF CRESCENT BAY\" and \"BRINY MORNING BREEZE\" appears cleanly and legibly in the sky, and \"SMOKED HERRING\" and \"BRASS LANTERNS\" labels are positioned next to their respective objects, all preserved in the original illustrative font.\n\noverall_soundscape: A gentle, ambient coastal atmosphere featuring the distant, rhythmic crashing of waves against rocks. The sound of a soft, whistling sea breeze persists throughout, accompanied by the faint, rhythmic creaking of wooden piers and the distant, muffled cries of seagulls.\n\nnon_diegetic_music: N/A",
+      "timings": {
+        "inference": 4.504619510000339
+      },
+      "elapsed_seconds": 28.873
+    },
+    {
+      "case": "fishing_lighthouse",
+      "model": "fal-ai/ltx-2.3/image-to-video/fast",
+      "fingerprint": "cb4313341eacc25ea4d6696a26087bc129a3be931cb0dcc155e3ec9a65ea1483",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into North Point Lighthouse, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "1080p",
+        "fps": 24
+      },
+      "source_sha256": "a4761ffd74bfd713d5733cff8a4cf99b5a392b6e5311b0df9d2cdb4fea5d9107",
+      "destination_sha256": "f6b7d29b0a0df170137e13a63fb2a340eeccbb51926636826fe88edd99f3e939",
+      "request_id": "01a07e78-2715-74c3-8ebc-47ef18f21b75",
+      "reserved_usd": "0.36",
+      "output": "fishing_lighthouse-ltx-cb4313341e.mp4",
+      "video_sha256": "82458909140f8508c48329ec24d55ac20cbf29442355c6e33be4d4c17cf74db6",
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "duration_seconds": 6.041667,
+        "fps": "24/1"
+      },
+      "expanded_prompt": null,
+      "timings": null,
+      "elapsed_seconds": 75.202
+    },
+    {
+      "case": "oasis_citadel",
+      "model": "minimax/h3-max/image-to-video",
+      "fingerprint": "c455972127aad2ac35c4f009bc266159fcc12fa780170e6b593ee5a5cd22f882",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into The Sandstone Citadel, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "768P",
+        "prompt_expansion_mode": "balanced",
+        "enable_safety_checker": true
+      },
+      "source_sha256": "c37022cb1e59aa601f0a7885ab8e1cb8c3144a8e9da0f2365e5fda33260d4598",
+      "destination_sha256": "c25c5de4df1050d61314b20a03bd0c46cf981a72f5751dc430c52e37a971b3ad",
+      "request_id": "01a07e79-54aa-72d2-9e98-f4becb2acc30",
+      "reserved_usd": "0.12",
+      "output": "oasis_citadel-h3-c455972127.mp4",
+      "video_sha256": "7c83e21cb04694364c37d0b32820cd949fc787c3b9ddf6b0945da5a42d209b35",
+      "metadata": {
+        "width": 1344,
+        "height": 768,
+        "duration_seconds": 6.592,
+        "fps": "24/1"
+      },
+      "expanded_prompt": "How the reference pictures align with the target video \u2014 Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] This is a 2D-animated, hand-drawn illustration with a vintage parchment aesthetic. The scene opens on <Picture 1>, a detailed map titled \"DESERT OASIS TOWN: CENTRAL URBAN CORE & NORTHERN HEIGHTS\" on aged, yellowed paper. The map depicts a top-down view of a settlement featuring \"The Sandstone Citadel\" at the top, \"Merchant's Row\" and \"Central Caravan Bazaar\" in the center, and the \"Emerald Spring Pond\" surrounded by lush palm trees at the bottom. The camera immediately begins a continuous, smooth Push In with large amplitude at fast speed, diving deep into the map's imagery. As the camera descends, the flat 2D map elements dynamically transition into a three-dimensional isometric perspective. The parchment texture fades away, replaced by the warm, sandy hues of a desert environment. The camera glides over the \"Central Caravan Bazaar,\" passing over the colorful striped tents and the \"Ancient Eastern Aqueduct\" where turquoise water flows through stone arches. The motion continues in a seamless, sweeping dive toward the center of the town. The transition culminates as the camera stabilizes into a high-angle isometric view, perfectly aligning with the composition of <Picture 2>. The final view reveals \"THE SUNBAKED OASIS OF ZAFFAR,\" featuring a dense cluster of sandstone buildings with flat roofs and open courtyards, encircling a vibrant oasis of palm trees and a intersecting channel of \"COOL SPRING WATER\" that glows with a clear, light blue hue. The artistic style remains a consistent, clean-lined digital illustration with a warm, sun-drenched color palette throughout the entire movement.\n\noverall_soundscape: The audio begins with the subtle, dry crinkle of old parchment paper. As the camera dives into the map, a rushing wind sound swells, transitioning into the ambient sounds of a bustling desert town: the distant chatter of a marketplace, the gentle splashing of flowing water in the aqueduct, and the soft rustle of palm fronds in a warm breeze.\n\nnon_diegetic_music: N/A",
+      "timings": {
+        "inference": 4.53070674999617
+      },
+      "elapsed_seconds": 29.11
+    },
+    {
+      "case": "oasis_citadel",
+      "model": "fal-ai/ltx-2.3/image-to-video/fast",
+      "fingerprint": "8fe4ef43adebf13edcb98961504d1c7abca97c87a01bfa978886fc1e65743a69",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into The Sandstone Citadel, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "1080p",
+        "fps": 24
+      },
+      "source_sha256": "c37022cb1e59aa601f0a7885ab8e1cb8c3144a8e9da0f2365e5fda33260d4598",
+      "destination_sha256": "c25c5de4df1050d61314b20a03bd0c46cf981a72f5751dc430c52e37a971b3ad",
+      "request_id": "01a07e79-bed3-7e63-95ee-24274316a6c2",
+      "reserved_usd": "0.36",
+      "output": "oasis_citadel-ltx-8fe4ef43ad.mp4",
+      "video_sha256": "36ea6b4c63ab76aeebe68fae31a02731c934b7a9e8827daf5f272b5323c6fded",
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "duration_seconds": 6.041667,
+        "fps": "24/1"
+      },
+      "expanded_prompt": null,
+      "timings": null,
+      "elapsed_seconds": 53.839
+    },
+    {
+      "case": "harbor_lighthouse",
+      "model": "minimax/h3-max/image-to-video",
+      "fingerprint": "b0f5104ef38d9f40d05488c5e7403032fde81c8397bcce20148ae9b2f6b9bc85",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into The Crystal Lighthouse, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "768P",
+        "prompt_expansion_mode": "balanced",
+        "enable_safety_checker": true
+      },
+      "source_sha256": "0d330c72ae943e4b7576740fc717774fd145d387af71335beb59b01176ccce16",
+      "destination_sha256": "33c21dd6bb1656176d93cb63720061d29b51e1e282b0967d6c9c385abbe6f3e7",
+      "request_id": "01a07e7a-97a3-7621-82ea-e9d98c8c9604",
+      "reserved_usd": "0.12",
+      "output": "harbor_lighthouse-h3-b0f5104ef3.mp4",
+      "video_sha256": "4182ec44123bcf9fee8de2889a455b57873657f14bbf4a785273616cf52a0082",
+      "metadata": {
+        "width": 1344,
+        "height": 768,
+        "duration_seconds": 6.592,
+        "fps": "24/1"
+      },
+      "expanded_prompt": "How the reference pictures align with the target video \u2014 Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] This is a 2D-animated cinematic shot in a detailed, stylized digital illustration style. The scene opens with <Picture 1>, a high-angle wide view of a coastal fantasy town. On the left, a tall stone tower topped with a glowing, iridescent blue crystal\u2014The Crystal Lighthouse\u2014stands atop a rocky cliff. The town features warm terracotta-roofed houses and a semicircular harbor filled with teal water and several ships with iridescent white sails. The camera begins a continuous, smooth Push In with large amplitude at slow speed, moving from the wide map perspective directly toward the heart of the harbor. As the camera descends and advances, the perspective shifts from a distant aerial view to a closer, more intimate angle of the harbor. The ships with glowing sails glide slowly through the water, and the warm golden light of the town's lanterns becomes more prominent. The movement follows a precise diagonal path, gliding over the water and the stone piers. Throughout the motion, the artistic style, the earthy brown tones of the architecture, and the luminous blue highlights of the magical elements are perfectly preserved. The camera movement concludes by seamlessly aligning with the composition of <Picture 2>, ending in a closer, mid-angle shot of \"The Grand Harbor of Aethelgard\". The final frame reveals a flying dragon gliding over the water and the legible text \"THE GRAND HARBOR OF AETHELGARD\" appearing cleanly in the upper left quadrant of the sky.\n\noverall_soundscape: The soundscape is dominated by the gentle, rhythmic splashing of seawater against stone piers and wooden hulls. Soft, ambient sounds of a bustling harbor are present, including the distant clatter of crates and the low, guttural roar of a dragon flying overhead. A light sea breeze whistles faintly throughout the duration.\n\nnon_diegetic_music: N/A",
+      "timings": {
+        "inference": 4.574224001997209
+      },
+      "elapsed_seconds": 30.083
+    },
+    {
+      "case": "harbor_lighthouse",
+      "model": "fal-ai/ltx-2.3/image-to-video/fast",
+      "fingerprint": "8c2a03c85cf54575644c70dd439582b91206d0dfcd48cd1264ef5bee2130c30a",
+      "complete": true,
+      "visual_verdict": "unreviewed",
+      "reported_cost_usd": null,
+      "settings": {
+        "image_url": "source",
+        "end_image_url": "destination",
+        "prompt": "One continuous camera move from the map into The Crystal Lighthouse, ending at the supplied destination image. Preserve landmarks, colors and drawing style throughout. No cuts, fades, dissolves, extra buildings, titles, dialogue or music.",
+        "duration": 6,
+        "resolution": "1080p",
+        "fps": 24
+      },
+      "source_sha256": "0d330c72ae943e4b7576740fc717774fd145d387af71335beb59b01176ccce16",
+      "destination_sha256": "33c21dd6bb1656176d93cb63720061d29b51e1e282b0967d6c9c385abbe6f3e7",
+      "request_id": "01a07e7b-06b2-7a21-bed5-bd3dec70d0df",
+      "reserved_usd": "0.36",
+      "output": "harbor_lighthouse-ltx-8c2a03c85c.mp4",
+      "video_sha256": "39574f6378834db4bf04be38eebc33e3958bdf24daaad76972ae43a4038ea94c",
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "duration_seconds": 6.041667,
+        "fps": "24/1"
+      },
+      "expanded_prompt": null,
+      "timings": null,
+      "elapsed_seconds": 59.456
+    }
+  ]
+}

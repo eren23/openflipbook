@@ -32,6 +32,27 @@ PRO_ANIMATE_MODEL = "fal-ai/ltx-2/image-to-video"
 # FAL_ANIMATE_MODEL override stay ambient-only, because a model without
 # end_image_url support would silently drop the arrival frame.
 DESCENT_ANIMATE_MODEL = "fal-ai/ltx-2.3/image-to-video/fast"
+H3_MAX_MODEL = "minimax/h3-max/image-to-video"
+
+
+def descent_arguments(
+    model: str, image_url: str, end_image_url: str, prompt: str, duration: int
+) -> dict:
+    """Keep endpoint-specific fields out of the ambient animation route."""
+    arguments: dict = {
+        "image_url": image_url,
+        "end_image_url": end_image_url,
+        "prompt": prompt,
+    }
+    if model == H3_MAX_MODEL:
+        arguments.update(
+            duration=max(5, min(15, duration)),
+            resolution="768P",
+            prompt_expansion_mode="balanced",
+            enable_safety_checker=True,
+        )
+    return arguments
+
 
 # Video tier → fal model. Mirrors the image-tier pattern in providers/image.py.
 # `balanced` defaults to Wan 2.2 i2v which has the best motion quality among
@@ -103,17 +124,15 @@ async def animate_image(
     image_url = await to_fal_url(image_data_url)
     if end_image_data_url:
         # Descent transition: dedicated slot, no tier/override routing (see
-        # DESCENT_ANIMATE_MODEL). No duration/resolution knobs — the probe ran
-        # clean on schema defaults, and ltx-2.3's enums differ from ltx-2's.
+        # DESCENT_ANIMATE_MODEL). LTX keeps its probed schema defaults; the
+        # opt-in H3 Max slot receives its own duration and required fields.
         model = os.environ.get("FAL_DESCENT_MODEL") or DESCENT_ANIMATE_MODEL
-        arguments: dict = {
-            "image_url": image_url,
-            "end_image_url": await to_fal_url(end_image_data_url),
-            "prompt": prompt,
-        }
+        arguments = descent_arguments(
+            model, image_url, await to_fal_url(end_image_data_url), prompt, duration
+        )
         async with span("video.animate", model=model, duration=duration):
             result = await _fal_subscribe(model, arguments)
-        return _clip_from_result(result, model, duration)
+        return _clip_from_result(result, model, arguments.get("duration", duration))
     model = _animate_model(tier)
     arguments = {
         "image_url": image_url,

@@ -56,9 +56,7 @@ async def _animate(
     **kwargs: Any,
 ) -> tuple[video.AnimatedClip, AsyncMock]:
     monkeypatch.setenv("FAL_KEY", "test-key")
-    monkeypatch.setattr(
-        video, "to_fal_url", AsyncMock(return_value="https://fal.media/in.png")
-    )
+    monkeypatch.setattr(video, "to_fal_url", AsyncMock(return_value="https://fal.media/in.png"))
     subscribe = AsyncMock(return_value=_fal_result() if result is None else result)
     monkeypatch.setattr(video, "_fal_subscribe", subscribe)
     clip = await video.animate_image(
@@ -137,9 +135,7 @@ async def test_descent_uses_the_dedicated_slot_and_sends_both_frames(
     assert clip.model == video.DESCENT_ANIMATE_MODEL
 
     monkeypatch.setenv("FAL_DESCENT_MODEL", "fal-ai/custom-descent")
-    _, subscribe = await _animate(
-        monkeypatch, end_image_data_url="data:image/png;base64,BBBB"
-    )
+    _, subscribe = await _animate(monkeypatch, end_image_data_url="data:image/png;base64,BBBB")
     model, _ = subscribe.await_args.args
     assert model == "fal-ai/custom-descent"
 
@@ -147,6 +143,33 @@ async def test_descent_uses_the_dedicated_slot_and_sends_both_frames(
 async def test_no_video_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError, match="no video payload"):
         await _animate(monkeypatch, result={"images": []})
+
+
+@pytest.mark.parametrize(("duration", "expected"), [(1, 5), (6, 6), (30, 15)])
+async def test_h3_max_descent_is_explicit_and_bounded(monkeypatch, duration, expected):
+    monkeypatch.setenv("FAL_DESCENT_MODEL", video.H3_MAX_MODEL)
+    clip, subscribe = await _animate(
+        monkeypatch,
+        duration=duration,
+        end_image_data_url="data:image/png;base64,BBBB",
+        result={"video": {"url": "https://fal.media/out.mp4"}},
+    )
+    model, arguments = subscribe.await_args.args
+    assert model == video.H3_MAX_MODEL
+    assert arguments["duration"] == expected
+    assert arguments["resolution"] == "768P"
+    assert arguments["prompt_expansion_mode"] == "balanced"
+    assert arguments["enable_safety_checker"] is True
+    assert arguments["end_image_url"]
+    assert clip.duration_seconds == expected
+
+
+async def test_h3_override_does_not_escape_mock_mode(monkeypatch):
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    monkeypatch.setenv("FAL_DESCENT_MODEL", video.H3_MAX_MODEL)
+    clip, subscribe = await _animate(monkeypatch, end_image_data_url="data:image/png;base64,BBBB")
+    assert clip.model == "mock/animate"
+    subscribe.assert_not_awaited()
 
 
 async def test_video_without_url_raises(monkeypatch: pytest.MonkeyPatch) -> None:
