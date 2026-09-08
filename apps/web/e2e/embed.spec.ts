@@ -110,7 +110,8 @@ test("embed viewer is publish-gated, navigates generated nodes, serves oEmbed", 
   await expect(page.getByText(/unexplored — continue this world/)).toBeVisible();
   expect(generates).toBe(0);
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByTestId("embed-stage").locator("img")).toHaveAttribute("src", rootImage!);
+  await expect(page.getByTestId("embed-stage").getByRole("img")).toHaveAttribute("src", rootImage!);
+  await expect(page.getByTestId("spatial-transition")).toHaveCount(0);
   await expect(dot).toBeVisible();
 
   // 5) oEmbed provider: a /n/ permalink resolves to the published session's

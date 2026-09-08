@@ -5,6 +5,10 @@ import { ArrowLeft, RotateCw } from "lucide-react";
 
 import TourButton from "@/components/tour-button";
 import { objectContainRect } from "@/lib/image-click";
+import type { SpatialFrame } from "@/lib/spatial-transition";
+import { SPATIAL_TRANSITIONS_ENABLED } from "@/lib/spatial-mode";
+import { useSpatialNavigation } from "@/hooks/useSpatialNavigation";
+import { SpatialTransitionLayer } from "./SpatialTransitionLayer";
 
 // Read-only navigable world viewer for the /embed surface. Zero model calls:
 // every navigation is a hop to an ALREADY-GENERATED node via the public
@@ -16,6 +20,12 @@ export interface EmbedNode {
   id: string;
   title: string;
   imageUrl: string;
+  parentId?: string | null;
+  imageKey?: string | undefined;
+  view?: SpatialFrame["view"];
+  context?: SpatialFrame["context"];
+  click?: SpatialFrame["click"];
+  relation?: SpatialFrame["relation"];
 }
 
 interface ChildRow {
@@ -23,6 +33,14 @@ interface ChildRow {
   page_title: string;
   image_url: string;
   click_in_parent: { x_pct: number; y_pct: number } | null;
+  image_key?: string;
+  scene_view?: SpatialFrame["view"];
+  transition_context?: SpatialFrame["context"];
+  relation?: SpatialFrame["relation"];
+}
+
+function frame(node: EmbedNode): SpatialFrame {
+  return { ...node, parentId: node.parentId ?? null, image: node.imageUrl };
 }
 
 interface EmbedViewerProps {
@@ -41,6 +59,7 @@ export default function EmbedViewer({
   initialReceipt,
 }: EmbedViewerProps) {
   const [current, setCurrent] = useState<EmbedNode>(initial);
+  const spatial = useSpatialNavigation();
   const [stack, setStack] = useState<EmbedNode[]>([]);
   const [childState, setChildState] = useState<{
     nodeId: string;
@@ -113,16 +132,26 @@ export default function EmbedViewer({
   };
 
   const enter = (c: ChildRow) => {
-    setStack((s) => [...s, current]);
-    setCurrent({ id: c.id, title: c.page_title, imageUrl: c.image_url });
-    clearOverlays();
+    const target: EmbedNode = { id: c.id, title: c.page_title, imageUrl: c.image_url, parentId: current.id, imageKey: c.image_key, view: c.scene_view, context: c.transition_context, click: c.click_in_parent, relation: c.relation };
+    const commit = () => {
+      setStack((s) => [...s, current]);
+      setCurrent(target);
+      clearOverlays();
+    };
+    if (SPATIAL_TRANSITIONS_ENABLED) void spatial.navigate(frame(current), frame(target), commit);
+    else commit();
   };
 
   const back = () => {
     const prev = stack[stack.length - 1];
-    if (prev) setCurrent(prev);
-    setStack((s) => s.slice(0, -1));
-    clearOverlays();
+    if (!prev) return;
+    const commit = () => {
+      setCurrent(prev);
+      setStack((s) => s.slice(0, -1));
+      clearOverlays();
+    };
+    if (SPATIAL_TRANSITIONS_ENABLED) void spatial.navigate(frame(current), frame(prev), commit);
+    else commit();
   };
 
   const status = childState?.nodeId === current.id ? childState.status : "loading";
@@ -134,7 +163,7 @@ export default function EmbedViewer({
   // anchored at the tap instead of doing nothing.
   const onGroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    if (!content || status !== "ready") return;
+    if (!content || status !== "ready" || spatial.pending) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     if (x < content.offsetX || x > content.offsetX + content.width ||
@@ -231,6 +260,11 @@ export default function EmbedViewer({
             setFailedImage(current.id);
           }}
         />
+        <SpatialTransitionLayer motion={spatial.motion} background="#faf7f1" />
+        {spatial.error && <div role="alert" className="absolute inset-x-0 bottom-3 z-40 flex items-center justify-center gap-2 bg-white/90 p-2 text-sm">
+          {spatial.error}
+          <button type="button" aria-label="Retry transition image" title="Retry image" className="p-2" onClick={e => { e.stopPropagation(); void spatial.retry(); }}><RotateCw size={16} /></button>
+        </div>}
         {failedImage === current.id && (
           <div className="absolute inset-0 flex items-center justify-center gap-2" role="alert">
             Image unavailable
@@ -241,7 +275,7 @@ export default function EmbedViewer({
             </button>
           </div>
         )}
-        {positioned.map((c) => (
+        {!spatial.pending && positioned.map((c) => (
           <button
             key={c.id}
             type="button"

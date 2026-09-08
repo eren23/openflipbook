@@ -56,7 +56,7 @@ export default function SpatialStudy() {
         <div data-testid="study-stage" style={{ position: "relative", aspectRatio: "16/9", background: "#111", overflow: "hidden" }}>
           {/* eslint-disable-next-line @next/next/no-img-element -- exact study fixture */}
           <img data-testid="study-image" alt={arrived ? "Destination" : "Source"} src={arrived ? destination.image : source.image} style={{ width: "100%", height: "100%", objectFit: "contain" }} onLoad={e => { if (!arrived) setDimensions({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight }); }} />
-          <SpatialTransitionLayer motion={motion} />
+          <SpatialTransitionLayer motion={motion} background="#111" />
         </div>
         <p>Target: {plan.target.x_pct.toFixed(3)}, {plan.target.y_pct.toFixed(3)}</p>
         <p>Motion: {scene ? "1.35x / 450 ms" : "2.38x / 800 ms"}. Cut: {arrived ? "arrived" : "pending"}.</p>

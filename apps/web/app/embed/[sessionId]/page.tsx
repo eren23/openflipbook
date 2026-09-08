@@ -44,6 +44,12 @@ export default async function EmbedPage({ params, searchParams }: EmbedPageProps
         id: start.id,
         title: start.page_title || start.query || published.title,
         imageUrl: `${base}/${start.image_key}`,
+        parentId: start.parent_id,
+        imageKey: start.image_key,
+        view: start.scene_view,
+        context: start.transition_context,
+        click: start.click_in_parent,
+        relation: start.relation,
       }}
       continueUrl={`/play?continue=${encodeURIComponent(sessionId)}`}
       initialReceipt={

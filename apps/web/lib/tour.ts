@@ -19,6 +19,12 @@ export interface TourNode {
   created_at: string;
 }
 
+export interface TourPlayerProps {
+  nodes: TourNode[];
+  continueUrl: string;
+  onClose: () => void;
+}
+
 export interface TourStep {
   node: TourNode;
   /** How the camera leaves this step toward the next:

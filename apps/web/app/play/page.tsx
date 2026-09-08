@@ -150,7 +150,10 @@ import {
 import { useImageMorph } from "@/hooks/useImageMorph";
 import type { TransitionContextV1, TransitionSeed } from "@openflipbook/config";
 import { captureTransition } from "@/lib/transition-context";
-import { ScanSearch, X } from "lucide-react";
+import { ScanSearch, X, RotateCcw, Film } from "lucide-react";
+import { useSpatialNavigation, decodeSpatialImage } from "@/hooks/useSpatialNavigation";
+import { SpatialTransitionLayer } from "@/components/SpatialTransitionLayer";
+import { spatialPage, SPATIAL_TRANSITIONS_ENABLED } from "@/lib/spatial-mode";
 import { isVerifiedView } from "@/lib/place-identity";
 import PlaceInspector from "@/components/PlayPage/PlaceInspector";
 import { placeCandidates } from "@/lib/place-selection";
@@ -425,6 +428,11 @@ export default function PlayPage() {
   const [error, setError] = useState<string | null>(null);
   const [failedCandidate, setFailedCandidate] = useState<string | null>(null);
   const [page, setPage] = useState<Page | null>(null);
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const { motion: spatialMotion, pending: spatialPending, error: spatialError, navigate: spatialNavigate, cancel: spatialCancel, retry: spatialRetry } = useSpatialNavigation();
+  const spatialPendingRef = useRef(false);
+  spatialPendingRef.current = spatialPending;
   const currentNodeRef = useRef(page?.nodeId);
   useEffect(() => { currentNodeRef.current = page?.nodeId; }, [page?.nodeId]);
   const { morphFx, setMorphFx } = useImageMorph(page?.imageDataUrl);
@@ -933,6 +941,9 @@ export default function PlayPage() {
       // Idempotency-Key per trace, so a same-trace replay would 409).
       lastGenerateRef.current = body;
       const strict = body.strict_world === true;
+      const spatialSource = spatialPage(pageRef.current);
+      spatialCancel();
+      if (SPATIAL_TRANSITIONS_ENABLED) setMorphFx(null);
       let completed = false;
       let errorReported = false;
       abortRef.current?.abort();
@@ -1002,7 +1013,7 @@ export default function PlayPage() {
               setStatusMsg("Draft preview — the full render is refining…");
             }
           } else if (evt.type === "progress") {
-            if (strict) continue;
+            if (strict || SPATIAL_TRANSITIONS_ENABLED) continue;
             lastImage = `data:image/jpeg;base64,${evt.jpeg_b64}`;
             setProgressiveDraft(true);
             hudEmit("sse:progress", {
@@ -1037,7 +1048,7 @@ export default function PlayPage() {
               setSessionSpend(evt.session_spend_estimate);
             }
             setProgressiveDraft(false);
-            if (!strict) setPage({
+            if (!strict && !SPATIAL_TRANSITIONS_ENABLED) setPage({
               nodeId: null,
               sessionId: evt.session_id,
               query: body.query,
@@ -1055,7 +1066,7 @@ export default function PlayPage() {
             });
             // Flip the morph gate so the decode-then-reveal effect runs
             // ONLY on the final image, not on streamed progress partials.
-            if (!strict) setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+            if (!strict && !SPATIAL_TRANSITIONS_ENABLED) setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
             // Judged edit: surface what the critics saw, with a one-click
             // path back to the pre-edit node (undo, made felt).
             if (evt.edit_verdict) {
@@ -1126,13 +1137,13 @@ export default function PlayPage() {
               },
               traceId,
               ac.signal,
-            ).then((saved) => {
+            ).then(async (saved) => {
               // A newer generation or a navigation aborted this one while the
               // node was persisting. This .then is detached from the fetch
               // reader, so without this guard it would clobber the current
               // page/history/URL with THIS (stale) node. (#3)
               if (ac.signal.aborted) return;
-              if (!saved && strict) {
+              if (!saved && (strict || SPATIAL_TRANSITIONS_ENABLED)) {
                 setFailedCandidate(evt.image_data_url);
                 throw new Error("The view could not be saved. Your current view is unchanged.");
               }
@@ -1162,63 +1173,58 @@ export default function PlayPage() {
                       }
                     : {}),
                 };
-                if (strict) {
-                  setPage(persisted);
-                  setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
-                } else setPage((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        ...persisted,
-                        sceneView: foldedSceneView
-                          ? { ...foldedSceneView, node_id: saved.id }
-                          : null,
-                      }
-                    : prev
-                );
-                const newId = saved.id;
-                setHistory((prev) => {
-                  const existingIdx = prev.items.findIndex(
-                    (p) => p.nodeId === newId
-                  );
-                  const items =
-                    existingIdx >= 0
-                      ? prev.items.map((p, i) =>
-                          i === existingIdx ? persisted : p
-                        )
-                      : [...prev.items, persisted];
-                  const trail = [
-                    ...prev.trail.slice(0, prev.trailIdx + 1),
-                    newId,
-                  ];
-                  return { items, trail, trailIdx: trail.length - 1 };
-                });
-                const url = new URL(window.location.href);
-                url.pathname = `/n/${saved.id}`;
-                window.history.replaceState({}, "", url.toString());
-                void triggerExtraction({
-                  sessionId: evt.session_id,
-                  nodeId: saved.id,
-                  imageDataUrl: evt.image_data_url,
-                  caption: evt.page_title,
-                  sceneDescription: evt.final_prompt ?? null,
-                  sceneView: foldedSceneView
-                    ? { ...foldedSceneView, node_id: saved.id }
-                    : null,
-                  traceId,
-                }).then((res) => {
-                  // Surface a silent extraction miss (error or 0/0 even after
-                  // the one retry) so the user isn't left on a page whose taps
-                  // quietly mis-behave with no signal. Reuses localizeStatus so
-                  // the "Map it" affordance is one click, overlay or not. (#6)
+                const commitArrival = () => {
                   if (ac.signal.aborted) return;
-                  if (!res || (res.added === 0 && res.updated === 0)) {
-                    setLocalizeStatus({ nodeId: saved.id, status: "failed" });
-                  }
-                });
+                  if (SPATIAL_TRANSITIONS_ENABLED) setPage(persisted);
+                  else if (strict) {
+                    setPage(persisted);
+                    setMorphFx((prev) => (prev ? { ...prev, isFinal: true } : prev));
+                  } else setPage((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          ...persisted,
+                          sceneView: foldedSceneView
+                            ? { ...foldedSceneView, node_id: saved.id }
+                            : null,
+                        }
+                      : prev
+                  );
+                  const newId = saved.id;
+                  setHistory((prev) => {
+                    const existingIdx = prev.items.findIndex((p) => p.nodeId === newId);
+                    const items = existingIdx >= 0
+                      ? prev.items.map((p, i) => i === existingIdx ? persisted : p)
+                      : [...prev.items, persisted];
+                    const trail = [...prev.trail.slice(0, prev.trailIdx + 1), newId];
+                    return { items, trail, trailIdx: trail.length - 1 };
+                  });
+                  const url = new URL(window.location.href);
+                  url.pathname = `/n/${saved.id}`;
+                  window.history.replaceState({}, "", url.toString());
+                  void triggerExtraction({
+                    sessionId: evt.session_id,
+                    nodeId: saved.id,
+                    imageDataUrl: evt.image_data_url,
+                    caption: evt.page_title,
+                    sceneDescription: evt.final_prompt ?? null,
+                    sceneView: foldedSceneView
+                      ? { ...foldedSceneView, node_id: saved.id }
+                      : null,
+                    traceId,
+                  }).then((res) => {
+                    // Surface an extraction miss without silently changing the view.
+                    if (ac.signal.aborted) return;
+                    if (!res || (res.added === 0 && res.updated === 0)) {
+                      setLocalizeStatus({ nodeId: saved.id, status: "failed" });
+                    }
+                  });
+                };
+                if (SPATIAL_TRANSITIONS_ENABLED) await spatialNavigate(spatialSource, spatialPage(persisted), commitArrival);
+                else commitArrival();
               }
             });
-            if (strict) await persistence;
+            if (strict || SPATIAL_TRANSITIONS_ENABLED) await persistence;
           } else if (evt.type === "error") {
             if (strict && evt.candidate_image_data_url) setFailedCandidate(evt.candidate_image_data_url);
             if (typeof evt.session_spend_estimate === "number") setSessionSpend(evt.session_spend_estimate);
@@ -1235,7 +1241,7 @@ export default function PlayPage() {
           }
         }
         if (ac.signal.aborted || abortRef.current !== ac) return;
-        if (strict && !completed) throw new Error("Generation ended before verification. Your world is unchanged.");
+        if ((strict || SPATIAL_TRANSITIONS_ENABLED) && !completed) throw new Error("Generation ended before verification. Your world is unchanged.");
         setPhase("ready");
         setStatusMsg(null);
       } catch (err) {
@@ -1279,7 +1285,7 @@ export default function PlayPage() {
         }).catch(() => {});
       }
     },
-    []
+    [spatialNavigate, spatialCancel]
   );
 
   // The error banner's "Try again": replay the exact failed request with the
@@ -1387,16 +1393,19 @@ export default function PlayPage() {
         setError("Only image files can be used as a seed page.");
         return;
       }
+      spatialCancel();
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       try {
         const dataUrl = await readFileAsDataUrl(file);
         // Join the abort scheme so a generation/navigation that supersedes this
         // upload flips ac.signal and the detached persist .then below bails (#3).
-        abortRef.current?.abort();
-        const ac = new AbortController();
-        abortRef.current = ac;
+        if (SPATIAL_TRANSITIONS_ENABLED) await decodeSpatialImage(dataUrl);
+        if (ac.signal.aborted) return;
         const seedTitle = "Uploaded image";
         const seedQuery = "Uploaded image";
-        setPage({
+        if (!SPATIAL_TRANSITIONS_ENABLED) setPage({
           nodeId: null,
           sessionId,
           query: seedQuery,
@@ -1408,7 +1417,7 @@ export default function PlayPage() {
         setStatusMsg(null);
         const uploadTrace = newTraceId();
         bindTrace(uploadTrace);
-        void persistNode(
+        const persistence = persistNode(
           {
             parent_id: null,
             session_id: sessionId,
@@ -1430,9 +1439,10 @@ export default function PlayPage() {
               query: seedQuery,
               title: seedTitle,
               imageDataUrl: dataUrl,
+              ...(saved.image_key ? { imageKey: saved.image_key } : {}),
               parentId: null,
             };
-            setPage((prev) => (prev ? { ...prev, nodeId: saved.id } : prev));
+            setPage(persisted);
             const newId = saved.id;
             setHistory((prev) => {
               const existingIdx = prev.items.findIndex(
@@ -1461,16 +1471,19 @@ export default function PlayPage() {
               traceId: uploadTrace,
             });
           }
+          else if (SPATIAL_TRANSITIONS_ENABLED) throw new Error("Image could not be saved. Your current view is unchanged.");
         });
+        if (SPATIAL_TRANSITIONS_ENABLED) await persistence;
       } catch (err) {
         // An upload failure isn't a generation — "Try again" must not replay
         // an unrelated earlier generate body.
+        if (ac.signal.aborted) return;
         lastGenerateRef.current = null;
         setError((err as Error).message);
         setPhase("error");
       }
     },
-    [sessionId, bindTrace]
+    [sessionId, bindTrace, spatialCancel]
   );
 
   const onFileInputChange = useCallback(
@@ -2047,29 +2060,33 @@ export default function PlayPage() {
 
   // Navigation is an event-side effect. Running this inside setHistory's
   // updater can update Next's Router while React is rendering PlayPage.
-  const showHistoryPage = useCallback((target: Page) => {
-    setFailedCandidate(null);
-    setPlaceChoice(null);
-    setPage(target);
-    setPhase("ready");
-    setError(null);
-    setStatusMsg(null);
-    setMorphFx(null);
+  const showHistoryPage = useCallback((target: Page, commitTrail: () => void) => {
     abortRef.current?.abort();
-    if (target.nodeId) {
-      const url = new URL(window.location.href);
-      url.pathname = `/n/${target.nodeId}`;
-      window.history.replaceState({}, "", url.toString());
-    }
-  }, [setMorphFx]);
+    setMorphFx(null);
+    const commit = () => {
+      setFailedCandidate(null);
+      setPlaceChoice(null);
+      setPage(target);
+      setPhase("ready");
+      setError(null);
+      setStatusMsg(null);
+      commitTrail();
+      if (target.nodeId) {
+        const url = new URL(window.location.href);
+        url.pathname = `/n/${target.nodeId}`;
+        window.history.replaceState({}, "", url.toString());
+      }
+    };
+    if (SPATIAL_TRANSITIONS_ENABLED) void spatialNavigate(spatialPage(pageRef.current), spatialPage(target), commit);
+    else commit();
+  }, [setMorphFx, spatialNavigate]);
 
   const navigateToTrailIdx = useCallback((nextIdx: number) => {
     if (nextIdx === history.trailIdx) return;
     const id = history.trail[nextIdx];
     const target = history.items.find((p) => p.nodeId === id);
     if (!id || !target) return;
-    showHistoryPage(target);
-    setHistory((prev) => ({ ...prev, trailIdx: nextIdx }));
+    showHistoryPage(target, () => setHistory((prev) => ({ ...prev, trailIdx: nextIdx })));
   }, [history, showHistoryPage]);
 
   const goBack = useCallback(() => {
@@ -2088,8 +2105,7 @@ export default function PlayPage() {
     setEditVerdictChip(null);
     const target = history.items.find((p) => p.nodeId === nodeId);
     if (!target) return;
-    showHistoryPage(target);
-    setHistory((prev) => {
+    showHistoryPage(target, () => setHistory((prev) => {
       // Append to trail (truncating forward) so back/forward walks the
       // visited path even after a map jump.
       const trail = [
@@ -2097,7 +2113,7 @@ export default function PlayPage() {
         nodeId,
       ];
       return { ...prev, trail, trailIdx: trail.length - 1 };
-    });
+    }));
     setViewMode("page");
   }, [history.items, showHistoryPage]);
 
@@ -2113,6 +2129,7 @@ export default function PlayPage() {
   }, [page?.nodeId, page?.relation]);
   const onAscended = useCallback(
     (a: Ascended) => {
+      spatialCancel();
       const parentPage: Page = {
         nodeId: a.parentNodeId,
         sessionId,
@@ -2147,7 +2164,7 @@ export default function PlayPage() {
       window.history.replaceState({}, "", url.toString());
       void geoRefetch();
     },
-    [sessionId, geoRefetch],
+    [sessionId, geoRefetch, spatialCancel],
   );
   const { start: startAscend, pending: ascendPending, error: ascendError, candidate: ascendCandidate, dismiss: dismissAscend } =
     useAscend(onAscended, page?.nodeId);
@@ -2519,7 +2536,7 @@ export default function PlayPage() {
       pinnedRenderModeRef.current = null;
       const placeIntent = placeIntentRef.current;
       placeIntentRef.current = null;
-      if (phase === "generating") return;
+      if (phase === "generating" || spatialPendingRef.current) return;
       if (editMode) return;
       if (clickInFlightRef.current) return;
       // Stroke release also fires `click` — suppress so we don't generate
@@ -2731,7 +2748,7 @@ export default function PlayPage() {
           diveOy = o.y;
         }
       }
-      setMorphFx({
+      if (!SPATIAL_TRANSITIONS_ENABLED) setMorphFx({
         ox: diveOx,
         oy: diveOy,
         prevImg: currentImage,
@@ -3285,7 +3302,7 @@ export default function PlayPage() {
       // Centroid is the click anchor; suppression flag is reset inside the
       // click handler when it sees strokeActiveRef.current === true.
       const click = summary.centroid;
-      if (clickInFlightRef.current) {
+      if (clickInFlightRef.current || spatialPendingRef.current) {
         strokeActiveRef.current = false;
         release();
         return;
@@ -3298,7 +3315,7 @@ export default function PlayPage() {
       const reduceMotion =
         typeof window !== "undefined" &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      setMorphFx({
+      if (!SPATIAL_TRANSITIONS_ENABLED) setMorphFx({
         ox: px,
         oy: py,
         prevImg: currentImage,
@@ -3527,7 +3544,7 @@ export default function PlayPage() {
   // clip persists on the node (once per edge). Additive: nothing plays by
   // itself — the Descend button just lights up pre-armed.
   const descentAutoFiredRef = useRef<Set<string>>(new Set());
-  const descentAutoEnabled = process.env.NEXT_PUBLIC_DESCENT_AUTO === "1";
+  const descentAutoEnabled = !SPATIAL_TRANSITIONS_ENABLED && process.env.NEXT_PUBLIC_DESCENT_AUTO === "1";
   useEffect(() => {
     if (
       !shouldAutoDescend({
@@ -3663,6 +3680,12 @@ export default function PlayPage() {
       </div>
 
       {isDraggingFile && <DragDropOverlay />}
+
+      {spatialError && <div role="alert" className="flex items-center gap-3 border-b border-red-400 py-2 text-sm">
+        <span>{spatialError}</span>
+        <button type="button" title="Retry image" aria-label="Retry transition image" className="p-2" onClick={() => void spatialRetry()}><RotateCcw size={18} /></button>
+        <button type="button" title="Dismiss" aria-label="Dismiss transition error" className="p-2" onClick={spatialCancel}><X size={18} /></button>
+      </div>}
 
       {phase === "error" && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm text-red-900">
@@ -3948,6 +3971,7 @@ export default function PlayPage() {
                   }}
                 />
               )}
+              <SpatialTransitionLayer motion={spatialMotion} />
               {strokeState && <StrokeOverlay pxPoints={strokeState.pxPoints} />}
 
               {editMode && (editDragRect ?? editRegionDisplayRect) && (
@@ -4360,16 +4384,24 @@ export default function PlayPage() {
                       ? t.generatingClip
                       : `… ${streamStatus}`}
               </button>
-              {streamStatus === "off" &&
+              {SPATIAL_TRANSITIONS_ENABLED && streamStatus === "off" && descentParentImage && page?.imageDataUrl && (
+                <button type="button" title="Replay arrival" aria-label="Replay arrival" disabled={spatialPending || phase === "generating"}
+                  className="flex h-9 w-9 items-center justify-center rounded bg-black/60 text-white disabled:opacity-50"
+                  onClick={() => {
+                    const parent = history.items.find(p => p.nodeId === page.parentId);
+                    if (parent) void spatialNavigate(spatialPage(parent), spatialPage(page), () => {});
+                  }}><RotateCcw size={16} /></button>
+              )}
+              {streamStatus === "off" && (!SPATIAL_TRANSITIONS_ENABLED || page?.descentVideoUrl) &&
                 descentParentImage &&
                 page?.imageDataUrl && (
                   <button
                     type="button"
                     onClick={descendClip}
                     className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
-                    title="Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"
+                    title={SPATIAL_TRANSITIONS_ENABLED ? "Play saved generated clip" : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"}
                   >
-                    ⤵ {t.descendClip}
+                    {SPATIAL_TRANSITIONS_ENABLED ? <span className="flex items-center gap-1"><Film size={14} /> Generated clip</span> : <>⤵ {t.descendClip}</>}
                   </button>
                 )}
             </div>

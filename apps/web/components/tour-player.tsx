@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { buildTour, type TourNode, type TourStep } from "@/lib/tour";
+import { buildTour, type TourPlayerProps, type TourStep } from "@/lib/tour";
+import { SPATIAL_TRANSITIONS_ENABLED } from "@/lib/spatial-mode";
+import SpatialTourPlayer from "./spatial-tour-player";
 
 // Tour mode: the world plays itself. Each step HOLDS on a page with a slow
 // Ken Burns drift, then leaves the way the explorer did — a camera DIVE into
@@ -14,13 +16,11 @@ const HOLD_MS = 2600;
 const DIVE_MS = 950;
 const CUT_MS = 500;
 
-interface TourPlayerProps {
-  nodes: TourNode[];
-  continueUrl: string;
-  onClose: () => void;
+export default function TourPlayer(props: TourPlayerProps) {
+  return SPATIAL_TRANSITIONS_ENABLED ? <SpatialTourPlayer {...props} /> : <LegacyTourPlayer {...props} />;
 }
 
-export default function TourPlayer({ nodes, continueUrl, onClose }: TourPlayerProps) {
+function LegacyTourPlayer({ nodes, continueUrl, onClose }: TourPlayerProps) {
   const steps = useMemo(() => buildTour(nodes), [nodes]);
   const [i, setI] = useState(0);
   const [phase, setPhase] = useState<"hold" | "exit" | "done">("hold");
