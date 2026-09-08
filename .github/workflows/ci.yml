@@ -113,7 +113,10 @@ jobs:
           source .venv/bin/activate
           pytest --cov=providers --cov=generate --cov-report=term
 
-  e2e-mock:
+  e2e-mock-variants:
+    strategy:
+      matrix:
+        spatial: ["0", "1"]
     # Zero-key boot proof, every PR: the whole compose stack comes up under
     # MOCK_PROVIDERS=1 (no secrets at all) and serves a full generate stream.
     # This is the contributor's first-clone experience, continuously tested.
@@ -129,6 +132,8 @@ jobs:
           # world/interior Playwright specs need it. Classic paths stay
           # exercisable (per-request world_mode:false + the UI mode toggle).
           WORLD_MODE: "true"
+          NEXT_PUBLIC_SPATIAL_TRANSITIONS: ${{ matrix.spatial }}
+          NEXT_PUBLIC_DESCENT_AUTO: ${{ matrix.spatial }}
         run: docker compose up -d --build
       - name: Wait for the web app
         run: |
@@ -183,6 +188,7 @@ jobs:
         env:
           E2E_BASE_URL: http://localhost:3000
           E2E_MOCK: "1"
+          E2E_SPATIAL: ${{ matrix.spatial }}
         run: pnpm e2e
       - name: Backend/web logs on failure
         if: failure()
@@ -191,10 +197,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-mock-report
+          name: playwright-mock-report-spatial-${{ matrix.spatial }}
           path: |
             apps/web/playwright-report
             apps/web/test-results
+
+  e2e-mock:
+    if: always()
+    needs: [e2e-mock-variants]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Both transition modes passed
+        env:
+          RESULT: ${{ needs.e2e-mock-variants.result }}
+        run: test "$RESULT" = "success"
 
   e2e:
     # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +

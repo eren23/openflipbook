@@ -56,3 +56,30 @@ timings are unchanged. CPU exports use nearest-neighbor resampling; the browser
 uses native image resampling, with identical transforms. Comparison order is
 source pixels, saved H3, saved LTX. Destination identity failures remain failures;
 motion correctness is separate from identity and human-rated continuity.
+
+## Opt-In Navigation
+
+Build with `NEXT_PUBLIC_SPATIAL_TRANSITIONS=1` to use this player for fresh
+arrivals, saved revisits, history/breadcrumb navigation, arrival replay, embeds
+and tours. It remains OFF by default. Docker/Compose forward the build argument.
+No environment file or production setting is changed by the implementation.
+
+The source stays still throughout generation and persistence. Existing strict
+world acceptance policy still applies; this flag does not promote an unverified
+destination. After destination decode, the shared controller commits the image,
+title, URL and trail at the cut. Decode failure exposes an image-only retry,
+not a new generation request. Direct back cuts to cropped parent pixels first,
+then pulls out. Taps are withheld during reframing because the normal click
+resolver operates on the untransformed image. History navigation can cancel
+the animation; the latest navigation wins.
+
+The opt-in flag suppresses `NEXT_PUBLIC_DESCENT_AUTO`, even if both are set.
+Arrival replay uses no video API. Already-saved generated clips remain under
+the separate Generated clip control. Ambient animation remains a separate,
+explicit user action. Flag-off retains the previous player and video behavior.
+
+CI runs the mocked browser suite in both modes. The opt-in build also sets
+DESCENT_AUTO=1 and asserts no animation requests during generation, navigation,
+reload/continue and replay. Geometry tests, image-load lifecycle tests, viewer
+commit tests, and desktop/mobile/landscape browser screenshots cover the new
+surface. This does not reconstruct geometry or repair a wrong destination.
