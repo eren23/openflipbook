@@ -101,6 +101,19 @@ function seed() {
 }
 
 describe("forkSession", () => {
+  it('remaps transition edge references while retaining source-image identity', async () => {
+    seed();
+    mongo.store('nodes').get('child1')!.transition_context = {
+      version: 1, source_node_id: 'root1', source_image_key: 'k/root.jpg',
+      target_point: { x_pct: .8, y_pct: .3 }, target_geo_id: 'geo_tower',
+      source_view: { node_id: 'root1', level: 'map' }, destination_view: { node_id: 'child1', level: 'eye' },
+    };
+    const forked = (await forkSession(SRC, 'child1'))!;
+    const rows = [...mongo.store('nodes').values()].filter(n => n.session_id === forked.session_id);
+    const parent = rows.find(n => n.parent_id == null)!;
+    const child = rows.find(n => n.parent_id != null)!;
+    expect(child.transition_context).toMatchObject({ source_node_id: parent._id, source_image_key: 'k/root.jpg', source_view: { node_id: parent._id }, destination_view: { node_id: child._id } });
+  });
   it("remaps a curated anchor's node but preserves its original bytes and crop", async () => {
     seed();
     const anchor = { node_id: "root1", image_key: "original-before-edit.png", bbox: { x_pct: .1, y_pct: .2, w_pct: .3, h_pct: .4 } };

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
-import { getNode, insertNode } from "@/lib/db";
+import { getNode, insertNode, type NodeRow } from "@/lib/db";
+import { bindTransitionContext } from "@/lib/transition-context";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
@@ -11,6 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface CreateBody {
+  transition_context?: unknown;
   parent_id?: string | null;
   session_id: string;
   query: string;
@@ -58,11 +60,12 @@ export async function POST(req: Request) {
   const auth = await requireOwner(body.session_id);
   if (!auth.ok) return auth.res;
 
+  let parent: NodeRow | null = null;
   if (body.parent_id != null) {
     if (!isSafeId(body.parent_id)) {
       return NextResponse.json({ error: "invalid parent_id" }, { status: 400 });
     }
-    const parent = await getNode(body.parent_id);
+    parent = await getNode(body.parent_id);
     if (!parent || parent.session_id !== body.session_id) {
       return NextResponse.json({ error: "parent_id not found in this session" }, { status: 404 });
     }
@@ -82,6 +85,14 @@ export async function POST(req: Request) {
     if (cached) return NextResponse.json(cached);
   }
 
+  const nodeId = crypto.randomUUID();
+  const sceneView = body.scene_view ? { ...body.scene_view, node_id: nodeId } : null;
+  let transitionContext;
+  try {
+    transitionContext = bindTransitionContext(body.transition_context, parent, body.click_in_parent, sceneView, body.relation);
+  } catch {
+    return NextResponse.json({ error: "invalid transition context" }, { status: 400 });
+  }
   const decoded = decodeDataUrl(body.image_data_url);
   const extension = decoded.contentType === "image/png" ? "png" : "jpg";
   const keyPrefix = body.session_id.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -90,6 +101,7 @@ export async function POST(req: Request) {
   const uploaded = await uploadJpeg(objectKey, decoded.bytes, decoded.contentType);
 
   const row = await insertNode({
+    id: nodeId,
     parent_id: body.parent_id ?? null,
     session_id: body.session_id,
     query: body.query,
@@ -104,13 +116,16 @@ export async function POST(req: Request) {
     relation: body.relation ?? "descend",
     scale: body.scale ?? "peer",
     scale_tier: body.scale_tier ?? null,
-    scene_view: body.scene_view ?? null,
+    scene_view: sceneView,
+    transition_context: transitionContext,
     view_verdict: body.view_verdict ?? null,
   });
 
   const result = {
     id: row.id,
     image_url: uploaded.url,
+    image_key: uploaded.key,
+    transition_context: transitionContext,
     created_at: row.created_at,
   };
   if (idemKey) await saveIdempotentResult(idemKey, result);

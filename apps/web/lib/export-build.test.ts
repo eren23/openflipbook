@@ -80,6 +80,19 @@ function worldNode(
 }
 
 describe("buildWorldZip", () => {
+  it("preserves the immutable transition binding in the exported graph", async () => {
+    const transition = {
+      version: 1 as const, source_node_id: "a", source_image_key: "original.jpg",
+      target_point: { x_pct: 0.9, y_pct: 0.2 }, target_geo_id: null,
+      target_bbox: null, target_provenance: "tap" as const,
+      source_view: null, destination_view: null,
+    };
+    const zip = await JSZip.loadAsync(await buildWorldZip([
+      worldNode("b", null, "a", { transition_context: transition }),
+    ], {}, {}));
+    const graph = JSON.parse(await zip.file("graph.json")!.async("string"));
+    expect(graph.nodes[0].transition_context).toEqual(transition);
+  });
   it("bundles immutable references separately from later page revisions", async () => {
     const original = new Uint8Array([1, 2, 3]);
     const zip = await JSZip.loadAsync(await buildWorldZip([], {}, {}, [

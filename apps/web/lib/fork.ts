@@ -2,6 +2,7 @@ import type { Document } from "mongodb";
 import type { WorldEntityGeo } from "@openflipbook/config";
 
 import { getDb, type NodeDoc } from "./db";
+import { remapTransition } from "./transition-context";
 
 // Fork a session: deep-copy its world into a fresh session_id so anyone with
 // a share link gets their OWN world to extend instead of write access to the
@@ -72,6 +73,7 @@ export async function forkSession(
       session_id: newSessionId,
       parent_id: n.parent_id ? (idMap.get(n.parent_id) ?? null) : null,
       scene_view: sceneView,
+      transition_context: remapTransition(n.transition_context, idMap),
       // Lineage rides the fork's root(s); created_at is preserved so the
       // world's history (hydration order, atlas) stays the world's history.
       ...(n.parent_id == null

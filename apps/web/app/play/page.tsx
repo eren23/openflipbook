@@ -148,6 +148,8 @@ import {
   type SessionNodeWire,
 } from "@/lib/session-pages";
 import { useImageMorph } from "@/hooks/useImageMorph";
+import type { TransitionContextV1, TransitionSeed } from "@openflipbook/config";
+import { captureTransition } from "@/lib/transition-context";
 import { ScanSearch, X } from "lucide-react";
 import { isVerifiedView } from "@/lib/place-identity";
 import PlaceInspector from "@/components/PlayPage/PlaceInspector";
@@ -161,6 +163,7 @@ import {
 } from "@/hooks/usePrefetchCache";
 
 type Phase = "idle" | "generating" | "ready" | "error";
+type ClientGenerateBody = GenerateRequestBody & { transitionSeed?: TransitionSeed | undefined };
 const STRICT_WORLD_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_IDENTITY_STRICT ?? "").toLowerCase());
 
 // Select-area mask edits (E1). Build-time gate so the UI never offers a drag
@@ -211,6 +214,7 @@ function initialSessionId(): string {
 }
 
 interface PersistBody {
+  transition_context?: TransitionSeed | undefined;
   parent_id: string | null;
   session_id: string;
   query: string;
@@ -249,7 +253,7 @@ async function persistNode(
   body: PersistBody,
   traceId: string | null,
   signal?: AbortSignal,
-): Promise<{ id: string; image_url: string } | null> {
+): Promise<{ id: string; image_url: string; image_key?: string; transition_context?: TransitionContextV1 | null } | null> {
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -267,7 +271,7 @@ async function persistNode(
       ...(signal ? { signal } : {}),
     });
     if (!res.ok) return null;
-    return (await res.json()) as { id: string; image_url: string };
+    return await res.json();
   } catch {
     return null;
   }
@@ -753,7 +757,7 @@ export default function PlayPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // The last generate body, any kind — powers the error banner's "Try again".
-  const lastGenerateRef = useRef<GenerateRequestBody | null>(null);
+  const lastGenerateRef = useRef<ClientGenerateBody | null>(null);
   // True when the current error landed while the tab was HIDDEN — the
   // freeze-suspension class; the visibilitychange effect auto-retries once.
   const erroredWhileHiddenRef = useRef(false);
@@ -922,7 +926,7 @@ export default function PlayPage() {
   } = usePrefetchCache();
 
   const generate = useCallback(
-    async (body: GenerateRequestBody) => {
+    async (body: ClientGenerateBody) => {
       // Every generation kind (query/tap/edit/expand/ascend) funnels through
       // here — keep the last body so the error banner's "Try again" can
       // replay it verbatim (minus trace_id: the API route claims the
@@ -945,6 +949,7 @@ export default function PlayPage() {
       bindTrace(traceId, { announce: true });
 
       try {
+        const { transitionSeed, ...requestBody } = body;
         const response = await fetch("/api/generate-page", {
           method: "POST",
           headers: {
@@ -954,7 +959,7 @@ export default function PlayPage() {
             // request) so a retry can't re-run the paid model stack.
             "Idempotency-Key": traceId,
           },
-          body: JSON.stringify({ ...body, trace_id: traceId }),
+          body: JSON.stringify({ ...requestBody, trace_id: traceId }),
           signal: ac.signal,
         });
         if (!response.ok || !response.body) {
@@ -1116,6 +1121,7 @@ export default function PlayPage() {
                   title: s.title ?? null,
                 })),
                 scene_view: foldedSceneView,
+                transition_context: transitionSeed,
                 view_verdict: evt.view_verdict ?? null,
               },
               traceId,
@@ -1137,6 +1143,8 @@ export default function PlayPage() {
                   query: body.query,
                   title: evt.page_title,
                   imageDataUrl: evt.image_data_url,
+                  ...(saved.image_key ? { imageKey: saved.image_key } : {}),
+                  transitionContext: saved.transition_context ?? null,
                   parentId: body.current_node_id || null,
                   sources: evtSources,
                   // Same relation the persist body sent — so the in-session
@@ -1161,7 +1169,7 @@ export default function PlayPage() {
                   prev
                     ? {
                         ...prev,
-                        nodeId: saved.id,
+                        ...persisted,
                         sceneView: foldedSceneView
                           ? { ...foldedSceneView, node_id: saved.id }
                           : null,
@@ -2917,6 +2925,7 @@ export default function PlayPage() {
         session_id: page.sessionId,
         current_node_id: page.nodeId ?? "",
         mode: "tap",
+        transitionSeed: captureTransition(page, click, worldTap?.focus_id ?? null, worldState.entities, geoEntities),
         ...(worldEnabled && STRICT_WORLD_ENABLED ? { strict_world: true } : {}),
         ...(worldTap?.focus_id ? { target_geo_id: worldTap.focus_id } : {}),
         image: annotated,

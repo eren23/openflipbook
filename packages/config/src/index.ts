@@ -791,6 +791,23 @@ export interface SceneView {
   place_form?: string;
 }
 
+/** Frozen evidence for a child edge, not a reconstructed 3D camera path. */
+export interface TransitionContextV1 {
+  version: 1;
+  source_node_id: string;
+  source_image_key: string;
+  target_point: { x_pct: number; y_pct: number };
+  target_geo_id: string | null;
+  target_bbox: EntityBBox | null;
+  target_provenance: "tap" | "source_bbox";
+  source_view: SceneView | null;
+  destination_view: SceneView | null;
+}
+
+/** Client evidence; source image identity is bound by the persistence server. */
+export type TransitionSeed = Omit<TransitionContextV1,
+  "source_image_key" | "destination_view">;
+
 // One entity's projected place in a rendered frame (geometry-engine output),
 // 0..1 normalized in the frame. Drives prompt constraints + VLM verification.
 export interface ProjectedEntity {

@@ -1,5 +1,5 @@
 import { MongoClient, type ClientSession, type Collection, type Db, type Document } from "mongodb";
-import type { ScaleTier, SceneView, ViewSpec, ViewVerdict } from "@openflipbook/config";
+import type { ScaleTier, SceneView, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -117,6 +117,7 @@ export interface NodeSource {
 }
 
 export interface NodeDoc extends Document {
+  transition_context?: TransitionContextV1 | null;
   _id: string;
   parent_id: string | null;
   session_id: string;
@@ -160,6 +161,7 @@ export interface NodeDoc extends Document {
 }
 
 export interface NodeInsert {
+  transition_context?: TransitionContextV1 | null;
   // Optional caller-supplied id (default: a fresh UUID). Lets the OUTWARD reparent
   // build the new parent's self-referential scene_view.node_id before inserting.
   id?: string;
@@ -182,6 +184,7 @@ export interface NodeInsert {
 }
 
 export interface NodeRow {
+  transition_context?: TransitionContextV1 | null;
   id: string;
   parent_id: string | null;
   session_id: string;
@@ -230,6 +233,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     forked_from,
     geo_extracted_at,
     descent_video_url,
+    transition_context,
     ...rest
   } = doc;
   return {
@@ -245,6 +249,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     forked_from: forked_from ?? null,
     geo_extracted: geo_extracted_at != null,
     descent_video_url: descent_video_url ?? null,
+    transition_context: transition_context ?? null,
     created_at: created_at.toISOString(),
   };
 }
@@ -252,6 +257,7 @@ export function toRow(doc: NodeDoc): NodeRow {
 export async function insertNode(n: NodeInsert): Promise<NodeRow> {
   const collection = await nodes();
   const doc: NodeDoc = {
+    transition_context: n.transition_context ?? null,
     _id: n.id ?? crypto.randomUUID(),
     parent_id: n.parent_id,
     session_id: n.session_id,

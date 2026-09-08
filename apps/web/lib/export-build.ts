@@ -61,6 +61,7 @@ export async function buildZip(pages: ExportPage[]): Promise<Uint8Array> {
  * graph, just without an image file). Decoupled from the db NodeRow so the
  * builder stays pure. */
 export interface WorldExportNode {
+  transition_context?: unknown;
   id: string;
   parent_id: string | null;
   title: string;
@@ -102,6 +103,7 @@ export async function buildWorldZip(
       scale_tier: n.scale_tier,
       click_in_parent: n.click_in_parent,
       scene_view: n.scene_view,
+      transition_context: n.transition_context ?? null,
       sources: n.sources,
       image,
     };

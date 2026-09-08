@@ -40,6 +40,8 @@ export async function GET(req: Request, { params }: Params) {
       query: row.query,
       page_title: row.page_title,
       image_url: `${publicBase}/${row.image_key}`,
+      image_key: row.image_key,
+      transition_context: row.transition_context ?? null,
       image_model: row.image_model,
       prompt_author_model: row.prompt_author_model,
       aspect_ratio: row.aspect_ratio,
