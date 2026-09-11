@@ -42,6 +42,7 @@ from .client import (
     DEFAULT_VLM_MODEL,
     ENTITY_KINDS,
     OPENROUTER_BASE_URL,
+    REQUESTY_BASE_URL,
     SCALE_KINDS,
     _cache_enabled,
     _choice_content,
