@@ -1,4 +1,4 @@
-import type { WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+import type { MapCrop, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
 import { clamp } from "./clamp";
@@ -66,6 +66,7 @@ function reExpressUnder(
     // consistent parent-local frame (INV-1 for extents too): resolving back
     // to absolute multiplies both by the same unit and recovers the original.
     footprint: { w: node.footprint.w / pScale, d: node.footprint.d / pScale },
+    ...(node.border ? { border: node.border.map(p => ({ x: (p.x - parentPos.x) / pScale, y: (p.y - parentPos.y) / pScale })) } : {}),
     source: "user", // protect the new edge from a later derived re-seed (SOURCE_RANK)
     updated_at: nowIso,
   };
@@ -179,4 +180,44 @@ export function reparentRoots(
   );
   geosOut.push(newParent);
   return { geos: geosOut, parentGeoId: parentGeo.id, learnedScale: pScale };
+}
+
+export interface SourceRect { x_pct: number; y_pct: number; w_pct: number; h_pct: number }
+
+// The rect reaches the route as client JSON, and it SCALES the world frame:
+// a 5%-wide rect would blow a 100x60 map up to 2000x1200 and move every place
+// on it. Bound what a forged or stale payload can do — the measurement's own
+// gate (providers/outward_frame.MIN_SCORE), a zoom-out of at most 5x per axis,
+// and a rect whose shape matches the image it claims to sit in.
+const MIN_SOURCE_SCORE = 0.6;
+const MIN_SOURCE_FRACTION = 0.2;
+const MAX_SOURCE_ASPECT_SKEW = 1.4;
+
+/** A well-formed, plausible normalized rect inside the image, else null. */
+export function parseSourceRect(value: unknown): SourceRect | null {
+  if (!value || typeof value !== "object") return null;
+  const r = value as Record<string, unknown>;
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  if (!ok(r.x_pct) || !ok(r.y_pct) || !ok(r.w_pct) || !ok(r.h_pct)) return null;
+  if (!ok(r.score) || r.score < MIN_SOURCE_SCORE || r.score > 1) return null;
+  const eps = 1e-6;
+  if (r.w_pct < MIN_SOURCE_FRACTION || r.h_pct < MIN_SOURCE_FRACTION) return null;
+  if (r.w_pct > 1 + eps || r.h_pct > 1 + eps) return null;
+  if (r.x_pct < -eps || r.y_pct < -eps) return null;
+  if (r.x_pct + r.w_pct > 1 + eps || r.y_pct + r.h_pct > 1 + eps) return null;
+  // Both axes shrink by roughly the same factor; a lopsided rect is not a
+  // camera pulling back, it is a bad measurement or a forgery.
+  const skew = r.w_pct / r.h_pct;
+  if (skew > MAX_SOURCE_ASPECT_SKEW || skew < 1 / MAX_SOURCE_ASPECT_SKEW) return null;
+  return { x_pct: r.x_pct, y_pct: r.y_pct, w_pct: r.w_pct, h_pct: r.h_pct };
+}
+
+/** The zoom-out image's frame in world units: the source's frame occupies
+ *  `rect` of the new image, so the new frame is that frame scaled up around
+ *  it. No rect → the source frame (the old behaviour, geometry unknown). */
+export function outwardFrame(sourceFrame: MapCrop, rect: SourceRect | null): MapCrop {
+  if (!rect) return sourceFrame;
+  const w = sourceFrame.w / rect.w_pct;
+  const h = sourceFrame.h / rect.h_pct;
+  return { x: sourceFrame.x - rect.x_pct * w, y: sourceFrame.y - rect.y_pct * h, w, h };
 }

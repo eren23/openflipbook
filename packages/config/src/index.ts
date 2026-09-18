@@ -485,6 +485,9 @@ export interface GenerateAscendReadyEvent {
   // The container render shipped without a critic verdict (judge failure /
   // remote-ref source). Additive — see GenerateFinalEvent.render_unjudged.
   render_unjudged?: boolean;
+  // Where the source image sits inside the container image (normalized),
+  // measured by the backend. Absent when it could not be located.
+  source_rect?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number; score: number };
   trace_id?: string;
 }
 

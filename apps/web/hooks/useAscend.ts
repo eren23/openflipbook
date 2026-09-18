@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   GenerateAscendReadyEvent,
   GenerateEvent,
+  MapCrop,
   ScaleTier,
   SceneView,
   GenerateErrorEvent,
@@ -154,6 +155,7 @@ export function useAscend(onAscended: (a: Ascended) => void, activeNodeId?: stri
               image_model: ready.image_model,
               final_prompt: ready.final_prompt,
               aspect_ratio: root.aspectRatio,
+              ...(ready.source_rect ? { source_rect: ready.source_rect } : {}),
             }),
             signal: ac.signal,
           });
@@ -161,7 +163,7 @@ export function useAscend(onAscended: (a: Ascended) => void, activeNodeId?: stri
             const errBody = (await saveRes.json().catch(() => ({}))) as { error?: string };
             throw new Error(errBody.error || `persist failed: HTTP ${saveRes.status}`);
           }
-          const saved = (await saveRes.json()) as { parent_node_id: string };
+          const saved = (await saveRes.json()) as { parent_node_id: string; map_crop?: MapCrop };
           if (ac.signal.aborted) return;
 
           onAscended({
@@ -175,7 +177,7 @@ export function useAscend(onAscended: (a: Ascended) => void, activeNodeId?: stri
               node_id: saved.parent_node_id,
               level: "map",
               observer: null,
-              map_crop: MAP_IMAGE_FRAME,
+              map_crop: saved.map_crop ?? MAP_IMAGE_FRAME,
               focus_id: null,
               scale_tier: ready.scale_tier,
             },

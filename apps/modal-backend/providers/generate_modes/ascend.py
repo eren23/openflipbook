@@ -42,6 +42,26 @@ _GENERIC_SOURCE_LABELS = {
 }
 
 
+async def _locate_source(source_url: str | None, wide: bytes) -> dict[str, float] | None:
+    """Where the source map landed in the container (see outward_frame).
+    Best-effort: any failure only drops the rect, never the hop."""
+    from providers.outward_frame import locate_source
+    from providers.render_loop import data_url_bytes
+
+    try:
+        source = data_url_bytes(source_url)
+        if source is None and source_url and source_url.startswith(("http://", "https://")):
+            source, _ = await image_provider._fetch_url_bytes(source_url)
+        if source is None:
+            return None
+        rect = await _asyncio.to_thread(locate_source, source, wide)
+    except Exception as exc:
+        log("warn", "ascend.source_locate_failed", error=f"{type(exc).__name__}: {exc}")
+        return None
+    log("info", "ascend.source_located" if rect else "ascend.source_unlocated", **(rect or {}))
+    return rect
+
+
 def _clean_text(value: str | None, limit: int = 800) -> str:
     text = " ".join((value or "").split())
     if limit > 3 and len(text) > limit:
@@ -483,6 +503,7 @@ async def stream_ascend(
     data_url = await _asyncio.to_thread(
         image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
     )
+    source_rect = await _locate_source(body.image, img.jpeg_bytes)
     ascend_payload: GenerateAscendReadyEvent = {
         "type": "ascend_ready",
         "page_title": page_title,
@@ -494,6 +515,10 @@ async def stream_ascend(
         "from_tier": from_tier,
         "session_id": body.session_id,
     }
+    if source_rect is not None:
+        # Where the source now sits in the container, so the web route can
+        # size the container's frame; absent = not located.
+        ascend_payload["source_rect"] = source_rect
     if strict_verdict is not None:
         ascend_payload["view_verdict"] = strict_verdict
     if render_unjudged:
