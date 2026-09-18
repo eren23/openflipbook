@@ -67,6 +67,11 @@ describe("place-aware navigation", () => {
     ] as never;
     expect(placeCandidates([lake, inn], entities, "root", null, { x_pct: 0.5, y_pct: 0.45 }).map(e => e.id)).toEqual(["inn"]);
   });
+  it("keeps a frame-filling box in a perspective view, where it is the only signal", () => {
+    const river = { ...geo("river"), entity_id: "river", parent_id: "tower" };
+    const entities = [{ id: "river", appearance_bboxes: { inside: { x_pct: 0, y_pct: 0, w_pct: 0.92, h_pct: 0.5 } } }] as never;
+    expect(placeCandidates([river], entities, "inside", view("tower"), { x_pct: 0.5, y_pct: 0.2 }).map(e => e.id)).toEqual(["river"]);
+  });
   it("does not treat world coordinates as perspective-image detections", () => {
     expect(placeCandidates([{ ...geo("child"), parent_id: "tower" }], [], "inside", view("tower"), { x_pct: .5, y_pct: .5 })).toEqual([]);
   });

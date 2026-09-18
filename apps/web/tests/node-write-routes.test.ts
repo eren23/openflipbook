@@ -69,6 +69,16 @@ describe("node write session boundaries", () => {
     expect(res.status).toBe(400);
     expect(mocks.uploadJpeg).not.toHaveBeenCalled();
   });
+  it("stores a well-formed grounding summary and drops a malformed one", async () => {
+    const grounding = { score: 0.82, mean_iou: 0.5, matched: ["The Copper Kettle"], missing: [], extra: [], repaired: false, iterations: 1 };
+    expect((await createNode(request({ ...createBody, grounding }))).status).toBe(200);
+    expect(mocks.insertNode).toHaveBeenCalledWith(expect.objectContaining({ grounding }));
+
+    mocks.insertNode.mockClear();
+    expect((await createNode(request({ ...createBody, grounding: { score: 7 } }))).status).toBe(200);
+    expect(mocks.insertNode).toHaveBeenCalledWith(expect.objectContaining({ grounding: null }));
+  });
+
   it("refuses to reparent a root from another session before any writes", async () => {
     mocks.getNode.mockResolvedValue({ ...child, session_id: "other" });
     const res = await ascend(request(ascendBody), params);

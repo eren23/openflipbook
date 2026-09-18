@@ -15,10 +15,12 @@ export function placeCandidates(
   const hits = display.filter(e => {
     if (e.kind !== "place") return false;
     const b = e.entity_id ? registry.get(e.entity_id)?.appearance_bboxes[nodeId] : null;
-    // ponytail: a box over 40% of the image (live: River Leven drawn over a
-    // whole lake, 92%x50%) says nothing about where the place is; geometry
-    // decides instead. Upgrade path: reject such boxes at extraction.
-    if (b && b.w_pct * b.h_pct <= 0.4) return point.x_pct >= b.x_pct && point.x_pct <= b.x_pct + b.w_pct && point.y_pct >= b.y_pct && point.y_pct <= b.y_pct + b.h_pct;
+    // ponytail: on a MAP, a box over 40% of the image (live: River Leven drawn
+    // across a whole lake, 92%x50%) says nothing about where the place is, and
+    // geometry can answer instead. In a perspective view the box is the only
+    // signal there is, so a frame-filling river stays tappable there.
+    const onMap = !view || view.level === "map";
+    if (b && (!onMap || b.w_pct * b.h_pct <= 0.4)) return point.x_pct >= b.x_pct && point.x_pct <= b.x_pct + b.w_pct && point.y_pct >= b.y_pct && point.y_pct <= b.y_pct + b.h_pct;
     if (inside) return false; // World coordinates are not image pixels in a perspective view.
     const x = frame.x + point.x_pct * frame.w;
     const y = frame.y + point.y_pct * frame.h;

@@ -121,6 +121,7 @@ export async function POST(req: Request) {
     scene_view: sceneView,
     transition_context: transitionContext,
     view_verdict: body.view_verdict ?? null,
+    grounding: cleanGrounding(body.grounding),
   });
 
   const result = {
