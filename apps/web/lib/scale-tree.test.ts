@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WorldEntityGeo } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
-import { reparent, reparentRoots } from "./scale-tree";
+import { outwardFrame, parseSourceRect, reparent, reparentRoots } from "./scale-tree";
 import {
   type FrameNode,
   resolveAbsoluteFrame,
@@ -233,5 +233,41 @@ describe("scale-tree reparentRoots (the multi-root geo store)", () => {
       expect(afterAbs.get(id)!.x).toBeCloseTo(beforeAbs.get(id)!.x, 9);
       expect(afterAbs.get(id)!.y).toBeCloseTo(beforeAbs.get(id)!.y, 9);
     }
+  });
+});
+
+describe("outwardFrame (zoom-out keeps the geometry)", () => {
+  it("scales the source frame up around where the source landed", () => {
+    // Live Lantern Quay: the town map (0,0,100,60) sits at 0.44 of the wider view.
+    const rect = parseSourceRect({ x_pct: 0.281, y_pct: 0.29, w_pct: 0.44, h_pct: 0.44, score: 0.74 })!;
+    const frame = outwardFrame({ x: 0, y: 0, w: 100, h: 60 }, rect);
+    // A town place maps to the same pixel it occupies in the wider image.
+    const kettle = { x: 37, y: 29.1 };
+    expect((kettle.x - frame.x) / frame.w).toBeCloseTo(0.281 + 0.37 * 0.44, 9);
+    expect((kettle.y - frame.y) / frame.h).toBeCloseTo(0.29 + 0.485 * 0.44, 9);
+    expect(frame.w).toBeCloseTo(227.27, 2);
+  });
+
+  it("keeps the source frame without a rect", () => {
+    const f = { x: 0, y: 0, w: 100, h: 60 };
+    expect(outwardFrame(f, null)).toEqual(f);
+  });
+
+  it("refuses a rect that would rewrite the world frame", () => {
+    // The rect is client JSON and SCALES the frame, so an implausible one has
+    // to bounce: it moves every place on the map.
+    const ok = { x_pct: 0.25, y_pct: 0.25, w_pct: 0.5, h_pct: 0.5, score: 0.8 };
+    expect(parseSourceRect(ok)).toEqual({ x_pct: 0.25, y_pct: 0.25, w_pct: 0.5, h_pct: 0.5 });
+    const bad: unknown[] = [
+      null,
+      {},
+      { ...ok, score: undefined }, // no measurement score
+      { ...ok, score: 0.4 }, // below the locator's own gate
+      { ...ok, w_pct: 0.05, h_pct: 0.05 }, // a 20x zoom-out
+      { ...ok, w_pct: 0.6, h_pct: 0.2 }, // lopsided: not a camera pulling back
+      { x_pct: 0.5, y_pct: 0.5, w_pct: 0.8, h_pct: 0.8, score: 0.8 }, // spills outside
+      { ...ok, x_pct: NaN },
+    ];
+    for (const value of bad) expect(parseSourceRect(value)).toBeNull();
   });
 });

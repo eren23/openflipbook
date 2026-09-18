@@ -49,7 +49,9 @@ services:
   # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
   # URLs from the published port (R2_PUBLIC_BASE_URL=http://localhost:9000/...).
   minio:
-    image: minio/minio:latest
+    # MinIO pulled its images from Docker Hub, so this reads from their own
+    # registry, pinned: `latest` there has since dropped the web console.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: openflipbook-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -66,7 +68,7 @@ services:
   # browser's <img src> GETs aren't 403'd. Retries until Minio answers, then
   # exits — `web` waits on it completing.
   minio-setup:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: openflipbook-minio-setup
     depends_on:
       - minio

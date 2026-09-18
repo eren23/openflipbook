@@ -5,6 +5,7 @@ import {
   deriveGeoFromExtraction,
   getWorldMap,
   registerPlanToImage,
+  extractionSeedTarget,
   upsertEntityGeos,
 } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
@@ -206,15 +207,16 @@ export async function POST(req: Request, { params }: Params) {
       }
     }
     const viewLevel = upstreamView?.level ?? "map";
-    // An ENTERED place (the geo-tap carried a focus): seed this scene's
+    // An ENTERED INTERIOR (the geo-tap carried a focus): seed this scene's
     // sub-entities into that place's CHILD frame, so the interior layout
-    // persists + stays consistent across re-entries. Otherwise we only seed a
+    // persists + stays consistent across re-entries. Exterior arrivals seed
+    // nothing (see extractionSeedTarget). Otherwise we only seed a
     // top-down MAP into the city frame — a scene's boxes don't belong in a fake
     // top-down crop.
-    const parentFrameId =
-      sceneView && sceneView.level !== "map" ? sceneView.focus_id ?? null : null;
+    const seedTarget = extractionSeedTarget(sceneView, viewLevel);
+    const parentFrameId = seedTarget?.frame === "child" ? seedTarget.parentId : null;
     const geoOn = envFlag("GEOMETRIC_WORLD", "true");
-    if (geoNodeId && geoOn && (parentFrameId || viewLevel === "map")) {
+    if (geoNodeId && geoOn && seedTarget) {
       try {
         // Map an on-node entity → a seedable geo item (or null to skip). Drops
         // boxes that are huge (a backdrop river → area ~0.7) or specks, and — in
@@ -268,6 +270,8 @@ export async function POST(req: Request, { params }: Params) {
           }
         } else {
           // Top-level city map (parent_id = null) — the original seeding.
+          // Boxes map through the frame this image shows: a zoomed-out map
+          // spans a wider world rect than the seeded 100x60.
           const items = merged.snapshot.entities
             .map((e) => toItem(e, false))
             .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -278,7 +282,7 @@ export async function POST(req: Request, { params }: Params) {
                 node_id: geoNodeId,
                 level: "map",
                 observer: null,
-                map_crop: MAP_IMAGE_FRAME,
+                map_crop: sceneView?.level === "map" && sceneView.map_crop ? sceneView.map_crop : MAP_IMAGE_FRAME,
               },
               16 / 9,
               items,
