@@ -12,6 +12,7 @@ import type {
   ObserverPose,
   ScaleTier,
   SceneView,
+  GroundingSummary,
   ViewVerdict,
   ViewLevel,
   WorldEntityGeo,
@@ -234,6 +235,7 @@ interface PersistBody {
   scale_tier?: ScaleTier;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
+  grounding?: GroundingSummary | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -1134,6 +1136,7 @@ export default function PlayPage() {
                 scene_view: foldedSceneView,
                 transition_context: transitionSeed,
                 view_verdict: evt.view_verdict ?? null,
+                grounding: evt.grounding ?? null,
               },
               traceId,
               ac.signal,
@@ -1851,8 +1854,10 @@ export default function PlayPage() {
     if (currentNodeRef.current !== page.nodeId) return;
     const bbox = worldState.entities.find(e => e.id === place.entity_id)?.appearance_bboxes[page.nodeId];
     const frame = page.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
+    // The map frame is absolute; a place inside another frame stores local numbers.
+    const pos = toAbsoluteEntities([place], geoMap.entities)[0]?.pos ?? place.pos;
     placeIntentRef.current = { id: place.id, newView, note, ...(override ? { override } : {}) };
-    dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (place.pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (place.pos.y-frame.y)/frame.h)));
+    dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (pos.y-frame.y)/frame.h)));
   }, [page, phase, geoMap.entities, geoMap.bounds, worldState.entities, promptForClickDetail, dispatchTapAt]);
 
   // Wander (auto-explore): reuse the ranked precompute candidates + the tap flow

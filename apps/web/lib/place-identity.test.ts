@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SceneView, ViewVerdict, WorldEntityGeo } from "@openflipbook/config";
-import { isVerifiedView, parsePlaceUpdate, preservePlaceIdentity, validReferenceBox } from "./place-identity";
+import { cleanGrounding, isVerifiedView, parsePlaceUpdate, preservePlaceIdentity, validReferenceBox } from "./place-identity";
 import { findRevisitTarget } from "./world-mode";
 import { placeCandidates } from "./place-selection";
 
@@ -56,7 +56,26 @@ describe("place-aware navigation", () => {
     const child = { ...geo("tower"), parent_id: "region", pos: { x: 0, y: 0 } };
     expect(placeCandidates([parent, child], [], "root", null, { x_pct: .5, y_pct: .5 }).map(e => e.id)).toEqual(["tower"]);
   });
+  it("a detection box covering most of the image does not claim every tap", () => {
+    // Live: "River Leven" was drawn over a whole lake (92%x50% of the image),
+    // so every tap in the top half resolved to the river.
+    const lake = { ...geo("river", 90), entity_id: "river" };
+    const inn = { ...geo("inn"), entity_id: "inn" };
+    const entities = [
+      { id: "river", appearance_bboxes: { root: { x_pct: 0, y_pct: 0, w_pct: 0.92, h_pct: 0.5 } } },
+      { id: "inn", appearance_bboxes: { root: { x_pct: 0.45, y_pct: 0.4, w_pct: 0.1, h_pct: 0.2 } } },
+    ] as never;
+    expect(placeCandidates([lake, inn], entities, "root", null, { x_pct: 0.5, y_pct: 0.45 }).map(e => e.id)).toEqual(["inn"]);
+  });
   it("does not treat world coordinates as perspective-image detections", () => {
     expect(placeCandidates([{ ...geo("child"), parent_id: "tower" }], [], "inside", view("tower"), { x_pct: .5, y_pct: .5 })).toEqual([]);
   });
+});
+
+describe("cleanGrounding", () => {
+  it("keeps a well-formed summary and bounds its lists", () => {
+    const g = cleanGrounding({ score: 0.8, mean_iou: 0.5, matched: ["inn", 3, "x".repeat(200)], missing: [], extra: ["tree"], repaired: "yes", iterations: 99 });
+    expect(g).toEqual({ score: 0.8, mean_iou: 0.5, matched: ["inn", "x".repeat(120)], missing: [], extra: ["tree"], repaired: false, iterations: 10 });
+  });
+  it.each([null, "0.9", { score: 2, mean_iou: 0.5 }, { score: 0.5 }])("drops a malformed summary %#", g => expect(cleanGrounding(g)).toBeNull());
 });

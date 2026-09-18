@@ -7,6 +7,7 @@ import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
 import { getIdempotentResult, saveIdempotentResult } from "@/lib/idempotency";
 import { isSafeId } from "@/lib/ids";
+import { cleanGrounding } from "@/lib/place-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ interface CreateBody {
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
+  grounding?: unknown;
 }
 
 export async function POST(req: Request) {

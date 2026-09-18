@@ -1,5 +1,5 @@
 import { MongoClient, type ClientSession, type Collection, type Db, type Document } from "mongodb";
-import type { ScaleTier, SceneView, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
+import type { GroundingSummary, ScaleTier, SceneView, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -146,6 +146,9 @@ export interface NodeDoc extends Document {
   // The render receipt: the judges' scores on the kept attempt (judged
   // enter/zoom paths only). Optional + null for unjudged / legacy nodes.
   view_verdict?: ViewVerdict | null;
+  // Layout grounding (VLM_GROUNDING): the detector's score of the kept image
+  // against the expected layout. Stored for offline gates; not on the wire.
+  grounding?: GroundingSummary | null;
   // Fork lineage, stamped on a forked session's ROOT node(s): which session
   // (and which shared page) this world was forked from. Absent everywhere
   // else — additive, and it rides the export ZIP's graph.json provenance.
@@ -181,6 +184,7 @@ export interface NodeInsert {
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
+  grounding?: GroundingSummary | null;
 }
 
 export interface NodeRow {
@@ -230,6 +234,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     scale_tier,
     scene_view,
     view_verdict,
+    grounding: _grounding,
     forked_from,
     geo_extracted_at,
     descent_video_url,
@@ -275,6 +280,7 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     scale_tier: n.scale_tier ?? null,
     scene_view: n.scene_view ?? null,
     view_verdict: n.view_verdict ?? null,
+    ...(n.grounding ? { grounding: n.grounding } : {}),
     created_at: new Date(),
   };
   await collection.insertOne(doc);

@@ -1,4 +1,4 @@
-import type { EntityBBox, PlaceUpdate, SceneView, WorldEntityGeo, ViewVerdict } from "@openflipbook/config";
+import type { EntityBBox, GroundingSummary, PlaceUpdate, SceneView, WorldEntityGeo, ViewVerdict } from "@openflipbook/config";
 import { isSafeId } from "./ids";
 
 export function isVerifiedView(verdict: ViewVerdict | null | undefined, options: { outward?: boolean; interior?: boolean } = {}): boolean {
@@ -45,5 +45,23 @@ export function preservePlaceIdentity(previous: WorldEntityGeo, incoming: WorldE
     ...(previous.identity_anchor !== undefined ? { identity_anchor: previous.identity_anchor } : {}),
     ...(previous.identity_locked !== undefined ? { identity_locked: previous.identity_locked } : {}),
     ...(previous.identity_locked ? { label: previous.label, visual: previous.visual } : {}),
+  };
+}
+
+/** Keep only a well-formed grounding summary, with bounded label lists. */
+export function cleanGrounding(g: unknown): GroundingSummary | null {
+  if (!g || typeof g !== "object") return null;
+  const v = g as Record<string, unknown>;
+  const unit = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
+  const labels = (a: unknown) => (Array.isArray(a) ? a.filter((s): s is string => typeof s === "string").slice(0, 16).map(s => s.slice(0, 120)) : []);
+  if (!unit(v.score) || !unit(v.mean_iou)) return null;
+  return {
+    score: v.score as number,
+    mean_iou: v.mean_iou as number,
+    matched: labels(v.matched),
+    missing: labels(v.missing),
+    extra: labels(v.extra),
+    repaired: v.repaired === true,
+    iterations: typeof v.iterations === "number" && Number.isInteger(v.iterations) ? Math.max(0, Math.min(v.iterations, 10)) : 0,
   };
 }
