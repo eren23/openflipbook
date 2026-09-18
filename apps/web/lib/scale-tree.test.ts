@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WorldEntityGeo } from "@openflipbook/config";
 import { tierMetricMultiplier } from "@openflipbook/config";
 
-import { reparent, reparentRoots } from "./scale-tree";
+import { outwardFrame, parseSourceRect, reparent, reparentRoots } from "./scale-tree";
 import {
   type FrameNode,
   resolveAbsoluteFrame,
@@ -232,6 +232,27 @@ describe("scale-tree reparentRoots (the multi-root geo store)", () => {
     for (const id of ["d", "c1", "c2", "c3"]) {
       expect(afterAbs.get(id)!.x).toBeCloseTo(beforeAbs.get(id)!.x, 9);
       expect(afterAbs.get(id)!.y).toBeCloseTo(beforeAbs.get(id)!.y, 9);
+    }
+  });
+});
+
+describe("outwardFrame (zoom-out keeps the geometry)", () => {
+  it("scales the source frame up around where the source landed", () => {
+    // Live Lantern Quay: the town map (0,0,100,60) sits at 0.44 of the wider view.
+    const rect = parseSourceRect({ x_pct: 0.281, y_pct: 0.29, w_pct: 0.44, h_pct: 0.44, score: 0.74 })!;
+    const frame = outwardFrame({ x: 0, y: 0, w: 100, h: 60 }, rect);
+    // A town place maps to the same pixel it occupies in the wider image.
+    const kettle = { x: 37, y: 29.1 };
+    expect((kettle.x - frame.x) / frame.w).toBeCloseTo(0.281 + 0.37 * 0.44, 9);
+    expect((kettle.y - frame.y) / frame.h).toBeCloseTo(0.29 + 0.485 * 0.44, 9);
+    expect(frame.w).toBeCloseTo(227.27, 2);
+  });
+
+  it("keeps the source frame without a rect, and rejects malformed rects", () => {
+    const f = { x: 0, y: 0, w: 100, h: 60 };
+    expect(outwardFrame(f, null)).toEqual(f);
+    for (const bad of [null, {}, { x_pct: 0.5, y_pct: 0.5, w_pct: 0.6, h_pct: 0.2 }, { x_pct: 0, y_pct: 0, w_pct: 0.01, h_pct: 0.5 }, { x_pct: NaN, y_pct: 0, w_pct: 0.5, h_pct: 0.5 }]) {
+      expect(parseSourceRect(bad)).toBeNull();
     }
   });
 });

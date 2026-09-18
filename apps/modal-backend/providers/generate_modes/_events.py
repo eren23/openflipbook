@@ -71,4 +71,5 @@ class GenerateAscendReadyEvent(TypedDict, total=False):
     session_id: str
     render_unjudged: bool
     view_verdict: ViewVerdict
+    source_rect: dict[str, float]
     trace_id: str

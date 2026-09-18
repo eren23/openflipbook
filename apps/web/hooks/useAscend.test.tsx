@@ -127,6 +127,18 @@ describe("useAscend", () => {
     });
   });
 
+  it("forwards where the source landed and adopts the route's wider frame", async () => {
+    const rect = { x_pct: 0.28, y_pct: 0.29, w_pct: 0.44, h_pct: 0.44, score: 0.74 };
+    const wide = { x: -63.6, y: -39.5, w: 227.3, h: 136.4 };
+    const fn = stubFetch({ events: [{ ...READY, source_rect: rect }], saveJson: { parent_node_id: "parent-1", map_crop: wide } });
+    const onAscended = vi.fn();
+    const { result } = renderHook(() => useAscend(onAscended));
+    act(() => result.current.start("s1", root()));
+    await waitFor(() => expect(onAscended).toHaveBeenCalledTimes(1));
+    expect(bodyOf(fn.mock.calls[1]!).source_rect).toEqual(rect);
+    expect(onAscended.mock.calls[0]![0].sceneView.map_crop).toEqual(wide);
+  });
+
   it("omits style anchor + label suppression unless armed, sends them when set", async () => {
     const fn = stubFetch();
     const onAscended = vi.fn();

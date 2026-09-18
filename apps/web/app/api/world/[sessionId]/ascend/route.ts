@@ -6,7 +6,7 @@ import { deleteNode, getNode, insertNode, recordError, updateNodeParent } from "
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
 import { getWorldMap, removeEntityGeos, upsertEntityGeos } from "@/lib/world-map";
 import { requireOwner } from "@/lib/session-owner";
-import { reparentRoots } from "@/lib/scale-tree";
+import { outwardFrame, parseSourceRect, reparentRoots } from "@/lib/scale-tree";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
@@ -31,6 +31,8 @@ interface AscendBody {
   prompt_author_model?: string;
   aspect_ratio?: string;
   final_prompt?: string | null;
+  // Where the child's image sits inside P's image (backend-measured).
+  source_rect?: unknown;
 }
 
 // Atomically re-root the current root C under a synthesized coarser parent P.
@@ -116,11 +118,14 @@ export async function POST(req: Request, { params }: Params) {
   );
   const pId = crypto.randomUUID();
   const nowIso = new Date().toISOString();
+  // P's image shows C's frame shrunk to source_rect, so P's frame is C's
+  // frame scaled up around it (absolute world units; INV-1 keeps C's places put).
+  const pFrame = outwardFrame(child.scene_view?.map_crop ?? MAP_IMAGE_FRAME, parseSourceRect(body.source_rect));
   const sceneView: SceneView = {
     node_id: pId,
     level: "map",
     observer: null,
-    map_crop: MAP_IMAGE_FRAME,
+    map_crop: pFrame,
     focus_id: null,
     scale_tier: body.parent_tier,
   };
@@ -159,9 +164,9 @@ export async function POST(req: Request, { params }: Params) {
         parent_id: null,
         kind: "place",
         label: body.page_title,
-        pos: { x: MAP_IMAGE_FRAME.w / 2, y: MAP_IMAGE_FRAME.h / 2 },
+        pos: { x: pFrame.x + pFrame.w / 2, y: pFrame.y + pFrame.h / 2 },
         height: 4,
-        footprint: { w: MAP_IMAGE_FRAME.w, d: MAP_IMAGE_FRAME.h },
+        footprint: { w: pFrame.w, d: pFrame.h },
         scale_tier: body.parent_tier,
         visual: "",
         state: {},
@@ -216,5 +221,6 @@ export async function POST(req: Request, { params }: Params) {
     parent_node_id: pId,
     child_node_id: body.child_node_id,
     learned_scale: learnedScale,
+    map_crop: pFrame,
   });
 }

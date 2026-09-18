@@ -175,6 +175,36 @@ async def test_ascend_uploaded_root_uses_extracted_source_identity(
     assert "The Mended Drum" in instr
 
 
+async def test_ascend_reports_where_the_source_landed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+
+    from tests.test_outward_frame import _town
+
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    _mock_fresh(monkeypatch)
+    source, wide = _town(7), _town(8, (1376, 768))
+    wide.paste(source.resize((688, 384)), (344, 192))
+
+    def jpeg(img: Image.Image) -> bytes:
+        buf = BytesIO()
+        img.save(buf, "JPEG", quality=92)
+        return buf.getvalue()
+
+    edit = AsyncMock(return_value=GeneratedImage(jpeg(wide), "image/jpeg", "fal-ai/nano-banana-pro", "r"))
+    monkeypatch.setattr(image_edit_mod, "edit_image", edit)
+    source_url = "data:image/jpeg;base64," + base64.b64encode(jpeg(source)).decode()
+    events = await _collect(_event_stream(_ascend_body(image=source_url), "t1"))
+    rect = next(e for e in events if e["type"] == "ascend_ready")["source_rect"]
+    assert abs(rect["w_pct"] - 0.5) < 0.02 and abs(rect["x_pct"] - 0.25) < 0.02
+    # An undecodable source (the other tests' stub bytes) just omits the rect.
+    events = await _collect(_event_stream(_ascend_body(), "t2"))
+    assert "source_rect" not in next(e for e in events if e["type"] == "ascend_ready")
+
+
 async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -46,6 +46,7 @@ import {
   __test,
   applyEntityEdits,
   deriveGeoFromExtraction,
+  extractionSeedTarget,
   getWorldMap,
   ladderDisagreement,
   registerPlanToImage,
@@ -717,5 +718,28 @@ describe("deriveGeoFromExtraction (extraction → derived map geometry)", () => 
     const g7 = on.entities.find((e) => e.id === "geo_e7")!;
     expect(g7.border).toBeUndefined();
     expect(g7.height_m).toBeUndefined();
+  });
+});
+
+describe("extractionSeedTarget (where a page's detections seed geometry)", () => {
+  const view = (over: Partial<SceneView>): SceneView =>
+    ({ node_id: "n", level: "street", observer: null, map_crop: null, focus_id: "geo_kettle", ...over }) as SceneView;
+
+  it("seeds a map page into the city map", () => {
+    expect(extractionSeedTarget(null, "map")).toEqual({ frame: "map" });
+    expect(extractionSeedTarget(view({ level: "map", focus_id: null }), "map")).toEqual({ frame: "map" });
+  });
+
+  it("seeds an entered interior into the place's child frame", () => {
+    expect(extractionSeedTarget(view({ place_form: "interior" }), "map")).toEqual({ frame: "child", parentId: "geo_kettle" });
+  });
+
+  it("seeds nothing from an exterior street arrival, even when the camera estimate says map", () => {
+    expect(extractionSeedTarget(view({}), "map")).toBeNull();
+    expect(extractionSeedTarget(view({ level: "building" }), "street")).toBeNull();
+  });
+
+  it("seeds nothing when an unviewed page reads as a perspective scene", () => {
+    expect(extractionSeedTarget(null, "street")).toBeNull();
   });
 });

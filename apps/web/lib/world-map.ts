@@ -425,6 +425,24 @@ export interface ExtractedGeoItem {
   height_m?: number;
 }
 
+/** Where a page's detections seed world geometry: the top-level city map, an
+ *  entered interior's CHILD frame, or nowhere. Only map pages and interiors
+ *  read like plans. An exterior street arrival shows the building itself and
+ *  its neighbours in perspective; seeding those as the building's children
+ *  planted a second inn and Ropewalk Store inside The Copper Kettle (live,
+ *  2026-09-17), and seeding them as a city map would be just as wrong. */
+export function extractionSeedTarget(
+  sceneView: SceneView | null | undefined,
+  estimatedLevel: string,
+): { frame: "map" } | { frame: "child"; parentId: string } | null {
+  if (sceneView && sceneView.level !== "map") {
+    return sceneView.place_form === "interior" && sceneView.focus_id
+      ? { frame: "child", parentId: sceneView.focus_id }
+      : null;
+  }
+  return estimatedLevel === "map" ? { frame: "map" } : null;
+}
+
 /** Map an extraction pass (entities that have a bbox on this scene) into derived
  *  world geometry and upsert it — the world map populates for free. */
 export async function deriveGeoFromExtraction(
