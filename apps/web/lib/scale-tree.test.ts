@@ -248,11 +248,26 @@ describe("outwardFrame (zoom-out keeps the geometry)", () => {
     expect(frame.w).toBeCloseTo(227.27, 2);
   });
 
-  it("keeps the source frame without a rect, and rejects malformed rects", () => {
+  it("keeps the source frame without a rect", () => {
     const f = { x: 0, y: 0, w: 100, h: 60 };
     expect(outwardFrame(f, null)).toEqual(f);
-    for (const bad of [null, {}, { x_pct: 0.5, y_pct: 0.5, w_pct: 0.6, h_pct: 0.2 }, { x_pct: 0, y_pct: 0, w_pct: 0.01, h_pct: 0.5 }, { x_pct: NaN, y_pct: 0, w_pct: 0.5, h_pct: 0.5 }]) {
-      expect(parseSourceRect(bad)).toBeNull();
-    }
+  });
+
+  it("refuses a rect that would rewrite the world frame", () => {
+    // The rect is client JSON and SCALES the frame, so an implausible one has
+    // to bounce: it moves every place on the map.
+    const ok = { x_pct: 0.25, y_pct: 0.25, w_pct: 0.5, h_pct: 0.5, score: 0.8 };
+    expect(parseSourceRect(ok)).toEqual({ x_pct: 0.25, y_pct: 0.25, w_pct: 0.5, h_pct: 0.5 });
+    const bad: unknown[] = [
+      null,
+      {},
+      { ...ok, score: undefined }, // no measurement score
+      { ...ok, score: 0.4 }, // below the locator's own gate
+      { ...ok, w_pct: 0.05, h_pct: 0.05 }, // a 20x zoom-out
+      { ...ok, w_pct: 0.6, h_pct: 0.2 }, // lopsided: not a camera pulling back
+      { x_pct: 0.5, y_pct: 0.5, w_pct: 0.8, h_pct: 0.8, score: 0.8 }, // spills outside
+      { ...ok, x_pct: NaN },
+    ];
+    for (const value of bad) expect(parseSourceRect(value)).toBeNull();
   });
 });

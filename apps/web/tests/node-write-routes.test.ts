@@ -69,6 +69,40 @@ describe("node write session boundaries", () => {
     expect(res.status).toBe(400);
     expect(mocks.uploadJpeg).not.toHaveBeenCalled();
   });
+  it("sizes the container's frame and geo from the measured rect, conserving places", async () => {
+    // The town map (100x60) occupies 0.44 of the container image, offset left
+    // and up: the container therefore spans a wider world rect, and the town's
+    // places must keep their absolute positions inside it (INV-1).
+    const inn = { id: "geo_inn", entity_id: null, parent_id: null, kind: "place", label: "The Copper Kettle",
+      pos: { x: 37, y: 29.1 }, footprint: { w: 16.2, d: 13.3 }, height: 7.2, visual: "", state: {},
+      confidence: 1, source: "extracted", updated_at: "t0" };
+    mocks.getWorldMap.mockResolvedValue({ entities: [inn] });
+    const res = await ascend(request({ ...ascendBody, source_rect: { x_pct: 0.28, y_pct: 0.29, w_pct: 0.44, h_pct: 0.44, score: 0.74 } }), params);
+    expect(res.status).toBe(200);
+
+    const frame = (await res.json()).map_crop;
+    expect(frame.w).toBeCloseTo(100 / 0.44, 6);
+    expect(frame.x).toBeCloseTo(-0.28 * (100 / 0.44), 6);
+    expect(mocks.insertNode).toHaveBeenCalledWith(expect.objectContaining({
+      scene_view: expect.objectContaining({ map_crop: frame }),
+    }));
+
+    const geos = mocks.upsertEntityGeos.mock.calls[0]![1];
+    const parent = geos.find((g: { id: string; label: string }) => g.label === "Region");
+    expect(parent.pos).toEqual({ x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 });
+    expect(parent.footprint).toEqual({ w: frame.w, d: frame.h });
+    const child = geos.find((g: { id: string; pos: { x: number; y: number } }) => g.id === "geo_inn");
+    expect(parent.pos.x + child.pos.x * parent.scale).toBeCloseTo(37, 6);
+    expect(parent.pos.y + child.pos.y * parent.scale).toBeCloseTo(29.1, 6);
+  });
+
+  it("ignores a rect that could not have been measured", async () => {
+    mocks.getWorldMap.mockResolvedValue({ entities: [] });
+    const res = await ascend(request({ ...ascendBody, source_rect: { x_pct: 0, y_pct: 0, w_pct: 0.05, h_pct: 0.05, score: 0.99 } }), params);
+    expect(res.status).toBe(200);
+    expect((await res.json()).map_crop).toEqual({ x: 0, y: 0, w: 100, h: 60 });
+  });
+
   it("refuses to reparent a root from another session before any writes", async () => {
     mocks.getNode.mockResolvedValue({ ...child, session_id: "other" });
     const res = await ascend(request(ascendBody), params);

@@ -9,9 +9,12 @@ geometry, and what must each part do? Four probes use existing data only.
 
 ## F1: Zoom-out parity: PASS after a fix
 
-Unit test (`lib/layout-control.test.ts`): reparent the town under a wider
-parent, then compute the enter camera and the block render from absolute
-positions. The camera position and the visible buildings are identical.
+Reparenting the town under a wider parent conserves every absolute position
+(INV-1), so the same camera sees the same town. Committed with the frame fix:
+`lib/scale-tree.test.ts` (the frame maths and what it refuses),
+`tests/node-write-routes.test.ts` (the route sizes the frame and the parent
+geo, and the town's places keep their absolute positions). The layout render's
+own parity test ships with the layout-control change.
 
 The probe found a real bug. The ascend route gave the wider map the same
 100x60 frame as the town map. On the live "Riverward Quarter" image the town

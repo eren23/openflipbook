@@ -19,6 +19,13 @@ from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 WORK_WIDTH = 192
 # Live Lantern Quay: true zoom-out 0.74, an unrelated street view 0.42.
 MIN_SCORE = 0.6
+# A repeating map (fields, tiles) correlates almost as well in many places.
+# Take the peak only when it beats the best placement well away from it.
+MIN_MARGIN = 0.04
+FAR_PIXELS = 0.1  # "well away", as a fraction of the working width
+# Decode limits: the source image arrives from the client.
+MAX_BYTES = 24 * 1024 * 1024
+MAX_PIXELS = 40_000_000
 # Compare the source's central 60%: redraws drop cartouches and legends at its edges.
 CORE = 0.6
 # The ascend prompts keep the source at the centre.
@@ -39,11 +46,26 @@ def _ncc(a: Image.Image, t: Image.Image, t_mean: float, t_std: float) -> float:
     return (prod - a_mean * t_mean) / (a_std * t_std)
 
 
+def _open(data: bytes) -> Image.Image | None:
+    if len(data) > MAX_BYTES:
+        return None
+    try:
+        img = Image.open(BytesIO(data))
+        img.draft("L", (WORK_WIDTH * 4, WORK_WIDTH * 4))  # cheap JPEG downscale
+        if img.width * img.height > MAX_PIXELS or img.width < 8 or img.height < 8:
+            return None
+        return img
+    except Exception:
+        return None
+
+
 def locate_source(source: bytes, wide: bytes) -> dict[str, float] | None:
     """The normalized rect {x_pct, y_pct, w_pct, h_pct, score} of `source`
-    inside `wide`, or None when no placement scores MIN_SCORE."""
-    src = Image.open(BytesIO(source))
-    big_img = Image.open(BytesIO(wide))
+    inside `wide`, or None when no placement scores MIN_SCORE clearly."""
+    src = _open(source)
+    big_img = _open(wide)
+    if src is None or big_img is None:
+        return None
     W = WORK_WIDTH
     H = round(W * big_img.height / big_img.width)
     big = _grey(big_img, W, H)
@@ -60,9 +82,12 @@ def locate_source(source: bytes, wide: bytes) -> dict[str, float] | None:
         return templates[tw]
 
     best: tuple[float, int, int, int] = (-2.0, 0, 0, 0)  # (score, tw, x, y) of the source's top-left
+    # Best score per coarse position bucket, to judge how unique the peak is.
+    by_place: dict[tuple[int, int], float] = {}
 
     def search(widths: range, xs: range | None, ys: range | None, step: int) -> None:
         nonlocal best
+        bucket = max(2, round(W * FAR_PIXELS))
         for tw in widths:
             core, th, cx, cy, _, t_mean, t_std = template(tw)
             if core.width < 8 or core.height < 8 or tw > W or th > H:
@@ -72,20 +97,33 @@ def locate_source(source: bytes, wide: bytes) -> dict[str, float] | None:
             for y in ys if ys is not None else range(y_mid - dy, y_mid + dy + 1, step):
                 for x in xs if xs is not None else range(x_mid - dx, x_mid + dx + 1, step):
                     x0, y0 = x + cx, y + cy
-                    if x0 < 0 or y0 < 0 or x0 + core.width > W or y0 + core.height > H:
+                    # The WHOLE template must sit inside the frame, not just
+                    # its core, or the returned rect spills outside the image.
+                    if x < 0 or y < 0 or x + tw > W or y + th > H:
                         continue
                     score = _ncc(big.crop((x0, y0, x0 + core.width, y0 + core.height)), core, t_mean, t_std)
+                    key = (round((x + tw / 2) / bucket), round((y + th / 2) / bucket))
+                    if score > by_place.get(key, -2.0):
+                        by_place[key] = score
                     if score > best[0]:
                         best = (score, tw, x, y)
 
     # Coarse: every 4% of scale, every 2nd pixel; then refine around the peak.
-    search(range(round(W * 0.2), W + 1, round(W * 0.04)), None, None, 2)
+    # From 12% of the width, so a tall source in a wide container is reachable.
+    search(range(round(W * 0.12), W + 1, round(W * 0.04)), None, None, 2)
     if best[0] < 0:
         return None
     _, tw0, x0, y0 = best
     search(range(tw0 - 8, tw0 + 9), range(x0 - 3, x0 + 4), range(y0 - 3, y0 + 4), 1)
     score, tw, x, y = best
     if score < MIN_SCORE:
+        return None
+    # A repeating map matches nearly as well somewhere else entirely. Compare
+    # the peak with the best CENTRE at least one bucket away from it.
+    bucket = max(2, round(W * FAR_PIXELS))
+    peak = (round((x + tw / 2) / bucket), round((y + template(tw)[1] / 2) / bucket))
+    elsewhere = [v for k, v in by_place.items() if max(abs(k[0] - peak[0]), abs(k[1] - peak[1])) > 1]
+    if elsewhere and score - max(elsewhere) < MIN_MARGIN:
         return None
     th = template(tw)[1]
     return {"x_pct": x / W, "y_pct": y / H, "w_pct": tw / W, "h_pct": th / H, "score": round(score, 3)}
