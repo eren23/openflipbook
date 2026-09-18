@@ -43,7 +43,7 @@ function normAngle(a: number): number {
   return v;
 }
 
-function hPos(x: number): string {
+export function hPos(x: number): string {
   if (x < 0.2) return "far-left";
   if (x < 0.4) return "left";
   if (x < 0.6) return "center";
@@ -51,13 +51,13 @@ function hPos(x: number): string {
   return "far-right";
 }
 
-function vPos(y: number): string {
+export function vPos(y: number): string {
   if (y < 0.4) return "top";
   if (y < 0.66) return "mid";
   return "bottom";
 }
 
-function sizeBin(s: number): string {
+export function sizeBin(s: number): string {
   if (s < 0.08) return "tiny";
   if (s < 0.18) return "small";
   if (s < 0.35) return "medium";
