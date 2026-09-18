@@ -1,0 +1,76 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { WorldEntityGeo } from "@openflipbook/config";
+
+import { RouteDrawLayer } from "./RouteDrawLayer";
+
+const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
+  ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
+
+const FRAME = { x: 0, y: 0, w: 100, h: 60 };
+const TOWN = [geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2), geo("Bellfounder Hall", 68.6, 32.6, 19.8, 16.3, 7.5)];
+
+// jsdom gives every element a zero box; pin one so normalized points are real.
+function pinBox(el: Element, box = { left: 0, top: 0, width: 400, height: 240 }) {
+  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({ ...box, right: box.left + box.width, bottom: box.top + box.height, x: box.left, y: box.top, toJSON: () => ({}) } as DOMRect);
+}
+
+function drawLine(from: [number, number], to: [number, number], steps = 12) {
+  const canvas = screen.getByTestId("route-canvas");
+  pinBox(canvas);
+  fireEvent.pointerDown(canvas, { clientX: from[0], clientY: from[1] });
+  for (let i = 1; i <= steps; i++) {
+    fireEvent.pointerMove(canvas, { clientX: from[0] + ((to[0] - from[0]) * i) / steps, clientY: from[1] + ((to[1] - from[1]) * i) / steps });
+  }
+  fireEvent.pointerUp(canvas);
+}
+
+describe("RouteDrawLayer", () => {
+  it("keeps a whole stroke that arrives in one batch (live pointer bursts)", () => {
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    const canvas = screen.getByTestId("route-canvas");
+    pinBox(canvas);
+    const at = (x: number) => ({ clientX: x, clientY: 120, bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1 });
+    act(() => {
+      canvas.dispatchEvent(new MouseEvent("pointerdown", at(40)));
+      for (let x = 60; x <= 360; x += 20) canvas.dispatchEvent(new MouseEvent("pointermove", at(x)));
+      canvas.dispatchEvent(new MouseEvent("pointerup", at(360)));
+    });
+    expect(screen.getAllByRole("button", { name: /^Checkpoint/ }).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("turns a drawn line into checkpoints with a start and an end", () => {
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    expect(screen.getByTestId("route-summary").textContent).toMatch(/Drag across the map/);
+    drawLine([40, 120], [360, 120]);
+    const marks = screen.getAllByRole("button", { name: /^Checkpoint/ });
+    expect(marks.length).toBeGreaterThanOrEqual(2);
+    expect(marks[0]!.getAttribute("data-checkpoint")).toBe("start");
+    expect(marks[marks.length - 1]!.getAttribute("data-checkpoint")).toBe("end");
+    expect(screen.getByTestId("route-summary").textContent).toMatch(/\d+ units · \d+ keyframes/);
+  });
+
+  it("selects a checkpoint and clears the route", () => {
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    const marks = screen.getAllByRole("button", { name: /^Checkpoint/ });
+    fireEvent.click(marks[marks.length - 1]!);
+    expect(marks[marks.length - 1]!.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByText("Clear"));
+    expect(screen.queryAllByRole("button", { name: /^Checkpoint/ })).toHaveLength(0);
+  });
+
+  it("closes on Done", () => {
+    const onClose = vi.fn();
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={onClose} />);
+    fireEvent.click(screen.getByText("Done"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when a camera had to step out of a building", () => {
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    // Straight through the inn at (37, 29.1) on a 100x60 frame.
+    drawLine([80, 116], [240, 116]);
+    expect(screen.getByTestId("route-summary").textContent).toMatch(/\d+ cameras stepped aside/);
+  });
+});

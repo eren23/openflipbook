@@ -98,3 +98,22 @@ The Phase 4 bake-off must score both "arrives on the keyframe" and "no hold".
 - NO-GO: generated `/play` arrivals as keyframes, and warps past 35°.
 - Checkpoint rule to start: 30° of yaw or the segment time limit, whichever
   comes first.
+
+## Phase 3: drawing the route (shipped, off by default)
+
+The stroke is the input. `lib/route-line.ts` turns a drag over the map image
+into world points, resamples them at a fixed step, and places a camera at each
+step facing along the walk, or at a tapped place when one is given. A new
+checkpoint starts wherever the heading has turned 30 degrees, which is the
+rule Phase 2 set.
+
+A drawn line runs through buildings, so each camera is allowed to step sideways
+off it. The offsets are chosen together, not one at a time: a walk over the
+lateral offsets scores clearance first, then bending, then distance from the
+line, with the bend penalty squared so the path ramps aside over several steps
+instead of dog-legging. A camera with nowhere to stand keeps the least-buried
+spot and is reported as blocked rather than silently moved.
+
+Nothing is generated. `RouteDrawLayer` previews the route over the same block
+render the map already draws, and reports the checkpoints it would need.
+Enabled with `NEXT_PUBLIC_WORLD_ROUTE_DRAW=1`, which is a build-time flag.

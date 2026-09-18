@@ -158,6 +158,7 @@ services:
         # DESCENT_AUTO: background arrival clips (~$0.24/edge). Default off.
         NEXT_PUBLIC_DESCENT_AUTO: ${NEXT_PUBLIC_DESCENT_AUTO:-}
         NEXT_PUBLIC_SPATIAL_TRANSITIONS: ${NEXT_PUBLIC_SPATIAL_TRANSITIONS:-}
+        NEXT_PUBLIC_WORLD_ROUTE_DRAW: ${NEXT_PUBLIC_WORLD_ROUTE_DRAW:-}
     container_name: openflipbook-web
     restart: unless-stopped
     # Same posture as the backend: the root .env (single-file demo) carries

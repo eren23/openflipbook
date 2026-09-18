@@ -100,6 +100,7 @@ import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
+import { RouteDrawLayer } from "@/components/PlayPage/RouteDrawLayer";
 import { MapLabelOverlay } from "@/components/PlayPage/MapLabelOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { rasterToPngBlob } from "@/lib/image-export";
@@ -169,6 +170,9 @@ import {
 type Phase = "idle" | "generating" | "ready" | "error";
 type ClientGenerateBody = GenerateRequestBody & { transitionSeed?: TransitionSeed | undefined };
 const STRICT_WORLD_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_IDENTITY_STRICT ?? "").toLowerCase());
+// Draw a camera route on the map. Free: the preview is the same block render
+// the map already knows how to draw; nothing is generated until asked.
+const WORLD_ROUTE_DRAW_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_ROUTE_DRAW ?? "").toLowerCase());
 
 // Select-area mask edits (E1). Build-time gate so the UI never offers a drag
 // whose mask a flag-off backend would silently ignore (a whole-image edit
@@ -626,6 +630,7 @@ export default function PlayPage() {
   const [placeChoice, setPlaceChoice] = useState<{ places: WorldEntityGeo[]; click: NormalizedClick } | null>(null);
   const closeInspector = useCallback(() => { setInspectorOpen(false); setInspectMode(false); }, []);
   const [geoOverlayOn, setGeoOverlayOn] = useState(false);
+  const [routeDrawOn, setRouteDrawOn] = useState(false);
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
   // would conflict with keyboard tab-order; we expose a small toggle
@@ -4099,6 +4104,17 @@ export default function PlayPage() {
                     prominent={ENTER_COACH_ENABLED}
                   />
                 )}
+              {WORLD_ROUTE_DRAW_ENABLED && routeDrawOn && worldEnabled && page?.imageDataUrl && (!page.sceneView || page.sceneView.level === "map") && (
+                <RouteDrawLayer
+                  entities={geoMap.entities}
+                  frame={page.sceneView?.map_crop ?? MAP_IMAGE_FRAME}
+                  // After a zoom-out the places sit under this page's own
+                  // container geo; on a seeded map they are top level.
+                  frameParentId={geoMap.entities.some(e => e.id === `geo_${page.nodeId}`) ? `geo_${page.nodeId}` : null}
+                  imgRef={imgRef}
+                  onClose={() => setRouteDrawOn(false)}
+                />
+              )}
               {worldEnabled &&
                 worldDomLabels &&
                 // The ⊞ geo debug layer already names every localized entity
@@ -4282,6 +4298,18 @@ export default function PlayPage() {
                 <BloomGlyph className="h-3.5 w-3.5" />
                 Around
               </button>
+              {WORLD_ROUTE_DRAW_ENABLED && worldEnabled && (!page?.sceneView || page.sceneView.level === "map") && (
+                <button
+                  type="button"
+                  onClick={() => setRouteDrawOn((v) => !v)}
+                  aria-pressed={routeDrawOn}
+                  disabled={!page?.imageDataUrl || phase === "generating"}
+                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-edge)] px-3 py-1 text-xs disabled:opacity-50"
+                  title="Draw a camera route on the map: checkpoints mark where a new image is needed"
+                >
+                  ✎ Route
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setGeoOverlayOn((v) => !v)}
