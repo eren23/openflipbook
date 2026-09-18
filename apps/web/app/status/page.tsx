@@ -17,7 +17,7 @@ interface BackendStatus {
   uptime_s?: number;
   in_flight?: number;
   last_error_ts?: number | null;
-  providers?: { fal?: boolean; openrouter?: boolean };
+  providers?: { fal?: boolean; openrouter?: boolean; requesty?: boolean };
   error?: string;
 }
 
@@ -163,6 +163,20 @@ export default async function StatusPage() {
               {backend.providers?.openrouter ? "ok" : "down"}
             </span>
           </li>
+          {backend.providers?.requesty !== undefined && (
+            <li>
+              requesty:{" "}
+              <span
+                className={
+                  backend.providers?.requesty
+                    ? "text-green-700"
+                    : "text-amber-700"
+                }
+              >
+                {backend.providers?.requesty ? "ok" : "down"}
+              </span>
+            </li>
+          )}
           <li>uptime: {backend.uptime_s ?? "—"}s</li>
           <li>in-flight: {backend.in_flight ?? 0}</li>
           <li className="col-span-2 opacity-70">
