@@ -24,17 +24,22 @@ export function solidBlocks<T extends LayoutBlock>(entities: readonly T[], frame
       (e.parent_id ?? null) === frameParentId &&
       e.kind === "place" &&
       e.height > 0.5 &&
-      !GROUND_LABEL.test(e.label ?? ""),
+      !GROUND_LABEL.test(e.label ?? "") &&
+      // One place with a non-finite number poisons every distance taken against
+      // it, and a NaN cost loses every comparison silently: the caller ends up
+      // with a whole route of NaN, not one bad block. Drop it here, once, for
+      // every consumer of this geometry.
+      castable(e),
   );
 }
 
 /** A heading that is not a number would make every slab test pass. */
 const headingOf = (b: LayoutBlock) => (Number.isFinite(b.heading) ? b.heading! : 0);
 
-/** Geometry we can actually cast a ray against. */
+/** Geometry we can actually measure or cast a ray against. */
 function castable(b: LayoutBlock): boolean {
-  return Number.isFinite(b.pos.x) && Number.isFinite(b.pos.y)
-    && Number.isFinite(b.footprint.w) && Number.isFinite(b.footprint.d)
+  return Number.isFinite(b.pos?.x) && Number.isFinite(b.pos?.y)
+    && Number.isFinite(b.footprint?.w) && Number.isFinite(b.footprint?.d)
     && b.footprint.w > 0 && b.footprint.d > 0
     && Number.isFinite(b.height) && Number.isFinite(b.elevation ?? 0);
 }
@@ -101,7 +106,6 @@ export function renderLayoutControl(
   // block whose VOLUME contains the camera cannot be drawn from inside, so it
   // is dropped too. Everything else keeps blocking, however low it is.
   const blocks = solidBlocks(entities, frameParentId)
-    .filter(castable)
     .filter((b) => !(pointInBlock(b, observer.pos) && observer.eye_height < (b.elevation ?? 0) + b.height));
   const g = observer.gaze;
   const p = observer.pitch ?? 0;

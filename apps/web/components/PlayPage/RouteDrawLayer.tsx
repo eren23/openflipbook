@@ -24,6 +24,8 @@ interface Props {
 
 const PREVIEW_W = 320;
 const PREVIEW_H = 180;
+// Fraction of the image a pointer must travel before the stroke gains a point.
+const MIN_STEP = 0.004;
 
 /**
  * Draw a route on the map (Phase 3). The stroke becomes world positions, the
@@ -39,6 +41,14 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   const drawingRef = useRef(false);
   const [selected, setSelected] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Walking to another page keeps this layer mounted. A stroke is drawn in the
+  // image's own coordinates, so carrying it over would redraw it, silently, on
+  // a map it was never drawn on.
+  useEffect(() => {
+    setStroke([]);
+    setSelected(0);
+  }, [frame.x, frame.y, frame.w, frame.h, frameParentId]);
 
   const absolute = useMemo(() => toAbsoluteEntities(entities, entities), [entities]);
   const route: Route | null = useMemo(() => {
@@ -73,7 +83,16 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
         className="absolute inset-0 cursor-crosshair"
         data-testid="route-canvas"
         onPointerDown={(e) => { e.preventDefault(); drawingRef.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); setSelected(0); setStroke([point(e)]); }}
-        onPointerMove={(e) => { if (!drawingRef.current) return; const next = point(e); setStroke((prev) => [...prev, next]); }}
+        // A pointer reports far finer than the route needs, and every point
+        // recomputes the whole walk: keep only moves that go somewhere.
+        onPointerMove={(e) => {
+          if (!drawingRef.current) return;
+          const next = point(e);
+          setStroke((prev) => {
+            const last = prev[prev.length - 1];
+            return last && Math.hypot(next.x - last.x, next.y - last.y) < MIN_STEP ? prev : [...prev, next];
+          });
+        }}
         onPointerUp={() => { drawingRef.current = false; }}
         onPointerLeave={() => { drawingRef.current = false; }}
       />

@@ -85,6 +85,9 @@ const WEIGHT_INSIDE = 20; // per unit actually inside a building
 // Squared, so the walk ramps sideways over several steps instead of dog-legging.
 const WEIGHT_BEND = 0.25;
 const WEIGHT_AWAY = 0.1;
+// The route is recomputed while the pointer moves, so the work per stroke has
+// to be bounded: samples x offsets squared, with 57 offsets.
+const MAX_SAMPLES = 240;
 
 const standoff = (b: LayoutBlock) => Math.min(STANDOFF_MAX, Math.max(STANDOFF_MIN, b.height * STANDOFF_FRACTION));
 
@@ -180,10 +183,12 @@ export function routeFromStroke(
   const eye = options.eyeHeight ?? EYE_HEIGHT;
   const fov = options.fov ?? DEFAULT_FOV;
   const walls = solidBlocks(entities, options.frameParentId ?? null);
-  // Sample fine enough to see corners, whatever the distance limit is.
+  // Sample fine enough to see corners, whatever the distance limit is — but
+  // the sideways walk costs samples x offsets squared, and a stroke across a
+  // zoomed-out map is arbitrarily long in world units, so cap the count.
   let raw = 0;
   for (let i = 1; i < world.length; i++) raw += dist(world[i - 1]!, world[i]!);
-  const sampleStep = Math.max(0.25, Math.min(maxStep / 12, raw / 48));
+  const sampleStep = Math.max(0.25, raw / MAX_SAMPLES, Math.min(maxStep / 12, raw / 48));
   const points = resample(world, sampleStep);
   if (points.length < 2) return { path: points.map((p) => p), checkpoints: [], length: 0 };
 

@@ -153,6 +153,26 @@ describe("routeFromStroke", () => {
     expect(route.checkpoints.every((c) => !c.moved)).toBe(true);
   });
 
+  it("keeps the whole route finite when one place carries a broken number", () => {
+    // A VLM has put NaN in a coordinate before. Every distance taken against
+    // that block is NaN, and a NaN cost loses every comparison in the walk, so
+    // without a guard the ENTIRE route comes back NaN, not just this corner.
+    const broken = geo("Nowhere", NaN, 29.1, 16.2, 13.3, 7.2);
+    const route = routeFromStroke(line([10, 29.1], [60, 29.1]), [broken], { maxStepUnits: 15 });
+    expect(route.path.length).toBeGreaterThan(1);
+    expect(route.path.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+    expect(route.checkpoints.every((c) => Number.isFinite(c.observer.gaze))).toBe(true);
+    expect(Number.isFinite(route.length)).toBe(true);
+  });
+
+  it("caps the work a long stroke can ask for", () => {
+    // The sideways walk costs samples x offsets squared, and it reruns on every
+    // pointer move: a stroke across a zoomed-out map must not grow unbounded.
+    const long = routeFromStroke(line([0, 0], [4000, 0]), [], { maxStepUnits: 18 });
+    expect(long.path.length).toBeLessThanOrEqual(241);
+    expect(long.length).toBeCloseTo(4000, 0);
+  });
+
   it("a single tap is not a route", () => {
     expect(routeFromStroke([{ x: 5, y: 5 }]).checkpoints).toEqual([]);
   });

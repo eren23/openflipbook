@@ -60,6 +60,18 @@ describe("RouteDrawLayer", () => {
     expect(screen.queryAllByRole("button", { name: /^Checkpoint/ })).toHaveLength(0);
   });
 
+  it("drops the stroke when the page moves to another map", () => {
+    // The layer stays mounted across a walk to the next page. A stroke is in
+    // the image's own coordinates, so carrying it over would silently redraw
+    // the old route on a map it was never drawn on.
+    const { rerender } = render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.getAllByRole("button", { name: /^Checkpoint/ }).length).toBeGreaterThanOrEqual(2);
+    rerender(<RouteDrawLayer entities={TOWN} frame={{ x: -65, y: -39.6, w: 231.3, h: 136.6 }} onClose={() => {}} />);
+    expect(screen.queryAllByRole("button", { name: /^Checkpoint/ })).toHaveLength(0);
+    expect(screen.getByTestId("route-summary").textContent).toMatch(/Drag across the map/);
+  });
+
   it("closes on Done", () => {
     const onClose = vi.fn();
     render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={onClose} />);

@@ -4106,6 +4106,8 @@ export default function PlayPage() {
                 )}
               {WORLD_ROUTE_DRAW_ENABLED && routeDrawOn && worldEnabled && page?.imageDataUrl && (!page.sceneView || page.sceneView.level === "map") && (
                 <RouteDrawLayer
+                  // A stroke belongs to the image it was drawn on.
+                  key={page.nodeId ?? "unsaved"}
                   entities={geoMap.entities}
                   frame={page.sceneView?.map_crop ?? MAP_IMAGE_FRAME}
                   // After a zoom-out the places sit under this page's own
