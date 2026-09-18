@@ -28,8 +28,19 @@ export function solidBlocks<T extends LayoutBlock>(entities: readonly T[], frame
   );
 }
 
+/** A heading that is not a number would make every slab test pass. */
+const headingOf = (b: LayoutBlock) => (Number.isFinite(b.heading) ? b.heading! : 0);
+
+/** Geometry we can actually cast a ray against. */
+function castable(b: LayoutBlock): boolean {
+  return Number.isFinite(b.pos.x) && Number.isFinite(b.pos.y)
+    && Number.isFinite(b.footprint.w) && Number.isFinite(b.footprint.d)
+    && b.footprint.w > 0 && b.footprint.d > 0
+    && Number.isFinite(b.height) && Number.isFinite(b.elevation ?? 0);
+}
+
 export function pointInBlock(b: LayoutBlock, p: WorldVec2, margin = 0): boolean {
-  const h = b.heading ?? 0;
+  const h = headingOf(b);
   const dx = p.x - b.pos.x;
   const dy = p.y - b.pos.y;
   const lx = dx * Math.cos(h) + dy * Math.sin(h);
@@ -40,7 +51,7 @@ export function pointInBlock(b: LayoutBlock, p: WorldVec2, margin = 0): boolean 
 /** Signed distance from `p` to the block's footprint edge in world units:
  *  positive outside, negative (or 0) inside. Used to keep a camera off walls. */
 export function blockDistance(b: LayoutBlock, p: WorldVec2): number {
-  const h = b.heading ?? 0;
+  const h = headingOf(b);
   const dx = p.x - b.pos.x;
   const dy = p.y - b.pos.y;
   const lx = Math.abs(dx * Math.cos(h) + dy * Math.sin(h)) - b.footprint.w / 2;
@@ -85,8 +96,13 @@ export function renderLayoutControl(
   height: number,
   frameParentId: string | null = null,
 ): LayoutControl {
-  // A footprint the camera stands on (a plaza well's square) is ground here.
-  const blocks = solidBlocks(entities, frameParentId).filter((b) => !pointInBlock(b, observer.pos));
+  if (width < 1 || height < 1 || width * height > 4_000_000) throw new Error("Layout render size is out of range");
+  // A footprint the camera stands ON (a plaza, a well's square) is ground; a
+  // block whose VOLUME contains the camera cannot be drawn from inside, so it
+  // is dropped too. Everything else keeps blocking, however low it is.
+  const blocks = solidBlocks(entities, frameParentId)
+    .filter(castable)
+    .filter((b) => !(pointInBlock(b, observer.pos) && observer.eye_height < (b.elevation ?? 0) + b.height));
   const g = observer.gaze;
   const p = observer.pitch ?? 0;
   const ox = observer.pos.x;
@@ -98,7 +114,7 @@ export function renderLayoutControl(
   const r = [-Math.sin(g), Math.cos(g), 0];
   const u = [-Math.cos(g) * Math.sin(p), -Math.sin(g) * Math.sin(p), Math.cos(p)];
   const local = blocks.map((b) => {
-    const h = b.heading ?? 0;
+    const h = headingOf(b);
     const c = Math.cos(h);
     const s = Math.sin(h);
     const dx = ox - b.pos.x;
@@ -123,17 +139,17 @@ export function renderLayoutControl(
         const b = local[k]!;
         const ldx = dx * b.c + dy * b.s;
         const ldy = -dx * b.s + dy * b.c;
-        // Slab test on x, y, z; `face` = axis of the entry plane (0 x, 1 y, 2 z).
+        // Slab test on x, y, z, unrolled: an array here allocates per pixel
+        // per block. `face` = axis of the entry plane (0 x, 1 y, 2 z).
         let tMin = 0.05;
         let tMax = best;
         let face = 0;
-        const ax = [b.lx, ldx, -b.hw, b.hw, b.ly, ldy, -b.hd, b.hd, oz, dz, b.z0, b.z1];
         let miss = false;
         for (let a = 0; a < 3 && !miss; a++) {
-          const o = ax[a * 4]!;
-          const d = ax[a * 4 + 1]!;
-          const lo = ax[a * 4 + 2]!;
-          const hi = ax[a * 4 + 3]!;
+          const o = a === 0 ? b.lx : a === 1 ? b.ly : oz;
+          const d = a === 0 ? ldx : a === 1 ? ldy : dz;
+          const lo = a === 0 ? -b.hw : a === 1 ? -b.hd : b.z0;
+          const hi = a === 0 ? b.hw : a === 1 ? b.hd : b.z1;
           if (Math.abs(d) < 1e-12) {
             miss = o < lo || o > hi;
             continue;

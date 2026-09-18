@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { MapCrop, ObserverPose, SceneView, WorldEntityGeo } from "@openflipbook/config";
 
 import { entityCloseupCrop, routeClick, routeToFocus } from "./click-route";
+import { blockDistance, pointInBlock } from "./layout-control";
 
 function geo(
   id: string,
@@ -288,5 +289,40 @@ describe("entityCloseupCrop", () => {
   it("preserves the frame aspect (w/h ratio)", () => {
     const c = entityCloseupCrop(geo("uni", 40, 30, { footprint: { w: 20, d: 6 } }), frame);
     expect(c.w / c.h).toBeCloseTo(100 / 60, 5);
+  });
+});
+
+describe("enter camera clearance (W2)", () => {
+  const block = (id: string, x: number, y: number, w: number, d: number, height: number) =>
+    ({ id, entity_id: null, kind: "place", label: id, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "t" }) as unknown as WorldEntityGeo;
+
+  it("frames the place identically when no obstacles are known", () => {
+    const inn = block("inn", 37, 29.1, 16.2, 13.3, 7.2);
+    expect(routeToFocus(inn, { x: 60, y: 29.1 }, []).observer).toEqual(routeToFocus(inn, { x: 60, y: 29.1 }).observer);
+  });
+
+  it("never stands inside a building shorter than the place it frames", () => {
+    const tower = block("tower", 0, 0, 10, 10, 20);
+    const shed = block("shed", 17, 0, 14, 14, 6);
+    const { observer } = routeToFocus(tower, { x: 40, y: 0 }, [tower, shed]);
+    expect(pointInBlock(shed, observer.pos, 1)).toBe(false);
+  });
+
+  it("does not look through a thin wall that sampling used to miss", () => {
+    const inn = block("inn", 0, 0, 10, 10, 8);
+    const wall = block("wall", 13, 0, 0.6, 40, 8);
+    const { observer } = routeToFocus(inn, { x: 40, y: 0 }, [inn, wall]);
+    const crossed = [0.05, 0.2, 0.4, 0.6, 0.8, 0.95].some((t) =>
+      pointInBlock(wall, { x: observer.pos.x * (1 - t), y: observer.pos.y * (1 - t) }));
+    expect(crossed).toBe(false);
+  });
+
+  it("takes the most open spot when every bearing is blocked", () => {
+    const inn = block("inn", 0, 0, 10, 10, 8);
+    const ring = [0, 60, 120, 180, 240, 300].map((deg, i) =>
+      block(`b${i}`, Math.cos((deg * Math.PI) / 180) * 16, Math.sin((deg * Math.PI) / 180) * 16, 15, 15, 9));
+    const { observer } = routeToFocus(inn, { x: 40, y: 0 }, [inn, ...ring]);
+    const deepest = Math.max(...ring.map((b) => -blockDistance(b, observer.pos)));
+    expect(deepest).toBeLessThan(3.5); // wedged in, but not buried in a wall
   });
 });

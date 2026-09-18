@@ -111,21 +111,37 @@ describe("renderLayoutControl", () => {
   });
 });
 
-describe("depth buffer", () => {
-  it("measures the distance to the block it hit, and the ground elsewhere", () => {
-    const wall = geo("Wall", 20, 0, 4, 40, 10);
+describe("geometry that cannot be cast", () => {
+  it("treats a non-finite heading as unrotated instead of filling the frame", () => {
+    const broken = geo("Broken", 10, 0, 6, 6, 8, { heading: Number.NaN });
     const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
-    const { depth, width, height } = renderLayoutControl([wall], observer, 64, 36);
-    const centre = depth[Math.floor(height / 2) * width + Math.floor(width / 2)]!;
-    // The wall's near face is 18 units ahead (20 - 4/2).
-    expect(centre).toBeGreaterThan(17.5);
-    expect(centre).toBeLessThan(18.6);
-    // Straight down at the bottom of the frame is close ground, never Infinity.
-    const low = depth[(height - 1) * width + Math.floor(width / 2)]!;
-    expect(Number.isFinite(low)).toBe(true);
-    expect(low).toBeLessThan(centre);
-    // Sky above the wall is unbounded.
-    expect(depth[Math.floor(width / 2)]).toBe(Infinity);
+    // NaN slab comparisons are all false, so this block used to be "hit" at
+    // the near plane across the whole image.
+    const [box] = renderLayoutControl([broken], observer, 64, 36).visible;
+    expect(box!.label).toBe("Broken");
+    expect(box!.w_pct).toBeLessThan(0.7);
+    expect(box!.h_pct).toBeLessThan(0.9);
+    // Same picture as an explicit heading of 0.
+    const plain = renderLayoutControl([geo("Broken", 10, 0, 6, 6, 8)], observer, 64, 36).visible[0]!;
+    expect(box!.w_pct).toBeCloseTo(plain.w_pct, 9);
+  });
+
+  it("drops zero-sized and non-finite footprints", () => {
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(renderLayoutControl([geo("Flat", 20, 0, 0, 10, 8), geo("Nowhere", Number.NaN, 0, 10, 10, 8)], observer, 32, 18).visible).toEqual([]);
+  });
+
+  it("refuses an absurd render size rather than hanging", () => {
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(() => renderLayoutControl([KETTLE], observer, 4000, 4000)).toThrow(/out of range/);
+  });
+
+  it("keeps a block the camera stands on, and drops one it stands inside", () => {
+    const plaza = geo("Market Square", 0, 0, 30, 30, 0.6);
+    const inn = geo("Inn", 18, 0, 8, 8, 9);
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(renderLayoutControl([plaza, inn], observer, 64, 36).visible.map((v) => v.label)).toContain("Inn");
+    expect(renderLayoutControl([plaza, inn], { ...observer, pos: { x: 18, y: 0 } }, 64, 36).visible.map((v) => v.label)).not.toContain("Inn");
   });
 });
 
