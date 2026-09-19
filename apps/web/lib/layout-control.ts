@@ -1,5 +1,6 @@
 import type { ObserverPose, ProjectedEntity, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
+import { carveLanes } from "./lane-carve";
 import { hPos, sizeBin, vPos } from "./world-geometry";
 
 // A camera-view block render of the world map: every solid place extruded to
@@ -100,12 +101,17 @@ export function renderLayoutControl(
   width: number,
   height: number,
   frameParentId: string | null = null,
+  // Daylight to open between overlapping footprints before drawing. Off for
+  // the enter path, which must keep the sizes the map states; a walk through
+  // the town needs it, or there is nothing to walk between.
+  laneGap: number = 0,
 ): LayoutControl {
   if (width < 1 || height < 1 || width * height > 4_000_000) throw new Error("Layout render size is out of range");
   // A footprint the camera stands ON (a plaza, a well's square) is ground; a
   // block whose VOLUME contains the camera cannot be drawn from inside, so it
   // is dropped too. Everything else keeps blocking, however low it is.
-  const blocks = solidBlocks(entities, frameParentId)
+  const selected = solidBlocks(entities, frameParentId);
+  const blocks = (laneGap > 0 ? carveLanes(selected, laneGap) : selected)
     .filter((b) => !(pointInBlock(b, observer.pos) && observer.eye_height < (b.elevation ?? 0) + b.height));
   const g = observer.gaze;
   const p = observer.pitch ?? 0;

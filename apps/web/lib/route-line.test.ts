@@ -116,13 +116,29 @@ describe("routeFromStroke", () => {
     }
   });
 
-  it("says when the line crosses a place with no standable gap", () => {
-    // Two rows whose boxes nearly touch: the extracted Mapmaker House and
-    // Bellfounder Hall do exactly this on the live map.
+  it("says when the line is drawn straight through a building", () => {
+    // Nothing to carve against here: one hall, no neighbour, and the stroke
+    // goes through the middle of it. Every camera would stand inside a wall,
+    // and the route says so rather than pretending otherwise.
+    const hall = geo("Great Hall", 40, 30, 44, 40, 9);
+    const route = routeFromStroke(line([20, 30], [60, 30]), [hall], { maxStepUnits: 10 });
+    expect(route.checkpoints.some((c) => c.blocked)).toBe(true);
+  });
+
+  it("walks between two rows that were extracted overlapping", () => {
+    // The live map has pairs like this: boxes drawn into each other, with no
+    // gap at all. Narrowing them about their centres opens the lane, and the
+    // walk goes down it instead of reporting the whole town impassable.
     const north = geo("north", 40, 20, 30, 20, 7);
     const south = geo("south", 40, 40.4, 30, 20, 7);
     const route = routeFromStroke(line([20, 30], [60, 30]), [north, south], { maxStepUnits: 10 });
-    expect(route.checkpoints.some((c) => c.blocked)).toBe(true);
+    expect(route.checkpoints.every((c) => !c.blocked)).toBe(true);
+    // ...and down the middle of it, not hugging either row.
+    for (const c of route.checkpoints) expect(Math.abs(c.observer.pos.y - 30.2)).toBeLessThan(2.5);
+
+    // With carving switched off, the same line has nowhere to stand.
+    const raw = routeFromStroke(line([20, 30], [60, 30]), [north, south], { maxStepUnits: 10, laneGap: 0 });
+    expect(raw.checkpoints.some((c) => c.blocked)).toBe(true);
   });
 
   it("an open lane keeps the drawn walk and few keyframes", () => {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import type { MapCrop, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
+import { LANE_GAP } from "@/lib/lane-carve";
 import { renderLayoutControl } from "@/lib/layout-control";
 import { routeFromStroke, strokeToWorld, type Route } from "@/lib/route-line";
 import { toAbsoluteEntities } from "@/lib/world-geometry";
@@ -68,7 +69,9 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !checkpoint) return;
-    const control = renderLayoutControl(absolute, checkpoint.observer, PREVIEW_W, PREVIEW_H, frameParentId);
+    // Carve as the route does, or the preview would show the camera standing
+    // in a wall it was never routed through.
+    const control = renderLayoutControl(absolute, checkpoint.observer, PREVIEW_W, PREVIEW_H, frameParentId, LANE_GAP);
     canvas.getContext("2d")?.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), PREVIEW_W, PREVIEW_H), 0, 0);
   }, [checkpoint, absolute, frameParentId]);
 

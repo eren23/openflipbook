@@ -1,5 +1,6 @@
 import type { MapCrop, ObserverPose, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
+import { LANE_GAP, carveLanes } from "./lane-carve";
 import { blockDistance, solidBlocks, type LayoutBlock } from "./layout-control";
 
 // A route the user DRAWS on the map: the stroke becomes world positions, the
@@ -18,6 +19,9 @@ export interface RouteOptions {
   lookAt?: WorldVec2 | null;
   /** The frame the drawn places live in (null = the root map). */
   frameParentId?: string | null;
+  /** Daylight to open between overlapping footprints before routing, in world
+   *  units; 0 walks the town exactly as it was extracted. */
+  laneGap?: number;
   eyeHeight?: number;
   fov?: number;
 }
@@ -182,7 +186,10 @@ export function routeFromStroke(
   const maxStep = options.maxStepUnits ?? 18;
   const eye = options.eyeHeight ?? EYE_HEIGHT;
   const fov = options.fov ?? DEFAULT_FOV;
-  const walls = solidBlocks(entities, options.frameParentId ?? null);
+  // Extracted footprints overlap: on the live map every point inside the town
+  // is inside a building, so a route could only ever hug the outside. Narrow
+  // them about their centres first, and the town has lanes to walk.
+  const walls = carveLanes(solidBlocks(entities, options.frameParentId ?? null), options.laneGap ?? LANE_GAP);
   // Sample fine enough to see corners, whatever the distance limit is — but
   // the sideways walk costs samples x offsets squared, and a stroke across a
   // zoomed-out map is arbitrarily long in world units, so cap the count.
