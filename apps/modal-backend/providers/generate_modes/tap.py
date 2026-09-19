@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from _env import env_flag
 from obs import log
+from providers import decisions, llm, model_router, spend
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
-from providers import llm, model_router, spend
+from providers.decisions.sites import click_incumbent, click_state
 from providers.generate_modes._events import GenerateFinalEvent, ViewVerdict
 from providers.generate_modes._frames import progress_frame
 
@@ -275,6 +276,15 @@ async def stream_tap(
                 # Clarifiers are surfaced client-side before this generate
                 # call, so the in-band resolve only needs the classification.
                 autonomy="auto",
+            )
+            await decisions.decide(
+                "click.classify",
+                state=click_state(
+                    resolution, body.parent_title or body.query, body.parent_query or body.query,
+                    cleaned_user_hint, effective_world_mode,
+                ),
+                incumbent=click_incumbent(resolution, "auto"),
+                session_id=body.session_id,
             )
             # In world mode, let the classifier's read pick the framing
             # unless the request already pinned one.
@@ -873,6 +883,34 @@ async def stream_tap(
             def _accepted(v: JudgeResult, d: JudgeResult | None) -> bool:
                 return v.score >= accept and (d is None or d.score >= detail_accept)
 
+            async def _decide_zoom(
+                n: int, v: JudgeResult, d: JudgeResult | None, retryable: bool
+            ) -> None:
+                """Put the zoom's verdict to the decision layer, shadow-side.
+                The floors stay out of the state: the scores and the
+                reviewers' sentences are what there is to read."""
+                await decisions.decide(
+                    "zoom.accept",
+                    state={
+                        "attempt": n,
+                        "max_attempts": 2,
+                        "register": zoom_register,
+                        "axes": {
+                            "step_in": {"score": v.score, "rationale": (v.rationale or "")[:400]},
+                            **(
+                                {"legibility": {"score": d.score, "rationale": (d.rationale or "")[:400]}}
+                                if d is not None
+                                else {}
+                            ),
+                        },
+                    },
+                    incumbent={
+                        "accept": "yes" if _accepted(v, d) else "no",
+                        "retry_worth_it": "yes" if retryable else "no",
+                    },
+                    session_id=body.session_id,
+                )
+
             def _total(v: JudgeResult, d: JudgeResult | None) -> float:
                 # Keep-best = the attempt whose WORST axis is best (min-floor).
                 # A sum could crown a retry that regressed legibility on a
@@ -900,12 +938,13 @@ async def stream_tap(
                 legibility=detail.score if detail is not None else None,
                 accepted=_accepted(verdict, detail),
             )
-            if _accepted(verdict, detail):
-                view_verdict = _zoom_receipt(verdict, detail, 1, True)
-                return first
             # One deadline-aware retry (same margin discipline as the render
             # loop: never start an attempt the ingress window can't fit).
             remaining = ingress_timeout_s - 120.0 - (_time.perf_counter() - started)
+            await _decide_zoom(1, verdict, detail, not _accepted(verdict, detail) and remaining >= 45.0)
+            if _accepted(verdict, detail):
+                view_verdict = _zoom_receipt(verdict, detail, 1, True)
+                return first
             if remaining < 45.0:
                 view_verdict = _zoom_receipt(verdict, detail, 1, False)
                 return first
@@ -945,6 +984,7 @@ async def stream_tap(
                 legibility=detail2.score if detail2 is not None else None,
                 accepted=_accepted(verdict2, detail2),
             )
+            await _decide_zoom(2, verdict2, detail2, False)
             if _total(verdict2, detail2) >= _total(verdict, detail):
                 view_verdict = _zoom_receipt(
                     verdict2, detail2, 2, _accepted(verdict2, detail2)
@@ -1295,6 +1335,11 @@ async def stream_tap(
         # bins were projected for a different camera register — the debug
         # HUD counts these so suppression frequency is finally observable.
         final_payload["layout_suppressed"] = True
+    receipts = await decisions.drain()
+    if receipts:
+        # What the decision layer was asked during this generate, and what
+        # the rules decided beside it. Additive; absent when the layer is off.
+        final_payload["decisions"] = receipts
     yield _sse(final_payload, trace_id)
     log(
         "info",

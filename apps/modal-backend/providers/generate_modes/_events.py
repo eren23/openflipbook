@@ -20,6 +20,24 @@ class EditVerdict(TypedDict):
     accepted: bool
 
 
+class DecisionReceipt(TypedDict):
+    """Mirror of TS ``DecisionReceipt`` -- one typed decision's receipt on
+    `final.decisions[]`: what the model said, what the incumbent rule did,
+    whether they agreed, and whether the model's answer was applied."""
+
+    id: str
+    site: str
+    mode: str
+    verdict: dict[str, str | None]
+    incumbent: dict[str, str | None]
+    agree: bool | None
+    p: dict[str, float]
+    applied: bool
+    latency_ms: int
+    cost_usd: float
+    error: str | None
+
+
 class ViewVerdict(TypedDict):
     """Mirror of TS ``ViewVerdict`` — what the render-loop / zoom critics saw
     on the KEPT attempt. Absent axes are None (that judge was not wired for
@@ -55,6 +73,7 @@ class GenerateFinalEvent(TypedDict, total=False):
     scene_view: dict[str, Any]
     session_spend_estimate: float
     trace_id: str
+    decisions: list[DecisionReceipt]
 
 
 class GenerateAscendReadyEvent(TypedDict, total=False):

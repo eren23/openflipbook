@@ -109,6 +109,12 @@ services:
       # Zero-key demo mode: deterministic mock providers (no fal/OpenRouter
       # calls, no keys needed). MOCK_PROVIDERS=1 docker compose up -d
       MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
+      # Typed decisions: unset = off. Shadow logs beside the rules and
+      # changes nothing; see .env.example.
+      DECISION_MODE: ${DECISION_MODE:-}
+      DECISION_LIVE: ${DECISION_LIVE:-}
+      DECISION_TIMEOUT_MS: ${DECISION_TIMEOUT_MS:-}
+      DECISIONS_CANARY: ${DECISIONS_CANARY:-}
       # World Mode: a tap ENTERS the tapped place (an immersive scene / a closer
       # sub-map) instead of explaining a topic, and places persist + reopen.
       # GRADUATED to default ON (2026-08-21). One knob kills the whole set:

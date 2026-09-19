@@ -182,6 +182,7 @@ def test_secondary_body_mirrors_match_ts(model: str, interface: str) -> None:
 @pytest.mark.parametrize(
     ("typed_dict", "interface"),
     [
+        ("DecisionReceipt", "DecisionReceipt"),
         ("EditVerdict", "EditVerdict"),
         ("ViewVerdict", "ViewVerdict"),
         ("GenerateFinalEvent", "GenerateFinalEvent"),

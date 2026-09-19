@@ -279,3 +279,81 @@ def test_no_question_mentions_a_floor() -> None:
         for q in site.questions.values():
             text = json.dumps(q)
             assert "floor" not in text.lower() and "at least 7" not in text and ">= 6" not in text
+
+
+# ---------------------------------------------------------------- no drift
+
+async def test_shadow_changes_nothing_in_the_render_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The point of shadow: the loop yields the same attempts, accepted the
+    same way, whether the layer is off or watching."""
+    from unittest.mock import AsyncMock
+
+    from providers.judge import JudgeResult
+    from providers.render_loop import Attempt, LoopConfig, iter_attempts
+
+    class _Img:
+        def __init__(self, b: bytes) -> None:
+            self.jpeg_bytes = b
+
+    def _j(score: float, rationale: str = "why") -> JudgeResult:
+        return JudgeResult(score=score, rationale=rationale, raw="")
+
+    async def run() -> list[tuple[int, bool, float | None]]:
+        out: list[Attempt] = []
+        async for a in iter_attempts(
+            render=AsyncMock(return_value=_Img(b"a")),
+            projection="eye_level",
+            region_bytes=b"r",
+            judge_conformance=AsyncMock(return_value=_j(4.0, "camera is oblique, not eye level")),
+            judge_same_place=AsyncMock(return_value=_j(9.0)),
+            config=LoopConfig(max_attempts=2, accept_conformance=7.0, accept_same_place=6.0),
+        ):
+            out.append(a)
+        return [(a.index, a.accepted, a.conformance.score if a.conformance else None) for a in out]
+
+    monkeypatch.delenv("DECISION_MODE", raising=False)
+    off = await run()
+    monkeypatch.setenv("DECISION_MODE", "shadow")
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")  # stub: no network, still a full row
+    client.begin()
+    shadowed = await run()
+    assert off == shadowed == [(0, False, 4.0), (1, False, 4.0)]
+    rows = [t.result() for t in (client.pending_var.get() or []) if t.done()]
+    await drain(grace_s=2.0)
+    rows = [t.result() for t in (client.pending_var.get() or [])]
+    assert len(rows) == 2 and all(r["site"] == "render.accept" for r in rows)
+    # The incumbent rejected both; the state carries the sentence, not the floor.
+    assert all(r["incumbent"]["accept"] == "no" for r in rows)
+    assert "oblique" in json.dumps(rows[0]["state"]) and "7.0" not in json.dumps(rows[0]["questions"])
+
+
+async def test_live_can_only_lower_accepted(shadow: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reject stays a reject: the seam is `accepted and decided.yes(...)`,
+    so the layer can re-roll a shipped render but never ship a rejected one."""
+    from unittest.mock import AsyncMock
+
+    from providers.judge import JudgeResult
+    from providers.render_loop import LoopConfig, iter_attempts
+
+    class _Img:
+        def __init__(self, b: bytes) -> None:
+            self.jpeg_bytes = b
+
+    monkeypatch.setenv("DECISION_LIVE", "render.accept")
+    _mock(monkeypatch, lambda req: httpx.Response(200, json={
+        "model": "m", "answers": {"accept": {"type": "noul", "noul": 0.99}}, "usage": {"input_tokens": 1},
+    }))
+
+    async def run(score: float) -> list[bool]:
+        out = []
+        async for a in iter_attempts(
+            render=AsyncMock(return_value=_Img(b"a")), projection="eye_level", region_bytes=b"r",
+            judge_conformance=AsyncMock(return_value=JudgeResult(score=score, rationale="r", raw="")),
+            judge_same_place=AsyncMock(return_value=JudgeResult(score=9.0, rationale="", raw="")),
+            config=LoopConfig(max_attempts=1, accept_conformance=7.0, accept_same_place=6.0),
+        ):
+            out.append(a.accepted)
+        return out
+
+    assert await run(9.0) == [True]   # both agree: ships
+    assert await run(4.0) == [False]  # model says ship, the floors said no: stays rejected

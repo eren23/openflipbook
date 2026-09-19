@@ -341,6 +341,25 @@ export interface EditVerdict {
   accepted: boolean; // false = best-effort keep-best, gates not all met
 }
 
+// One typed decision's receipt. A site names a judgment the pipeline makes
+// (ship this render, ask or assume); `verdict` is what the decision model
+// answered per question, `incumbent` what the current rule decided, and
+// `applied` whether the model's answer actually replaced it (live sites
+// only). Present on `final` only when the layer ran (DECISION_MODE).
+export interface DecisionReceipt {
+  id: string;
+  site: string;
+  mode: string; // "shadow" | "advise" | "live"
+  verdict: Record<string, string | null>;
+  incumbent: Record<string, string | null>;
+  agree: boolean | null; // null when the backend failed or nothing to compare
+  p: Record<string, number>; // top probability per question
+  applied: boolean;
+  latency_ms: number;
+  cost_usd: number;
+  error: string | null;
+}
+
 // The render receipt (view_verdict): what the judged render-loop / zoom
 // critics saw on the KEPT attempt. Present on `final` only when a judged
 // path ran; axes the path didn't wire are null (never fabricated zeros).
@@ -394,6 +413,9 @@ export interface GenerateFinalEvent {
   // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
   // backends.
   session_spend_estimate?: number;
+  // Typed decisions taken during this generate, with what the incumbent rule
+  // decided beside them. Additive; absent unless the decision layer ran.
+  decisions?: DecisionReceipt[];
   trace_id?: string;
 }
 

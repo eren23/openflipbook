@@ -962,9 +962,10 @@ async def _event_stream(
     import time as _time
 
     from obs import bind_trace, log, record_error
-    from providers import spend
+    from providers import decisions, spend
 
     bind_trace(trace_id)
+    decisions.begin()  # this request's shadow decisions, drained at `final`
     started = _time.perf_counter()
     log("info", "sse.generate.start", mode=body.mode, locale=body.output_locale)
 
@@ -1297,7 +1298,9 @@ async def resolve_click(req: Request, body: ResolveClickBody) -> JSONResponse:
     (c) suppress page generation when ``groundable`` is false.
     """
     from obs import TRACE_HEADER, bind_trace, record_error
+    from providers import decisions
     from providers import llm as llm_provider
+    from providers.decisions.sites import click_incumbent, click_state
 
     limited = _rate_limited(req)
     if limited is not None:
@@ -1323,6 +1326,15 @@ async def resolve_click(req: Request, body: ResolveClickBody) -> JSONResponse:
             status_code=502,
             headers={"X-Trace-Id": trace_id},
         )
+    # The hover prefetch is where the classifier's reading is cheapest to
+    # question: nothing has been rendered yet. Shadow only -- the answer is
+    # logged beside the classifier's own, and changes nothing.
+    await decisions.decide(
+        "click.classify",
+        state=click_state(resolution, body.parent_title or "", body.parent_query or "",
+                          None, _world_mode_on(body.world_mode)),
+        incumbent=click_incumbent(resolution, body.autonomy or "auto"),
+    )
     return JSONResponse(
         {
             "subject": resolution.subject,
