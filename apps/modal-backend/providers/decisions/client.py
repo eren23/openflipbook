@@ -250,10 +250,15 @@ def receipt(row: DecisionRow) -> DecisionReceipt:
     }
 
 
-async def drain(grace_s: float = 0.3) -> list[DecisionReceipt]:
-    """Receipts for the rows that have landed, waiting at most `grace_s` for
-    the rest. A row that is still in flight is not lost: its log line lands
-    when it does; it just misses this request's `final`."""
+async def drain(grace_s: float = 0.0) -> list[DecisionReceipt]:
+    """Receipts for the rows that have ALREADY landed.
+
+    It waits for nothing by default: this runs just before the `final`
+    frame, and a shadow decision that is still in flight must not hold the
+    stream open -- turning the layer on would otherwise cost the user the
+    very latency shadow mode exists to avoid. Nothing is lost when a row
+    misses the frame: the log line is the ledger, and it lands when the row
+    does. Tests pass a grace to wait on purpose."""
     pending = pending_var.get()
     if not pending:
         return []

@@ -131,6 +131,11 @@ SITES: dict[str, Site] = {
         questions={"accept": SHIP, "retry_worth_it": RETRY_WORTH_IT},
         incumbent="tap._judged_zoom._accepted: step_in and legibility at or above their floors; one retry when 45 s remain",
         spend_questions=frozenset({"retry_worth_it"}),
+        # Observe-only: the zoom's call site reads the verdict for the log
+        # and nothing else. Promoting it would buy a blocking round trip and
+        # an answer nobody applies -- and the report would read that as the
+        # model never clearing the bar. Raise this WITH the seam, not before.
+        max_mode="advise",
         params={"accept": (6.0, "TAP_ZOOM_ACCEPT"), "detail_accept": (6.0, "TAP_ZOOM_DETAIL_ACCEPT")},
     ),
     "click.classify": Site(

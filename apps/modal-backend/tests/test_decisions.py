@@ -357,3 +357,32 @@ async def test_live_can_only_lower_accepted(shadow: None, monkeypatch: pytest.Mo
 
     assert await run(9.0) == [True]   # both agree: ships
     assert await run(4.0) == [False]  # model says ship, the floors said no: stays rejected
+
+
+async def test_drain_never_waits_for_a_row_in_flight(shadow: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turning the layer on must not cost the stream a millisecond: `final`
+    takes the receipts that have landed and leaves the rest to the log."""
+    gate = asyncio.Event()
+
+    async def slow(req: httpx.Request) -> httpx.Response:
+        await gate.wait()
+        return httpx.Response(200, json=_answers())
+
+    _mock(monkeypatch, slow)
+    client.begin()
+    await decide("render.accept", state=STATE, incumbent={"accept": "yes"})
+    started = asyncio.get_running_loop().time()
+    assert await drain() == []  # the default grace is zero
+    assert asyncio.get_running_loop().time() - started < 0.05
+    gate.set()
+
+
+def test_a_site_is_only_promotable_as_far_as_its_seam_is_wired(monkeypatch: pytest.MonkeyPatch) -> None:
+    """render.accept reads the answer back (`accepted and d.yes(...)`); the
+    other two only log it. A site whose answer nobody applies must cap at
+    advise, or a flip buys a blocking call and an answer thrown away."""
+    monkeypatch.setenv("DECISION_MODE", "shadow")
+    monkeypatch.setenv("DECISION_LIVE", "render.accept,zoom.accept,click.classify")
+    assert registry.mode("render.accept") == "live"
+    assert registry.mode("zoom.accept") == "advise"
+    assert registry.mode("click.classify") == "advise"
