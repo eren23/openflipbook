@@ -37,7 +37,8 @@
     "backend": "cd apps/modal-backend && PORT=8787 .venv/bin/python local_server.py",
     "modal:serve": "cd apps/modal-backend && modal serve generate.py ltx_stream.py",
     "modal:deploy": "cd apps/modal-backend && modal deploy generate.py ltx_stream.py",
-    "record-demo": "cd scripts/record-demo && pnpm install --ignore-workspace --silent && pnpm start"
+    "record-demo": "cd scripts/record-demo && pnpm install --ignore-workspace --silent && pnpm start",
+    "verify": "pnpm lint --max-warnings=12 && pnpm --filter @openflipbook/web check:circular && pnpm -r typecheck && pnpm --filter @openflipbook/web test"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
