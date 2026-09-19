@@ -1,6 +1,9 @@
-import type { WorldVec2 } from "@openflipbook/config";
+import type { WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
-import { type LayoutBlock } from "./layout-control";
+/** All this needs of a place: where it stands and how much ground it takes.
+ *  Declared here rather than imported, so the block renderer can depend on
+ *  this file without the two depending on each other. */
+type Footprinted = Pick<WorldEntityGeo, "pos" | "footprint">;
 
 /**
  * Extracted footprints are too wide, and they overlap. On the live Lantern
@@ -22,7 +25,7 @@ export const LANE_GAP = 2.5;
 const MIN_SIDE = 3;
 const PASSES = 6;
 
-function needed(a: LayoutBlock, b: LayoutBlock, gap: number): number {
+function needed(a: Footprinted, b: Footprinted, gap: number): number {
   // Axis-aligned boxes clear each other as soon as ONE axis separates them,
   // so take the axis that asks for the least shrinking.
   const dx = Math.abs(a.pos.x - b.pos.x);
@@ -38,7 +41,7 @@ function needed(a: LayoutBlock, b: LayoutBlock, gap: number): number {
  * The same blocks with narrower footprints. `gap` is the daylight to open
  * between neighbours; everything already clear is returned untouched.
  */
-export function carveLanes<T extends LayoutBlock>(blocks: readonly T[], gap: number = LANE_GAP): T[] {
+export function carveLanes<T extends Footprinted>(blocks: readonly T[], gap: number = LANE_GAP): T[] {
   const scale = blocks.map(() => 1);
   const size = (i: number) => ({
     ...blocks[i]!,
@@ -81,7 +84,7 @@ export function carveLanes<T extends LayoutBlock>(blocks: readonly T[], gap: num
 }
 
 /** How much daylight the tightest pair has: negative means they intersect. */
-export function tightestGap(blocks: readonly LayoutBlock[]): number {
+export function tightestGap(blocks: readonly Footprinted[]): number {
   let worst = Infinity;
   for (let i = 0; i < blocks.length; i++) {
     for (let j = i + 1; j < blocks.length; j++) {
@@ -97,7 +100,7 @@ export function tightestGap(blocks: readonly LayoutBlock[]): number {
 }
 
 /** Whether a point stands in the open once the lanes are carved. */
-export function standable(blocks: readonly LayoutBlock[], p: WorldVec2, margin = 0): boolean {
+export function standable(blocks: readonly Footprinted[], p: WorldVec2, margin = 0): boolean {
   return !blocks.some((b) =>
     Math.abs(p.x - b.pos.x) <= b.footprint.w / 2 + margin && Math.abs(p.y - b.pos.y) <= b.footprint.d / 2 + margin);
 }
