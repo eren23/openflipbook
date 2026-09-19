@@ -23,18 +23,25 @@ export const LANE_GAP = 2.5;
  *  rather than a share, so carving an already-carved town changes nothing:
  *  a pair the floor stops from clearing stays exactly where it stopped. */
 const MIN_SIDE = 3;
-const PASSES = 6;
+const PASSES = 24;
 
-function needed(a: Footprinted, b: Footprinted, gap: number): number {
-  // Axis-aligned boxes clear each other as soon as ONE axis separates them,
-  // so take the axis that asks for the least shrinking.
-  const dx = Math.abs(a.pos.x - b.pos.x);
-  const dy = Math.abs(a.pos.y - b.pos.y);
-  const spanX = (a.footprint.w + b.footprint.w) / 2;
-  const spanY = (a.footprint.d + b.footprint.d) / 2;
-  const byX = spanX > 0 ? (dx - gap) / spanX : Infinity;
-  const byY = spanY > 0 ? (dy - gap) / spanY : Infinity;
-  return Math.max(byX, byY);
+/** The share of its current size each of a pair keeps, to clear on one axis.
+ *  Shrinking is shared in proportion, so a large neighbour does not flatten a
+ *  small one -- but when one of them is already at the floor it cannot give
+ *  way, and the other takes the whole of what is left. Solving the pair in one
+ *  step is what makes the result settle: a symmetric step that ignores the
+ *  floor only ever approaches the answer, and stops wherever the passes run
+ *  out. Returns null when the two cannot clear on this axis at all. */
+function share(a: number, b: number, room: number, floorA: number, floorB: number): [number, number] | null {
+  if (!(room > 0) || !Number.isFinite(room)) return null;
+  if (a + b <= room) return [1, 1];
+  if (floorA * a + floorB * b > room) return null; // not even at the floor
+  const even = room / (a + b);
+  if (even >= floorA && even >= floorB) return [even, even];
+  // One is pinned at its floor; the other absorbs the rest.
+  return even < floorA
+    ? [floorA, Math.min(1, (room - floorA * a) / b)]
+    : [Math.min(1, (room - floorB * b) / a), floorB];
 }
 
 /**
@@ -43,32 +50,37 @@ function needed(a: Footprinted, b: Footprinted, gap: number): number {
  */
 export function carveLanes<T extends Footprinted>(blocks: readonly T[], gap: number = LANE_GAP): T[] {
   const scale = blocks.map(() => 1);
-  const size = (i: number) => ({
-    ...blocks[i]!,
-    footprint: { w: blocks[i]!.footprint.w * scale[i]!, d: blocks[i]!.footprint.d * scale[i]! },
+  // A footprint keeps its shape, so one number carries both sides. The floor
+  // is on the smaller side, and it is measured against the size the block came
+  // in at, which is what lets a carved town be carved again to no effect.
+  const floor = blocks.map((b) => {
+    const side = Math.min(b.footprint.w, b.footprint.d);
+    return side > 0 && Number.isFinite(side) ? Math.min(1, MIN_SIDE / side) : 1;
   });
 
   for (let pass = 0; pass < PASSES; pass++) {
     let moved = false;
     for (let i = 0; i < blocks.length; i++) {
       for (let j = i + 1; j < blocks.length; j++) {
-        const a = size(i);
-        const b = size(j);
-        const room = needed(a, b, gap);
-        if (room >= 1 || !Number.isFinite(room)) continue;
-        // Both give way in proportion, so one large neighbour does not
-        // flatten a small one, and neither goes under the floor.
-        const step = Math.max(0, room);
-        const limit = (k: number) => {
-          const f = blocks[k]!.footprint;
-          const side = Math.min(f.w, f.d);
-          return side > 0 ? Math.min(1, MIN_SIDE / side) : 1;
-        };
-        const next = [
-          Math.max(limit(i), scale[i]! * step),
-          Math.max(limit(j), scale[j]! * step),
-        ];
-        if (next[0]! < scale[i]! - 1e-9 || next[1]! < scale[j]! - 1e-9) moved = true;
+        const fa = blocks[i]!.footprint;
+        const fb = blocks[j]!.footprint;
+        const gapNow = (axis: "x" | "y", ha: number, hb: number) =>
+          Math.abs(blocks[i]!.pos[axis] - blocks[j]!.pos[axis]) - gap - (ha * scale[i]! + hb * scale[j]!) / 2;
+        if (gapNow("x", fa.w, fb.w) >= -1e-9 || gapNow("y", fa.d, fb.d) >= -1e-9) continue;
+
+        // Take whichever axis asks for the least shrinking; axis-aligned boxes
+        // clear each other as soon as one of them separates them.
+        let best: [number, number] | null = null;
+        for (const [axis, ha, hb] of [["x", fa.w, fb.w], ["y", fa.d, fb.d]] as const) {
+          const room = Math.abs(blocks[i]!.pos[axis] - blocks[j]!.pos[axis]) - gap;
+          const got = share((ha * scale[i]!) / 2, (hb * scale[j]!) / 2, room, floor[i]! / scale[i]!, floor[j]! / scale[j]!);
+          if (got && (!best || got[0] + got[1] > best[0] + best[1])) best = got;
+        }
+        // Nowhere to go on either axis: give way as far as the floor allows,
+        // which is the least overlap this pair can leave.
+        const keep = best ?? [floor[i]! / scale[i]!, floor[j]! / scale[j]!];
+        const next = [Math.max(floor[i]!, scale[i]! * keep[0]!), Math.max(floor[j]!, scale[j]! * keep[1]!)];
+        if (next[0]! < scale[i]! - 1e-12 || next[1]! < scale[j]! - 1e-12) moved = true;
         scale[i] = Math.min(scale[i]!, next[0]!);
         scale[j] = Math.min(scale[j]!, next[1]!);
       }

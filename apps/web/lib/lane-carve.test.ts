@@ -68,6 +68,31 @@ describe("carveLanes", () => {
     }
   });
 
+  it("clears a pair where only one of them can give way", () => {
+    // A kiosk beside a hall: the kiosk hits the floor at once, so the hall has
+    // to absorb the whole of the shrinking. Sharing it evenly instead only
+    // approaches the answer, and stops wherever the passes run out (measured:
+    // 2.4988 of daylight, and a second carve moved it again).
+    const kiosk = geo("kiosk", 0, 0, 10, 10);
+    const hall = geo("hall", 8, 0, 100, 100);
+    const once = carveLanes([kiosk, hall]);
+    expect(tightestGap(once)).toBeGreaterThanOrEqual(LANE_GAP - 1e-9);
+    const twice = carveLanes(once);
+    for (const [i, b] of twice.entries()) expect(b.footprint.w).toBeCloseTo(once[i]!.footprint.w, 9);
+  });
+
+  it("gives way as far as it can when a pair cannot be parted at all", () => {
+    // Centres closer together than the gap: no amount of narrowing separates
+    // these. Both go to the floor, which is the least overlap available, and
+    // the answer does not wander on a second pass.
+    const a = geo("a", 20, 20, 12, 12);
+    const b = geo("b", 21, 20, 12, 12);
+    const once = carveLanes([a, b]);
+    expect(Math.min(...once.map((x) => x.footprint.w))).toBeCloseTo(3, 9);
+    const twice = carveLanes(once);
+    for (const [i, x] of twice.entries()) expect(x.footprint.w).toBeCloseTo(once[i]!.footprint.w, 9);
+  });
+
   it("handles a town of one, and of none", () => {
     expect(carveLanes([])).toEqual([]);
     const one = [geo("only", 20, 20, 12, 9)];
