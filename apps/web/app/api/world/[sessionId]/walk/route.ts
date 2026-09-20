@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 
-import type { StoredWalk, WalkClipRow, WalkShotRow } from "@openflipbook/config";
+import type { StoredWalk, WalkClipRow } from "@openflipbook/config";
+
+/** One shot as the client posts it: `sees` is a pair per place, matching the
+ *  backend's model, not the named shape a stored walk keeps. */
+interface PostedShot {
+  index: number;
+  distance?: number;
+  sees?: [string, number][];
+}
 
 import { setNodeWalk } from "@/lib/db";
 
@@ -71,10 +79,13 @@ export async function POST(
       if (done.clips?.length) {
         const walk: StoredWalk = {
           clips: done.clips,
-          shots: (payload.shots as WalkShotRow[] | undefined)?.map((s) => ({
+          // The wire carries `sees` as [label, share] pairs, which is the
+          // shape the backend's model takes. Stored rows are read back by
+          // name, so name them here rather than keeping tuples in the world.
+          shots: (payload.shots as PostedShot[] | undefined)?.map((s) => ({
             index: s.index,
             distance: s.distance ?? 0,
-            sees: s.sees ?? [],
+            sees: (s.sees ?? []).map(([label, share]) => ({ label, share })),
           })) ?? [],
           spent_usd: done.spent_usd ?? 0,
           created_at: new Date().toISOString(),

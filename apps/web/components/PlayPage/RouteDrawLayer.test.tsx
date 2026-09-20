@@ -89,7 +89,7 @@ describe("RouteDrawLayer", () => {
   // Accept is the paid half: the layer renders the control image for every
   // camera (the renderer is ours) and the backend only paints and links.
   it("paints only the shots worth painting, and says what it spent", async () => {
-    const posted: { shots: { index: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
+    const posted: { shots: { index: number; distance: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       posted.push(JSON.parse(String(init?.body)));
       return { ok: true, json: async () => ({ clips: [{ video_url: "a.mp4" }, { video_url: "b.mp4" }], spent_usd: 0.41 }) } as Response;
@@ -114,10 +114,15 @@ describe("RouteDrawLayer", () => {
     expect(String(fetchMock.mock.calls[0]![0])).toBe("/api/world/s1/walk");
     const body = posted[0]!;
     expect(body.shots.length).toBeGreaterThan(0);
-    // every shot carries its own control image and what it sees
+    // every shot carries its own control image, how far along it is, and what
+    // it sees -- as [label, share] pairs, the shape the backend's model takes
     for (const s of body.shots) {
       expect(s.control_data_url).toMatch(/^data:image\/png/);
-      expect(Array.isArray(s.sees)).toBe(true);
+      expect(typeof s.distance).toBe("number");
+      for (const seen of s.sees) {
+        expect(typeof seen[0]).toBe("string");
+        expect(typeof seen[1]).toBe("number");
+      }
     }
     expect(screen.getByTestId("route-walk-status").textContent).toMatch(/2 clips · \$0\.41/);
     vi.unstubAllGlobals();
