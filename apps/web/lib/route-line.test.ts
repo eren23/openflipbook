@@ -192,4 +192,31 @@ describe("routeFromStroke", () => {
   it("a single tap is not a route", () => {
     expect(routeFromStroke([{ x: 5, y: 5 }]).checkpoints).toEqual([]);
   });
+
+  // Live town, 2026-09-20: the drawn stroke came back scattered, cameras piled
+  // on whatever spots were open. Extracted footprints cover 79% of that town
+  // and interpenetrate by 5.3 units, so a camera is pushed a long way to find
+  // clear ground -- a median 4 units off the line at the pedestrian gap. What
+  // matters is not how many cameras move but how far they end up from what the
+  // user drew.
+  it("keeps the walk near the line the user drew", () => {
+    const town = [
+      geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2),
+      geo("Tideglass Apothecary", 45.4, 18.5, 10.7, 8.8, 5),
+      geo("Candleworks", 34.7, 19, 10.8, 7.8, 5),
+      geo("Mapmaker House", 58.9, 19, 13.8, 11.3, 5.7),
+      geo("Bellfounder Hall", 68.6, 32.6, 19.8, 16.3, 7.5),
+      geo("Blue Shutter Bakery", 71.9, 21.3, 13.4, 11, 5.6),
+    ];
+    const stroke = line([40, 12], [58, 42], 40);
+    const strayOf = (opts: object) =>
+      routeFromStroke(stroke, town, { maxStepUnits: 4, ...opts }).checkpoints
+        .map((c) => Math.min(...stroke.map((q) => Math.hypot(q.x - c.observer.pos.x, q.y - c.observer.pos.y))))
+        .sort((a, b) => a - b);
+    const carved = strayOf({});
+    const raw = strayOf({ laneGap: 0 });
+    expect(raw[raw.length - 1]).toBeGreaterThan(10);
+    expect(carved[carved.length - 1]).toBeLessThan(6);
+    expect(carved[Math.floor(carved.length / 2)]!).toBeLessThan(2);
+  });
 });

@@ -1,6 +1,6 @@
 import type { MapCrop, ObserverPose, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
-import { LANE_GAP, carveLanes } from "./lane-carve";
+import { carveLanes } from "./lane-carve";
 import { blockDistance, solidBlocks, type LayoutBlock } from "./layout-control";
 
 // A route the user DRAWS on the map: the stroke becomes world positions, the
@@ -9,6 +9,16 @@ import { blockDistance, solidBlocks, type LayoutBlock } from "./layout-control";
 
 export const EYE_HEIGHT = 1.7;
 export const DEFAULT_FOV = Math.PI / 2;
+
+/** How wide a lane the ROUTE needs, as opposed to a person.
+ *
+ *  `LANE_GAP` is a pedestrian gap -- room to squeeze between two walls. A
+ *  camera also needs standoff, or it is pressed against a seven-metre face and
+ *  sees only stone. Walking a live town at the pedestrian gap left every
+ *  camera a median 4 units from the line the user drew and the worst 8.5; at
+ *  this gap the median is 1.0 and the worst 4.5, so the walk follows the
+ *  stroke instead of scattering to whatever spots happened to be open. */
+export const ROUTE_LANE_GAP = 8;
 
 export interface RouteOptions {
   /** A turn this large since the last checkpoint forces a new one. */
@@ -189,7 +199,7 @@ export function routeFromStroke(
   // Extracted footprints overlap: on the live map every point inside the town
   // is inside a building, so a route could only ever hug the outside. Narrow
   // them about their centres first, and the town has lanes to walk.
-  const walls = carveLanes(solidBlocks(entities, options.frameParentId ?? null), options.laneGap ?? LANE_GAP);
+  const walls = carveLanes(solidBlocks(entities, options.frameParentId ?? null), options.laneGap ?? ROUTE_LANE_GAP);
   // Sample fine enough to see corners, whatever the distance limit is — but
   // the sideways walk costs samples x offsets squared, and a stroke across a
   // zoomed-out map is arbitrarily long in world units, so cap the count.
