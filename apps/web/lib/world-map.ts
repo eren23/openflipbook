@@ -527,6 +527,61 @@ export async function deriveGeoFromExtraction(
   return upsertEntityGeos(sessionId, geos);
 }
 
+/** Label-match two sets of places and return the position pairs to fit.
+ *
+ *  The painter RENAMES features (live case, 2026-07-05 fishing village: plan
+ *  "White Lighthouse" painted as "North Point Lighthouse", "Wooden Harbor" as
+ *  "Old Harbor Piers") -- exact/substring matching alone found 1 anchor out of
+ *  5 and the registration never fired. So the tiers are: exact > substring >
+ *  shared significant tokens (stop-worded, s-stemmed: "lighthouse"/"harbor"/
+ *  "pine" anchor; "north"/"old"/"white" don't), greedily assigned unique on
+ *  both sides. */
+function labelPairs(
+  from: readonly WorldEntityGeo[],
+  to: readonly WorldEntityGeo[],
+): [WorldVec2, WorldVec2][] {
+  const norm = (s: string) => s.toLowerCase().trim();
+  const GENERIC = new Set([
+    "the", "and", "old", "new", "big", "small", "great", "little",
+    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
+    "central", "grand", "dark", "white", "black", "red", "blue", "green",
+    "golden", "silver", "point", "side", "shore", "ridge", "district",
+  ]);
+  const sig = (s: string) =>
+    new Set(
+      norm(s)
+        .split(/[^a-z0-9]+/)
+        .map((t) => t.replace(/s$/, ""))
+        .filter((t) => t.length > 2 && !GENERIC.has(t)),
+    );
+  const candidates: { p: WorldEntityGeo; g: WorldEntityGeo; score: number }[] = [];
+  for (const p of from) {
+    const a = norm(p.label);
+    if (!a) continue;
+    const ta = sig(a);
+    for (const g of to) {
+      const b = norm(g.label);
+      if (!b) continue;
+      let score = 0;
+      if (a === b) score = Infinity;
+      else if (a.includes(b) || b.includes(a)) score = 100;
+      else for (const t of ta) if (sig(b).has(t)) score++;
+      if (score > 0) candidates.push({ p, g, score });
+    }
+  }
+  candidates.sort((x, y) => y.score - x.score);
+  const usedP = new Set<string>();
+  const usedG = new Set<string>();
+  const pairs: [WorldVec2, WorldVec2][] = [];
+  for (const c of candidates) {
+    if (usedP.has(c.p.id) || usedG.has(c.g.id)) continue;
+    usedP.add(c.p.id);
+    usedG.add(c.g.id);
+    pairs.push([c.p.pos, c.g.pos]);
+  }
+  return pairs;
+}
+
 // ── Plan→image register (AUDIT_BOX §4, the tractable half of metric pose) ────
 
 /** Register the B1 authored plane onto the image register. The solver's
@@ -556,53 +611,7 @@ export function registerPlanToImage(
       g.entity_id !== null,
   );
   if (images.length === 0) return null;
-  const norm = (s: string) => s.toLowerCase().trim();
-  // The painter RENAMES features (live case, 2026-07-05 fishing village:
-  // plan "White Lighthouse" painted as "North Point Lighthouse", "Wooden
-  // Harbor" as "Old Harbor Piers") — exact/substring matching alone found 1
-  // anchor out of 5 and the registration never fired. So the tiers are:
-  // exact > substring > shared significant tokens (stop-worded, s-stemmed:
-  // "lighthouse"/"harbor"/"pine" anchor; "north"/"old"/"white" don't),
-  // greedily assigned unique on both sides.
-  const GENERIC = new Set([
-    "the", "and", "old", "new", "big", "small", "great", "little",
-    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
-    "central", "grand", "dark", "white", "black", "red", "blue", "green",
-    "golden", "silver", "point", "side", "shore", "ridge", "district",
-  ]);
-  const sig = (s: string) =>
-    new Set(
-      norm(s)
-        .split(/[^a-z0-9]+/)
-        .map((t) => t.replace(/s$/, ""))
-        .filter((t) => t.length > 2 && !GENERIC.has(t)),
-    );
-  const candidates: { p: WorldEntityGeo; g: WorldEntityGeo; score: number }[] =
-    [];
-  for (const p of plans) {
-    const a = norm(p.label);
-    if (!a) continue;
-    const ta = sig(a);
-    for (const g of images) {
-      const b = norm(g.label);
-      if (!b) continue;
-      let score = 0;
-      if (a === b) score = Infinity;
-      else if (a.includes(b) || b.includes(a)) score = 100;
-      else for (const t of ta) if (sig(b).has(t)) score++;
-      if (score > 0) candidates.push({ p, g, score });
-    }
-  }
-  candidates.sort((x, y) => y.score - x.score);
-  const usedP = new Set<string>();
-  const usedG = new Set<string>();
-  const pairs: [WorldVec2, WorldVec2][] = [];
-  for (const c of candidates) {
-    if (usedP.has(c.p.id) || usedG.has(c.g.id)) continue;
-    usedP.add(c.p.id);
-    usedG.add(c.g.id);
-    pairs.push([c.p.pos, c.g.pos]);
-  }
+  const pairs = labelPairs(plans, images);
   // Gated runs fit down to REGISTER_MIN_SCALE (0.40) to rescue coherent deep
   // compressions the 0.5 clamp would reject; legacy keeps the 0.5 default.
   const fit = fitSimilarity(pairs, opts?.gate ? { minScale: REGISTER_MIN_SCALE } : undefined);
@@ -631,6 +640,58 @@ export function registerPlanToImage(
       d: p.footprint.d * fit.scale,
     },
     height: p.height * fit.scale,
+    updated_at: nowIso,
+  }));
+  return { updated, fit };
+}
+
+/** Move one frame's places onto another frame's, by label.
+ *
+ *  Redrawing a map -- an expand, a zoom, an edit -- makes a new IMAGE, and
+ *  extraction seeds what it finds into a frame of its own. Nothing reconciles
+ *  the two, so a world accumulates the same place twice in two frames and the
+ *  geometry a viewer sees never moves to match the picture it is drawn over.
+ *  A live world held The Copper Kettle in two frames at once, 14x11 in one and
+ *  10x12 in the other.
+ *
+ *  Fit a similarity from `from`'s places to their label-matched twins in `to`
+ *  and re-express `from` through it, so the older geometry tracks the newer
+ *  image instead of sitting where an earlier render put it. Same gate as the
+ *  plan register, for the same reason: an unhealthy fit re-expresses EVERY
+ *  place through a bad transform and doubles the error. */
+export function registerFrames(
+  geos: readonly WorldEntityGeo[],
+  fromFrame: string | null,
+  toFrame: string | null,
+  nowIso: string,
+  opts?: { gate?: boolean },
+): { updated: WorldEntityGeo[]; fit: SimilarityFit } | null {
+  if (fromFrame === toFrame) return null;
+  const inFrame = (f: string | null) =>
+    geos.filter((g) => (g.parent_id ?? null) === f && g.kind === "place");
+  const from = inFrame(fromFrame);
+  const to = inFrame(toFrame);
+  if (from.length === 0 || to.length === 0) return null;
+  const fit = fitSimilarity(
+    labelPairs(from, to),
+    opts?.gate ? { minScale: REGISTER_MIN_SCALE } : undefined,
+  );
+  if (fit === null) return null;
+  // Already in register: keep the write path idempotent.
+  if (
+    !fit.flipX &&
+    Math.abs(fit.scale - 1) < 0.02 &&
+    Math.abs(fit.tx) < 0.5 &&
+    Math.abs(fit.ty) < 0.5
+  ) {
+    return null;
+  }
+  if (opts?.gate && !isFitHealthy(fit)) return null;
+  const updated = from.map((g) => ({
+    ...g,
+    pos: applySimilarity(fit, g.pos),
+    footprint: { w: g.footprint.w * fit.scale, d: g.footprint.d * fit.scale },
+    height: g.height * fit.scale,
     updated_at: nowIso,
   }));
   return { updated, fit };

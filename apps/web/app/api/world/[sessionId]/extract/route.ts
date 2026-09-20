@@ -4,12 +4,13 @@ import { listPriorEntitiesForExtraction, mergeExtraction } from "@/lib/world";
 import {
   deriveGeoFromExtraction,
   getWorldMap,
+  registerFrames,
   registerPlanToImage,
   extractionSeedTarget,
   upsertEntityGeos,
 } from "@/lib/world-map";
 import { MAP_IMAGE_FRAME } from "@/lib/geo-tap";
-import { isFitHealthy } from "@/lib/world-geometry";
+import { frameForView, isFitHealthy } from "@/lib/world-geometry";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { isSafeId } from "@/lib/ids";
@@ -331,6 +332,27 @@ export async function POST(req: Request, { params }: Params) {
                       matched: reg.fit.matched,
                     }),
                   );
+                }
+              }
+              // A redrawn view seeds its places into a frame of its own and
+              // nothing folds the two together, so the same place ends up in
+              // two frames and the geometry a viewer sees never moves to match
+              // the picture under it. Fit the frame that used to cover this
+              // view onto the one this render just seeded. Off by default: it
+              // REWRITES existing geometry, and an unhealthy fit doubles the
+              // error, so it earns its flag the way the register gate did.
+              if (envFlag("WORLD_FRAME_REGISTER", "false")) {
+                const after = await getWorldMap(sessionId);
+                const covering = frameForView(after.entities, body.scene_view?.map_crop ?? null);
+                if (covering !== parentFrameId) {
+                  const folded = registerFrames(
+                    after.entities,
+                    covering,
+                    parentFrameId,
+                    new Date().toISOString(),
+                    { gate: envFlag("WORLD_REGISTER_GATE", "true") },
+                  );
+                  if (folded) await upsertEntityGeos(sessionId, folded.updated);
                 }
               }
             } catch {
