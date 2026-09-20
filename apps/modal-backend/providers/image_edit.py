@@ -99,10 +99,13 @@ async def edit_image(
     if identity_ref_url and not supports_identity_reference(model):
         raise ValueError("This edit model cannot honor the place reference")
     image_url = await to_fal_url(image_data_url)
-    # The style exemplar only helps the nano models (they accept a 2nd ref);
-    # Kontext is singular-ref, so it leans on the instruction's medium clause.
+    # Kontext is singular-ref and leans on the instruction's medium clause;
+    # every other edit model here takes `image_urls` and can hold a second
+    # exemplar. Gating this on "nano-banana" dropped it for qwen-image-edit --
+    # the one model research 34 measured as holding the camera, and the one a
+    # walk paints its keyframes with, which then lost the world's art medium.
     style_fal: str | None = None
-    if style_ref_url and "nano-banana" in model:
+    if style_ref_url and "kontext" not in model:
         style_fal = await to_fal_url(style_ref_url)
     args = _edit_args_for(model, instruction, image_url, style_fal)
     if identity_ref_url:

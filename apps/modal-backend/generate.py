@@ -1181,6 +1181,88 @@ async def sse_generate(req: Request) -> Response:
     )
 
 
+class WalkShotBody(BaseModel):
+    index: int
+    control_data_url: str
+    # (label, share of frame) for the places this camera sees, biggest first.
+    sees: list[tuple[str, float]] = []
+
+
+class WalkBody(BaseModel):
+    session_id: str
+    shots: list[WalkShotBody]
+    style_ref_url: str | None = None
+    medium: str | None = None
+    clip_seconds: int = 5
+    trace_id: str | None = None
+    # Ask what it would cost without painting anything.
+    estimate_only: bool = False
+
+
+@fastapi_app.post("/walk")
+async def walk(req: Request, body: WalkBody) -> JSONResponse:
+    """Paint a drawn route: a keyframe per shot, a clip between neighbours.
+
+    The client owns the geometry -- it renders each camera's block control and
+    says what that camera sees -- because the renderer is the web app's. This
+    end spends: one edit call per shot, one video call per gap.
+    """
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import walk as walk_provider
+
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds)
+    if body.estimate_only:
+        return JSONResponse(
+            {"shots": len(body.shots), "estimate_usd": estimate}, headers={"X-Trace-Id": trace_id}
+        )
+    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate)
+    try:
+        result = await walk_provider.paint(
+            session_id=body.session_id,
+            shots=[
+                walk_provider.WalkShot(
+                    index=s.index,
+                    control_data_url=s.control_data_url,
+                    sees=[(label, share) for label, share in s.sees],
+                )
+                for s in body.shots
+            ],
+            style_ref_url=body.style_ref_url,
+            medium=body.medium,
+            clip_seconds=body.clip_seconds,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400, headers={"X-Trace-Id": trace_id})
+    except Exception as exc:
+        record_error("walk", exc, shots=len(body.shots))
+        return JSONResponse(
+            {"error": str(exc)}, status_code=502, headers={"X-Trace-Id": trace_id}
+        )
+    return JSONResponse(
+        {
+            "keyframes": result.keyframes,
+            "clips": [
+                {
+                    "from_shot": c.from_shot,
+                    "to_shot": c.to_shot,
+                    "video_url": c.video_url,
+                    "model": c.model,
+                    "seconds": c.seconds,
+                }
+                for c in result.clips
+            ],
+            "spent_usd": result.spent_usd,
+            "estimate_usd": estimate,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
 class AnimateBody(BaseModel):
     image_data_url: str
     prompt: str

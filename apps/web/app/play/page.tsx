@@ -4116,6 +4116,9 @@ export default function PlayPage() {
                   // root's region-scale boxes or against nothing.
                   frameParentId={frameForView(geoMap.entities, page.sceneView?.map_crop ?? MAP_IMAGE_FRAME)}
                   imgRef={imgRef}
+                  sessionId={sessionId}
+                  // This page's own art is the medium a painted shot keeps.
+                  styleRefUrl={page.imageDataUrl ?? null}
                   onClose={() => setRouteDrawOn(false)}
                 />
               )}
