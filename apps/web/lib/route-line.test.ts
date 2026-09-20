@@ -2,7 +2,7 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
 import { blockDistance } from "./layout-control";
-import { resample, routeFromStroke, strokeToWorld } from "./route-line";
+import { resample, routeFromStroke, routeShots, strokeToWorld } from "./route-line";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -233,5 +233,37 @@ describe("routeFromStroke", () => {
       Math.min(...stroke.map((q) => Math.hypot(q.x - c.observer.pos.x, q.y - c.observer.pos.y))));
     expect(Math.max(...stray)).toBeLessThan(3);
     expect(r.checkpoints.some((c) => c.blocked)).toBe(false);
+  });
+
+  // A route can walk somewhere worth nothing -- the first walk's receipt named
+  // it: "nothing stops it putting a camera against a wall, or facing open
+  // ground where this town has no boxes". A shot knows what it is OF before
+  // anything is painted, so the worthless ones can be dropped for free.
+  it("says what each shot sees, and drops the ones that see nothing", () => {
+    const town = [
+      geo("The Copper Kettle", 40, 30, 10, 12, 8),
+      geo("Bellfounder Hall", 40, 46, 10, 12, 8),
+    ];
+    // walks up the gap between them, then out into empty ground
+    const shots = routeShots(
+      routeFromStroke(line([40, 8], [40, 120], 40), town, { maxStepUnits: 12 }),
+      town,
+      { maxStepUnits: 12 },
+    );
+    expect(shots.length).toBeGreaterThan(2);
+    const seeing = shots.filter((s) => s.worth);
+    expect(seeing.length).toBeGreaterThan(0);
+    expect(seeing.length).toBeLessThan(shots.length);
+    // the shots that see something name it
+    const labels = new Set(seeing.flatMap((s) => s.sees.map((v) => v.label)));
+    expect(labels.has("The Copper Kettle") || labels.has("Bellfounder Hall")).toBe(true);
+    // shares are a fraction of the frame, biggest first
+    for (const s of seeing) {
+      expect(s.built).toBeGreaterThan(0);
+      expect(s.built).toBeLessThanOrEqual(1);
+      for (let k = 1; k < s.sees.length; k++) expect(s.sees[k - 1]!.share).toBeGreaterThanOrEqual(s.sees[k]!.share);
+    }
+    // the far end of the walk is past the town, looking at nothing
+    expect(shots[shots.length - 1]!.worth).toBe(false);
   });
 });
