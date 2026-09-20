@@ -33,8 +33,24 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
     ("fal-ai/bria", 0.04),
     ("openrouter:sourceful/riverflow", 0.24),
     ("openai/gpt-image", 0.17),
+    # The edit model a walk paints its keyframes with -- research 34's one
+    # camera-holding pick. Unpriced it fell to the 0.15 default, which is more
+    # than four times what fal bills and trips a session cap four times early.
+    ("fal-ai/qwen-image-edit", 0.035),
 )
 _DEFAULT_IMAGE_PRICE = 0.15  # unknown slug: assume the balanced default
+
+# Video is billed per CLIP here, not per second: these are the fixed-price
+# slugs the descent/walk paths use. An unknown one falls back to the image
+# default, which is the conservative direction for a reservation.
+_VIDEO_PRICES: tuple[tuple[str, float], ...] = (
+    ("minimax/h3-max", 0.12),
+    ("fal-ai/ltx-2.3-quality", 0.12),
+    ("fal-ai/ltx-2.3", 0.04),
+    ("fal-ai/ltx-2", 0.06),
+    ("fal-ai/ltx-video", 0.02),
+    ("fal-ai/wan-i2v", 0.05),
+)
 VLM_STACK_FLAT = 0.02  # planner + judges + extraction, per generation
 
 VLM_CALL_FLAT = 0.005  # one standalone VLM/text-LLM call (extract/edit/plan/precompute)
@@ -52,6 +68,17 @@ def estimate_image(model: str | None) -> float:
     best: float | None = None
     best_len = -1
     for prefix, price in _IMAGE_PRICES:
+        if slug.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = price, len(prefix)
+    return best if best is not None else _DEFAULT_IMAGE_PRICE
+
+
+def estimate_video(model: str | None) -> float:
+    """What one clip from this model costs, longest matching prefix wins."""
+    slug = (model or "").strip().lower()
+    best: float | None = None
+    best_len = -1
+    for prefix, price in _VIDEO_PRICES:
         if slug.startswith(prefix) and len(prefix) > best_len:
             best, best_len = price, len(prefix)
     return best if best is not None else _DEFAULT_IMAGE_PRICE

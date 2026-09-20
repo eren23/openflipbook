@@ -34,6 +34,27 @@ def test_instruction_ignores_slivers_and_survives_an_empty_view() -> None:
     assert walk.shot_instruction([]).count("camera") >= 1
 
 
+def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
+    # Unpriced, both fell to the 0.15 image default: four times what fal bills
+    # for a keyframe, so a session cap tripped four times early.
+    assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.035
+    assert spend.estimate_video("minimax/h3-max/image-to-video") == 0.12
+    # longest prefix wins, so the 2.3 slugs do not collide
+    assert spend.estimate_video("fal-ai/ltx-2.3/image-to-video/fast") == 0.04
+    assert spend.estimate_video("fal-ai/ltx-2.3-quality/reference-video-to-video") == 0.12
+    # an unknown slug stays conservative rather than free
+    assert spend.estimate_video("who/knows") == spend._DEFAULT_IMAGE_PRICE
+
+
+def test_estimate_follows_the_descent_slot_actually_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAL_DESCENT_MODEL", "minimax/h3-max/image-to-video")
+    h3 = walk.estimate_usd(5)
+    monkeypatch.setenv("FAL_DESCENT_MODEL", "fal-ai/ltx-video/image-to-video")
+    assert walk.estimate_usd(5) < h3
+
+
 def test_estimate_is_frames_plus_the_gaps_between_them() -> None:
     one = walk.estimate_usd(1)
     four = walk.estimate_usd(4)

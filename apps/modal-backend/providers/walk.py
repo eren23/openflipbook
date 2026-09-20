@@ -85,13 +85,20 @@ def shot_instruction(sees: list[tuple[str, float]], medium: str | None = None) -
     )
 
 
+def _clip_model() -> str:
+    """Whichever slug the descent slot will actually call."""
+    from providers import video
+
+    return os.environ.get("FAL_DESCENT_MODEL") or video.DESCENT_ANIMATE_MODEL
+
+
 def estimate_usd(shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS) -> float:
     """What a walk of this many shots would cost, before any of it runs."""
-    from providers import spend, video
+    from providers import spend
 
     shots = max(0, min(shots, MAX_SHOTS))
     frames = spend.estimate_image(KEYFRAME_MODEL) * shots
-    clips = spend.estimate_image(video.H3_MAX_MODEL) * max(0, shots - 1)
+    clips = spend.estimate_video(_clip_model()) * max(0, shots - 1)
     return round(frames + clips, 4)
 
 
@@ -133,7 +140,7 @@ async def paint(
         keyframes.append(encode_data_url(image.jpeg_bytes, image.mime_type))
 
     clips: list[WalkClip] = []
-    clip_usd = spend.estimate_image(video.H3_MAX_MODEL)
+    clip_usd = spend.estimate_video(_clip_model())
     for i in range(len(keyframes) - 1):
         spend.reserve(session_id, clip_usd)
         spent += clip_usd
