@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 
-import type { MapCrop, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+import type { MapCrop, ObserverPose, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
 import { renderLayoutControl } from "@/lib/layout-control";
@@ -38,6 +38,11 @@ const PREVIEW_H = 180;
 // because the edit model that holds a camera was measured square.
 const CONTROL_W = 768;
 const CONTROL_H = 768;
+// How much of the map travels with a shot: a square of world centred a little
+// ahead of the camera, so the crop holds what it is walking toward rather than
+// what is behind it.
+const SURROUNDINGS_AHEAD = 12;
+const SURROUNDINGS_SPAN = 46;
 // Fraction of the image a pointer must travel before the stroke gains a point.
 const MIN_STEP = 0.004;
 
@@ -97,10 +102,37 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       canvas.height = CONTROL_H;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("This browser would not give a 2d canvas");
+      // The map around a camera is what makes a shot THIS town rather than a
+      // competent generic street with the right geometry, so crop it from the
+      // page's own image when there is one to crop.
+      const map = imgRef?.current ?? null;
+      const mapCanvas = document.createElement("canvas");
+      mapCanvas.width = CONTROL_W;
+      mapCanvas.height = CONTROL_H;
+      const mapCtx = mapCanvas.getContext("2d");
+      const surroundings = (o: ObserverPose): string | null => {
+        if (!map || !mapCtx || !map.naturalWidth) return null;
+        const cx = o.pos.x + Math.cos(o.gaze) * SURROUNDINGS_AHEAD;
+        const cy = o.pos.y + Math.sin(o.gaze) * SURROUNDINGS_AHEAD;
+        const half = SURROUNDINGS_SPAN / 2;
+        const sx = ((cx - half - frame.x) / frame.w) * map.naturalWidth;
+        const sy = ((cy - half - frame.y) / frame.h) * map.naturalHeight;
+        const sw = (SURROUNDINGS_SPAN / frame.w) * map.naturalWidth;
+        const sh = (SURROUNDINGS_SPAN / frame.h) * map.naturalHeight;
+        mapCtx.drawImage(map, sx, sy, sw, sh, 0, 0, CONTROL_W, CONTROL_H);
+        return mapCanvas.toDataURL("image/png");
+      };
       const payload = worth.map((s) => {
         const control = renderLayoutControl(absolute, s.observer, CONTROL_W, CONTROL_H, frameParentId, ROUTE_LANE_GAP, true);
         ctx.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), CONTROL_W, CONTROL_H), 0, 0);
-        return { index: s.index, distance: s.distance, control_data_url: canvas.toDataURL("image/png"), sees: s.sees.map((v) => [v.label, v.share]) };
+        const around = surroundings(s.observer);
+        return {
+          index: s.index,
+          distance: s.distance,
+          control_data_url: canvas.toDataURL("image/png"),
+          sees: s.sees.map((v) => [v.label, v.share]),
+          ...(around ? { surroundings_data_url: around } : {}),
+        };
       });
       const res = await fetch(`/api/world/${encodeURIComponent(sessionId)}/walk`, {
         method: "POST",
@@ -113,7 +145,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
     } catch (err) {
       setWalk({ state: "failed", why: err instanceof Error ? err.message : String(err) });
     }
-  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId]);
+  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId, imgRef, frame]);
 
   const toImage = useCallback((p: WorldVec2) => ({ x: (p.x - frame.x) / frame.w, y: (p.y - frame.y) / frame.h }), [frame]);
   const point = (event: ReactPointerEvent<HTMLDivElement>) => {

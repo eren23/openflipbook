@@ -201,3 +201,57 @@ async def test_a_provider_failure_becomes_a_502_not_a_crash(
     monkeypatch.setattr(walk, "paint", boom)
     res = await generate.walk(_Req(), _body(2))
     assert res.status_code == 502
+
+
+# ── the grounded path (a shot that carries its map) ─────────────────────────
+
+
+def test_a_grounded_shot_is_painted_by_the_enter_model() -> None:
+    assert walk._frame_model(grounded=True) == walk.ENTER_MODEL
+    assert walk._frame_model(grounded=False) == walk.KEYFRAME_MODEL
+
+
+def test_grounded_instruction_leads_with_the_map_and_asks_for_eye_level() -> None:
+    text = walk.shot_instruction([("The Copper Kettle", 0.3)], grounded=True)
+    assert "map" in text
+    assert "eye level" in text
+    assert "The Copper Kettle" in text
+    # the whole point: it must refuse to hand back another aerial view
+    assert "not an aerial" in text
+
+
+@pytest.mark.asyncio
+async def test_a_grounded_shot_sends_the_map_and_NOT_the_box_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Research 19 ran the enter model against a simplified proxy guide four
+    times and it failed architecture every run -- the guide's form came through
+    instead of the real building. A box render is that guide, so a grounded
+    shot must send the map alone."""
+    from providers import image_edit
+
+    seen: dict[str, object] = {}
+
+    async def spy(image_data_url: str, instruction: str, **kw: object):
+        seen["image"] = image_data_url
+        seen["kw"] = kw
+        return type("G", (), {"jpeg_bytes": b"x", "mime_type": "image/png"})()
+
+    monkeypatch.setattr(image_edit, "edit_image", spy)
+    monkeypatch.setattr(spend, "reserve", lambda *_a, **_kw: 0.0)
+    shot = walk.WalkShot(
+        index=0,
+        control_data_url="data:image/png;base64,CONTROL",
+        sees=[("Hall", 0.3)],
+        surroundings_data_url="data:image/png;base64,MAP",
+    )
+    await walk.paint(session_id="s1", shots=[shot])
+    assert seen["image"] == "data:image/png;base64,MAP"
+    kw = seen["kw"]
+    assert isinstance(kw, dict)
+    assert kw.get("model_override") == walk.ENTER_MODEL
+    assert "identity_ref_url" not in kw
+
+
+def test_a_grounded_walk_is_quoted_at_the_enter_model_price() -> None:
+    assert walk.estimate_usd(4, grounded=True) > walk.estimate_usd(4, grounded=False)

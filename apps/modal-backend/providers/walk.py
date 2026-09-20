@@ -26,6 +26,19 @@ from dataclasses import dataclass, field
 
 # The one edit model measured to keep the camera it was given (research 34).
 KEYFRAME_MODEL = "fal-ai/qwen-image-edit-2511"
+# The enter path's model, for a shot that carries the MAP around its camera.
+# Given only a depth render a model draws a competent generic street: the
+# geometry is right and the town is not the one on the map. Handed the map
+# itself it draws the buildings that are actually there -- the same model and
+# the same move as tapping a place to enter it (#172 benched it at 9.0).
+#
+# The box render is deliberately NOT sent with it. Research 19 ran this model
+# against a simplified proxy guide four times and it failed architecture every
+# run: "the prompt prioritized guide silhouette/arrangement, so the model
+# received conflicting architectural instructions. The guide's simplified form
+# appears in the generated results." A box proxy IS that guide. With the map
+# alone the camera is described in words instead.
+ENTER_MODEL = "fal-ai/nano-banana-pro/edit"
 # A walk is many paid calls in a row, so it gets its own ceiling rather than
 # riding the per-generation render budget.
 MAX_SHOTS = 12
@@ -39,6 +52,9 @@ class WalkShot:
     index: int
     control_data_url: str
     sees: list[tuple[str, float]] = field(default_factory=list)
+    # The map around this camera, if the caller cropped one. Its presence is
+    # what switches a shot from "a street with this geometry" to "this town".
+    surroundings_data_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,7 +73,11 @@ class Walk:
     spent_usd: float
 
 
-def shot_instruction(sees: list[tuple[str, float]], medium: str | None = None) -> str:
+def shot_instruction(
+    sees: list[tuple[str, float]],
+    medium: str | None = None,
+    grounded: bool = False,
+) -> str:
     """What to paint at one camera, from the geometry and the names in frame.
 
     The block render is the camera and the placement; the labels are the
@@ -74,6 +94,19 @@ def shot_instruction(sees: list[tuple[str, float]], medium: str | None = None) -
         else named[0]
     )
     style = medium or "hand-drawn ink and watercolour"
+    if grounded:
+        # The map is the only geometry sent. The camera is words, because a box
+        # proxy alongside it is the conflicting instruction research 19 caught.
+        return (
+            "Image 1 is this town's own map seen from directly above, and it is the truth about "
+            "what stands here: draw THESE buildings, with their own roof colours, shapes and "
+            f"arrangement, and the spaces between them. You are standing among them facing "
+            f"{subject}. Draw what that person actually sees at eye level, about 1.7 metres "
+            "above the ground: those same buildings seen from the street, with doorways, "
+            "shuttered windows, awnings, barrels and crates, worn cobbles underfoot and a soft "
+            f"overcast sky. {style}. A view from INSIDE the town at human height -- not a map, "
+            "not an aerial or bird's-eye view. No lettering, no words, no people."
+        )
     return (
         "Image 1 is a depth render from an exact camera: bright is near, dark is far, "
         "black is sky. Every wall, roofline and corner sits where it puts them, and no "
@@ -85,6 +118,13 @@ def shot_instruction(sees: list[tuple[str, float]], medium: str | None = None) -
     )
 
 
+def _frame_model(grounded: bool) -> str:
+    """The enter model when a shot carries its map, else the camera-holder."""
+    if grounded:
+        return os.environ.get("FAL_WALK_ENTER_MODEL") or ENTER_MODEL
+    return os.environ.get("FAL_WALK_KEYFRAME_MODEL") or KEYFRAME_MODEL
+
+
 def _clip_model() -> str:
     """Whichever slug the descent slot will actually call."""
     from providers import video
@@ -92,12 +132,14 @@ def _clip_model() -> str:
     return os.environ.get("FAL_DESCENT_MODEL") or video.DESCENT_ANIMATE_MODEL
 
 
-def estimate_usd(shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS) -> float:
+def estimate_usd(
+    shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS, grounded: bool = False
+) -> float:
     """What a walk of this many shots would cost, before any of it runs."""
     from providers import spend
 
     shots = max(0, min(shots, MAX_SHOTS))
-    frames = spend.estimate_image(KEYFRAME_MODEL) * shots
+    frames = spend.estimate_image(_frame_model(grounded)) * shots
     clips = spend.estimate_video(_clip_model()) * max(0, shots - 1)
     return round(frames + clips, 4)
 
@@ -122,18 +164,20 @@ async def paint(
 
     spent = 0.0
     keyframes: list[str] = []
-    model_override = os.environ.get("FAL_WALK_KEYFRAME_MODEL") or KEYFRAME_MODEL
-
-    frame_usd = spend.estimate_image(model_override)
     for shot in shots:
+        # A shot carrying its map is painted through the enter path, from the
+        # map ALONE -- see ENTER_MODEL for why the box render stays behind.
+        grounded = bool(shot.surroundings_data_url)
+        model_override = _frame_model(grounded)
+        frame_usd = spend.estimate_image(model_override)
         # Reserve BEFORE submitting: a timeout cannot prove the provider did
         # not bill, and a walk is many calls in a row where that adds up.
         spend.reserve(session_id, frame_usd)
         spent += frame_usd
-        async with span("walk.keyframe", shot=shot.index):
+        async with span("walk.keyframe", shot=shot.index, grounded=grounded):
             image = await image_edit.edit_image(
-                shot.control_data_url,
-                shot_instruction(shot.sees, medium),
+                shot.surroundings_data_url or shot.control_data_url,
+                shot_instruction(shot.sees, medium, grounded),
                 model_override=model_override,
                 style_ref_url=style_ref_url,
             )

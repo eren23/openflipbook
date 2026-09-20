@@ -1186,6 +1186,10 @@ class WalkShotBody(BaseModel):
     control_data_url: str
     # (label, share of frame) for the places this camera sees, biggest first.
     sees: list[tuple[str, float]] = []
+    # The map around this camera. Its presence paints the shot through the
+    # enter path, so the walk shows the town the map draws rather than a
+    # competent generic street with the right geometry.
+    surroundings_data_url: str | None = None
 
 
 class WalkBody(BaseModel):
@@ -1215,12 +1219,14 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
         return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
-    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds)
+    grounded = any(s.surroundings_data_url for s in body.shots)
+    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded)
     if body.estimate_only:
         return JSONResponse(
-            {"shots": len(body.shots), "estimate_usd": estimate}, headers={"X-Trace-Id": trace_id}
+            {"shots": len(body.shots), "estimate_usd": estimate, "grounded": grounded},
+            headers={"X-Trace-Id": trace_id},
         )
-    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate)
+    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate, grounded=grounded)
     try:
         result = await walk_provider.paint(
             session_id=body.session_id,
@@ -1229,6 +1235,7 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
                     index=s.index,
                     control_data_url=s.control_data_url,
                     sees=[(label, share) for label, share in s.sees],
+                    surroundings_data_url=s.surroundings_data_url,
                 )
                 for s in body.shots
             ],
