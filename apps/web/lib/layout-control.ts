@@ -93,6 +93,11 @@ export interface LayoutControl {
    *  Infinity where the ray hit sky. Lets one keyframe be warped into the
    *  next camera (research 34) without a 3D scene. */
   depth: Float32Array;
+  /** Which entry of `visible` owns each pixel, or -1 for none -- sky, ground,
+   *  or a block too small to be named. The renderer already computes this to
+   *  draw the boxes; returning it is what lets a caller measure a painted
+   *  building against the footprint the map actually stores. */
+  ids: Int32Array;
 }
 
 export function renderLayoutControl(
@@ -260,5 +265,14 @@ export function renderLayoutControl(
       pixels: st.pixels,
     };
   });
-  return { width, height, rgba, visible, depth };
+  // Re-key the id buffer from block index to `visible` index, so a caller can
+  // say "the pixels of visible[k]" without knowing the renderer's ordering.
+  const visibleIndex = new Map<number, number>();
+  order.forEach((k, n) => visibleIndex.set(k, n));
+  const ids = new Int32Array(width * height);
+  for (let idx = 0; idx < hitId.length; idx++) {
+    const k = hitId[idx]!;
+    ids[idx] = k >= 0 ? visibleIndex.get(k) ?? -1 : -1;
+  }
+  return { width, height, rgba, visible, depth, ids };
 }
