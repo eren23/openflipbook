@@ -219,4 +219,19 @@ describe("routeFromStroke", () => {
     expect(carved[carved.length - 1]).toBeLessThan(6);
     expect(carved[Math.floor(carved.length / 2)]!).toBeLessThan(2);
   });
+
+  // Live world, 2026-09-20: the district map's root frame holds one entity,
+  // "The Riverward Quarter" -- 231 x 137 on a 100 x 86 world, the frame the
+  // town's places are nested in. Walked as a wall it swallowed the map: all
+  // 53 cameras stepped aside and the route looped outside the town.
+  it("walks inside the quarter its places are nested in", () => {
+    const quarter = geo("The Riverward Quarter", 50.6, 28.7, 231.3, 136.6, 4, { id: "geo_quarter" });
+    const inn = geo("The Copper Kettle", 37, 29.1, 10, 12, 7.2, { parent_id: "geo_quarter" });
+    const stroke = line([25, 20], [75, 45], 40);
+    const r = routeFromStroke(stroke, [quarter, inn], { maxStepUnits: 4 });
+    const stray = r.checkpoints.map((c) =>
+      Math.min(...stroke.map((q) => Math.hypot(q.x - c.observer.pos.x, q.y - c.observer.pos.y))));
+    expect(Math.max(...stray)).toBeLessThan(3);
+    expect(r.checkpoints.some((c) => c.blocked)).toBe(false);
+  });
 });
