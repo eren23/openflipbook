@@ -8,6 +8,7 @@ import type { ObserverPose } from "@openflipbook/config";
 import {
   applySimilarity,
   cropEntities,
+  frameForView,
   fitSimilarity,
   isFitHealthy,
   neighborsOf,
@@ -301,4 +302,41 @@ describe("isFitHealthy (§4 safe-to-apply gate — port of register._fit_is_heal
     expect(isFitHealthy(fit({ residual: 15 }))).toBe(false);
     expect(isFitHealthy(fit({ residual: 11 }))).toBe(true); // just under
   });
+
 });
+
+// Live world, 2026-09-20: three frames. Only the node that created the
+// quarter matched `geo_<nodeId>`, so every other view fell back to the root
+// and routed against region-scale boxes -- and the richest frame, the one
+// holding the streets and the correctly sized buildings, was picked by no
+// node at all.
+describe("frameForView", () => {
+  const e = (id: string, parent: string | null, x: number, y: number, h = 6) =>
+    ({ id, parent_id: parent, kind: "place", label: id, pos: { x, y }, height: h,
+       footprint: { w: 8, d: 8 }, scale: 1 }) as never;
+  // a quarter holding coarse boxes, and a street frame inside it holding fine ones
+  const world = [
+    e("geo_quarter", null, 0, 0, 4),
+    e("coarse_a", "geo_quarter", 10, 10),
+    e("coarse_b", "geo_quarter", 30, 10),
+    e("place_street", null, 0, 0, 4),
+    e("fine_a", "place_street", 12, 12),
+    e("fine_b", "place_street", 16, 12),
+    e("fine_c", "place_street", 20, 12),
+  ];
+  const view = { x: 5, y: 5, w: 25, h: 15 };
+
+  it("picks the frame with the most places inside the view", () => {
+    expect(frameForView(world, view)).toBe("place_street");
+  });
+
+  it("follows the view: a wider one keeps whichever frame covers it", () => {
+    expect(frameForView(world, { x: 25, y: 5, w: 20, h: 15 })).toBe("geo_quarter");
+  });
+
+  it("falls back to the root frame when nothing stands in the view", () => {
+    expect(frameForView(world, { x: 500, y: 500, w: 10, h: 10 })).toBeNull();
+    expect(frameForView(world, null)).toBeNull();
+  });
+});
+
