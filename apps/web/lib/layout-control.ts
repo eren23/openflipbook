@@ -1,6 +1,7 @@
 import type { ObserverPose, ProjectedEntity, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { carveLanes } from "./lane-carve";
+import { type RoofKind, roofEntry, roofFor } from "./roof";
 import { hPos, sizeBin, vPos } from "./world-geometry";
 
 // A camera-view block render of the world map: every solid place extruded to
@@ -110,6 +111,11 @@ export function renderLayoutControl(
   // the enter path, which must keep the sizes the map states; a walk through
   // the town needs it, or there is nothing to walk between.
   laneGap: number = 0,
+  // Give each footprint a pitched roof instead of a flat lid. A depth render
+  // of shoeboxes conditions a model into drawing shoeboxes (research 35);
+  // the roof is what makes "follow the depth exactly" and "looks like a town"
+  // stop being opposed. Off by default: it changes every depth map.
+  roofs: boolean = false,
 ): LayoutControl {
   if (width < 1 || height < 1 || width * height > 4_000_000) throw new Error("Layout render size is out of range");
   // A footprint the camera stands ON (a plaza, a well's square) is ground; a
@@ -134,7 +140,10 @@ export function renderLayoutControl(
     const s = Math.sin(h);
     const dx = ox - b.pos.x;
     const dy = oy - b.pos.y;
-    return { c, s, lx: dx * c + dy * s, ly: -dx * s + dy * c, hw: b.footprint.w / 2, hd: b.footprint.d / 2, z0: b.elevation ?? 0, z1: (b.elevation ?? 0) + b.height };
+    const roof = roofs ? roofFor(b.footprint.w, b.footprint.d, b.height) : { kind: "flat" as RoofKind, rise: 0, ridgeAlongX: true };
+    return { c, s, lx: dx * c + dy * s, ly: -dx * s + dy * c, hw: b.footprint.w / 2, hd: b.footprint.d / 2,
+             z0: b.elevation ?? 0, z1: (b.elevation ?? 0) + b.height,
+             roofKind: roof.kind, rise: roof.rise, ridgeAlongX: roof.ridgeAlongX };
   });
   const hitId = new Int32Array(width * height).fill(-1);
   const shade = new Float32Array(width * height);
@@ -183,13 +192,26 @@ export function renderLayoutControl(
           bestK = k;
           bestFace = face;
         }
+        // The roof sits above the wall top as its own convex volume, so a ray
+        // that clears the walls can still land on the pitch.
+        if (b.rise > 0) {
+          const tRoof = roofEntry(
+            b.roofKind, b.rise, b.ridgeAlongX, b.hw, b.hd, b.z1,
+            b.lx, b.ly, oz, ldx, ldy, dz, 0.05, best,
+          );
+          if (tRoof < best) {
+            best = tRoof;
+            bestK = k;
+            bestFace = 3; // its own face: a pitch catches the light differently
+          }
+        }
       }
       const idx = j * width + i;
       const rayLength = Math.hypot(dx, dy, dz);
       let color: readonly [number, number, number];
       if (bestK >= 0) {
         hitId[idx] = bestK;
-        shade[idx] = bestFace === 2 ? 1 : bestFace === 0 ? 0.82 : 0.66;
+        shade[idx] = bestFace === 2 ? 1 : bestFace === 3 ? 0.91 : bestFace === 0 ? 0.82 : 0.66;
         depth[idx] = best * rayLength;
         color = OTHER;
       } else if (dz < 0) {

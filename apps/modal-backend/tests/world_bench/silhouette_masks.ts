@@ -5,7 +5,7 @@
  * same spot and compares. Split because the renderer lives in TypeScript and
  * the paid segmenter call lives with the other bench runners.
  *
- *   npx tsx silhouette_masks.ts <entities.json> <route.json> <out-dir> [laneGap]
+ *   npx tsx silhouette_masks.ts <entities.json> <route.json> <out-dir> [laneGap] [roofs]
  *
  * `laneGap` must match whatever the frames were painted with, or the truth is
  * a different town from the one in the picture.
@@ -15,8 +15,11 @@ import { join } from "node:path";
 import { renderLayoutControl } from "../../../web/lib/layout-control";
 import { maskForVisible, maskStats } from "../../../web/lib/silhouette";
 
-const [entitiesPath, routePath, outDir, gapArg] = process.argv.slice(2);
+const [entitiesPath, routePath, outDir, gapArg, roofArg] = process.argv.slice(2);
 const gap = Number(gapArg ?? 7);
+// Must match how the frames were conditioned: a roofed proxy is a different
+// town from a flat one, and the truth has to be the town in the picture.
+const roofs = roofArg === "roofs";
 const entities = JSON.parse(readFileSync(entitiesPath!, "utf8"));
 const route = JSON.parse(readFileSync(routePath!, "utf8"));
 mkdirSync(outDir!, { recursive: true });
@@ -24,7 +27,7 @@ const W = route.width, H = route.height;
 
 const out: unknown[] = [];
 for (const shot of route.shots) {
-  const c = renderLayoutControl(entities, shot.observer, W, H, null, gap);
+  const c = renderLayoutControl(entities, shot.observer, W, H, null, gap, roofs);
   const rows = c.visible.map((v, k) => {
     const mask = maskForVisible(c.ids, k);
     const st = maskStats(mask, W, H)!;

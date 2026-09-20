@@ -1,6 +1,6 @@
 # 35. What the silhouette gate says about the keyframe recipe
 
-Date: 2026-09-20. Spend: about $0.44 (5 generations, 11 SAM-3 masks).
+Date: 2026-09-20. Spend: about $0.55 (7 generations, 13 SAM-3 masks).
 World: Lantern Quay, the carved lane walk, camera 0, Ropewalk Store.
 Gate: `make eval-silhouette` (research 33/34's successor — see PR 272).
 
@@ -68,9 +68,39 @@ footprints (5-way type classification, then straight-skeleton geometry) so
 that "follow the depth exactly" and "looks like a town" stop being opposed.
 That is the argument for doing the roof work BEFORE picking a side here.
 
+## Then: give the proxy a roof
+
+The trade above is a property of the PROXY, not of depth conditioning. A depth
+map of shoeboxes asks for shoeboxes. So each footprint was given a pitched
+roof -- gable down the long axis, or a pyramid when the plan is too square for
+a ridge -- and the same arm was run again against the same camera.
+
+| arm | IoU | width ratio | centre dx | seed spread | segmenter |
+|---|---|---|---|---|---|
+| depth, flat boxes | 0.816 | 0.932 | +0.012 | - | 0.870 |
+| depth, roofed (s22) | **0.841** | 0.932 | +0.015 | - | 0.885 |
+| depth, roofed (s11) | **0.843** | 0.929 | +0.016 | **0.002** | 0.910 |
+
+Fidelity rises, and the seed spread tightens fivefold (0.010 to 0.002) -- the
+model has less left to invent, so it invents less differently. The segmenter
+is more certain of what it is looking at too.
+
+And the picture changes: the roofed arm draws red clay tile pitches where the
+flat arm drew lids. It is still sparer than the line-drawing arm, which has
+dormers and balconies and barrels along every wall -- but those came with a
+building 15% too wide, and these did not.
+
+The roof is closed form because the footprints are rectangles: the general
+method (straight-skeleton decomposition, then a parametric roof per part)
+collapses to a handful of half-planes, which the ray caster clips exactly the
+way it already clips walls. No model, no library, no new dependency. Hip and
+half-hip are the two shapes not fitted, and they need a per-building label
+rather than a rule -- a five-way choice, which is the shape of question the
+decision layer already asks.
+
 ## What this does not establish
 
-One building, one camera, one prompt per arm. The massing arm's own number
+One building, one camera, one prompt per arm; the roofed arm is measured against a roofed proxy, so both the render and the yardstick moved -- each arm is self-consistent, but the 0.816 and 0.841 are not the same measurement twice. The massing arm's own number
 moved from 0.535 to 0.376 between two runs that differed only in prompt
 wording, so the measurement is sensitive to phrasing and these are not
 tolerances. The gate measures agreement with the stored footprint and has no
