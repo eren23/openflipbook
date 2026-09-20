@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 
-import type { MapCrop, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+import type { MapCrop, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
 import { renderLayoutControl } from "@/lib/layout-control";
@@ -24,6 +24,11 @@ interface Props {
   sessionId?: string | null;
   /** The world's own art, so painted keyframes keep its medium. */
   styleRefUrl?: string | null;
+  /** The page a walk is kept on -- a walk is paid for, so it outlives the tab
+   *  that made it. Without it the walk still paints, it just is not kept. */
+  nodeId?: string | null;
+  /** A walk already painted on this page, shown instead of an empty layer. */
+  savedWalk?: StoredWalk | null;
   onClose: () => void;
 }
 
@@ -42,7 +47,7 @@ const MIN_STEP = 0.004;
  * needed. Everything here is free: the preview is the same block render the
  * enter path already uses, so a route can be judged before any spend.
  */
-export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, lookAt = null, sessionId = null, styleRefUrl = null, onClose }: Props) {
+export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, lookAt = null, sessionId = null, styleRefUrl = null, nodeId = null, savedWalk = null, onClose }: Props) {
   const content = useContainRect(imgRef);
   const [stroke, setStroke] = useState<{ x: number; y: number }[]>([]);
   // A ref, not state: a burst of pointermove events inside one task would all
@@ -52,7 +57,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [walk, setWalk] = useState<
     { state: "idle" } | { state: "painting"; shots: number } | { state: "done"; clips: { video_url: string }[]; usd: number } | { state: "failed"; why: string }
-  >({ state: "idle" });
+  >(savedWalk?.clips.length ? { state: "done", clips: savedWalk.clips, usd: savedWalk.spent_usd } : { state: "idle" });
 
   // Walking to another page keeps this layer mounted. A stroke is drawn in the
   // image's own coordinates, so carrying it over would redraw it, silently, on
@@ -95,12 +100,12 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       const payload = worth.map((s) => {
         const control = renderLayoutControl(absolute, s.observer, CONTROL_W, CONTROL_H, frameParentId, ROUTE_LANE_GAP, true);
         ctx.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), CONTROL_W, CONTROL_H), 0, 0);
-        return { index: s.index, control_data_url: canvas.toDataURL("image/png"), sees: s.sees.map((v) => [v.label, v.share]) };
+        return { index: s.index, distance: s.distance, control_data_url: canvas.toDataURL("image/png"), sees: s.sees.map((v) => [v.label, v.share]) };
       });
       const res = await fetch(`/api/world/${encodeURIComponent(sessionId)}/walk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shots: payload, style_ref_url: styleRefUrl }),
+        body: JSON.stringify({ shots: payload, style_ref_url: styleRefUrl, node_id: nodeId }),
       });
       const body = (await res.json()) as { clips?: { video_url: string }[]; spent_usd?: number; error?: string };
       if (!res.ok || body.error) throw new Error(body.error || `walk failed (${res.status})`);
@@ -108,7 +113,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
     } catch (err) {
       setWalk({ state: "failed", why: err instanceof Error ? err.message : String(err) });
     }
-  }, [sessionId, worth, absolute, frameParentId, styleRefUrl]);
+  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId]);
 
   const toImage = useCallback((p: WorldVec2) => ({ x: (p.x - frame.x) / frame.w, y: (p.y - frame.y) / frame.h }), [frame]);
   const point = (event: ReactPointerEvent<HTMLDivElement>) => {

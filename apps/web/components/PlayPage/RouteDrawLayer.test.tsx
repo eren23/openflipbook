@@ -130,4 +130,23 @@ describe("RouteDrawLayer", () => {
     expect(screen.queryByTestId("route-accept")).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it("shows a walk already painted on this page, before anything is drawn", () => {
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [{ from_shot: 0, to_shot: 2, video_url: "a.mp4", model: "m", seconds: 5 }],
+          shots: [{ index: 0, distance: 0, sees: [{ label: "The Copper Kettle", share: 0.3 }] }],
+          spent_usd: 0.19,
+          created_at: "2026-09-20T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    // no stroke drawn, and the paid walk is still there
+    expect(screen.getByTestId("route-walk-status").textContent).toMatch(/1 clip · \$0\.19/);
+  });
 });

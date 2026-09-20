@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import type { StoredWalk, WalkClipRow, WalkShotRow } from "@openflipbook/config";
+
+import { setNodeWalk } from "@/lib/db";
+
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { inlineStoredImage } from "@/lib/r2";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
@@ -56,6 +60,31 @@ export async function POST(
     throw err;
   }
   const text = await upstream.text();
+  // A walk is paid for, so it outlives the tab that made it: keep the clips
+  // and what each shot was OF on the page the route was drawn on. The
+  // keyframes are left behind deliberately -- they return as data URIs, and a
+  // node row is read on every visit.
+  const nodeId = typeof payload.node_id === "string" ? payload.node_id : null;
+  if (upstream.ok && nodeId) {
+    try {
+      const done = JSON.parse(text) as { clips?: WalkClipRow[]; spent_usd?: number };
+      if (done.clips?.length) {
+        const walk: StoredWalk = {
+          clips: done.clips,
+          shots: (payload.shots as WalkShotRow[] | undefined)?.map((s) => ({
+            index: s.index,
+            distance: s.distance ?? 0,
+            sees: s.sees ?? [],
+          })) ?? [],
+          spent_usd: done.spent_usd ?? 0,
+          created_at: new Date().toISOString(),
+        };
+        await setNodeWalk(nodeId, walk);
+      }
+    } catch {
+      // Keeping the walk is a convenience; never fail the response over it.
+    }
+  }
   return new Response(text, {
     status: upstream.status,
     headers: { "Content-Type": "application/json", "X-Trace-Id": traceId },

@@ -4119,6 +4119,8 @@ export default function PlayPage() {
                   sessionId={sessionId}
                   // This page's own art is the medium a painted shot keeps.
                   styleRefUrl={page.imageDataUrl ?? null}
+                  nodeId={page.nodeId ?? null}
+                  savedWalk={page.walk ?? null}
                   onClose={() => setRouteDrawOn(false)}
                 />
               )}
