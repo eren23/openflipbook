@@ -43,7 +43,7 @@ demo-logs:
 # Free gates run always (deterministic, no spend). Paid gates spend fal/openrouter
 # and only run when their *_BENCH_RUN flag is set — `make eval` excludes them.
 PY := apps/modal-backend/.venv/bin/python
-.PHONY: eval eval-geometry eval-layout eval-grounding eval-repair eval-edit eval-paid
+.PHONY: eval eval-geometry eval-silhouette eval-layout eval-grounding eval-repair eval-edit eval-paid
 
 # The always-on gate: every free phase gate + lints + typechecks. Run between
 # phases — must be green before the next phase's commit.
@@ -60,6 +60,13 @@ eval-geometry:
 # P3 layout-fidelity A/B: generate each scene with vs without the geometry layout
 # clause + VLM-judge both → the lift. PAID (~4 fal gens + judge calls). Needs
 # FAL_KEY + OPENROUTER_API_KEY (auto-loaded from apps/modal-backend/.env).
+# Silhouette fidelity: the block render knows which pixels belong to which
+# place (the footprint is stored data) -- segment the painted building in the
+# same spot and compare. PAID (~one SAM-3 call per camera+building).
+# Needs masks from the TS side first; see the runner's docstring.
+eval-silhouette:
+	cd apps/modal-backend && SILHOUETTE_BENCH_RUN=1 .venv/bin/python -m tests.world_bench.silhouette_runner $(MASKS) $(FRAMES)
+
 eval-layout:
 	cd apps/modal-backend && .venv/bin/python -m tests.world_bench.layout_runner
 # P4 grounding-verify: generate from the layout clause, detect the expected
