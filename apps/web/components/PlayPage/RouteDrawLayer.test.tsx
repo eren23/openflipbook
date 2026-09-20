@@ -85,4 +85,49 @@ describe("RouteDrawLayer", () => {
     drawLine([80, 116], [240, 116]);
     expect(screen.getByTestId("route-summary").textContent).toMatch(/\d+ cameras stepped aside/);
   });
+
+  // Accept is the paid half: the layer renders the control image for every
+  // camera (the renderer is ours) and the backend only paints and links.
+  it("paints only the shots worth painting, and says what it spent", async () => {
+    const posted: { shots: { index: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return { ok: true, json: async () => ({ clips: [{ video_url: "a.mp4" }, { video_url: "b.mp4" }], spent_usd: 0.41 }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // jsdom ships neither ImageData nor a canvas 2d context, and with a context
+    // stubbed the preview effect gets far enough to need the former.
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    // jsdom's canvas has no 2d context unless one is stubbed
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      putImageData: () => {}, clearRect: () => {}, drawImage: () => {},
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,AAA");
+
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    const accept = screen.getByTestId("route-accept");
+    expect(accept.textContent).toMatch(/^Paint \d+ shots?$/);
+    await act(async () => { fireEvent.click(accept); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/api/world/s1/walk");
+    const body = posted[0]!;
+    expect(body.shots.length).toBeGreaterThan(0);
+    // every shot carries its own control image and what it sees
+    for (const s of body.shots) {
+      expect(s.control_data_url).toMatch(/^data:image\/png/);
+      expect(Array.isArray(s.sees)).toBe(true);
+    }
+    expect(screen.getByTestId("route-walk-status").textContent).toMatch(/2 clips · \$0\.41/);
+    vi.unstubAllGlobals();
+  });
+
+  it("offers nothing to paint without a session to bill", () => {
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.queryByTestId("route-accept")).toBeNull();
+    vi.unstubAllGlobals();
+  });
 });
