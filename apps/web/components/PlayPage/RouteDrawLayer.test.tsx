@@ -126,7 +126,9 @@ describe("RouteDrawLayer", () => {
     }
     expect(screen.getByTestId("route-walk-status").textContent).toMatch(/2 clips · \$0\.41/);
     vi.unstubAllGlobals();
-  });
+  // Ray-casts a control image per camera: ~4s locally, 8.5s on CI under
+  // coverage. vitest 2 never enforced the 5s default on it; vitest 3 does.
+  }, 30_000);
 
   it("offers nothing to paint without a session to bill", () => {
     vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
