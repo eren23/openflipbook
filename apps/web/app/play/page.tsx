@@ -1017,7 +1017,13 @@ export default function PlayPage() {
                   : `Drawing image…${proNote}`
               );
             } else if (evt.stage === "draft") {
-              setStatusMsg("Draft preview — the full render is refining…");
+              // Strict and spatial-transition pages drop the draft frames
+              // (the progress branch below), so there is no preview to name.
+              setStatusMsg(
+                strict || SPATIAL_TRANSITIONS_ENABLED
+                  ? "Finishing the full render…"
+                  : "Draft preview — the full render is refining…"
+              );
             }
           } else if (evt.type === "progress") {
             if (strict || SPATIAL_TRANSITIONS_ENABLED) continue;
@@ -4269,8 +4275,11 @@ export default function PlayPage() {
               <TapHint text={t.tapHint} />
             )}
           </div>
-            {/* On phones, wrapped controls must not cover the tappable map. */}
-            <div role="toolbar" aria-label="Image tools" className="relative z-10 flex flex-wrap items-center gap-2 border-t border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 sm:absolute sm:right-3 sm:top-3 sm:max-w-[calc(100%-1.5rem)] sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:pointer-events-none [&>button]:pointer-events-auto [&>div]:pointer-events-auto">
+            {/* On phones, wrapped controls must not cover the tappable map.
+                With the World pill in the top-left corner, stop short of it:
+                full width, the first row ran under the pill and hid half its
+                label (1200px viewport, Wander over it by 40px). */}
+            <div role="toolbar" aria-label="Image tools" className={`relative z-10 flex flex-wrap items-center gap-2 border-t border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 sm:absolute sm:right-3 sm:top-3 ${worldEnabled ? "sm:max-w-[calc(100%-14rem)]" : "sm:max-w-[calc(100%-1.5rem)]"} sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:pointer-events-none [&>button]:pointer-events-auto [&>div]:pointer-events-auto`}>
               {wanderNote && (
                 <span className="flex items-center rounded-full bg-black/70 px-2.5 py-1 text-xs text-white/95">
                   {wanderNote}
