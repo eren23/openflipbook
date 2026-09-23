@@ -53,6 +53,7 @@ import {
   registerPlanToImage,
   removeEntityGeos,
   upsertEntityGeos,
+  registerFrames,
 } from "./world-map";
 
 const { applyGeoUpsert, removeAndReroot, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
@@ -790,5 +791,52 @@ describe("undoing a removal", () => {
 
   it("touches nothing when the place is not there", () => {
     expect(geosTouchedByRemoval(world, ["geo_missing"])).toEqual([]);
+  });
+});
+
+// A redrawn map seeds its places into a frame of its own and nothing folds
+// the two together, so a live world held The Copper Kettle twice -- 14x11 in
+// the quarter's frame and 10x12 in the scene's -- and the geometry a viewer
+// saw never moved to match the picture under it.
+describe("registerFrames", () => {
+  const g = (id: string, parent: string | null, label: string, x: number, y: number, w = 10): WorldEntityGeo =>
+    ({ id, entity_id: id, parent_id: parent, kind: "place", label, pos: { x, y },
+       footprint: { w, d: w }, height: 6, visual: "", state: {}, confidence: 1,
+       source: "extracted", updated_at: "" }) as unknown as WorldEntityGeo;
+  // the same four places, the second frame drawn at half scale and shifted
+  const world = [
+    g("a1", "old", "The Copper Kettle", 20, 20),
+    g("a2", "old", "Bellfounder Hall", 40, 20),
+    g("a3", "old", "Ropewalk Store", 20, 40),
+    g("a4", "old", "Lantern Watch", 40, 40),
+    g("b1", "new", "The Copper Kettle", 10, 10, 5),
+    g("b2", "new", "Bellfounder Hall", 20, 10, 5),
+    g("b3", "new", "Ropewalk Store", 10, 20, 5),
+    g("b4", "new", "Lantern Watch", 20, 20, 5),
+  ];
+
+  it("moves the older frame onto the newer image", () => {
+    const r = registerFrames(world, "old", "new", "2026-09-20T00:00:00Z", { gate: true });
+    expect(r).not.toBeNull();
+    expect(r!.fit.scale).toBeCloseTo(0.5, 2);
+    expect(r!.updated).toHaveLength(4);
+    const kettle = r!.updated.find((e) => e.label === "The Copper Kettle")!;
+    expect(kettle.pos.x).toBeCloseTo(10, 1);
+    expect(kettle.pos.y).toBeCloseTo(10, 1);
+    // footprint and height ride the same scale, or the place changes size
+    expect(kettle.footprint.w).toBeCloseTo(5, 2);
+    expect(kettle.height).toBeCloseTo(3, 2);
+  });
+
+  it("does nothing when the frames already agree", () => {
+    const same = world.filter((e) => e.parent_id === "old")
+      .map((e) => ({ ...e, id: `c${e.id}`, parent_id: "new" }));
+    expect(registerFrames([...world.filter((e) => e.parent_id === "old"), ...same],
+      "old", "new", "2026-09-20T00:00:00Z", { gate: true })).toBeNull();
+  });
+
+  it("refuses a frame it cannot match, and itself", () => {
+    expect(registerFrames(world, "old", "missing", "x", { gate: true })).toBeNull();
+    expect(registerFrames(world, "old", "old", "x", { gate: true })).toBeNull();
   });
 });

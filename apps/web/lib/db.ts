@@ -1,5 +1,5 @@
 import { MongoClient, type ClientSession, type Collection, type Db, type Document } from "mongodb";
-import type { GroundingSummary, ScaleTier, SceneView, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
+import type { GroundingSummary, ScaleTier, SceneView, StoredWalk, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
 declare global {
@@ -160,6 +160,9 @@ export interface NodeDoc extends Document {
   geo_extracted_at?: Date | null;
   // DESCENT_AUTO's stored arrival clip. Absent on every legacy row.
   descent_video_url?: string | null;
+  // A painted walk drawn on this page, kept so it outlives the tab that made
+  // it -- a walk is paid for, and losing it to a refresh means paying twice.
+  walk?: StoredWalk | null;
   created_at: Date;
 }
 
@@ -220,6 +223,8 @@ export interface NodeRow {
   // into this page). Null until (and unless) the flag-gated client stores
   // one; served back so every future visitor replays it instantly.
   descent_video_url: string | null;
+  /** The last walk painted on this page, or null. */
+  walk: StoredWalk | null;
   created_at: string;
 }
 
@@ -238,6 +243,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     forked_from,
     geo_extracted_at,
     descent_video_url,
+    walk,
     transition_context,
     ...rest
   } = doc;
@@ -254,6 +260,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     forked_from: forked_from ?? null,
     geo_extracted: geo_extracted_at != null,
     descent_video_url: descent_video_url ?? null,
+    walk: walk ?? null,
     transition_context: transition_context ?? null,
     created_at: created_at.toISOString(),
   };
@@ -468,6 +475,14 @@ export async function setNodeDescentClip(id: string, url: string): Promise<boole
     { _id: id },
     { $set: { descent_video_url: url } },
   );
+  return res.matchedCount > 0;
+}
+
+/** Keep a painted walk on the page it was drawn on. Replaces any earlier one:
+ *  a route is redrawn freely, and only the walk on screen is worth keeping. */
+export async function setNodeWalk(id: string, walk: StoredWalk): Promise<boolean> {
+  const collection = await nodes();
+  const res = await collection.updateOne({ _id: id }, { $set: { walk } });
   return res.matchedCount > 0;
 }
 

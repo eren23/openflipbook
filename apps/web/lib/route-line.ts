@@ -1,7 +1,7 @@
 import type { MapCrop, ObserverPose, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { carveLanes } from "./lane-carve";
-import { blockDistance, pointInBlock, solidBlocks, type LayoutBlock } from "./layout-control";
+import { blockDistance, pointInBlock, renderLayoutControl, solidBlocks, type LayoutBlock } from "./layout-control";
 
 // A route the user DRAWS on the map: the stroke becomes world positions, the
 // camera looks along it, and checkpoints mark where a new keyframe image is
@@ -308,4 +308,68 @@ function merge(checkpoints: RouteCheckpoint[]): RouteCheckpoint[] {
     out.push(c);
   }
   return out;
+}
+
+/** How wide the block render used to judge a shot is. Small on purpose: this
+ *  answers "what does this camera see", not "what will it look like". */
+const SHOT_W = 160;
+const SHOT_H = 96;
+/** A camera seeing less built surface than this is looking at nothing -- open
+ *  ground, or the inside of a wall. The receipt for the first walk recorded
+ *  the gap: "nothing stops it putting a camera against a wall, or facing open
+ *  ground where this town has no boxes". */
+export const SHOT_MIN_BUILT = 0.04;
+
+export interface RouteShot {
+  index: number;
+  observer: ObserverPose;
+  /** Distance from the start of the route, world units. */
+  distance: number;
+  reason: RouteCheckpoint["reason"];
+  /** The places in frame, largest share first -- what this shot is OF. */
+  sees: { label: string; share: number }[];
+  /** Share of the frame that is a building rather than sky or ground. */
+  built: number;
+  /** Worth painting: it sees enough, and it is not standing in a wall. */
+  worth: boolean;
+}
+
+/** Turn a drawn route into the shots that would be painted along it.
+ *
+ *  A checkpoint is a camera; a shot is that camera plus what it can see from
+ *  there. The block render already knows: it returns the places in frame and
+ *  how much of the frame each one covers, so a shot can say what it is OF
+ *  before anything is generated. That is also the only way to tell a camera
+ *  worth painting from one facing open ground or pressed into a wall. */
+export function routeShots(
+  route: Route,
+  entities: readonly WorldEntityGeo[] = [],
+  options: RouteOptions = {},
+): RouteShot[] {
+  return route.checkpoints.map((c, index) => {
+    const control = renderLayoutControl(
+      entities,
+      c.observer,
+      SHOT_W,
+      SHOT_H,
+      options.frameParentId ?? null,
+      options.laneGap ?? ROUTE_LANE_GAP,
+      true,
+    );
+    const total = SHOT_W * SHOT_H;
+    const sees = control.visible
+      .map((v) => ({ label: v.label, share: v.pixels / total }))
+      .filter((v) => v.share > 0.002)
+      .sort((a, b) => b.share - a.share);
+    const built = sees.reduce((s, v) => s + v.share, 0);
+    return {
+      index,
+      observer: c.observer,
+      distance: c.distance,
+      reason: c.reason,
+      sees,
+      built,
+      worth: !c.blocked && built >= SHOT_MIN_BUILT,
+    };
+  });
 }

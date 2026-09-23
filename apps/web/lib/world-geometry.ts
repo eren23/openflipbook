@@ -403,6 +403,62 @@ export function resolveAbsoluteFrame(
  *  pos saw an empty map (the -8400 demo bug). Top-level entities pass through
  *  untouched — pre-nesting data stays byte-identical. `all` supplies the
  *  parent chains: pass the full map, not the filtered subset. */
+/** The frame whose places actually cover the view being looked at.
+ *
+ *  Geometry is nested in frames, and a frame belongs to the node that created
+ *  it. Picking the frame by node id means only THAT node ever sees its own
+ *  places: every other view of the same world -- a street page, an edit, a
+ *  zoom -- falls back to the root and routes against region-scale boxes, or
+ *  against nothing. A live world had three frames, and the richest (its
+ *  streets, benches and eight buildings) was selected by no node at all.
+ *
+ *  So choose by coverage instead: the frame with the most places standing
+ *  inside the rect on screen, preferring the finer one when they tie, since a
+ *  street frame nested in a quarter covers the same ground in more detail.
+ *  Null (the root frame) when nothing covers the view. */
+export function frameForView(
+  entities: readonly (FrameNode & { kind?: string; height?: number; footprint: { w: number; d: number } })[],
+  crop: { x: number; y: number; w: number; h: number } | null | undefined,
+): string | null {
+  if (!crop || !entities.length) return null;
+  const absolute = toAbsoluteEntities([...entities], [...entities]);
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const inView = new Map<string | null, number>();
+  for (const e of absolute) {
+    if (e.kind !== "place" || (e.height ?? 0) <= 0.5) continue;
+    if (e.pos.x < crop.x || e.pos.x > crop.x + crop.w) continue;
+    if (e.pos.y < crop.y || e.pos.y > crop.y + crop.h) continue;
+    const frame = e.parent_id ?? null;
+    inView.set(frame, (inView.get(frame) ?? 0) + 1);
+  }
+  if (!inView.size) return null;
+  const most = Math.max(...inView.values());
+  // A frame's own footprint says how much ground it describes, so between two
+  // that both cover the view the SMALLER one is the finer account of it -- a
+  // street frame inside a quarter. Depth cannot tell them apart when both hang
+  // off the root, which is how a live world stored them.
+  const extent = (frame: string | null) => {
+    const f = frame ? byId.get(frame) : undefined;
+    return f ? f.footprint.w * f.footprint.d : Infinity;
+  };
+  let best: string | null = null;
+  let bestArea = Infinity;
+  let bestCount = 0;
+  for (const [frame, count] of inView) {
+    // Coverage is a gate, not the ranking: a frame holding less than half of
+    // what the best one holds is not describing this view. Proportional, so a
+    // view with one building in it still resolves to that building's frame.
+    if (count < most * 0.5) continue;
+    const area = extent(frame);
+    if (area < bestArea || (area === bestArea && count > bestCount)) {
+      best = frame;
+      bestArea = area;
+      bestCount = count;
+    }
+  }
+  return bestCount > 0 ? best : null;
+}
+
 export function toAbsoluteEntities<
   T extends FrameNode & { footprint: { w: number; d: number } },
 >(subset: T[], all: FrameNode[]): T[] {

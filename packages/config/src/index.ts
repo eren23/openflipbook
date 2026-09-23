@@ -764,6 +764,34 @@ export interface MapCrop {
   h: number;
 }
 
+/** A painted walk, kept so it survives the page that made it.
+ *
+ *  The keyframes are deliberately NOT here. They come back as data URIs, and
+ *  a node row is read on every visit -- storing them would make every read
+ *  carry megabytes of base64 for pictures already baked into the clips. The
+ *  clips are what anyone watches; the shots are what they are OF. */
+export interface WalkClipRow {
+  from_shot: number;
+  to_shot: number;
+  video_url: string;
+  model: string;
+  seconds: number;
+}
+
+export interface WalkShotRow {
+  index: number;
+  distance: number;
+  /** The places this camera saw, and their share of the frame. */
+  sees: { label: string; share: number }[];
+}
+
+export interface StoredWalk {
+  clips: WalkClipRow[];
+  shots: WalkShotRow[];
+  spent_usd: number;
+  created_at: string;
+}
+
 // What level a scene renders at — there is no single correct view.
 export type ViewLevel = "map" | "building" | "street" | "eye";
 

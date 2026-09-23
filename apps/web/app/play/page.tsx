@@ -139,7 +139,7 @@ import { buildOutwardContext } from "@/lib/outward-context";
 import { saveDescentClip, shouldAutoDescend } from "@/lib/descent-clip";
 import { parseAzgaarExport } from "@/lib/azgaar-import";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
-import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
+import { childrenOf, frameForView, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 // The in-session page graph node — lives in lib/session-pages.ts so the
 // ?continue= hydration mapper (nodeToPage) is a testable pure function.
@@ -4112,10 +4112,17 @@ export default function PlayPage() {
                   key={page.nodeId ?? "unsaved"}
                   entities={geoMap.entities}
                   frame={page.sceneView?.map_crop ?? MAP_IMAGE_FRAME}
-                  // After a zoom-out the places sit under this page's own
-                  // container geo; on a seeded map they are top level.
-                  frameParentId={geoMap.entities.some(e => e.id === `geo_${page.nodeId}`) ? `geo_${page.nodeId}` : null}
+                  // Whichever frame's places actually stand in this view --
+                  // not this node's own frame, which only the node that made
+                  // it ever has, leaving every other view routing against the
+                  // root's region-scale boxes or against nothing.
+                  frameParentId={frameForView(geoMap.entities, page.sceneView?.map_crop ?? MAP_IMAGE_FRAME)}
                   imgRef={imgRef}
+                  sessionId={sessionId}
+                  // This page's own art is the medium a painted shot keeps.
+                  styleRefUrl={page.imageDataUrl ?? null}
+                  nodeId={page.nodeId ?? null}
+                  savedWalk={page.walk ?? null}
                   onClose={() => setRouteDrawOn(false)}
                 />
               )}
