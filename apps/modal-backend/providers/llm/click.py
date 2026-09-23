@@ -7,13 +7,14 @@ that monkeypatch `providers.llm._client` / `_complete_json` still intercept.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from providers import llm as _llm
 from providers.coordinate_scale import coerce_unit as _coerce_scaled_unit
 
-from .client import _coerce_scale, _system_message, _vlm_model
+from .client import _coerce_scale, _reasoning_extra, _system_message, _vlm_model
 
 
 @dataclass
@@ -276,7 +277,9 @@ async def click_to_subject(
         "clicked. Return ONE JSON object with these fields: "
         "(1) `subject` — a 2-8 word noun phrase naming the specific thing "
         "under the crosshair (ignore the crosshair itself); should make a "
-        "good next query for a visual explainer. "
+        "good next query for a visual explainer. When the crosshair is on a "
+        "text label, callout box, or legend entry, the subject is the place "
+        "or thing that text names, never the label itself. "
         "(2) `style` — a single sentence (<=30 words) describing the "
         "illustration's visual style: art medium (e.g. flat infographic, "
         "watercolor, technical line drawing, photoreal, anime, blueprint), "
@@ -362,6 +365,13 @@ async def click_to_subject(
             schema=CLICK_SCHEMA,
             schema_name="click_resolution",
             temperature=0.2,
+            # Every cold tap waits on this call. At the default effort a tap
+            # took a median 9-12 s; at "low" 6-7 s with no reasoning tokens and
+            # the same subjects (2026-09-23: 2 maps x 8 taps x 2 runs). Without
+            # reasoning the model named callout text ("Fish Market Wharf
+            # label"), which the label rule in the prompt fixes.
+            # CLICK_REASONING_EFFORT="" restores the model's default.
+            extra_body=_reasoning_extra(os.environ.get("CLICK_REASONING_EFFORT", "low").strip()) or None,
             max_tokens=_llm.REASONING_HEADROOM + 400,
             span_ctx=ctx,
         )

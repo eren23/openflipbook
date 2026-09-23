@@ -1528,3 +1528,26 @@ async def test_short_answers_leave_room_for_reasoning(monkeypatch: pytest.Monkey
     budgets = [c["max_tokens"] for c in fake.chat.completions.calls]
     assert len(budgets) == 4
     assert min(budgets) > llm.REASONING_HEADROOM
+
+
+async def test_taps_ask_openrouter_for_low_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Low effort roughly halved tap resolve time with the same subjects. Only
+    # OpenRouter gets the field, and an empty override restores the default.
+    fake = _FakeClient([_fake_response(content='{"subject": "x"}') for _ in range(3)])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+
+    async def sent() -> dict[str, Any]:
+        await llm.click_to_subject(
+            image_data_url="data:image/png;base64,AA", x_pct=0.5, y_pct=0.5,
+            parent_title="t", parent_query="q",
+        )
+        return fake.chat.completions.calls[-1].get("extra_body") or {}
+
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("CLICK_REASONING_EFFORT", raising=False)
+    assert (await sent())["reasoning"] == {"effort": "low"}
+    monkeypatch.setenv("CLICK_REASONING_EFFORT", "")
+    assert "reasoning" not in await sent()
+    monkeypatch.setenv("CLICK_REASONING_EFFORT", "low")
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    assert "reasoning" not in await sent()
