@@ -2787,7 +2787,8 @@ export default function PlayPage() {
         annotated = await annotateClickPoint(
           currentImage,
           click.x_pct,
-          click.y_pct
+          click.y_pct,
+          page.nodeId,
         );
       } catch {
         // Fall back to the raw image + numeric coords if canvas taint or
@@ -2935,6 +2936,7 @@ export default function PlayPage() {
             : null;
         condition = await buildConditionRefs({
           parentDataUrl: currentImage,
+          parentNodeId: page.nodeId,
           styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
           click: { xPct: click.x_pct, yPct: click.y_pct },
           ...(regionSpec && "box" in regionSpec
@@ -3350,7 +3352,7 @@ export default function PlayPage() {
       hudEmit("morph:start", { ox: px, oy: py, t: nowMs() });
       let annotated = currentImage;
       try {
-        annotated = await annotateStroke(currentImage, summary);
+        annotated = await annotateStroke(currentImage, summary, page.nodeId);
       } catch {
         // Fall back to the raw image; VLM still gets numeric coords.
       }

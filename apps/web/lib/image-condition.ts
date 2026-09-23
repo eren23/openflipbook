@@ -1,6 +1,7 @@
 "use client";
 
 import { clamp } from "./clamp";
+import { canvasSource } from "./image-click";
 
 /**
  * Image conditioning — build the weighted reference stack that grounds a new
@@ -111,6 +112,7 @@ export function regionUpscale(sw: number): number {
 export async function cropRegionRect(
   src: string,
   box: { x: number; y: number; w: number; h: number },
+  nodeId?: string | null,
 ): Promise<string> {
   const img = new Image();
   // `crossOrigin="anonymous"` keeps the canvas untainted when `src` is a blob on
@@ -120,7 +122,7 @@ export async function cropRegionRect(
   // set before `src`; no-op for same-origin data URLs.
   img.crossOrigin = "anonymous";
   img.decoding = "async";
-  img.src = src;
+  img.src = canvasSource(src, nodeId);
   await img.decode();
   const sx = box.x * img.naturalWidth;
   const sy = box.y * img.naturalHeight;
@@ -159,6 +161,9 @@ export async function buildConditionRefs(opts: {
   // fills the frame): no canvas pass, and the separate parent role is
   // dropped — it would be a byte-duplicate of the region.
   regionWhole?: boolean;
+  // The node `parentDataUrl` belongs to, so the crop can read a stored render
+  // same-origin (see canvasSource).
+  parentNodeId?: string | null;
 }): Promise<ConditionRefs> {
   if (opts.regionWhole && opts.parentDataUrl) {
     return orderedRefs({
@@ -179,6 +184,7 @@ export async function buildConditionRefs(opts: {
             opts.click!.yPct,
             opts.regionFrac ?? REGION_FRAC,
           ),
+        opts.parentNodeId,
       );
     } catch {
       region = null;

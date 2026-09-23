@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  annotateClickPoint,
   normalizeClickOnImage,
   objectContainRect,
   summarizeStroke,
@@ -157,5 +158,22 @@ describe("summarizeStroke", () => {
     ])!;
     expect(result.centroid.x_pct).toBe(0);
     expect(result.centroid.y_pct).toBe(0);
+  });
+});
+
+describe("annotateClickPoint on a stored render", () => {
+  it("draws from the same-origin bytes, and never sends that path upstream", async () => {
+    const loaded: string[] = [];
+    const decode = vi.spyOn(HTMLImageElement.prototype, "decode").mockImplementation(function (this: HTMLImageElement) {
+      loaded.push(this.src);
+      return Promise.resolve();
+    });
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    // No 2D context: the fallback must be the url the backend can fetch.
+    const out = await annotateClickPoint("https://pub.r2.dev/s/a.jpg", 0.5, 0.5, "n1");
+    expect(new URL(loaded[0]!).pathname).toBe("/api/image/n1");
+    expect(out).toBe("https://pub.r2.dev/s/a.jpg");
+    decode.mockRestore();
+    getContext.mockRestore();
   });
 });
