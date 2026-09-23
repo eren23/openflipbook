@@ -56,6 +56,17 @@ def test_rate_limit_by_status_and_wording() -> None:
     assert "busy" in msg2
 
 
+def test_exhausted_balance_says_top_up_not_retry() -> None:
+    # Live 2026-09-23: fal locked the account and the page said "hit retry",
+    # which cannot work until someone tops the balance up.
+    msg, _ = _friendly_error(_FalLikeError(
+        "User is locked. Reason: Exhausted balance. Top up your balance at "
+        "fal.ai/dashboard/billing.", status_code=403,
+    ))
+    assert "out of credit" in msg
+    assert "retry" not in msg.split("—")[0]
+
+
 def test_safety_block() -> None:
     msg, _ = _friendly_error(RuntimeError("rejected by content_policy check"))
     assert "safety filter" in msg

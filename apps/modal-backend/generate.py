@@ -942,6 +942,12 @@ def _friendly_error(exc: BaseException) -> tuple[str, str]:
             "The image model declined this one — hit retry or tap somewhere else.",
             detail,
         )
+    if "exhausted balance" in s or "top up your balance" in s:
+        # Retrying cannot help until the provider account is topped up.
+        return (
+            "The image service is out of credit — top up the provider balance, then retry.",
+            detail,
+        )
     if isinstance(exc, TimeoutError) or "timed out" in s or "timeout" in name.lower():
         return ("That page took too long to draw — hit retry.", detail)
     if getattr(exc, "status_code", None) == 429 or "rate limit" in s:
