@@ -8,6 +8,7 @@ import type {
   EntityUpdate,
   ExtractedEntity,
   WorldContextEntity,
+  WorldEntityGeo,
   WorldStateSnapshot,
 } from "@openflipbook/config";
 import { getDb } from "./db";
@@ -92,6 +93,10 @@ interface EntityDoc {
   // the same character. The codex panel offers a brief Undo window; otherwise
   // tombstones accumulate (a future purge sweep collapses them ~30 days out).
   deleted_at?: Date | null;
+  // The map geometry the delete removed, so an Undo can put it back. Without
+  // it an undone delete returned to the codex with no footprint at all.
+  // Server-side only: a tombstoned entity is filtered out of every snapshot.
+  deleted_geos?: WorldEntityGeo[] | null;
 }
 
 interface WorldStateDoc extends Document {
@@ -787,7 +792,9 @@ export async function renameEntity(
 
 export async function deleteEntity(
   sessionId: string,
-  entityId: string
+  entityId: string,
+  // The map geometry this delete is about to remove, kept for the Undo.
+  geos: WorldEntityGeo[] = [],
 ): Promise<WorldStateSnapshot> {
   // Soft-delete rather than splice: a hard delete causes a whack-a-mole loop
   // (extractor re-discovers the entity next page, user deletes again, repeat).
@@ -797,6 +804,7 @@ export async function deleteEntity(
     const target = entities.find((e) => e.id === entityId);
     if (target) {
       target.deleted_at = new Date();
+      target.deleted_geos = geos.length ? geos : null;
       target.updated_at = new Date();
     }
   });
@@ -806,16 +814,28 @@ export async function undoDeleteEntity(
   sessionId: string,
   entityId: string
 ): Promise<WorldStateSnapshot> {
-  // Restores a tombstoned entity. Powers the codex's "Undo" toast after
-  // a delete; also reachable via the WorldEntityMutation wire as
-  // `undo_delete`.
-  return mutate(sessionId, (entities) => {
+  return (await restoreDeletedEntity(sessionId, entityId)).snapshot;
+}
+
+/** Restore a tombstoned entity, and hand back the map geometry its delete
+ *  removed so the caller can put that back too. Powers the codex's "Undo"
+ *  toast after a delete; reachable via the WorldEntityMutation wire as
+ *  `undo_delete`. */
+export async function restoreDeletedEntity(
+  sessionId: string,
+  entityId: string
+): Promise<{ snapshot: WorldStateSnapshot; geos: WorldEntityGeo[] }> {
+  let geos: WorldEntityGeo[] = [];
+  const snapshot = await mutate(sessionId, (entities) => {
     const target = entities.find((e) => e.id === entityId);
     if (target) {
+      geos = target.deleted_geos ?? [];
       target.deleted_at = null;
+      target.deleted_geos = null;
       target.updated_at = new Date();
     }
   });
+  return { snapshot, geos };
 }
 
 export async function setEntityAppearance(

@@ -47,6 +47,7 @@ import {
   applyEntityEdits,
   deriveGeoFromExtraction,
   extractionSeedTarget,
+  geosTouchedByRemoval,
   getWorldMap,
   ladderDisagreement,
   registerPlanToImage,
@@ -54,7 +55,7 @@ import {
   upsertEntityGeos,
 } from "./world-map";
 
-const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
+const { applyGeoUpsert, removeAndReroot, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
   __test;
 
 function geo(
@@ -741,5 +742,53 @@ describe("extractionSeedTarget (where a page's detections seed geometry)", () =>
 
   it("seeds nothing when an unviewed page reads as a perspective scene", () => {
     expect(extractionSeedTarget(null, "street")).toBeNull();
+  });
+});
+
+// Deleting a place removed its geometry for good, while the codex's Undo only
+// cleared the tombstone -- so an undone delete came back in the list with no
+// footprint: gone from the overlay and the bounds, and walked straight through
+// by a route. Its interior, lifted into the root frame by the removal, stayed
+// there. What a removal touches is now kept so an undo can put it all back.
+describe("undoing a removal", () => {
+  const geo = (id: string, parent: string | null, x: number, y: number, extra: Partial<WorldEntityGeo> = {}): WorldEntityGeo =>
+    ({ id, entity_id: id.replace(/^geo_/, ""), parent_id: parent, kind: "place", label: id, pos: { x, y },
+       height: 6, footprint: { w: 8, d: 6 }, visual: "", state: {}, confidence: 1, source: "extracted",
+       updated_at: "2026-09-01T00:00:00Z", ...extra }) as WorldEntityGeo;
+  // an inn in the city, with two rooms nested in its own local frame
+  const world = [
+    geo("geo_inn", null, 30, 20, { scale: 0.5 }),
+    geo("geo_bar", "geo_inn", 4, 2, { footprint: { w: 3, d: 2 } }),
+    geo("geo_kitchen", "geo_inn", -4, 2, { footprint: { w: 2, d: 2 } }),
+    geo("geo_well", null, 60, 40),
+  ];
+
+  it("keeps the removed place and every child the removal lifts out", () => {
+    const touched = geosTouchedByRemoval(world, ["geo_inn"]).map((e) => e.id).sort();
+    expect(touched).toEqual(["geo_bar", "geo_inn", "geo_kitchen"]);
+  });
+
+  it("puts back exactly what was there: the place, and its interior nested again", () => {
+    const touched = geosTouchedByRemoval(world, ["geo_inn"]);
+    const removed = removeAndReroot(world, ["geo_inn"]);
+    // the removal really does lift the rooms out and drop the inn
+    expect(removed.find((e) => e.id === "geo_inn")).toBeUndefined();
+    expect(removed.find((e) => e.id === "geo_bar")!.parent_id).toBeNull();
+
+    const restored = applyGeoUpsert(removed, touched, "2026-09-23T00:00:00Z");
+    const byId = new Map(restored.map((e) => [e.id, e]));
+    for (const before of world) {
+      const after = byId.get(before.id)!;
+      expect(after, before.id).toBeDefined();
+      expect(after.parent_id, before.id).toBe(before.parent_id);
+      expect(after.pos, before.id).toEqual(before.pos);
+      expect(after.footprint, before.id).toEqual(before.footprint);
+      expect(after.scale, before.id).toBe(before.scale);
+    }
+    expect(restored).toHaveLength(world.length);
+  });
+
+  it("touches nothing when the place is not there", () => {
+    expect(geosTouchedByRemoval(world, ["geo_missing"])).toEqual([]);
   });
 });

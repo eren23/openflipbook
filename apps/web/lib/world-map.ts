@@ -166,6 +166,20 @@ function slugLabel(label: string): string {
 /** Remove entries and re-express orphaned survivors in the absolute frame.
  *  Resolve against the original tree before deleting ancestors; position,
  *  footprint and child-frame scale must all survive a container rollback. */
+/** The geometry a removal changes: the removed places, and every direct child
+ *  `removeAndReroot` lifts out into the root frame. Kept on the tombstone so
+ *  an undo can put back exactly what was there -- the building AND its
+ *  interior nested inside it again, not just the codex entry. */
+export function geosTouchedByRemoval(
+  entities: readonly WorldEntityGeo[],
+  removedIds: Iterable<string>,
+): WorldEntityGeo[] {
+  const removed = new Set(removedIds);
+  return entities.filter(
+    (e) => removed.has(e.id) || (e.parent_id != null && removed.has(e.parent_id)),
+  );
+}
+
 function removeAndReroot(
   entities: WorldEntityGeo[],
   removedIds: Iterable<string>,
@@ -654,6 +668,7 @@ export async function countMapEntities(
 
 export const __test = {
   applyGeoUpsert,
+  removeAndReroot,
   recomputeBounds,
   applyEntityEdit,
   blastRadius,
