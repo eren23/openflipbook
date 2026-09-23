@@ -31,15 +31,15 @@ export default defineConfig({
       include: ["lib/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}", "components/**/*.{ts,tsx}"],
       exclude: ["**/*.test.{ts,tsx}"],
       // The RATCHET: floors pinned just under the measured baseline
-      // (2026-07-20: lines/stmts 77.6, functions 80.8, branches 86.8). CI
+      // (2026-09-23: lines/stmts 81.4, functions 83.7, branches 87.8). CI
       // runs vitest with --coverage so a PR that drops below any floor
       // FAILS; a PR that raises coverage bumps the floor to the new number.
       // Never lower these to make a PR pass — that defeats the ratchet.
       thresholds: {
-        lines: 78,
-        statements: 78,
-        functions: 81,
-        branches: 86,
+        lines: 80,
+        statements: 80,
+        functions: 83,
+        branches: 87,
       },
     },
   },
