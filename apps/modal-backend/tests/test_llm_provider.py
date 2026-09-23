@@ -1507,3 +1507,24 @@ def test_world_context_clause_without_hints_adds_no_position_text() -> None:
     ]
     out = llm._format_world_context_clause(entities)
     assert "fixed position" not in out
+
+
+async def test_short_answers_leave_room_for_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Live 2026-09-23: the default model spent 381 of a 400-token budget
+    # thinking, so every tap resolved to the page title and short edits went to
+    # the image model as "In". Each budget sized for a short answer must also
+    # hold the reasoning in front of it.
+    from providers import view_estimator
+
+    fake = _FakeClient([_fake_response(content='{"subject": "x"}') for _ in range(4)])
+    monkeypatch.setattr(llm, "_client", lambda: fake)
+    await llm.click_to_subject(
+        image_data_url="data:image/png;base64,AA", x_pct=0.5, y_pct=0.5,
+        parent_title="t", parent_query="q",
+    )
+    await llm.polish_edit_instruction("make the roofs red")
+    await llm.polish_fill_description("make the roofs red")
+    await view_estimator.estimate_view(b"img")
+    budgets = [c["max_tokens"] for c in fake.chat.completions.calls]
+    assert len(budgets) == 4
+    assert min(budgets) > llm.REASONING_HEADROOM

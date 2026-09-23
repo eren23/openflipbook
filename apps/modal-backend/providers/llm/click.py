@@ -362,7 +362,7 @@ async def click_to_subject(
             schema=CLICK_SCHEMA,
             schema_name="click_resolution",
             temperature=0.2,
-            max_tokens=400,
+            max_tokens=_llm.REASONING_HEADROOM + 400,
             span_ctx=ctx,
         )
     return _build_click_resolution(parsed, x_pct=x_pct, y_pct=y_pct, fallback_subject=parent_title)

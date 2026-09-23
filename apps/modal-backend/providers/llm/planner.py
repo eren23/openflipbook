@@ -562,7 +562,7 @@ async def rewrite_motion_prompt(
                         },
                     ],
                     temperature=0.4,
-                    max_tokens=160,
+                    max_tokens=_llm.REASONING_HEADROOM + 160,
                 )
             else:
                 response = await client.chat.completions.create(
@@ -572,7 +572,7 @@ async def rewrite_motion_prompt(
                         {"role": "user", "content": user_text},
                     ],
                     temperature=0.4,
-                    max_tokens=160,
+                    max_tokens=_llm.REASONING_HEADROOM + 160,
                 )
             _log_cache_usage(ctx, response)
         rewritten = (response.choices[0].message.content or "").strip()
@@ -629,7 +629,7 @@ async def polish_edit_instruction(
                     {"role": "user", "content": user},
                 ],
                 temperature=0.3,
-                max_tokens=120,
+                max_tokens=_llm.REASONING_HEADROOM + 120,
             )
             _log_cache_usage(ctx, response)
         polished = (response.choices[0].message.content or "").strip()
@@ -701,7 +701,7 @@ async def polish_fill_description(
                     {"role": "user", "content": user},
                 ],
                 temperature=0.3,
-                max_tokens=120,
+                max_tokens=_llm.REASONING_HEADROOM + 120,
             )
             _log_cache_usage(ctx, response)
         described = (response.choices[0].message.content or "").strip()

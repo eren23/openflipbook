@@ -34,6 +34,16 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_VLM_MODEL = "google/gemini-3.7-flash"
 DEFAULT_TEXT_MODEL = "google/gemini-3.7-flash"
 
+# The default models THINK before they answer, and those reasoning tokens count
+# against max_tokens. A budget sized for the visible answer alone gets spent on
+# thinking and the answer is cut off. Measured 2026-09-23 on the live stack:
+# click_to_subject was cut off 5/5 (381 of 400 tokens were reasoning, and every
+# tap fell back to the page title), polish_edit_instruction 5/5 (the edit model
+# got "In" or "Recolor the"), estimate_view 5/10. With room, a tap reasoned for
+# up to 1666 tokens. Add this to any budget sized for the answer. It is a
+# ceiling: a call pays only for the tokens it uses.
+REASONING_HEADROOM = 4000
+
 # Built-in base URLs per provider. This is DATA, not a behavior registry —
 # every target speaks the OpenAI wire protocol, so the only thing that varies
 # is the endpoint + key. `custom` (or any unknown value) must supply
