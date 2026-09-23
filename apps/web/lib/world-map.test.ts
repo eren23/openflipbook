@@ -677,6 +677,31 @@ describe("deriveGeoFromExtraction (extraction → derived map geometry)", () => 
     expect(String(mongo.errors[0]!.message)).toMatch(/OUTWARD/);
   });
 
+  it("does not seed a place that already stands there under another codex id", async () => {
+    // Live, 2026-09-20: a scene editor minted a second codex entry per building,
+    // a re-extraction of the town map matched those, and every building got a
+    // second box at the root beside the one in the district frame.
+    await upsertEntityGeos("s12", [
+      { ...geo("geo_district", "user", 50, 30), scale: 0.005 },
+      { ...geo("geo_bell", "user", 3600, 771), parent_id: "geo_district",
+        label: "Bellfounder Hall", footprint: { w: 3960, d: 3253 } },
+    ]);
+    const bbox = { x_pct: 0.58, y_pct: 0.38, w_pct: 0.2, h_pct: 0.2 };
+    const snap = await deriveGeoFromExtraction("s12", mapView(), 16 / 9, [
+      item("gen_9", { label: "bellfounder hall ", bbox }),
+      item("inn", { label: "The Inn", bbox }),
+      item("far", { label: "Bellfounder Hall", bbox: { ...bbox, x_pct: 0.01 } }),
+    ]);
+    // Same place -> skipped; a different name there, or the same name
+    // elsewhere, is a different place and still seeds.
+    expect(snap.entities.map((e) => e.id).sort()).toEqual(["geo_bell", "geo_district", "geo_far", "geo_inn"]);
+    // Re-seeding a place's OWN geo is an update, never a duplicate.
+    const again = await deriveGeoFromExtraction("s12", mapView(), 16 / 9, [
+      item("inn", { label: "The Inn", bbox }),
+    ]);
+    expect(again.entities.filter((e) => e.id === "geo_inn")).toHaveLength(1);
+  });
+
   it("a missing parent id seeds children without learning any scale", async () => {
     const snap = await deriveGeoFromExtraction(
       "s8",

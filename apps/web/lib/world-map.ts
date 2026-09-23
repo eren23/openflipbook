@@ -509,15 +509,14 @@ export async function deriveGeoFromExtraction(
     };
   });
   if (geos.length === 0) return getWorldMap(sessionId);
+  const existing = (await getWorldMap(sessionId)).entities;
   // Seeding INTO a place's frame → LEARN that place's `scale` so its children
   // resolve INSIDE its footprint (a true absolute coordinate across the
   // universe), not summed flat into the city: scale = the parent's footprint
   // extent ÷ the interior's local extent. Best-effort + clamped so a bad extent
   // can't explode the map; the parent keeps its source authority (scale-only).
   if (parentId) {
-    const parent = (await getWorldMap(sessionId)).entities.find(
-      (e) => e.id === parentId,
-    );
+    const parent = existing.find((e) => e.id === parentId);
     if (parent) {
       const footprint = Math.max(parent.footprint.w, parent.footprint.d);
       const scale = Math.min(Math.max(footprint / localExtent(geos), 1e-3), 10);
@@ -538,7 +537,39 @@ export async function deriveGeoFromExtraction(
       if ((parent.scale ?? 1) !== scale) geos.push({ ...parent, scale });
     }
   }
-  return upsertEntityGeos(sessionId, geos);
+  const fresh = unmappedSeeds(existing, geos);
+  return fresh.length ? upsertEntityGeos(sessionId, fresh) : getWorldMap(sessionId);
+}
+
+/** Drop seeds for places the map already holds under another codex id.
+ *
+ *  One building can have two codex entries (a scene editor mints its own ids),
+ *  and an extraction may match either. Seeding by entity id then draws the
+ *  building twice: live, 2026-09-20, every building in a town got a second
+ *  box at the root beside its own in the district frame. Same kind and label,
+ *  and the seed's centre inside the standing place's footprint, both compared
+ *  in absolute coordinates, means the same place. A seed for an id already on
+ *  the map is an update and always passes. */
+export function unmappedSeeds(
+  existing: readonly WorldEntityGeo[],
+  seeds: WorldEntityGeo[],
+): WorldEntityGeo[] {
+  const seedIds = new Set(seeds.map((s) => s.id));
+  const all = [...existing.filter((e) => !seedIds.has(e.id)), ...seeds];
+  const abs = new Map(toAbsoluteEntities(all, all).map((e) => [e.id, e]));
+  const key = (s: string) => s.toLowerCase().trim();
+  const onMap = new Set(existing.map((e) => e.id));
+  const standing = all.filter((e) => !seedIds.has(e.id));
+  return seeds.filter((s) => {
+    if (onMap.has(s.id) || !key(s.label)) return true;
+    const p = abs.get(s.id)!.pos;
+    // ponytail: axis-aligned test, ignores heading; standing boxes are unrotated today.
+    return !standing.some((e) => {
+      if (e.kind !== s.kind || key(e.label) !== key(s.label)) return false;
+      const b = abs.get(e.id)!;
+      return Math.abs(p.x - b.pos.x) <= b.footprint.w / 2 && Math.abs(p.y - b.pos.y) <= b.footprint.d / 2;
+    });
+  });
 }
 
 /** Label-match two sets of places and return the position pairs to fit.
