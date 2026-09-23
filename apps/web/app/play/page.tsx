@@ -136,7 +136,7 @@ import { focusOnMap } from "@/lib/click-route";
 import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { buildOutwardContext } from "@/lib/outward-context";
-import { shouldAutoDescend } from "@/lib/descent-clip";
+import { saveDescentClip, shouldAutoDescend } from "@/lib/descent-clip";
 import { parseAzgaarExport } from "@/lib/azgaar-import";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
@@ -2042,22 +2042,28 @@ export default function PlayPage() {
               } | null;
               window.alert(j?.error ?? "publish failed");
             }
-          });
+          }).catch(() => window.alert("publish failed — check your connection"));
         },
       });
       items.push({
         label: "Unpublish session",
         onClick: () => {
           close();
+          // Said nothing either way, so a failed unpublish left the session
+          // public while the owner believed it was gone.
           void fetch(
             `/api/gallery/publish?session_id=${encodeURIComponent(publishSessionId)}`,
             { method: "DELETE" },
-          );
+          ).then(async (r) => {
+            if (r.ok) return;
+            const j = (await r.json().catch(() => null)) as { error?: string } | null;
+            window.alert(j?.error ?? "unpublish failed — the session is still public");
+          }).catch(() => window.alert("unpublish failed — the session is still public"));
         },
       });
     }
     return items;
-  }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
+  }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity, worldState.overrideEnabled]);
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
@@ -3524,11 +3530,7 @@ export default function PlayPage() {
         p.nodeId === nodeId ? { ...p, descentVideoUrl: url } : p,
       ),
     }));
-    void fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ descent_video_url: url }),
-    }).catch(() => {});
+    void saveDescentClip(nodeId, url);
   }, []);
   const descendClip = useCallback(() => {
     if (page?.descentVideoUrl) {

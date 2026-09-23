@@ -24,7 +24,9 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     promptFragment:
       "hand-carved woodcut print, high-contrast black ink on cream paper, expressive line work, visible chisel grain",
     gradient: ["#d4a574", "#8b6f47"],
-    textColor: "#2a1a0a",
+    // Light, like every other tile: the gallery paints black at 55% under
+    // each label, so a dark label there measured 1.3-1.5:1 -- unreadable.
+    textColor: "#fdf3e1",
   },
   {
     id: "cyberpunk",
@@ -40,7 +42,9 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     promptFragment:
       "early-20th-century lithograph plate, muted pastel ink, cross-hatching, slight halftone screen, aged paper",
     gradient: ["#e8c4a0", "#c8a474"],
-    textColor: "#4a2a0a",
+    // Light, like every other tile: the gallery paints black at 55% under
+    // each label, so a dark label there measured 1.3-1.5:1 -- unreadable.
+    textColor: "#fdf3e1",
   },
   {
     id: "botanical",
