@@ -10,7 +10,8 @@ interface PostedShot {
   sees?: [string, number][];
 }
 
-import { setNodeWalk } from "@/lib/db";
+import { getNode, setNodeWalk } from "@/lib/db";
+import { verifyOwnerReadonly } from "@/lib/session-owner";
 
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { inlineStoredImage } from "@/lib/r2";
@@ -72,8 +73,17 @@ export async function POST(
   // and what each shot was OF on the page the route was drawn on. The
   // keyframes are left behind deliberately -- they return as data URIs, and a
   // node row is read on every visit.
+  //
+  // Painting is open, like /api/animate; KEEPING it on a node is the owner's,
+  // like the clip save in PATCH /api/nodes/[id]. And the node id comes from
+  // the body while the session comes from the url, so the node must actually
+  // be in that session -- otherwise a caller names their own session and
+  // somebody else's node. Readonly: a walk must not claim a session, and this
+  // response is a plain Response that may not carry a Set-Cookie.
   const nodeId = typeof payload.node_id === "string" ? payload.node_id : null;
-  if (upstream.ok && nodeId) {
+  const node = upstream.ok && nodeId ? await getNode(nodeId).catch(() => null) : null;
+  const mayKeep = !!node && node.session_id === sessionId && (await verifyOwnerReadonly(sessionId)).ok;
+  if (mayKeep && nodeId) {
     try {
       const done = JSON.parse(text) as { clips?: WalkClipRow[]; spent_usd?: number };
       if (done.clips?.length) {

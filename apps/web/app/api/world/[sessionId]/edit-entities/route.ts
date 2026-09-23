@@ -8,6 +8,7 @@ import {
 } from "@/lib/world-map";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { requireOwner } from "@/lib/session-owner";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { EntityEditPlan, EntityGeoEdit, SceneView } from "@openflipbook/config";
@@ -57,6 +58,12 @@ export async function POST(req: Request, { params }: Params) {
       { status: 503 }
     );
   }
+  // This route says it mirrors the codex-override route next door, and that
+  // one checks who is asking; this one did not. A session id is in every
+  // /play?continue= link and every published session, so anyone who could
+  // see a world could rewrite its map -- and spend the planner call doing it.
+  const auth = await requireOwner(sessionId);
+  if (!auth.ok) return auth.res;
   const traceId = req.headers.get(TRACE_HEADER) || newTraceId();
   let body: EditRequestBody;
   try {
