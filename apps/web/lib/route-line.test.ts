@@ -334,9 +334,9 @@ describe("the snap-point spec", () => {
     const ground = snapGround([
       geo("River Lantern", 50, 45, 100, 6, 0.2, { visual: "slow green water" }), // south: right
       geo("Fishmarket Quay", 50, 20, 100, 4, 0.5), // north: left
-      geo("Chapel Square", 10, 30, 8, 8, 0.1), // behind
-      geo("Rope Road", 70, 30, 4, 30, 0.1), // ahead
-      geo("Far Canal", 200, 30, 4, 30, 0.1), // ahead too, but fifth
+      geo("Chapel Square", 22, 30, 8, 8, 0.1), // behind
+      geo("Rope Road", 60, 30, 4, 30, 0.1), // ahead
+      geo("Mill Lane", 64, 30, 4, 30, 0.1), // ahead too, but fifth
       geo("The Copper Kettle", 45, 30, 4, 4, 7), // a building, not ground
     ], at);
     expect(ground).toEqual([
@@ -345,6 +345,15 @@ describe("the snap-point spec", () => {
       { label: "Chapel Square", side: "behind" },
       { label: "Rope Road", side: "ahead" },
     ]);
+  });
+
+  it("leaves out districts, ground underfoot and ground out of view", () => {
+    const at = pose(40, 30, 0);
+    expect(snapGround([
+      geo("Harbour District", 50, 45, 20, 6, 0.2),
+      geo("Lantern Quay", 40, 30, 24, 20, 0.2), // the camera stands on it
+      geo("Far Canal", 200, 30, 4, 30, 0.1),
+    ], at)).toEqual([]);
   });
 
   it("a river alongside is beside you, even when its middle is far ahead", () => {

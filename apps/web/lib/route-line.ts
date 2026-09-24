@@ -463,6 +463,8 @@ export interface SnapGround {
 /** The river, the quay, the square: ground the block render leaves out, placed
  *  on the camera's left or right so the painter puts it on the right side.
  *  Nearest first, at most `max`. */
+const GROUND_RANGE = 25;
+
 export function snapGround(
   entities: readonly WorldEntityGeo[],
   observer: ObserverPose,
@@ -470,11 +472,14 @@ export function snapGround(
   max = 4,
 ): SnapGround[] {
   return groundBlocks(entities, frameParentId)
+    // A district is an area name, not something a camera sees. Ground the
+    // camera stands on has no side, and ground far off is not in the view.
+    // ponytail: fixed range in world units; scale it by the frame if regions need it.
+    .filter((e) => !/\bdistrict\b/i.test(e.label ?? "") && blockDistance(e, observer.pos) > 0 && blockDistance(e, observer.pos) <= GROUND_RANGE)
     .map((e) => {
       // Aim at the nearest edge: a river alongside is beside you even when
-      // its middle is far ahead. Standing on it, aim at its middle instead.
-      const inside = blockDistance(e, observer.pos) <= 0;
-      const to = inside ? e.pos : nearestPoint(e, observer.pos);
+      // its middle is far ahead.
+      const to = nearestPoint(e, observer.pos);
       const turn = (wrapPi(Math.atan2(to.y - observer.pos.y, to.x - observer.pos.x) - observer.gaze) * 180) / Math.PI;
       const side: SnapGround["side"] = Math.abs(turn) <= 45 ? "ahead" : Math.abs(turn) >= 135 ? "behind" : turn > 0 ? "right" : "left";
       return { e, side, far: Math.max(0, blockDistance(e, observer.pos)) };
