@@ -1,4 +1,4 @@
-"""providers/walk.py -- a drawn route painted into keyframes and clips.
+"""providers/walk.py -- a drawn route painted stop by stop into one walk.
 
 The fal boundary is mocked through providers.mock, the same gate every paid
 image op rides (#184: one ungated entry point is enough for a "mock" stack to
@@ -11,39 +11,142 @@ import pytest
 
 from providers import spend, walk
 
+_C = "data:image/png;base64,iVBORw0KGgo="
 
-def _shot(index: int, sees: list[tuple[str, float]] | None = None) -> walk.WalkShot:
+
+def _obj(label: str, h_pos: str = "center", distance: float | None = None, visual: str = "") -> walk.SeenObject:
+    return walk.SeenObject(label=label, h_pos=h_pos, distance=distance, share=0.2, visual=visual)
+
+
+def _shot(
+    index: int,
+    *,
+    forward: float | None = 10.0,
+    turn_deg: float = 0.0,
+    objects: list[walk.SeenObject] | None = None,
+) -> walk.WalkShot:
     return walk.WalkShot(
         index=index,
-        control_data_url="data:image/png;base64,iVBORw0KGgo=",
-        sees=sees if sees is not None else [("Bellfounder Hall", 0.2)],
+        control_data_url=_C,
+        objects=objects if objects is not None else [_obj("Bellfounder Hall", distance=20.0)],
+        forward=forward,
+        turn_deg=turn_deg,
     )
 
 
-def test_instruction_names_what_the_shot_sees() -> None:
-    text = walk.shot_instruction([("The Copper Kettle", 0.28), ("Lantern Watch", 0.04)])
-    assert "The Copper Kettle" in text
-    assert "Lantern Watch" in text
-    # the camera is the render's, never the model's
+class _Edits:
+    """Counts the paid edits and hands back a distinct frame for each."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def __call__(self, image_data_url: str, instruction: str, **kw: object):
+        self.calls.append({"image": image_data_url, "instruction": instruction, **kw})
+        return type("G", (), {"jpeg_bytes": f"k{len(self.calls)}".encode(), "mime_type": "image/png"})()
+
+
+@pytest.fixture
+def mocked(monkeypatch: pytest.MonkeyPatch) -> _Edits:
+    from providers import image_edit
+
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    monkeypatch.setattr(spend, "reserve", lambda *_a, **_kw: 0.0)
+    edits = _Edits()
+    monkeypatch.setattr(image_edit, "edit_image", edits)
+    return edits
+
+
+# ── the spec: exactly what the world holds, left to right ──────────────────
+
+
+def test_describe_lists_the_known_places_left_to_right_with_their_looks() -> None:
+    shot = _shot(
+        0,
+        objects=[
+            _obj("Bakery", "right", 6.0, "blue shutters"),
+            _obj("Bellfounder Hall", "far-left", 30.0, "teal slate roof"),
+            _obj("Well", "center", 12.0),
+        ],
+    )
+    text = walk.describe(shot)
+    assert text.index("Bellfounder Hall") < text.index("Well") < text.index("Bakery")
+    assert "teal slate roof" in text and "blue shutters" in text
+    assert "far left, in the distance" in text and "right, close by" in text
+
+
+def test_describe_places_the_ground_by_side_and_skips_what_is_behind() -> None:
+    shot = walk.WalkShot(
+        index=0,
+        control_data_url=_C,
+        ground=[
+            walk.GroundFeature("River Leven", "right", "slow green water"),
+            walk.GroundFeature("Market Square", "behind"),
+        ],
+    )
+    text = walk.describe(shot)
+    assert "River Leven is on your right (slow green water)" in text
+    assert "Market Square" not in text
+    assert "no named building" in text
+
+
+def test_an_old_client_still_gets_its_names_without_the_slivers() -> None:
+    shot = walk.WalkShot(index=0, control_data_url=_C, sees=[("Hall", 0.3), ("Speck", 0.002)])
+    assert [o.label for o in shot.seen()] == ["Hall"]
+
+
+def test_keyframe_names_only_the_spec_and_forbids_inventions() -> None:
+    shot = walk.WalkShot(
+        index=0, control_data_url=_C, objects=[walk.SeenObject("Bellfounder Hall", "left", color="red")]
+    )
+    text = walk.keyframe_instruction(shot, styled=True)
+    assert "Bellfounder Hall (the red block, left" in text
+    assert "block render" in text and "depth" not in text
+    # the correction has no render, so no colours
+    assert "red block" not in walk.correction_instruction(shot)
+    assert "Do not add any other named building" in text
     assert "Do not move the camera" in text
+    assert "Image 2 shows how this town is drawn" in text
+    assert "Image 2" not in walk.keyframe_instruction(_shot(0))
 
 
-def test_instruction_ignores_slivers_and_survives_an_empty_view() -> None:
-    # a place covering under a percent of frame is not what the shot is OF
-    assert "Speck" not in walk.shot_instruction([("Hall", 0.3), ("Speck", 0.002)])
-    assert walk.shot_instruction([]).count("camera") >= 1
+def test_a_leg_walks_toward_what_is_ahead_at_the_next_stop() -> None:
+    nxt = _shot(1, objects=[_obj("Well", "center"), _obj("Bakery", "far-right")])
+    prompt = walk.leg_prompt(nxt)
+    assert "toward Well" in prompt and "Bakery" in prompt
+    assert "Only the camera moves" in prompt
+
+
+# ── the move: a straight dolly, never an orbit ─────────────────────────────
+
+
+def test_push_goes_as_far_as_the_move_toward_what_is_ahead() -> None:
+    traj = walk.push(_shot(0, forward=5.0, objects=[_obj("Hall", "center", 20.0)]))
+    assert traj[0]["distance"] == 1.0
+    assert traj[-1]["distance"] == 0.75
+    # H3's azimuth orbits the centre subject, so a leg never uses it
+    assert all(p["azimuth"] == 0.0 for p in traj)
+
+
+def test_push_is_clamped_and_has_a_default() -> None:
+    past = walk.push(_shot(0, forward=50.0, objects=[_obj("Hall", "center", 10.0)]))
+    assert past[-1]["distance"] == walk.MIN_PUSH
+    nothing_ahead = walk.push(_shot(0, objects=[_obj("Hall", "far-left", 10.0)]))
+    assert nothing_ahead[-1]["distance"] == 0.5
+
+
+# ── cost ───────────────────────────────────────────────────────────────────
+
+
+def test_estimate_is_an_edit_per_stop_plus_a_leg_per_gap() -> None:
+    edit = spend.estimate_image(walk.KEYFRAME_MODEL)
+    leg = spend.estimate_video(walk.LEG_MODEL, walk.DEFAULT_CLIP_SECONDS)
+    assert walk.estimate_usd(4) == round(4 * edit + 3 * leg, 4)
+    assert walk.estimate_usd(500) == walk.estimate_usd(walk.MAX_SHOTS)
 
 
 def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
-    # Unpriced, both fell to the 0.15 image default: four times what fal bills
-    # for a keyframe, so a session cap tripped four times early.
     assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.035
-    assert spend.estimate_video("minimax/h3-max/image-to-video") == pytest.approx(0.125)
-    # longest prefix wins, so the 2.3 slugs do not collide
-    assert spend.estimate_video("fal-ai/ltx-2.3/image-to-video/fast") == 0.04
-    assert spend.estimate_video("fal-ai/ltx-2.3-quality/reference-video-to-video") == 0.12
-    # an unknown slug stays conservative rather than free
-    assert spend.estimate_video("who/knows") == spend._DEFAULT_IMAGE_PRICE
+    assert spend.estimate_video(walk.LEG_MODEL, 5) == pytest.approx(0.125)
 
 
 def test_h3_is_priced_per_second_and_turbo_is_not_priced_as_max() -> None:
@@ -56,48 +159,87 @@ def test_h3_is_priced_per_second_and_turbo_is_not_priced_as_max() -> None:
     assert spend.estimate_video(turbo, -5) == 0.0
 
 
-def test_estimate_follows_the_descent_slot_actually_configured(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FAL_DESCENT_MODEL", "minimax/h3-max/image-to-video")
-    h3 = walk.estimate_usd(5)
-    monkeypatch.setenv("FAL_DESCENT_MODEL", "fal-ai/ltx-video/image-to-video")
-    assert walk.estimate_usd(5) < h3
-
-
-def test_estimate_is_frames_plus_the_gaps_between_them() -> None:
-    one = walk.estimate_usd(1)
-    four = walk.estimate_usd(4)
-    assert one > 0
-    # 4 shots is 4 frames and 3 clips, so it costs more than 4x a lone frame
-    assert four > one * 4
-    # and the cap bounds it however many shots are asked for
-    assert walk.estimate_usd(500) == walk.estimate_usd(walk.MAX_SHOTS)
+# ── paint ──────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_paint_makes_a_keyframe_per_shot_and_a_clip_per_gap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MOCK_PROVIDERS", "1")
-    monkeypatch.setattr(spend, "reserve", lambda *_args, **_kw: 0.0)
-    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(2), _shot(4)])
-    assert len(result.keyframes) == 3
-    assert len(result.clips) == 2
+async def test_a_straight_walk_paints_once_and_pushes_between_every_stop(mocked: _Edits) -> None:
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(2), _shot(4, forward=None)])
+    assert len(mocked.calls) == 1  # one keyframe; the rest come from the legs
     assert [(c.from_shot, c.to_shot) for c in result.clips] == [(0, 2), (2, 4)]
-    assert all(k.startswith("data:") for k in result.keyframes)
+    assert [s.index for s in result.snaps] == [0, 2, 4]
+    assert len(result.keyframes) == 3
+    assert result.video_url is not None
     assert result.spent_usd > 0
 
 
 @pytest.mark.asyncio
-async def test_a_single_shot_paints_but_links_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_real_turn_cuts_to_a_new_keyframe_at_the_new_heading(mocked: _Edits) -> None:
+    shots = [_shot(0, turn_deg=90.0), _shot(1), _shot(2, forward=None)]
+    result = await walk.paint(session_id="s1", shots=shots)
+    assert len(mocked.calls) == 2
+    assert mocked.calls[1]["image"] == _C  # painted from stop 1's own render
+    assert len(result.clips) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_small_turn_does_not_cut(mocked: _Edits) -> None:
+    await walk.paint(session_id="s1", shots=[_shot(0, turn_deg=8.0), _shot(1, forward=None)])
+    assert len(mocked.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stop_under_the_gate_is_corrected_and_the_next_leg_starts_there(
+    mocked: _Edits, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MOCK_PROVIDERS", "1")
-    monkeypatch.setattr(spend, "reserve", lambda *_args, **_kw: 0.0)
-    result = await walk.paint(session_id="s1", shots=[_shot(0)])
-    assert len(result.keyframes) == 1
-    assert result.clips == []
+    async def low(_frame: str, _shot: walk.WalkShot) -> float:
+        return 3.0
+
+    monkeypatch.setattr(walk, "_conformance", low)
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1, forward=None)])
+    assert len(mocked.calls) == 2
+    assert "Keep the camera" in str(mocked.calls[1]["instruction"])
+    assert result.snaps[1].corrected and result.snaps[1].conformance == 3.0
+
+
+@pytest.mark.asyncio
+async def test_a_stop_over_the_gate_is_left_alone(
+    mocked: _Edits, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def high(_frame: str, _shot: walk.WalkShot) -> float:
+        return 8.5
+
+    monkeypatch.setattr(walk, "_conformance", high)
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1, forward=None)])
+    assert len(mocked.calls) == 1
+    assert not result.snaps[1].corrected
+
+
+@pytest.mark.asyncio
+async def test_a_judge_that_fails_leaves_the_frame_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import judge
+
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+
+    async def boom(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("judge down")
+
+    monkeypatch.setattr(judge, "score_spec_conformance", boom)
+    assert await walk._conformance(_C, _shot(0)) is None
+
+
+@pytest.mark.asyncio
+async def test_the_judges_median_decides(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import judge
+
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+    scores = iter([2.0, 9.0, 7.0])
+
+    async def score(*_a: object, **_kw: object):
+        return judge.JudgeResult(score=next(scores), rationale="", raw="")
+
+    monkeypatch.setattr(judge, "score_spec_conformance", score)
+    assert await walk._conformance(_C, _shot(0)) == 7.0
 
 
 @pytest.mark.asyncio
@@ -105,9 +247,7 @@ async def test_a_walk_refuses_nothing_and_refuses_too_much() -> None:
     with pytest.raises(ValueError):
         await walk.paint(session_id="s1", shots=[])
     with pytest.raises(ValueError):
-        await walk.paint(
-            session_id="s1", shots=[_shot(i) for i in range(walk.MAX_SHOTS + 1)]
-        )
+        await walk.paint(session_id="s1", shots=[_shot(i) for i in range(walk.MAX_SHOTS + 1)])
 
 
 @pytest.mark.asyncio
@@ -143,8 +283,16 @@ def _body(shots: int, **kw: object):
         shots=[
             generate.WalkShotBody(
                 index=i,
-                control_data_url="data:image/png;base64,iVBORw0KGgo=",
+                control_data_url=_C,
                 sees=[("Bellfounder Hall", 0.2)],
+                observer=generate.WalkObserver(x=10.0 + i, y=20.0, gaze=0.0),
+                move=generate.WalkMove(forward=5.0, turn_deg=0.0) if i < shots - 1 else None,
+                objects=[
+                    generate.WalkObject(
+                        label="Bellfounder Hall", h_pos="center", distance=20.0, visual="x" * 400
+                    )
+                ],
+                ground=[generate.WalkGround(label="River Quay", side="right")],
             )
             for i in range(shots)
         ],
@@ -168,6 +316,25 @@ async def test_estimate_only_prices_a_walk_without_painting(
 
 
 @pytest.mark.asyncio
+async def test_endpoint_hands_the_spec_to_the_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    import generate
+
+    seen: list[walk.WalkShot] = []
+
+    async def spy(**kw: object) -> walk.Walk:
+        seen.extend(kw["shots"])  # type: ignore[arg-type]
+        return walk.Walk(keyframes=[], clips=[], spent_usd=0.0)
+
+    monkeypatch.setattr(generate, "_rate_limited", lambda _req: None)
+    monkeypatch.setattr(walk, "paint", spy)
+    await generate.walk(_Req(), _body(2))
+    assert seen[0].forward == 5.0 and seen[1].forward is None
+    assert seen[0].objects[0].label == "Bellfounder Hall"
+    assert len(seen[0].objects[0].visual) == 240  # a long description is cut
+    assert seen[0].ground[0].side == "right"
+
+
+@pytest.mark.asyncio
 async def test_endpoint_paints_and_reports_what_it_spent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -183,6 +350,8 @@ async def test_endpoint_paints_and_reports_what_it_spent(
     assert len(payload["keyframes"]) == 3
     assert len(payload["clips"]) == 2
     assert payload["clips"][0]["from_shot"] == 0
+    assert [s["index"] for s in payload["snaps"]] == [0, 1, 2]
+    assert payload["video_url"]
     assert payload["spent_usd"] > 0
 
 
@@ -211,98 +380,3 @@ async def test_a_provider_failure_becomes_a_502_not_a_crash(
     monkeypatch.setattr(walk, "paint", boom)
     res = await generate.walk(_Req(), _body(2))
     assert res.status_code == 502
-
-
-# ── the grounded path (a shot that carries its map) ─────────────────────────
-
-
-def test_a_grounded_shot_is_painted_by_the_enter_model() -> None:
-    assert walk._frame_model(grounded=True) == walk.ENTER_MODEL
-    assert walk._frame_model(grounded=False) == walk.KEYFRAME_MODEL
-
-
-def test_grounded_instruction_leads_with_the_map_and_asks_for_eye_level() -> None:
-    text = walk.shot_instruction([("The Copper Kettle", 0.3)], grounded=True)
-    assert "map" in text
-    # the crop is turned so the camera faces up from its lower middle
-    assert "the way you face is UP" in text and "lower middle" in text
-    assert "eye level" in text
-    assert "The Copper Kettle" in text
-    # the whole point: it must refuse to hand back another aerial view
-    assert "not an aerial" in text
-
-
-@pytest.mark.asyncio
-async def test_a_grounded_shot_sends_the_map_and_NOT_the_box_proxy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Research 19 ran the enter model against a simplified proxy guide four
-    times and it failed architecture every run -- the guide's form came through
-    instead of the real building. A box render is that guide, so a grounded
-    shot must send the map alone."""
-    from providers import image_edit
-
-    seen: dict[str, object] = {}
-
-    async def spy(image_data_url: str, instruction: str, **kw: object):
-        seen["image"] = image_data_url
-        seen["kw"] = kw
-        return type("G", (), {"jpeg_bytes": b"x", "mime_type": "image/png"})()
-
-    monkeypatch.setattr(image_edit, "edit_image", spy)
-    monkeypatch.setattr(spend, "reserve", lambda *_a, **_kw: 0.0)
-    shot = walk.WalkShot(
-        index=0,
-        control_data_url="data:image/png;base64,CONTROL",
-        sees=[("Hall", 0.3)],
-        surroundings_data_url="data:image/png;base64,MAP",
-    )
-    await walk.paint(session_id="s1", shots=[shot])
-    assert seen["image"] == "data:image/png;base64,MAP"
-    kw = seen["kw"]
-    assert isinstance(kw, dict)
-    assert kw.get("model_override") == walk.ENTER_MODEL
-    assert kw.get("identity_ref_url") is None
-
-
-@pytest.mark.asyncio
-async def test_each_keyframe_after_the_first_carries_the_one_before(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Painted alone, neighbouring keyframes drew the same street differently,
-    and a clip between them could only jump (2026-09-20: seams measured 55;
-    chained, 5.8). The shot after the first is handed its predecessor."""
-    from providers import image_edit
-
-    calls: list[dict[str, object]] = []
-
-    async def spy(image_data_url: str, instruction: str, **kw: object):
-        calls.append({"instruction": instruction, **kw})
-        return type("G", (), {"jpeg_bytes": f"k{len(calls)}".encode(), "mime_type": "image/png"})()
-
-    monkeypatch.setattr(image_edit, "edit_image", spy)
-    monkeypatch.setattr(spend, "reserve", lambda *_a, **_kw: 0.0)
-    monkeypatch.setenv("MOCK_PROVIDERS", "1")  # the clips
-    shots = [
-        walk.WalkShot(index=i, control_data_url="data:image/png;base64,C", sees=[("Hall", 0.3)],
-                      surroundings_data_url="data:image/png;base64,MAP")
-        for i in range(3)
-    ]
-    await walk.paint(session_id="s1", shots=shots)
-    assert calls[0]["identity_ref_url"] is None
-    assert calls[1]["identity_ref_url"] == "data:image/png;base64," + __import__("base64").b64encode(b"k1").decode()
-    instruction = str(calls[1]["instruction"])
-    assert "previous stop of this walk" in instruction
-    assert "do not repeat Image 2's view" in instruction  # style, not a copy
-
-
-def test_a_clip_walks_the_street_instead_of_charging_the_facade() -> None:
-    """Asked for "a forward walk toward X", every live clip pushed into the
-    nearest facade and then snapped to the next keyframe (2026-09-24)."""
-    prompt = walk._clip_prompt([("Hall", 0.3)], [("Well", 0.2)])
-    assert "forward walk" not in prompt
-    assert "never pushes up to a wall" in prompt
-
-
-def test_a_grounded_walk_is_quoted_at_the_enter_model_price() -> None:
-    assert walk.estimate_usd(4, grounded=True) > walk.estimate_usd(4, grounded=False)

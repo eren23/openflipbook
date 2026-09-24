@@ -1187,15 +1187,52 @@ async def sse_generate(req: Request) -> Response:
     )
 
 
+class WalkObserver(BaseModel):
+    x: float
+    y: float
+    gaze: float
+    fov: float | None = None
+    eye_height: float | None = None
+    pitch: float | None = None
+
+
+class WalkMove(BaseModel):
+    # World units to the next stop, and the signed turn there (+ = right).
+    forward: float
+    turn_deg: float = 0.0
+
+
+class WalkObject(BaseModel):
+    label: str
+    color: str | None = None
+    visual: str | None = None
+    h_pos: str = "center"
+    v_pos: str | None = None
+    size: str | None = None
+    distance: float | None = None
+    height: float | None = None
+    share: float = 0.0
+
+
+class WalkGround(BaseModel):
+    label: str
+    side: str
+    visual: str | None = None
+
+
 class WalkShotBody(BaseModel):
     index: int
     control_data_url: str
     # (label, share of frame) for the places this camera sees, biggest first.
     sees: list[tuple[str, float]] = []
-    # The map around this camera. Its presence paints the shot through the
-    # enter path, so the walk shows the town the map draws rather than a
-    # competent generic street with the right geometry.
+    # Sent by old clients; the walk no longer paints from a map crop.
     surroundings_data_url: str | None = None
+    # The stop's spec, from the web's block render (all optional: an old
+    # client sends names only and still gets a walk).
+    observer: WalkObserver | None = None
+    move: WalkMove | None = None
+    objects: list[WalkObject] = []
+    ground: list[WalkGround] = []
 
 
 class WalkBody(BaseModel):
@@ -1225,14 +1262,13 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
         return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
-    grounded = any(s.surroundings_data_url for s in body.shots)
-    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded)
+    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds)
     if body.estimate_only:
         return JSONResponse(
-            {"shots": len(body.shots), "estimate_usd": estimate, "grounded": grounded},
+            {"shots": len(body.shots), "estimate_usd": estimate},
             headers={"X-Trace-Id": trace_id},
         )
-    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate, grounded=grounded)
+    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate)
     try:
         result = await walk_provider.paint(
             session_id=body.session_id,
@@ -1241,7 +1277,25 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
                     index=s.index,
                     control_data_url=s.control_data_url,
                     sees=[(label, share) for label, share in s.sees],
-                    surroundings_data_url=s.surroundings_data_url,
+                    objects=[
+                        walk_provider.SeenObject(
+                            label=o.label,
+                            h_pos=o.h_pos,
+                            distance=o.distance,
+                            share=o.share,
+                            visual=(o.visual or "")[:240],
+                            color=o.color,
+                        )
+                        for o in s.objects
+                    ],
+                    ground=[
+                        walk_provider.GroundFeature(
+                            label=g.label, side=g.side, visual=(g.visual or "")[:240]
+                        )
+                        for g in s.ground
+                    ],
+                    forward=s.move.forward if s.move else None,
+                    turn_deg=s.move.turn_deg if s.move else 0.0,
                 )
                 for s in body.shots
             ],
@@ -1271,6 +1325,16 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
             ],
             "spent_usd": result.spent_usd,
             "estimate_usd": estimate,
+            "video_url": result.video_url,
+            "snaps": [
+                {
+                    "index": s.index,
+                    "image_url": s.image_url,
+                    "corrected": s.corrected,
+                    "conformance": s.conformance,
+                }
+                for s in result.snaps
+            ],
         },
         headers={"X-Trace-Id": trace_id},
     )
