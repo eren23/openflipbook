@@ -43,6 +43,12 @@ ENTER_MODEL = "fal-ai/nano-banana-pro/edit"
 # riding the per-generation render budget.
 MAX_SHOTS = 12
 DEFAULT_CLIP_SECONDS = 5
+# Rides every shot after the first, whose Image 2 is the keyframe before it.
+CHAIN_CLAUSE = (
+    " Image 2 is the previous step of this walk, the same street a few steps back: "
+    "keep every building exactly as it is drawn there (roof colours, materials, "
+    "windows, signs) and keep its light and palette, now seen from further along."
+)
 
 
 @dataclass(frozen=True)
@@ -174,12 +180,21 @@ async def paint(
         # not bill, and a walk is many calls in a row where that adds up.
         spend.reserve(session_id, frame_usd)
         spent += frame_usd
-        async with span("walk.keyframe", shot=shot.index, grounded=grounded):
+        # Painted alone, neighbouring keyframes drew the same street in two
+        # different ways, and a clip between them could only jump (2026-09-20:
+        # seams measured 55; chained, 5.8). Hand each shot its predecessor.
+        previous = keyframes[-1] if keyframes else None
+        chained = previous is not None and image_edit.supports_identity_reference(model_override)
+        instruction = shot_instruction(shot.sees, medium, grounded)
+        if chained:
+            instruction += CHAIN_CLAUSE
+        async with span("walk.keyframe", shot=shot.index, grounded=grounded, chained=chained):
             image = await image_edit.edit_image(
                 shot.surroundings_data_url or shot.control_data_url,
-                shot_instruction(shot.sees, medium, grounded),
+                instruction,
                 model_override=model_override,
                 style_ref_url=style_ref_url,
+                identity_ref_url=previous if chained else None,
             )
         keyframes.append(encode_data_url(image.jpeg_bytes, image.mime_type))
 
@@ -211,11 +226,16 @@ async def paint(
 
 def _clip_prompt(frm: list[tuple[str, float]], to: list[tuple[str, float]]) -> str:
     """The move between two shots, named by what is gained along the way."""
+    # "A forward walk toward X" sent every live clip into the nearest facade,
+    # then snapped it onto the next keyframe (2026-09-24). Describe the walk
+    # the route makes: along the street, turning with it, landing on the view.
     ahead = [label for label, share in to if share >= 0.02][:2]
-    toward = f" toward {' and '.join(ahead)}" if ahead else ""
+    past = f" past {' and '.join(ahead)}" if ahead else ""
     return (
-        f"A slow continuous forward walk down the street{toward}, camera at eye height "
-        "gliding steadily ahead. Every building, window, shutter, awning, doorway and "
-        "the cobbles keep their exact hand-drawn appearance and do not change. One "
-        "unbroken shot at walking pace, no cuts, no people, no lettering."
+        f"The camera walks along the street{past} at a steady walking pace and eye "
+        "height, turning gradually as the street turns, and arrives exactly on the "
+        "final view. It stays in the open street, keeps its distance from the "
+        "buildings, and never pushes up to a wall, door or window. Every building, "
+        "window, shutter, awning, doorway and the cobbles keep their exact hand-drawn "
+        "appearance. One unbroken shot, no cuts, no people, no lettering."
     )

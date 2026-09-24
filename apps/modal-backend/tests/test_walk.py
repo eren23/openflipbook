@@ -250,7 +250,44 @@ async def test_a_grounded_shot_sends_the_map_and_NOT_the_box_proxy(
     kw = seen["kw"]
     assert isinstance(kw, dict)
     assert kw.get("model_override") == walk.ENTER_MODEL
-    assert "identity_ref_url" not in kw
+    assert kw.get("identity_ref_url") is None
+
+
+@pytest.mark.asyncio
+async def test_each_keyframe_after_the_first_carries_the_one_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Painted alone, neighbouring keyframes drew the same street differently,
+    and a clip between them could only jump (2026-09-20: seams measured 55;
+    chained, 5.8). The shot after the first is handed its predecessor."""
+    from providers import image_edit
+
+    calls: list[dict[str, object]] = []
+
+    async def spy(image_data_url: str, instruction: str, **kw: object):
+        calls.append({"instruction": instruction, **kw})
+        return type("G", (), {"jpeg_bytes": f"k{len(calls)}".encode(), "mime_type": "image/png"})()
+
+    monkeypatch.setattr(image_edit, "edit_image", spy)
+    monkeypatch.setattr(spend, "reserve", lambda *_a, **_kw: 0.0)
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")  # the clips
+    shots = [
+        walk.WalkShot(index=i, control_data_url="data:image/png;base64,C", sees=[("Hall", 0.3)],
+                      surroundings_data_url="data:image/png;base64,MAP")
+        for i in range(3)
+    ]
+    await walk.paint(session_id="s1", shots=shots)
+    assert calls[0]["identity_ref_url"] is None
+    assert calls[1]["identity_ref_url"] == "data:image/png;base64," + __import__("base64").b64encode(b"k1").decode()
+    assert "previous step of this walk" in str(calls[1]["instruction"])
+
+
+def test_a_clip_walks_the_street_instead_of_charging_the_facade() -> None:
+    """Asked for "a forward walk toward X", every live clip pushed into the
+    nearest facade and then snapped to the next keyframe (2026-09-24)."""
+    prompt = walk._clip_prompt([("Hall", 0.3)], [("Well", 0.2)])
+    assert "forward walk" not in prompt
+    assert "never pushes up to a wall" in prompt
 
 
 def test_a_grounded_walk_is_quoted_at_the_enter_model_price() -> None:
