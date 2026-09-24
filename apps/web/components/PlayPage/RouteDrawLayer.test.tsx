@@ -197,4 +197,32 @@ describe("RouteDrawLayer", () => {
     // no stroke drawn, and the paid walk is still there
     expect(screen.getByTestId("route-walk-status").textContent).toMatch(/1 clip · \$0\.19/);
   });
+
+  it("plays a painted walk's clips one after another", () => {
+    // Live 2026-09-24: a finished walk said "2 clips · $0.69" and nothing
+    // could play it, so a paid walk was never seen.
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [
+            { from_shot: 0, to_shot: 1, video_url: "https://v/a.mp4", model: "m", seconds: 5 },
+            { from_shot: 1, to_shot: 2, video_url: "https://v/b.mp4", model: "m", seconds: 5 },
+          ],
+          shots: [],
+          spent_usd: 0.69,
+          created_at: "2026-09-24T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    const player = screen.getByTestId("route-walk-player") as HTMLVideoElement;
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4");
+    fireEvent.ended(player);
+    expect(player.getAttribute("src")).toBe("https://v/b.mp4");
+    fireEvent.ended(player);
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4"); // loops the walk
+  });
 });

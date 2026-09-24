@@ -60,6 +60,8 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   // read the pre-commit state value and the stroke would come out empty.
   const drawingRef = useRef(false);
   const [selected, setSelected] = useState(0);
+  // Which clip of a painted walk is playing; the player steps through them.
+  const [clip, setClip] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [walk, setWalk] = useState<
     { state: "idle" } | { state: "painting"; shots: number } | { state: "done"; clips: { video_url: string }[]; usd: number } | { state: "failed"; why: string }
@@ -157,6 +159,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       });
       const body = (await res.json()) as { clips?: { video_url: string }[]; spent_usd?: number; error?: string };
       if (!res.ok || body.error) throw new Error(body.error || `walk failed (${res.status})`);
+      setClip(0);
       setWalk({ state: "done", clips: body.clips ?? [], usd: body.spent_usd ?? 0 });
     } catch (err) {
       setWalk({ state: "failed", why: err instanceof Error ? err.message : String(err) });
@@ -268,6 +271,20 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
                 ? `${walk.clips.length} clip${walk.clips.length === 1 ? "" : "s"} · $${walk.usd.toFixed(2)}`
                 : walk.why}
           </span>
+        )}
+        {walk.state === "done" && walk.clips.length > 0 && (
+          // A paid walk used to end at "2 clips · $0.69" with nothing that
+          // could play it. Play its clips back to back, looping.
+          <video
+            data-testid="route-walk-player"
+            src={walk.clips[clip % walk.clips.length]!.video_url}
+            autoPlay
+            muted
+            playsInline
+            controls
+            onEnded={() => setClip((i) => (i + 1) % walk.clips.length)}
+            className="h-[180px] w-[320px] rounded border border-[var(--color-edge)] bg-black"
+          />
         )}
         <canvas ref={canvasRef} width={PREVIEW_W} height={PREVIEW_H} aria-label="Checkpoint preview" className="h-[90px] w-[160px] rounded border border-[var(--color-edge)]" />
         <span className="flex-1" />
