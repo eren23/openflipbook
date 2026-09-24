@@ -49,41 +49,46 @@ services:
   # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
   # URLs from the published port (R2_PUBLIC_BASE_URL=http://localhost:9000/...).
   minio:
-    # MinIO pulled its images from Docker Hub, so this reads from their own
-    # registry, pinned: `latest` there has since dropped the web console.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # The service keeps its old name so R2_ENDPOINT=http://minio:9000 and
+    # everything wired to it stay the same, but it is RustFS now: MinIO
+    # withdrew its public images (quay.io answers 401, Docker Hub has none),
+    # which broke `docker compose up` and the e2e CI job (2026-09-24).
+    # RustFS is an Apache-2.0, S3-compatible store; its data format differs
+    # from MinIO's, so it uses a fresh volume.
+    image: rustfs/rustfs:1.0.0
     container_name: openflipbook-minio
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openflipbook}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      RUSTFS_ACCESS_KEY: ${MINIO_ROOT_USER:-openflipbook}
+      RUSTFS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
     ports:
       - "9000:9000" # S3 API (also the browser's image origin)
-      - "9001:9001" # web console
     volumes:
-      - minio-data:/data
+      - s3-data:/data
 
-  # One-shot: create the bucket and make it anonymously readable, so the
-  # browser's <img src> GETs aren't 403'd. Retries until Minio answers, then
-  # exits — `web` waits on it completing.
+  # One-shot: create the bucket and make its objects anonymously readable, so
+  # the browser's <img src> GETs aren't 403'd. Retries until the store
+  # answers, then exits -- `web` waits on it completing.
   minio-setup:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: amazon/aws-cli:2.37.1
     container_name: openflipbook-minio-setup
     depends_on:
       - minio
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openflipbook}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      AWS_DEFAULT_REGION: us-east-1
       R2_BUCKET: ${R2_BUCKET:-openflipbook}
     entrypoint: |
       /bin/sh -c '
-      until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
-        echo "waiting for minio..."; sleep 1;
+      s3="aws --endpoint-url http://minio:9000 s3api";
+      until $$s3 list-buckets >/dev/null 2>&1; do
+        echo "waiting for the s3 store..."; sleep 1;
       done;
-      mc mb --ignore-existing "local/$${R2_BUCKET}";
-      mc anonymous set download "local/$${R2_BUCKET}";
-      echo "minio bucket $${R2_BUCKET} ready";
+      $$s3 head-bucket --bucket "$${R2_BUCKET}" 2>/dev/null || $$s3 create-bucket --bucket "$${R2_BUCKET}";
+      policy=$$(printf "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::%s/*\"]}]}" "$${R2_BUCKET}");
+      $$s3 put-bucket-policy --bucket "$${R2_BUCKET}" --policy "$$policy";
+      echo "s3 bucket $${R2_BUCKET} ready";
       '
     restart: "no"
 
@@ -218,4 +223,4 @@ services:
 
 volumes:
   mongo-data:
-  minio-data:
+  s3-data:
