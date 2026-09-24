@@ -42,10 +42,14 @@ _GENERIC_SOURCE_LABELS = {
 }
 
 
-async def _locate_source(source_url: str | None, wide: bytes) -> dict[str, float] | None:
-    """Where the source map landed in the container (see outward_frame).
-    Best-effort: any failure only drops the rect, never the hop."""
-    from providers.outward_frame import locate_source
+async def _place_source(
+    source_url: str | None, wide: bytes, composite: bool
+) -> tuple[dict[str, float] | None, bytes | None]:
+    """Where the source map landed in the container (see outward_frame), and,
+    when `composite`, the container with the source's real pixels put back
+    there (#252). Best-effort: any failure only drops the rect or the
+    composite, never the hop."""
+    from providers.outward_frame import composite_source, locate_source
     from providers.render_loop import data_url_bytes
 
     try:
@@ -53,13 +57,17 @@ async def _locate_source(source_url: str | None, wide: bytes) -> dict[str, float
         if source is None and source_url and source_url.startswith(("http://", "https://")):
             source, _ = await image_provider._fetch_url_bytes(source_url)
         if source is None:
-            return None
+            return None, None
         rect = await _asyncio.to_thread(locate_source, source, wide)
+        log("info", "ascend.source_located" if rect else "ascend.source_unlocated", **(rect or {}))
+        if rect is None or not composite:
+            return rect, None
+        composed = await _asyncio.to_thread(composite_source, source, wide, rect)
+        log("info", "ascend.source_composited" if composed else "ascend.source_not_composited")
+        return rect, composed
     except Exception as exc:
         log("warn", "ascend.source_locate_failed", error=f"{type(exc).__name__}: {exc}")
-        return None
-    log("info", "ascend.source_located" if rect else "ascend.source_unlocated", **(rect or {}))
-    return rect
+        return None, None
 
 
 def _clean_text(value: str | None, limit: int = 800) -> str:
@@ -500,10 +508,23 @@ async def stream_ascend(
             trace_id,
         )
         return
+    # A redraw of the source re-invents it (#252: the right medium, a
+    # different city). Put the source's own pixels back where the redraw
+    # landed. Same-plane hops only (a planet around a city map is not the
+    # map), and never the outpaint, which already keeps them. Kill-switch
+    # SCALE_OUTWARD_COMPOSITE_SOURCE=false.
+    composite = (
+        same_plane
+        and not use_outpaint
+        and not strict
+        and env_flag("SCALE_OUTWARD_COMPOSITE_SOURCE", "true")
+    )
+    source_rect, composed = await _place_source(body.image, img.jpeg_bytes, composite)
+    if composed is not None:
+        img = dataclasses.replace(img, jpeg_bytes=composed, mime_type="image/jpeg")
     data_url = await _asyncio.to_thread(
         image_provider.encode_data_url, img.jpeg_bytes, img.mime_type
     )
-    source_rect = await _locate_source(body.image, img.jpeg_bytes)
     ascend_payload: GenerateAscendReadyEvent = {
         "type": "ascend_ready",
         "page_title": page_title,

@@ -205,6 +205,51 @@ async def test_ascend_reports_where_the_source_landed(monkeypatch: pytest.Monkey
     assert "source_rect" not in next(e for e in events if e["type"] == "ascend_ready")
 
 
+async def test_ascend_puts_the_real_source_back_at_the_centre(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#252: the edit redraws the source smaller at the centre, and a redraw is
+    a re-invention. The source's own pixels go back where it landed."""
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+
+    from tests.test_outward_frame import _mean_abs, _redrawn, _town
+
+    _enable(monkeypatch)
+    monkeypatch.delenv("SCALE_OUTWARD_OUTPAINT", raising=False)
+    _mock_fresh(monkeypatch)
+    source, wide = _town(21), _town(22, (1376, 768))
+    wide.paste(_redrawn(source).resize((688, 384)), (344, 192))
+
+    def jpeg(img: Image.Image) -> bytes:
+        buf = BytesIO()
+        img.save(buf, "JPEG", quality=92)
+        return buf.getvalue()
+
+    monkeypatch.setattr(
+        image_edit_mod,
+        "edit_image",
+        AsyncMock(return_value=GeneratedImage(jpeg(wide), "image/jpeg", "fal-ai/nano-banana-pro", "r")),
+    )
+    source_url = "data:image/jpeg;base64," + base64.b64encode(jpeg(source)).decode()
+
+    def centre(events: list[dict[str, Any]]) -> Image.Image:
+        ready = next(e for e in events if e["type"] == "ascend_ready")
+        img = Image.open(BytesIO(base64.b64decode(ready["image_data_url"].partition(",")[2])))
+        # the middle 40% of where the source was placed (344, 192, 688x384)
+        return img.crop((344 + 206, 192 + 115, 344 + 482, 192 + 269))
+
+    truth = source.resize((688, 384)).crop((206, 115, 482, 269))
+    got = centre(await _collect(_event_stream(_ascend_body(image=source_url), "t1")))
+    assert _mean_abs(got, truth) < 8
+
+    monkeypatch.setenv("SCALE_OUTWARD_COMPOSITE_SOURCE", "false")
+    kept = centre(await _collect(_event_stream(_ascend_body(image=source_url), "t2")))
+    assert _mean_abs(kept, truth) > 2 * _mean_abs(got, truth)  # the kill switch leaves the redraw
+
+
 async def test_ascend_edit_ref_kill_switch_reverts_to_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
