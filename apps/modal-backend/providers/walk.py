@@ -9,8 +9,7 @@ inventing a street.
 Three paid steps:
 
 * **Keyframe.** The first stop, and each stop after a real turn, is painted
-  from its block render and its spec by the edit model that holds a camera
-  (research 34: qwen-image-edit-2511, IoU 0.944, the rest re-frame).
+  from its block render and its spec (KEYFRAME_MODEL, picked by A/B).
 * **Legs.** Between stops the camera pushes straight ahead with fal's MiniMax
   H3 camera-controls. The scene stays frozen and only the camera moves, so
   the motion comes from the route, not from the model. Start/end
@@ -21,8 +20,8 @@ Three paid steps:
   leg never turns: a turn above TURN_CUT_DEG cuts to a new keyframe at the
   new heading, painted from real geometry.
 * **Snap check.** A leg's last frame is judged against the next stop's spec.
-  Under the gate it is corrected in place by the camera-holding edit model,
-  and the next leg starts from the corrected frame.
+  Under the gate it is corrected in place by the camera-holding edit model
+  (CORRECT_MODEL), and the next leg starts from the corrected frame.
 
 The legs are merged into one video by fal's ffmpeg API; the runtime image
 carries no ffmpeg.
@@ -37,8 +36,15 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
-# The one edit model measured to keep the camera it was given (research 34).
-KEYFRAME_MODEL = "fal-ai/qwen-image-edit-2511"
+# Paints a stop from its block render. A/B 2026-09-24 (4 stops, judged
+# median of 3, frames eyeballed): qwen-2511 left the coloured blocks in the
+# picture (spec 6.0, style 1.25); nano-banana-2 drifted to aerial views;
+# nano-banana-pro stayed at eye level in the town's own look (spec 8.0).
+KEYFRAME_MODEL = "fal-ai/nano-banana-pro/edit"
+# Fixes a painted frame in place. The one edit model measured to keep the
+# camera it was given (research 34: IoU 0.944), which is what a correction
+# needs: the leg that follows starts from exactly this frame.
+CORRECT_MODEL = "fal-ai/qwen-image-edit-2511"
 LEG_MODEL = "minimax/h3-max/camera-controls"
 LEG_RESOLUTION = "768P"
 EXTRACT_MODEL = "fal-ai/ffmpeg-api/extract-frame"
@@ -244,17 +250,31 @@ def _keyframe_model() -> str:
     return os.environ.get("FAL_WALK_KEYFRAME_MODEL") or KEYFRAME_MODEL
 
 
-def estimate_usd(shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS) -> float:
+def _correct_model() -> str:
+    return os.environ.get("FAL_WALK_CORRECT_MODEL") or CORRECT_MODEL
+
+
+def keyframes_for(shots: list[WalkShot]) -> int:
+    """How many stops are painted fresh: the first, and each after a real turn."""
+    return 1 + sum(_cuts_after(s) for s in shots[:-1]) if shots else 0
+
+
+def estimate_usd(
+    shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS, keyframes: int | None = None
+) -> float:
     """What a walk of this many stops can cost at most, before any of it runs.
 
-    Every stop is priced as if it needs an edit (a keyframe or a correction).
+    `keyframes` stops are painted fresh (every stop when not known); every
+    other stop is priced as if its snap check asks for a correction.
     """
     from providers import spend
 
     shots = max(0, min(shots, MAX_SHOTS))
-    frames = spend.estimate_image(_keyframe_model()) * shots
+    fresh = shots if keyframes is None else max(0, min(keyframes, shots))
+    frames = spend.estimate_image(_keyframe_model()) * fresh
+    fixes = spend.estimate_image(_correct_model()) * (shots - fresh)
     legs = spend.estimate_video(LEG_MODEL, clip_seconds) * max(0, shots - 1)
-    return round(frames + legs, 4)
+    return round(frames + fixes + legs, 4)
 
 
 async def _image_bytes(url: str) -> bytes:
@@ -343,6 +363,8 @@ async def paint(
     spent = 0.0
     model = _keyframe_model()
     edit_usd = spend.estimate_image(model)
+    fixer = _correct_model()
+    fix_usd = spend.estimate_image(fixer)
     leg_usd = spend.estimate_video(LEG_MODEL, clip_seconds)
     snaps: list[Snap] = []
     clips: list[WalkClip] = []
@@ -366,11 +388,11 @@ async def paint(
             score = await _conformance(frame, shot)
             corrected = score is not None and score < SNAP_GATE
             if corrected:
-                spend.reserve(session_id, edit_usd)
-                spent += edit_usd
+                spend.reserve(session_id, fix_usd)
+                spent += fix_usd
                 async with span("walk.correct", shot=shot.index, score=score):
                     image = await image_edit.edit_image(
-                        frame, correction_instruction(shot), model_override=model
+                        frame, correction_instruction(shot), model_override=fixer
                     )
                 frame = encode_data_url(image.jpeg_bytes, image.mime_type)
             snaps.append(

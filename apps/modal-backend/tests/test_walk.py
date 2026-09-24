@@ -139,15 +139,28 @@ def test_push_is_clamped_and_has_a_default() -> None:
 # ── cost ───────────────────────────────────────────────────────────────────
 
 
-def test_estimate_is_an_edit_per_stop_plus_a_leg_per_gap() -> None:
-    edit = spend.estimate_image(walk.KEYFRAME_MODEL)
+def test_estimate_is_the_planned_keyframes_the_fixes_and_the_legs() -> None:
+    paint = spend.estimate_image(walk.KEYFRAME_MODEL)
+    fix = spend.estimate_image(walk.CORRECT_MODEL)
     leg = spend.estimate_video(walk.LEG_MODEL, walk.DEFAULT_CLIP_SECONDS)
-    assert walk.estimate_usd(4) == round(4 * edit + 3 * leg, 4)
+    assert walk.estimate_usd(4, keyframes=2) == round(2 * paint + 2 * fix + 3 * leg, 4)
+    # not knowing the turns, every stop is priced as a fresh painting
+    assert walk.estimate_usd(4) == round(4 * paint + 3 * leg, 4)
     assert walk.estimate_usd(500) == walk.estimate_usd(walk.MAX_SHOTS)
 
 
+def test_keyframes_are_the_first_stop_and_each_after_a_real_turn() -> None:
+    shots = [_shot(0, turn_deg=5.0), _shot(1, turn_deg=-40.0), _shot(2, turn_deg=90.0), _shot(3)]
+    # stop 0, then stops 2 and 3 after the two big turns; the last stop's
+    # move goes nowhere, so its turn never cuts
+    assert walk.keyframes_for(shots) == 3
+    assert walk.keyframes_for([*shots[:3], _shot(3, turn_deg=180.0)]) == 3
+    assert walk.keyframes_for([]) == 0
+
+
 def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
-    assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.035
+    assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.15
+    assert spend.estimate_image(walk.CORRECT_MODEL) == 0.035
     assert spend.estimate_video(walk.LEG_MODEL, 5) == pytest.approx(0.125)
 
 
@@ -201,6 +214,8 @@ async def test_a_stop_under_the_gate_is_corrected_and_the_next_leg_starts_there(
     result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1, forward=None)])
     assert len(mocked.calls) == 2
     assert "Keep the camera" in str(mocked.calls[1]["instruction"])
+    assert mocked.calls[1]["model_override"] == walk.CORRECT_MODEL
+    assert mocked.calls[0]["model_override"] == walk.KEYFRAME_MODEL
     assert result.snaps[1].corrected and result.snaps[1].conformance == 3.0
 
 
@@ -314,7 +329,8 @@ async def test_estimate_only_prices_a_walk_without_painting(
     res = await generate.walk(_Req(), _body(3, estimate_only=True))
     payload = json.loads(bytes(res.body))
     assert payload["shots"] == 3
-    assert payload["estimate_usd"] == walk.estimate_usd(3)
+    # three straight stops: one painting, two possible fixes, two legs
+    assert payload["estimate_usd"] == walk.estimate_usd(3, keyframes=1)
 
 
 @pytest.mark.asyncio

@@ -1262,7 +1262,34 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
         return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
-    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds)
+    shots = [
+        walk_provider.WalkShot(
+            index=s.index,
+            control_data_url=s.control_data_url,
+            sees=[(label, share) for label, share in s.sees],
+            objects=[
+                walk_provider.SeenObject(
+                    label=o.label,
+                    h_pos=o.h_pos,
+                    distance=o.distance,
+                    share=o.share,
+                    visual=(o.visual or "")[:240],
+                    color=o.color,
+                )
+                for o in s.objects
+            ],
+            ground=[
+                walk_provider.GroundFeature(label=g.label, side=g.side, visual=(g.visual or "")[:240])
+                for g in s.ground
+            ],
+            forward=s.move.forward if s.move else None,
+            turn_deg=s.move.turn_deg if s.move else 0.0,
+        )
+        for s in body.shots
+    ]
+    estimate = walk_provider.estimate_usd(
+        len(shots), body.clip_seconds, keyframes=walk_provider.keyframes_for(shots)
+    )
     if body.estimate_only:
         return JSONResponse(
             {"shots": len(body.shots), "estimate_usd": estimate},
@@ -1272,33 +1299,7 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
     try:
         result = await walk_provider.paint(
             session_id=body.session_id,
-            shots=[
-                walk_provider.WalkShot(
-                    index=s.index,
-                    control_data_url=s.control_data_url,
-                    sees=[(label, share) for label, share in s.sees],
-                    objects=[
-                        walk_provider.SeenObject(
-                            label=o.label,
-                            h_pos=o.h_pos,
-                            distance=o.distance,
-                            share=o.share,
-                            visual=(o.visual or "")[:240],
-                            color=o.color,
-                        )
-                        for o in s.objects
-                    ],
-                    ground=[
-                        walk_provider.GroundFeature(
-                            label=g.label, side=g.side, visual=(g.visual or "")[:240]
-                        )
-                        for g in s.ground
-                    ],
-                    forward=s.move.forward if s.move else None,
-                    turn_deg=s.move.turn_deg if s.move else 0.0,
-                )
-                for s in body.shots
-            ],
+            shots=shots,
             style_ref_url=body.style_ref_url,
             medium=body.medium,
             clip_seconds=body.clip_seconds,
