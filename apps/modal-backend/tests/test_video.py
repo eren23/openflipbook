@@ -275,12 +275,14 @@ async def test_camera_controls_does_not_escape_mock_mode(monkeypatch: pytest.Mon
     subscribe.assert_not_awaited()
 
 
-def test_estimate_follows_the_tier_and_the_clamped_duration() -> None:
-    assert video.estimate_usd(5, "fast") == pytest.approx(0.0625)
-    assert video.estimate_usd(5, "balanced") == pytest.approx(0.125)
+def test_estimate_follows_the_tier_its_resolution_and_the_clamped_duration() -> None:
+    # regular per-second rates: turbo 768P $0.04, max 768P $0.08, max 1080P $0.16
+    assert video.estimate_usd(5, "fast") == pytest.approx(0.2)
+    assert video.estimate_usd(5, "balanced") == pytest.approx(0.4)
+    assert video.estimate_usd(5, "pro") == pytest.approx(0.8)
     # H3 bills at least 5 s, so a shorter ask is not a cheaper reservation.
     assert video.estimate_usd(1, "fast") == video.estimate_usd(5, "fast")
-    assert video.estimate_usd(5, "fast", descent=True) == pytest.approx(0.125)
+    assert video.estimate_usd(5, "fast", descent=True) == pytest.approx(0.4)
 
 
 # ── POST /animate reserves spend ────────────────────────────────────────────

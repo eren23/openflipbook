@@ -148,7 +148,9 @@ def estimate_usd(duration: int, tier: str | None = None, *, descent: bool = Fals
 
     model = clip_model(tier, descent=descent)
     seconds = _h3_seconds(model, duration) if is_h3(model) else duration
-    return spend.estimate_video(model, seconds)
+    # A descent rides h3_arguments' default resolution.
+    resolution = "768P" if descent else TIER_VIDEO_RESOLUTIONS[_resolve_video_tier(tier)]
+    return spend.estimate_video(model, seconds, resolution)
 
 
 async def animate_image(

@@ -38,7 +38,8 @@ def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
     # Unpriced, both fell to the 0.15 image default: four times what fal bills
     # for a keyframe, so a session cap tripped four times early.
     assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.035
-    assert spend.estimate_video("minimax/h3-max/image-to-video") == pytest.approx(0.125)
+    # 5 s at 768P, the published regular rate ($0.08/s)
+    assert spend.estimate_video("minimax/h3-max/image-to-video") == pytest.approx(0.4)
     # longest prefix wins, so the 2.3 slugs do not collide
     assert spend.estimate_video("fal-ai/ltx-2.3/image-to-video/fast") == 0.04
     assert spend.estimate_video("fal-ai/ltx-2.3-quality/reference-video-to-video") == 0.12
@@ -48,9 +49,13 @@ def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
 
 def test_h3_is_priced_per_second_and_turbo_is_not_priced_as_max() -> None:
     turbo = "minimax/h3-max-turbo/image-to-video"
-    assert spend.estimate_video(turbo, 10) == pytest.approx(0.125)
-    assert spend.estimate_video("minimax/h3-max/image-to-video", 10) == pytest.approx(0.25)
-    assert spend.estimate_video("minimax/h3-max/camera-controls", 4) == pytest.approx(0.1)
+    # fal's pricing API returns only the 480P rate; 768P and 1080P cost more
+    assert spend.estimate_video(turbo, 10, "768P") == pytest.approx(0.4)
+    assert spend.estimate_video("minimax/h3-max/image-to-video", 10, "768P") == pytest.approx(0.8)
+    assert spend.estimate_video("minimax/h3-max/image-to-video", 5, "1080P") == pytest.approx(0.8)
+    assert spend.estimate_video("minimax/h3-max/camera-controls", 4, "480P") == pytest.approx(0.2)
+    # an unknown resolution is priced at the dearest one
+    assert spend.estimate_video(turbo, 5, "4K") == pytest.approx(0.4)
     # a per-clip slug ignores the duration; a bad duration is never a refund
     assert spend.estimate_video("fal-ai/ltx-2.3/image-to-video/fast", 10) == 0.04
     assert spend.estimate_video(turbo, -5) == 0.0
