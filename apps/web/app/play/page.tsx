@@ -779,6 +779,8 @@ export default function PlayPage() {
   const streamRef = useRef<StreamClient | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus | "off">("off");
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
+  // What the clip should show. Empty = the page title, as before.
+  const [clipPrompt, setClipPrompt] = useState("");
   // After Stop, we keep `fallbackVideoUrl` around so the user can flip back
   // to the already-generated clip without re-paying for animation. `showVideo`
   // gates whether the figure renders the video or the still image.
@@ -790,6 +792,7 @@ export default function PlayPage() {
     // when the user navigates so "Replay clip" never resurfaces a stale clip.
     setFallbackVideoUrl(null);
     setShowVideo(false);
+    setClipPrompt("");
   }, [page?.imageDataUrl]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -3619,7 +3622,7 @@ export default function PlayPage() {
       streamRef.current = startLTXStream({
         wsUrl,
         video: videoRef.current,
-        prompt: page.title,
+        prompt: clipPrompt.trim() || page.title,
         startImageDataUrl: page.imageDataUrl,
         onStatus: setStreamStatus,
         onError: (msg) => setError(msg),
@@ -3635,11 +3638,11 @@ export default function PlayPage() {
     // the UI silently.
     await requestClip({
       image_data_url: page.imageDataUrl,
-      prompt: page.title,
+      prompt: clipPrompt.trim() || page.title,
       video_tier: videoTier,
       session_id: sessionId,
     });
-  }, [page, videoTier, requestClip, sessionId]);
+  }, [page, videoTier, requestClip, sessionId, clipPrompt]);
 
   return (
     <main
@@ -4412,6 +4415,19 @@ export default function PlayPage() {
                     </button>
                   ))}
                 </div>
+              )}
+              {streamStatus === "off" && (
+                <input
+                  type="text"
+                  value={clipPrompt}
+                  maxLength={400}
+                  aria-label={t.animatePrompt}
+                  placeholder={t.animatePrompt}
+                  // A new prompt means a new clip: drop the old one so the
+                  // button makes a clip instead of replaying the last.
+                  onChange={(e) => { setClipPrompt(e.target.value); setFallbackVideoUrl(null); setShowVideo(false); }}
+                  className="w-44 rounded-full border border-white/30 bg-black/60 px-3 py-1 text-xs text-white placeholder:text-white/60"
+                />
               )}
               <button
                 type="button"
