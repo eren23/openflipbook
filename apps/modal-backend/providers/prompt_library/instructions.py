@@ -691,15 +691,18 @@ def _redraw_zoom_instruction(
     text = (
         f'Redraw the reference image as a sharper, more detailed map of "{title}" '
         "at EXACTLY the same framing: the reference's four edges are your map's "
-        "edges. Keep every structure, road, shoreline, ship and label where the "
+        "edges. Keep every structure, road, shoreline and ship where the "
         "reference has it, at the same size. Add fine detail only inside what is "
         "already drawn (roof tiles, window rows, stonework, rigging, water "
         "texture). Do not add, move or enlarge anything, and show nothing beyond "
         "the reference's edges"
     )
-    named = [f.strip() for f in facts if f and f.strip()]
-    if named:
-        text += ". Named features to keep where they are: " + "; ".join(named[:8])
+    # No planner facts: they name what the planner imagines at this spot
+    # (live 2026-09-24: "Quarterdeck and Ship Helm" for a tap on a ship at
+    # sea), and asking for them pulled the render off the crop (step-in 1).
+    # Labels are left to the lettering guard in medium_lock, which may ask
+    # for none at all.
+    del facts
     text += ". " + medium_lock(style_anchor)
     if layout_clause.strip():
         text += "\n\n" + layout_clause.strip()

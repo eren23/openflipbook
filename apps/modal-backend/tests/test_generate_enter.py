@@ -1123,7 +1123,7 @@ async def test_redraw_prompt_carries_clauses_and_style(
     prompt = cont.await_args.args[1]
     assert 'sharper, more detailed map of "The Stone Castle"' in prompt
     assert "EXACTLY the same framing" in prompt
-    assert "The Inner Bailey" in prompt  # the planner's facts ride in
+    assert "The Inner Bailey" not in prompt  # facts pulled the render off the crop
     assert "hand-drawn engraving, sepia ink" in prompt  # the medium lock
     assert "garbled" in prompt  # the lettering guard
     assert "FLAT TOP-DOWN" in prompt  # the map lever rides the redraw

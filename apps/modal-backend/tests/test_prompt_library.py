@@ -132,7 +132,7 @@ def test_redraw_zoom_is_fresh_rerender_wording() -> None:
     assert "EXACTLY the same framing" in s
     assert "show nothing beyond the reference's edges" in s
     assert "individual buildings, lanes, courtyards" not in s  # invited invention
-    assert "The Shades" in s and "Unseen University" in s
+    assert "Unseen University" not in s  # planner facts pulled renders off the crop
     assert "hand-drawn engraving, sepia ink" in s  # the medium lock
     assert "photograph" in s.lower()  # the photoreal guard rides the lock
     assert "garbled" in s.lower()  # the lettering guard
