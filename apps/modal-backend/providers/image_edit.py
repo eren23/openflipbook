@@ -5,9 +5,10 @@ Mirrors the tier shape in `image.py`. Edit models on fal expect an
 data URL to fal storage first — fal's queue endpoints get unhappy with
 multi-MB inline data URLs.
 
-fal-ai doesn't publish standalone qwen-image-edit inference (only the LoRA
-trainer, as of 2026-04), so the balanced slot reuses nano-banana-pro, which
-handles both gen and edit on the same endpoint.
+Every tier must name an endpoint that takes the source image. The balanced
+slot named `fal-ai/nano-banana-pro`, the text-to-image endpoint: its input
+has no `image_urls` (fal's schema, read 2026-09-24), so each balanced edit
+was painted from the text alone and never saw its source.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from .image import (
 
 EDIT_TIER_MODELS: dict[str, str] = {
     "fast":     "fal-ai/nano-banana/edit",
-    "balanced": "fal-ai/nano-banana-pro",
+    "balanced": "fal-ai/nano-banana-pro/edit",
     "pro":      "fal-ai/flux-pro/kontext",
 }
 EDIT_TIER_ENV_KEYS: dict[str, str] = {

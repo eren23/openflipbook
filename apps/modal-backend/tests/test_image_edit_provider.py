@@ -178,3 +178,12 @@ async def test_expand_image_zoomout_centers_and_uses_real_dims(
     assert captured["args"]["original_image_size"] == [1024, 576]
     assert captured["args"]["canvas_size"] == [4096, 2304]  # 4x clamp of measured dims
     assert captured["args"]["original_image_location"] == [1536, 864]  # centered
+
+
+def test_every_edit_tier_names_an_endpoint_that_takes_the_source_image() -> None:
+    """`fal-ai/nano-banana-pro` is text-to-image: its input has no image_urls,
+    so a balanced edit sent there was painted from the text alone and never
+    saw its source (2026-09-24). Each tier must be an image-taking endpoint."""
+    for tier, slug in image_edit.EDIT_TIER_MODELS.items():
+        assert slug.endswith("/edit") or "kontext" in slug, (tier, slug)
+    assert image_edit._resolve_edit_model(None, None) == "fal-ai/nano-banana-pro/edit"
