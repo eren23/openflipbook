@@ -422,6 +422,55 @@ async def test_classic_cold_tap_classified_scene_zoom_continues(
     gen.assert_not_awaited()
 
 
+async def test_submap_without_region_role_does_not_zoom_the_whole_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Live 2026-09-23: the region crop failed (R2 sends no CORS header), so
+    # the request carried roles ["parent", "style"]. The fallback took refs[0],
+    # the WHOLE parent, as the region: the zoom re-drew the whole map and the
+    # step-in judge rejected both paid attempts. With roles, no "region" role
+    # means there is no region.
+    monkeypatch.setenv("PROGRESSIVE_DRAFT", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/flux-pro/kontext", "r3")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    gen = _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_tap_body(
+        render_mode="place_submap",
+        condition_image_urls=["data:p", "data:s"],
+        condition_roles=["parent", "style"],
+    ), "t1"))
+
+    cont.assert_not_awaited()
+    edit.assert_not_awaited()
+    gen.assert_awaited_once()
+
+
+async def test_submap_legacy_refs_without_roles_still_zoom_the_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A client that sends no roles orders the region first: keep using it.
+    _mock_plan(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/flux-pro/kontext", "r3")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_tap_body(
+        render_mode="place_submap",
+        condition_image_urls=["data:r", "data:p"],
+        condition_roles=None,
+    ), "t1"))
+
+    cont.assert_awaited_once()
+    assert cont.await_args.args[0] == "data:r"
+
+
 async def test_classic_zoom_without_region_stays_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

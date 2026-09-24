@@ -482,7 +482,11 @@ async def stream_tap(
             if i < len(roles) and roles[i] == "region":
                 region_ref = url
                 break
-        if region_ref is None:
+        # A client that sends no roles orders the region first. With roles,
+        # no "region" role means no region: refs[0] is then the WHOLE parent,
+        # and zooming it re-drew the whole map (live 2026-09-23, when the
+        # crop failed on a reopened session).
+        if region_ref is None and not roles:
             region_ref = body.condition_image_urls[0]
     if canonical_bytes is not None:
         region_ref = image_provider.encode_data_url(canonical_bytes, "image/png")

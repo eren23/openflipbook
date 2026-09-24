@@ -328,6 +328,14 @@ def _text_model(online: bool) -> str:
     return base
 
 
+def _reasoning_extra(effort: str) -> dict[str, Any]:
+    """OpenRouter's reasoning control. Only OpenRouter gets the field, because
+    another provider may reject it. An empty effort keeps the model default."""
+    if not effort or _llm_provider() != "openrouter":
+        return {}
+    return {"reasoning": {"effort": effort}}
+
+
 def _web_plugin_extra(model: str, online: bool) -> dict[str, Any]:
     if _web_search_enabled(online) and not _supports_online_suffix(model):
         return {"plugins": [{"id": "web"}]}
