@@ -7,7 +7,7 @@ import type { MapCrop, ObserverPose, StoredWalk, WorldEntityGeo, WorldVec2 } fro
 import { useContainRect } from "@/hooks/useContainRect";
 import { canvasSource } from "@/lib/image-click";
 import { renderLayoutControl } from "@/lib/layout-control";
-import { ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
+import { aheadUpTransform, paintedShots, ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
 import { toAbsoluteEntities } from "@/lib/world-geometry";
 
 interface Props {
@@ -39,10 +39,9 @@ const PREVIEW_H = 180;
 // because the edit model that holds a camera was measured square.
 const CONTROL_W = 768;
 const CONTROL_H = 768;
-// How much of the map travels with a shot: a square of world centred a little
-// ahead of the camera, so the crop holds what it is walking toward rather than
-// what is behind it.
-const SURROUNDINGS_AHEAD = 12;
+// How much of the map travels with a shot: a square of world this wide, turned
+// so the camera faces up from its lower middle (see aheadUpTransform), so the
+// crop holds what it walks toward and which side each thing is on.
 const SURROUNDINGS_SPAN = 46;
 // Fraction of the image a pointer must travel before the stroke gains a point.
 const MIN_STEP = 0.004;
@@ -92,7 +91,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
     () => (route ? routeShots(route, absolute, routeOpts) : []),
     [route, absolute, routeOpts],
   );
-  const worth = useMemo(() => shots.filter((s) => s.worth), [shots]);
+  const worth = useMemo(() => paintedShots(shots), [shots]);
 
   const accept = useCallback(async () => {
     if (!sessionId || worth.length === 0) return;
@@ -124,14 +123,12 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       const mapCtx = mapCanvas.getContext("2d");
       const surroundings = (o: ObserverPose): string | null => {
         if (!map || !mapCtx || !map.naturalWidth) return null;
-        const cx = o.pos.x + Math.cos(o.gaze) * SURROUNDINGS_AHEAD;
-        const cy = o.pos.y + Math.sin(o.gaze) * SURROUNDINGS_AHEAD;
-        const half = SURROUNDINGS_SPAN / 2;
-        const sx = ((cx - half - frame.x) / frame.w) * map.naturalWidth;
-        const sy = ((cy - half - frame.y) / frame.h) * map.naturalHeight;
-        const sw = (SURROUNDINGS_SPAN / frame.w) * map.naturalWidth;
-        const sh = (SURROUNDINGS_SPAN / frame.h) * map.naturalHeight;
-        mapCtx.drawImage(map, sx, sy, sw, sh, 0, 0, CONTROL_W, CONTROL_H);
+        mapCtx.setTransform(1, 0, 0, 1, 0, 0);
+        mapCtx.fillStyle = "#e9dfc6"; // parchment where the turned square runs past the map
+        mapCtx.fillRect(0, 0, CONTROL_W, CONTROL_H);
+        mapCtx.setTransform(...aheadUpTransform(frame, map.naturalWidth, map.naturalHeight, o, SURROUNDINGS_SPAN, CONTROL_W, CONTROL_H));
+        mapCtx.drawImage(map, 0, 0);
+        mapCtx.setTransform(1, 0, 0, 1, 0, 0);
         // The crop only makes a shot this town; without it the shot is still
         // a street with the right geometry, so never fail the walk over it.
         try {
@@ -259,7 +256,9 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
                 route.checkpoints.some((c) => c.blocked) ? `${route.checkpoints.filter((c) => c.blocked).length} have no clear spot — redraw around the buildings` : null,
                 // A camera facing open ground is not worth a generation, so
                 // say how many of them would actually be painted.
-                shots.length > worth.length ? `${shots.length - worth.length} see nothing — skipped` : null,
+                shots.some((s) => !s.worth) ? `${shots.filter((s) => !s.worth).length} see nothing — skipped` : null,
+                // Turn-on-the-spot shots fold into the one that walks on (paintedShots).
+                shots.filter((s) => s.worth).length > worth.length ? `${shots.filter((s) => s.worth).length - worth.length} turns on the spot merged` : null,
               ].filter(Boolean).join(" · ")
             : "Drag across the map to draw where the camera walks."}
         </span>

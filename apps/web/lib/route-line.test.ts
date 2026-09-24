@@ -2,7 +2,7 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
 import { blockDistance } from "./layout-control";
-import { resample, routeFromStroke, routeShots, strokeToWorld } from "./route-line";
+import { aheadUpTransform, paintedShots, resample, routeFromStroke, routeShots, strokeToWorld, type RouteShot } from "./route-line";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -265,5 +265,41 @@ describe("routeFromStroke", () => {
     }
     // the far end of the walk is past the town, looking at nothing
     expect(shots[shots.length - 1]!.worth).toBe(false);
+  });
+});
+
+describe("aheadUpTransform", () => {
+  // Source image 200x100 px showing a world frame 100x50: 2 px per unit.
+  const frame = { x: 0, y: 0, w: 100, h: 50 };
+  const apply = (m: number[], wx: number, wy: number) => {
+    const [a, b, c, d, e, f] = m as [number, number, number, number, number, number];
+    const x = (wx - frame.x) * 2, y = (wy - frame.y) * 2; // world -> source px
+    return { x: a * x + c * y + e, y: b * x + d * y + f };
+  };
+  it("puts the camera at the lower middle and what it faces straight up", () => {
+    // Live 2026-09-24: over a north-up crop the model could not tell where it
+    // stood or which side the river was on.
+    const cam = { x: 50, y: 25 }, east = 0;
+    const m = aheadUpTransform(frame, 200, 100, { pos: cam, gaze: east }, 40, 400, 400);
+    const c = apply(m, cam.x, cam.y);
+    expect(c.x).toBeCloseTo(200, 6);
+    expect(c.y).toBeCloseTo(320, 6); // 80% down
+    const ahead = apply(m, cam.x + 10, cam.y);
+    expect(ahead.x).toBeCloseTo(200, 6);
+    expect(ahead.y).toBeCloseTo(220, 6); // 10 units = 100 px straight up
+    const north = apply(m, cam.x, cam.y - 10); // north of an east-facing camera is its left
+    expect(north.x).toBeCloseTo(100, 6);
+    expect(north.y).toBeCloseTo(320, 6);
+  });
+});
+
+describe("paintedShots", () => {
+  const shot = (index: number, x: number, y: number, worth = true) =>
+    ({ index, observer: { pos: { x, y }, eye_height: 1.7, gaze: 0, fov: 1, pitch: 0 }, distance: x, reason: "turn", sees: [], built: 0.3, worth }) as RouteShot;
+  it("keeps one shot per standing spot: the walk starts facing where it goes", () => {
+    // Live 2026-09-24: three shots stood at the start, so two of five paid clips
+    // were the camera turning on the spot.
+    const out = paintedShots([shot(0, 0, 0), shot(1, 0, 0), shot(2, 0, 0), shot(3, 19, 0), shot(4, 38, 0, false), shot(5, 40, 0)]);
+    expect(out.map((s) => s.index)).toEqual([2, 3, 5]);
   });
 });
