@@ -3522,7 +3522,7 @@ export default function PlayPage() {
   }, []);
 
   // Descent clip: first frame = the parent map, last frame = this page — the
-  // tap hard-cut replayed as a real camera move (fal ltx-2.3 first+last mode).
+  // tap hard-cut replayed as a real camera move (fal H3 first+last mode).
   // A node with a STORED clip (DESCENT_AUTO or an earlier generate) replays
   // instantly instead of re-billing fal.
   const descentParentImage = page?.parentId
@@ -3554,10 +3554,11 @@ export default function PlayPage() {
       end_image_data_url: page.imageDataUrl,
       prompt: page.title,
       video_tier: videoTier,
+      session_id: sessionId,
     }).then((url) => {
       if (url && forNode) rememberDescentClip(forNode, url);
     });
-  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip]);
+  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip, sessionId]);
 
   // DESCENT_AUTO (default off): generate the arrival clip in the BACKGROUND
   // as soon as an entered page settles, so the replay is instant and the
@@ -3588,6 +3589,7 @@ export default function PlayPage() {
         end_image_data_url: page!.imageDataUrl,
         prompt: page!.title,
         video_tier: videoTier,
+        session_id: sessionId,
       }),
     })
       .then(async (res) => {
@@ -3601,6 +3603,7 @@ export default function PlayPage() {
     descentParentImage,
     videoTier,
     rememberDescentClip,
+    sessionId,
   ]);
 
   const connectStream = useCallback(async () => {
@@ -3627,15 +3630,16 @@ export default function PlayPage() {
       setStreamStatus("connecting");
       return;
     }
-    // Cheap fallback via fal. fal LTX video gen typically takes 30-90s; cap
+    // Cheap fallback via fal. fal H3 video gen typically takes 30-90s; cap
     // the wait at 3 minutes so a stuck request surfaces rather than hanging
     // the UI silently.
     await requestClip({
       image_data_url: page.imageDataUrl,
       prompt: page.title,
       video_tier: videoTier,
+      session_id: sessionId,
     });
-  }, [page, videoTier, requestClip]);
+  }, [page, videoTier, requestClip, sessionId]);
 
   return (
     <main
@@ -4388,7 +4392,7 @@ export default function PlayPage() {
                   role="group"
                   aria-label="Video quality tier"
                   className="flex items-center overflow-hidden rounded-full border border-white/30 bg-black/60 text-[10px] text-white"
-                  title="Video quality tier — fast (LTX), balanced (Wan 2.2), pro (LTX-2)"
+                  title="Video quality tier — fast (H3 turbo), balanced (H3), pro (H3 1080p)"
                 >
                   <span className="px-2 py-1 opacity-70">video</span>
                   {(["fast", "balanced", "pro"] as const).map((tier) => (
@@ -4424,7 +4428,7 @@ export default function PlayPage() {
                     ? "Replay the clip you already generated for this page (no new fal call)"
                     : process.env.NEXT_PUBLIC_LTX_WS_URL
                       ? "Stream an animated clip from Modal LTX"
-                      : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
+                      : "Generate a 5-second clip via fal MiniMax H3 (not streaming — full MP4)"
                 }
               >
                 {streamStatus === "off"
@@ -4454,7 +4458,7 @@ export default function PlayPage() {
                     type="button"
                     onClick={descendClip}
                     className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
-                    title={SPATIAL_TRANSITIONS_ENABLED ? "Play saved generated clip" : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"}
+                    title={SPATIAL_TRANSITIONS_ENABLED ? "Play saved generated clip" : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal MiniMax H3)"}
                   >
                     {SPATIAL_TRANSITIONS_ENABLED ? <span className="flex items-center gap-1"><Film size={14} /> Generated clip</span> : <>⤵ {t.descendClip}</>}
                   </button>

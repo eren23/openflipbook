@@ -72,7 +72,7 @@ Sped up 4×: landing → `"how does a steam engine work"` deeplink → two click
                                                        ▼
                                ┌────────────────────────────────────┐
                                │  optional: Animate toggle          │
-                               │  ├─ default: fal-ai/ltx-video clip │
+                               │  ├─ default: fal MiniMax H3 clip   │
                                │  └─ streaming: Modal LTX-2 via WS  │
                                │     with custom LTXF fMP4 framing  │
                                └────────────────────────────────────┘

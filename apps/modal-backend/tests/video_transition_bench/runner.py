@@ -24,9 +24,11 @@ from urllib.parse import urlparse
 import httpx
 from dotenv import load_dotenv
 
-from providers.video import DESCENT_ANIMATE_MODEL, H3_MAX_MODEL, descent_arguments
+from providers.video import H3_MAX_MODEL, LTX_DESCENT_MODEL, descent_arguments
 
 BACKEND = Path(__file__).resolve().parents[2]
+# The bench's LTX arm. The live descent slot moved to H3 after this pilot.
+DESCENT_ANIMATE_MODEL = LTX_DESCENT_MODEL
 CASES = ("fishing_lighthouse", "oasis_citadel", "harbor_lighthouse")
 MODELS = (H3_MAX_MODEL, DESCENT_ANIMATE_MODEL)
 CAP = Decimal("2.00")

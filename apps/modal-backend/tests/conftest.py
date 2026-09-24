@@ -138,6 +138,7 @@ _SCRUB = (
     "FAL_VIDEO_TIER_FAST",
     "FAL_VIDEO_TIER_BALANCED",
     "FAL_VIDEO_TIER_PRO",
+    "FAL_DESCENT_MODEL",
     "LTX_PRO_RESOLUTION",
     "WAN_RESOLUTION",
     # Map-pan expand (outpaint the world outward).

@@ -69,7 +69,7 @@ Open <http://localhost:3000/play> and type a query. The flow:
 3. Browser renders the image, POSTs to `/api/nodes` which uploads to R2 and
    writes metadata to Mongo. URL flips to `/n/<id>`.
 4. Click on the image → VLM resolves the region → next page generates.
-5. Click "Animate ▶" → Python backend calls `fal-ai/ltx-video` → returns a
+5. Click "Animate ▶" → Python backend calls fal MiniMax H3 → returns a
    5-second MP4 URL → browser plays it.
 
 ## Debug

@@ -1282,6 +1282,8 @@ class AnimateBody(BaseModel):
     duration: int = 5
     video_tier: str | None = None
     trace_id: str | None = None
+    # Whose spend caps the clip counts against. Older clients omit it.
+    session_id: str | None = None
     # Descent transition: when set, image_data_url is the PARENT map (first
     # frame) and this is the entered page (last frame) — the clip is the
     # camera move between them, not an ambient animation.
@@ -1290,7 +1292,7 @@ class AnimateBody(BaseModel):
 
 @fastapi_app.post("/animate")
 async def animate(req: Request, body: AnimateBody) -> JSONResponse:
-    """Cheap-fallback animation: delegate to fal-ai/ltx-video.
+    """Animate one page with fal (MiniMax H3 by default, see providers/video.py).
 
     Wraps fal errors into a JSON 502 with the original exception message so
     the frontend can surface the real cause (rate limit, payload too large,
@@ -1298,6 +1300,7 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
     """
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers import spend
     from providers import video as video_provider
 
     limited = _rate_limited(req)
@@ -1306,6 +1309,9 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     img_size_kb = len(body.image_data_url) // 1024
+    estimate = video_provider.estimate_usd(
+        body.duration, body.video_tier, descent=bool(body.end_image_data_url)
+    )
     log(
         "info",
         "animate.request",
@@ -1313,7 +1319,18 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
         image_kb=img_size_kb,
         duration=body.duration,
         descent=bool(body.end_image_data_url),
+        estimate_usd=estimate,
     )
+    # Reserve BEFORE submitting, as /walk does: the caps apply, and a timeout
+    # cannot prove that fal did not bill.
+    try:
+        spend.reserve(body.session_id or "_anon", estimate)
+    except RuntimeError as exc:
+        return JSONResponse(
+            {"error": str(exc), "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
     if body.end_image_data_url:
         # A descent clip carries a fixed camera brief — the ambient motion
         # rewriter would fight the first→last-frame move.
