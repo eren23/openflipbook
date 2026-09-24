@@ -44,10 +44,16 @@ ENTER_MODEL = "fal-ai/nano-banana-pro/edit"
 MAX_SHOTS = 12
 DEFAULT_CLIP_SECONDS = 5
 # Rides every shot after the first, whose Image 2 is the keyframe before it.
+# It is a reference for HOW the town is drawn, not what to draw: told to keep
+# "every building exactly as it is drawn there", live keyframes re-drew the
+# previous view, and a walk through the town kept circling one square
+# (2026-09-24).
 CHAIN_CLAUSE = (
-    " Image 2 is the previous step of this walk, the same street a few steps back: "
-    "keep every building exactly as it is drawn there (roof colours, materials, "
-    "windows, signs) and keep its light and palette, now seen from further along."
+    " Image 2 is the previous stop of this walk, some way back along the route. "
+    "Use it only for how this town is drawn: a building that appears in both views "
+    "keeps the same roof colour, materials and details, and the light and palette "
+    "match. This view has moved on: draw what stands in front of this camera now, "
+    "and do not repeat Image 2's view."
 )
 
 

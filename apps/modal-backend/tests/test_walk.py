@@ -279,7 +279,9 @@ async def test_each_keyframe_after_the_first_carries_the_one_before(
     await walk.paint(session_id="s1", shots=shots)
     assert calls[0]["identity_ref_url"] is None
     assert calls[1]["identity_ref_url"] == "data:image/png;base64," + __import__("base64").b64encode(b"k1").decode()
-    assert "previous step of this walk" in str(calls[1]["instruction"])
+    instruction = str(calls[1]["instruction"])
+    assert "previous stop of this walk" in instruction
+    assert "do not repeat Image 2's view" in instruction  # style, not a copy
 
 
 def test_a_clip_walks_the_street_instead_of_charging_the_facade() -> None:
