@@ -29,6 +29,13 @@ from providers.image import GeneratedImage  # noqa: E402
 from providers.llm import PagePlan  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _one_step_in_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Map zooms sample step-in 3 times in production; these tests script one
+    # verdict per attempt. The sampling tests unset this.
+    monkeypatch.setenv("TAP_ZOOM_MAP_SAMPLES", "1")
+
+
 async def _collect(agen: Any) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     async for chunk in agen:
@@ -582,6 +589,58 @@ async def test_map_zoom_at_the_same_framing_passes_first_time(
     )
 
     cont.assert_awaited_once()
+
+
+async def test_map_zoom_takes_the_median_of_three_step_in_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A correct map zoom sits on the judge's 4/5 boundary. One low draw must
+    # not fail it: 4, 5, 5 -> median 5 -> accepted on the first render.
+    monkeypatch.delenv("TAP_ZOOM_MAP_SAMPLES")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [4.0, 5.0, 5.0])
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    assert step.await_count == 3
+    final = next(e for e in events if e["type"] == "final")
+    assert final["view_verdict"]["same_place"] == 5.0
+
+
+async def test_close_up_zoom_still_asks_step_in_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TAP_ZOOM_MAP_SAMPLES")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [9.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                prefetched_enter_as="scene",  # -> place_closeup, the view register
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    step.assert_awaited_once()
 
 
 async def test_view_zoom_at_the_same_framing_still_retries(

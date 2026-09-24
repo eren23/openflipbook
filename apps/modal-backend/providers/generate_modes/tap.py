@@ -881,13 +881,30 @@ async def stream_tap(
                 "TAP_ZOOM_DETAIL", "true"
             )
 
+            # A correct map zoom sits on the judge's 4/5 boundary: one live
+            # render with the right framing scored 4 twice, while the bench
+            # gave the same kind of render 5 on all 18 samples. Take the
+            # median of a few calls there; close-ups keep one.
+            try:
+                samples = max(1, int(os.environ.get("TAP_ZOOM_MAP_SAMPLES", "3")))
+            except ValueError:
+                samples = 3
+            if zoom_register != "map":
+                samples = 1
+
+            async def _step_in(candidate: bytes) -> JudgeResult:
+                runs = await _asyncio.gather(
+                    *(step_in(region_bytes, candidate) for _ in range(samples))
+                )
+                return sorted(runs, key=lambda r: r.score)[len(runs) // 2]
+
             async def _verdicts(
                 img: GeneratedImage,
             ) -> tuple[JudgeResult, JudgeResult | None]:
                 if not detail_on:
-                    return await step_in(region_bytes, img.jpeg_bytes), None
+                    return await _step_in(img.jpeg_bytes), None
                 got = await _asyncio.gather(
-                    step_in(region_bytes, img.jpeg_bytes),
+                    _step_in(img.jpeg_bytes),
                     judge.score_map_legibility(img.jpeg_bytes),
                 )
                 return got[0], got[1]
