@@ -102,6 +102,24 @@ describe("keeping a painted walk", () => {
     expect(mocks.setNodeWalk).not.toHaveBeenCalled();
   });
 
+  it("passes the snap-point spec to the backend as it came", async () => {
+    const spec = {
+      observer: { x: 1, y: 2, gaze: 0.5, fov: 1.57, eye_height: 1.7, pitch: 0 },
+      move: { forward: 12, turn_deg: -30 },
+      objects: [{ label: "Hall", visual: "stone", h_pos: "left", v_pos: "mid", size: "large", distance: 4, height: 7.5, share: 0.3 }],
+      ground: [{ label: "The River", side: "right" }],
+    };
+    await walk(post({ ...body, shots: [{ ...body.shots[0], ...spec }] }), inSession("s1"));
+    const sent = JSON.parse(String(upstream.mock.calls[0]![1].body));
+    expect(sent.shots[0]).toMatchObject(spec);
+  });
+
+  it("keeps the merged video with the walk", async () => {
+    upstream.mockResolvedValue(new Response(JSON.stringify({ ...painted, video_url: "https://v/walk.mp4" }), { status: 200 }));
+    await walk(post(body), inSession("s1"));
+    expect(mocks.setNodeWalk.mock.calls[0]![1]).toMatchObject({ video_url: "https://v/walk.mp4", clips: painted.clips });
+  });
+
   it("still hands back the walk it painted, kept or not", async () => {
     mocks.verifyOwnerReadonly.mockResolvedValue(forbidden());
     const res = await walk(post(body), inSession("s1"));

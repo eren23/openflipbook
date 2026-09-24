@@ -21,20 +21,26 @@ const GROUND_LABEL = /\b(river|quay|stream|canal|lake|harbou?r|road|street|avenu
  *  re-expresses the town's local numbers under the new parent, but absolute
  *  positions stay put. */
 export function solidBlocks<T extends LayoutBlock>(entities: readonly T[], frameParentId: string | null = null): T[] {
-  return entities.filter(
-    (e) =>
-      (e.parent_id ?? null) === frameParentId &&
-      e.kind === "place" &&
-      // The 3D scene editor's copy of a town stands where the map shows none.
-      !e.scene_id &&
-      e.height > 0.5 &&
-      !GROUND_LABEL.test(e.label ?? "") &&
-      // One place with a non-finite number poisons every distance taken against
-      // it, and a NaN cost loses every comparison silently: the caller ends up
-      // with a whole route of NaN, not one bad block. Drop it here, once, for
-      // every consumer of this geometry.
-      castable(e),
-  );
+  return entities.filter((e) => inFrame(e, frameParentId) && e.height > 0.5 && !GROUND_LABEL.test(e.label ?? ""));
+}
+
+/** The ground places solidBlocks leaves out by name (the river, the quay, the
+ *  square): nothing to draw as a block, but a walk must still say where they
+ *  are, or the painter never puts the water in. */
+export function groundBlocks<T extends LayoutBlock>(entities: readonly T[], frameParentId: string | null = null): T[] {
+  return entities.filter((e) => inFrame(e, frameParentId) && GROUND_LABEL.test(e.label ?? ""));
+}
+
+function inFrame(e: LayoutBlock, frameParentId: string | null): boolean {
+  return (e.parent_id ?? null) === frameParentId &&
+    e.kind === "place" &&
+    // The 3D scene editor's copy of a town stands where the map shows none.
+    !e.scene_id &&
+    // One place with a non-finite number poisons every distance taken against
+    // it, and a NaN cost loses every comparison silently: the caller ends up
+    // with a whole route of NaN, not one bad block. Drop it here, once, for
+    // every consumer of this geometry.
+    castable(e);
 }
 
 /** A heading that is not a number would make every slab test pass. */
@@ -66,6 +72,16 @@ export function blockDistance(b: LayoutBlock, p: WorldVec2): number {
   const lx = Math.abs(dx * Math.cos(h) + dy * Math.sin(h)) - b.footprint.w / 2;
   const ly = Math.abs(-dx * Math.sin(h) + dy * Math.cos(h)) - b.footprint.d / 2;
   return lx > 0 || ly > 0 ? Math.hypot(Math.max(lx, 0), Math.max(ly, 0)) : Math.max(lx, ly);
+}
+
+/** The point of the block's footprint nearest to `p` (`p` itself when inside). */
+export function nearestPoint(b: LayoutBlock, p: WorldVec2): WorldVec2 {
+  const h = headingOf(b);
+  const c = Math.cos(h), s = Math.sin(h);
+  const dx = p.x - b.pos.x, dy = p.y - b.pos.y;
+  const lx = Math.max(-b.footprint.w / 2, Math.min(b.footprint.w / 2, dx * c + dy * s));
+  const ly = Math.max(-b.footprint.d / 2, Math.min(b.footprint.d / 2, -dx * s + dy * c));
+  return { x: b.pos.x + lx * c - ly * s, y: b.pos.y + lx * s + ly * c };
 }
 
 export const LAYOUT_COLORS: readonly (readonly [string, readonly [number, number, number]])[] = [

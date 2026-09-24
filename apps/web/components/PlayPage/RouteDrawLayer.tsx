@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 
-import type { MapCrop, ObserverPose, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+import type { MapCrop, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
-import { canvasSource } from "@/lib/image-click";
 import { renderLayoutControl } from "@/lib/layout-control";
-import { aheadUpTransform, paintedShots, ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
+import { paintedShots, ROUTE_LANE_GAP, routeFromStroke, routeShots, snapGround, snapMove, snapObjects, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
 import { toAbsoluteEntities } from "@/lib/world-geometry";
 
 interface Props {
@@ -39,10 +38,6 @@ const PREVIEW_H = 180;
 // because the edit model that holds a camera was measured square.
 const CONTROL_W = 768;
 const CONTROL_H = 768;
-// How much of the map travels with a shot: a square of world this wide, turned
-// so the camera faces up from its lower middle (see aheadUpTransform), so the
-// crop holds what it walks toward and which side each thing is on.
-const SURROUNDINGS_SPAN = 46;
 // Fraction of the image a pointer must travel before the stroke gains a point.
 const MIN_STEP = 0.004;
 
@@ -63,8 +58,14 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   const [clip, setClip] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [walk, setWalk] = useState<
-    { state: "idle" } | { state: "painting"; shots: number } | { state: "done"; clips: { video_url: string }[]; usd: number } | { state: "failed"; why: string }
-  >(savedWalk?.clips.length ? { state: "done", clips: savedWalk.clips, usd: savedWalk.spent_usd } : { state: "idle" });
+    | { state: "idle" }
+    | { state: "painting"; shots: number }
+    // `video` is the legs merged into one; older walks only have the clips.
+    | { state: "done"; clips: { video_url: string }[]; video?: string; usd: number }
+    | { state: "failed"; why: string }
+  >(savedWalk && (savedWalk.video_url || savedWalk.clips.length)
+    ? { state: "done", clips: savedWalk.clips, ...(savedWalk.video_url ? { video: savedWalk.video_url } : {}), usd: savedWalk.spent_usd }
+    : { state: "idle" });
 
   // Walking to another page keeps this layer mounted. A stroke is drawn in the
   // image's own coordinates, so carrying it over would redraw it, silently, on
@@ -104,49 +105,24 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       canvas.height = CONTROL_H;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("This browser would not give a 2d canvas");
-      // The map around a camera is what makes a shot THIS town rather than a
-      // competent generic street with the right geometry, so crop it from the
-      // page's own image when there is one to crop.
-      // A reopened page shows its R2 url, and R2 sends no CORS header: drawing
-      // that <img> taints the canvas and toDataURL throws, which failed the
-      // whole walk before it was sent (live 2026-09-24). Crop the node's own
-      // bytes, served same-origin, instead.
-      let map = imgRef?.current ?? null;
-      if (map && canvasSource(map.src, nodeId) !== map.src) {
-        const same = new Image();
-        same.src = canvasSource(map.src, nodeId);
-        map = await same.decode().then(() => same, () => null);
-      }
-      const mapCanvas = document.createElement("canvas");
-      mapCanvas.width = CONTROL_W;
-      mapCanvas.height = CONTROL_H;
-      const mapCtx = mapCanvas.getContext("2d");
-      const surroundings = (o: ObserverPose): string | null => {
-        if (!map || !mapCtx || !map.naturalWidth) return null;
-        mapCtx.setTransform(1, 0, 0, 1, 0, 0);
-        mapCtx.fillStyle = "#e9dfc6"; // parchment where the turned square runs past the map
-        mapCtx.fillRect(0, 0, CONTROL_W, CONTROL_H);
-        mapCtx.setTransform(...aheadUpTransform(frame, map.naturalWidth, map.naturalHeight, o, SURROUNDINGS_SPAN, CONTROL_W, CONTROL_H));
-        mapCtx.drawImage(map, 0, 0);
-        mapCtx.setTransform(1, 0, 0, 1, 0, 0);
-        // The crop only makes a shot this town; without it the shot is still
-        // a street with the right geometry, so never fail the walk over it.
-        try {
-          return mapCanvas.toDataURL("image/png");
-        } catch {
-          return null;
-        }
-      };
-      const payload = worth.map((s) => {
+      // Each shot is a snap point: where the camera stands, how it gets to the
+      // next one, and what the world says is in front of it -- so the painter
+      // draws those places and does not invent others. A turned map crop left
+      // it guessing, and it guessed (2026-09-24).
+      const payload = worth.map((s, i) => {
         const control = renderLayoutControl(absolute, s.observer, CONTROL_W, CONTROL_H, frameParentId, ROUTE_LANE_GAP, true);
         ctx.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), CONTROL_W, CONTROL_H), 0, 0);
-        const around = surroundings(s.observer);
+        const next = worth[i + 1];
+        const o = s.observer;
         return {
           index: s.index,
           distance: s.distance,
           control_data_url: canvas.toDataURL("image/png"),
           sees: s.sees.map((v) => [v.label, v.share]),
-          ...(around ? { surroundings_data_url: around } : {}),
+          observer: { x: o.pos.x, y: o.pos.y, gaze: o.gaze, fov: o.fov, eye_height: o.eye_height, pitch: o.pitch ?? 0 },
+          ...(next ? { move: snapMove(o, next.observer) } : {}),
+          objects: snapObjects(control.visible, absolute, o, CONTROL_W * CONTROL_H),
+          ground: snapGround(absolute, o, frameParentId),
         };
       });
       const res = await fetch(`/api/world/${encodeURIComponent(sessionId)}/walk`, {
@@ -154,14 +130,14 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shots: payload, style_ref_url: styleRefUrl, node_id: nodeId }),
       });
-      const body = (await res.json()) as { clips?: { video_url: string }[]; spent_usd?: number; error?: string };
+      const body = (await res.json()) as { clips?: { video_url: string }[]; video_url?: string; spent_usd?: number; error?: string };
       if (!res.ok || body.error) throw new Error(body.error || `walk failed (${res.status})`);
       setClip(0);
-      setWalk({ state: "done", clips: body.clips ?? [], usd: body.spent_usd ?? 0 });
+      setWalk({ state: "done", clips: body.clips ?? [], ...(body.video_url ? { video: body.video_url } : {}), usd: body.spent_usd ?? 0 });
     } catch (err) {
       setWalk({ state: "failed", why: err instanceof Error ? err.message : String(err) });
     }
-  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId, imgRef, frame]);
+  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId]);
 
   const toImage = useCallback((p: WorldVec2) => ({ x: (p.x - frame.x) / frame.w, y: (p.y - frame.y) / frame.h }), [frame]);
   const point = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -271,16 +247,18 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
                 : walk.why}
           </span>
         )}
-        {walk.state === "done" && walk.clips.length > 0 && (
+        {walk.state === "done" && (walk.video || walk.clips.length > 0) && (
           // A paid walk used to end at "2 clips · $0.69" with nothing that
-          // could play it. Play its clips back to back, looping.
+          // could play it. Play the merged walk, or else its clips back to
+          // back; either way, looping.
           <video
             data-testid="route-walk-player"
-            src={walk.clips[clip % walk.clips.length]!.video_url}
+            src={walk.video ?? walk.clips[clip % walk.clips.length]!.video_url}
             autoPlay
             muted
             playsInline
             controls
+            loop={!!walk.video}
             onEnded={() => setClip((i) => (i + 1) % walk.clips.length)}
             className="h-[180px] w-[320px] rounded border border-[var(--color-edge)] bg-black"
           />

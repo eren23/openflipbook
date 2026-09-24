@@ -89,7 +89,15 @@ describe("RouteDrawLayer", () => {
   // Accept is the paid half: the layer renders the control image for every
   // camera (the renderer is ours) and the backend only paints and links.
   it("paints only the shots worth painting, and says what it spent", async () => {
-    const posted: { shots: { index: number; distance: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
+    type Posted = {
+      index: number; distance: number; control_data_url: string; sees: [string, number][];
+      observer: { x: number; y: number; gaze: number; fov: number; eye_height: number; pitch: number };
+      move?: { forward: number; turn_deg: number };
+      objects: { label: string; visual?: string; share: number }[];
+      ground: { label: string; side: string }[];
+      surroundings_data_url?: string;
+    };
+    const posted: { shots: Posted[] }[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       posted.push(JSON.parse(String(init?.body)));
       return { ok: true, json: async () => ({ clips: [{ video_url: "a.mp4" }, { video_url: "b.mp4" }], spent_usd: 0.41 }) } as Response;
@@ -104,7 +112,12 @@ describe("RouteDrawLayer", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,AAA");
 
-    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" onClose={() => {}} />);
+    const town = [
+      geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2, { visual: "a copper-roofed inn" }),
+      TOWN[1]!,
+      geo("The River", 50, 57, 100, 4, 0.2, { visual: "slow green water" }),
+    ];
+    render(<RouteDrawLayer entities={town} frame={FRAME} sessionId="s1" onClose={() => {}} />);
     drawLine([40, 120], [360, 120]);
     const accept = screen.getByTestId("route-accept");
     expect(accept.textContent).toMatch(/^Paint \d+ shots?$/);
@@ -113,7 +126,7 @@ describe("RouteDrawLayer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toBe("/api/world/s1/walk");
     const body = posted[0]!;
-    expect(body.shots.length).toBeGreaterThan(0);
+    expect(body.shots.length).toBeGreaterThan(1);
     // every shot carries its own control image, how far along it is, and what
     // it sees -- as [label, share] pairs, the shape the backend's model takes
     for (const s of body.shots) {
@@ -123,52 +136,23 @@ describe("RouteDrawLayer", () => {
         expect(typeof seen[0]).toBe("string");
         expect(typeof seen[1]).toBe("number");
       }
+      // ...and its snap point: where the camera is and what the world has there
+      expect(s.observer).toEqual({ x: expect.any(Number), y: expect.any(Number), gaze: expect.any(Number), fov: expect.any(Number), eye_height: 1.7, pitch: 0 });
+      expect(Array.isArray(s.objects)).toBe(true);
+      // the map crop is gone: the spec says where things are
+      expect(s.surroundings_data_url).toBeUndefined();
     }
+    // a move leads to every shot but the last
+    expect(body.shots.slice(0, -1).every((s) => typeof s.move?.forward === "number" && typeof s.move.turn_deg === "number")).toBe(true);
+    expect(body.shots[body.shots.length - 1]!.move).toBeUndefined();
+    // walking east along y 30 with the river to the south: it is on the right
+    expect(body.shots[0]!.ground).toContainEqual({ label: "The River", side: "right", visual: "slow green water" });
+    const kettle = body.shots.flatMap((s) => s.objects).find((o) => o.label === "The Copper Kettle");
+    expect(kettle?.visual).toBe("a copper-roofed inn");
     expect(screen.getByTestId("route-walk-status").textContent).toMatch(/2 clips · \$0\.41/);
     vi.unstubAllGlobals();
   // Ray-casts a control image per camera: ~4s locally, 8.5s on CI under
   // coverage. vitest 2 never enforced the 5s default on it; vitest 3 does.
-  }, 30_000);
-
-  it("crops a reopened page's map from its own bytes, not the R2 <img>", async () => {
-    // Live 2026-09-24: the page showed its R2 url, drawing that <img> tainted
-    // the canvas, toDataURL threw, and the walk failed before it was sent.
-    const posted: { shots: { surroundings_data_url?: string }[] }[] = [];
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      posted.push(JSON.parse(String(init?.body)));
-      return { ok: true, json: async () => ({ clips: [], spent_usd: 0 }) } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
-    const tainted = new WeakSet<HTMLCanvasElement>();
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-      return {
-        putImageData: () => {}, clearRect: () => {}, setTransform: () => {}, fillRect: () => {},
-        drawImage: (img: HTMLImageElement) => { if (new URL(img.src).origin !== location.origin) tainted.add(this); },
-      } as unknown as CanvasRenderingContext2D;
-    } as never);
-    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(function (this: HTMLCanvasElement) {
-      if (tainted.has(this)) throw new DOMException("Tainted canvases may not be exported.", "SecurityError");
-      return "data:image/png;base64,AAA";
-    });
-    const decoded: string[] = [];
-    vi.spyOn(HTMLImageElement.prototype, "decode").mockImplementation(function (this: HTMLImageElement) {
-      decoded.push(this.src);
-      return Promise.resolve();
-    });
-    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(1376);
-    vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(768);
-    const shown = document.createElement("img");
-    shown.src = "https://pub.r2.dev/s/map.png";
-
-    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" nodeId="n1" imgRef={{ current: shown }} onClose={() => {}} />);
-    drawLine([40, 120], [360, 120]);
-    await act(async () => { fireEvent.click(screen.getByTestId("route-accept")); });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(new URL(decoded[0]!).pathname).toBe("/api/image/n1");
-    expect(posted[0]!.shots.every((s) => s.surroundings_data_url === "data:image/png;base64,AAA")).toBe(true);
-    vi.unstubAllGlobals();
   }, 30_000);
 
   it("offers nothing to paint without a session to bill", () => {
@@ -224,5 +208,26 @@ describe("RouteDrawLayer", () => {
     expect(player.getAttribute("src")).toBe("https://v/b.mp4");
     fireEvent.ended(player);
     expect(player.getAttribute("src")).toBe("https://v/a.mp4"); // loops the walk
+  });
+
+  it("plays the merged walk when there is one, not the clips", () => {
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [{ from_shot: 0, to_shot: 1, video_url: "https://v/a.mp4", model: "m", seconds: 5 }],
+          video_url: "https://v/walk.mp4",
+          shots: [],
+          spent_usd: 0.9,
+          created_at: "2026-09-24T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    const player = screen.getByTestId("route-walk-player") as HTMLVideoElement;
+    expect(player.getAttribute("src")).toBe("https://v/walk.mp4");
+    expect(player.loop).toBe(true);
   });
 });

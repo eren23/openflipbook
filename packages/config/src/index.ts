@@ -791,6 +791,8 @@ export interface WalkShotRow {
 
 export interface StoredWalk {
   clips: WalkClipRow[];
+  /** The clips merged into one video. Older walks have only the clips. */
+  video_url?: string;
   shots: WalkShotRow[];
   spent_usd: number;
   created_at: string;

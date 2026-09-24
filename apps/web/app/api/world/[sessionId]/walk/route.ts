@@ -85,10 +85,11 @@ export async function POST(
   const mayKeep = !!node && node.session_id === sessionId && (await verifyOwnerReadonly(sessionId)).ok;
   if (mayKeep && nodeId) {
     try {
-      const done = JSON.parse(text) as { clips?: WalkClipRow[]; spent_usd?: number };
-      if (done.clips?.length) {
+      const done = JSON.parse(text) as { clips?: WalkClipRow[]; video_url?: string; spent_usd?: number };
+      if (done.clips?.length || done.video_url) {
         const walk: StoredWalk = {
-          clips: done.clips,
+          clips: done.clips ?? [],
+          ...(typeof done.video_url === "string" ? { video_url: done.video_url } : {}),
           // The wire carries `sees` as [label, share] pairs, which is the
           // shape the backend's model takes. Stored rows are read back by
           // name, so name them here rather than keeping tuples in the world.

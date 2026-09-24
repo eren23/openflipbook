@@ -1,7 +1,7 @@
 import type { MapCrop, ObserverPose, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { carveLanes } from "./lane-carve";
-import { blockDistance, pointInBlock, renderLayoutControl, solidBlocks, type LayoutBlock } from "./layout-control";
+import { blockDistance, groundBlocks, nearestPoint, pointInBlock, renderLayoutControl, solidBlocks, type LayoutBlock, type LayoutVisible } from "./layout-control";
 
 // A route the user DRAWS on the map: the stroke becomes world positions, the
 // camera looks along it, and checkpoints mark where a new keyframe image is
@@ -387,32 +387,99 @@ export function paintedShots(shots: readonly RouteShot[]): RouteShot[] {
   });
 }
 
-/** The canvas transform (ctx.setTransform order: a, b, c, d, e, f) that draws
- *  a map image turned so the camera's gaze points UP, with the camera at the
- *  lower middle and `span` world units across the output. Over a north-up
- *  crop and "you are facing X", the model could not tell where it stood or
- *  which side the river was on, and drew a generic square (2026-09-24). */
-export function aheadUpTransform(
-  frame: { x: number; y: number; w: number; h: number },
-  imageW: number,
-  imageH: number,
-  observer: { pos: WorldVec2; gaze: number },
-  span: number,
-  outW: number,
-  outH: number,
-): [number, number, number, number, number, number] {
-  const kx = imageW / frame.w, ky = imageH / frame.h; // source px per world unit
-  const s = outW / span; // output px per world unit
-  const phi = -Math.PI / 2 - observer.gaze; // gaze direction -> straight up
-  const cos = Math.cos(phi), sin = Math.sin(phi);
-  const tx = outW / 2, ty = outH * 0.8;
-  const ox = frame.x - observer.pos.x, oy = frame.y - observer.pos.y;
-  return [
-    (s * cos) / kx,
-    (s * sin) / kx,
-    (-s * sin) / ky,
-    (s * cos) / ky,
-    tx + s * (cos * ox - sin * oy),
-    ty + s * (sin * ox + cos * oy),
-  ];
+// The snap-point spec: what the walk's painter is told at each painted shot.
+// A painted map crop left the model to guess where it stood and what was
+// there, and it made things up (2026-09-24). The world already knows both.
+
+/** How the camera gets from one painted shot to the next. */
+export interface SnapMove {
+  /** World units between the two standing spots. */
+  forward: number;
+  /** Change of gaze, degrees in (-180, 180]. Map y grows DOWN, so a growing
+   *  gaze angle turns clockwise seen from above: + is a turn to the right. */
+  turn_deg: number;
+}
+
+export function snapMove(from: ObserverPose, to: ObserverPose): SnapMove {
+  const turn = (wrapPi(to.gaze - from.gaze) * 180) / Math.PI;
+  return { forward: dist(from.pos, to.pos), turn_deg: turn <= -180 ? turn + 360 : turn };
+}
+
+export interface SnapObject {
+  label: string;
+  visual?: string;
+  h_pos: string;
+  v_pos: string;
+  size: string;
+  /** World units from the camera to the place's footprint. */
+  distance: number;
+  height?: number;
+  /** Share of the frame's pixels. */
+  share: number;
+}
+
+/** Below this share of the frame a place is a sliver, not something to name. */
+export const SNAP_MIN_SHARE = 0.005;
+const VISUAL_MAX = 240;
+
+const clip = (text: string) => (text.length > VISUAL_MAX ? `${text.slice(0, VISUAL_MAX - 1)}…` : text);
+
+/** What a control render shows, left to right, with what the world says each
+ *  place looks like. `framePixels` is the render's width x height. */
+export function snapObjects(
+  visible: readonly LayoutVisible[],
+  entities: readonly WorldEntityGeo[],
+  observer: ObserverPose,
+  framePixels: number,
+): SnapObject[] {
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  return visible
+    .filter((v) => v.pixels / framePixels >= SNAP_MIN_SHARE)
+    .sort((a, b) => a.x_pct - b.x_pct)
+    .map((v) => {
+      const e = byId.get(v.id);
+      return {
+        label: v.label,
+        ...(e?.visual ? { visual: clip(e.visual) } : {}),
+        h_pos: v.h_pos,
+        v_pos: v.v_pos,
+        size: v.size,
+        // ponytail: the stored footprint, not the lane-carved one the render
+        // draws; they differ by a unit or two, and a camera inside the stored
+        // one reads as 0.
+        distance: e ? Math.max(0, blockDistance(e, observer.pos)) : v.depth,
+        ...(e ? { height: e.height } : {}),
+        share: v.pixels / framePixels,
+      };
+    });
+}
+
+export interface SnapGround {
+  label: string;
+  side: "left" | "right" | "ahead" | "behind";
+  visual?: string;
+}
+
+/** The river, the quay, the square: ground the block render leaves out, placed
+ *  on the camera's left or right so the painter puts it on the right side.
+ *  Nearest first, at most `max`. */
+export function snapGround(
+  entities: readonly WorldEntityGeo[],
+  observer: ObserverPose,
+  frameParentId: string | null = null,
+  max = 4,
+): SnapGround[] {
+  return groundBlocks(entities, frameParentId)
+    .map((e) => {
+      // Aim at the nearest edge: a river alongside is beside you even when
+      // its middle is far ahead. Standing on it, aim at its middle instead.
+      const inside = blockDistance(e, observer.pos) <= 0;
+      const to = inside ? e.pos : nearestPoint(e, observer.pos);
+      const turn = (wrapPi(Math.atan2(to.y - observer.pos.y, to.x - observer.pos.x) - observer.gaze) * 180) / Math.PI;
+      const side: SnapGround["side"] = Math.abs(turn) <= 45 ? "ahead" : Math.abs(turn) >= 135 ? "behind" : turn > 0 ? "right" : "left";
+      return { e, side, far: Math.max(0, blockDistance(e, observer.pos)) };
+    })
+    .sort((a, b) => a.far - b.far)
+    .slice(0, max)
+    .map(({ e, side }) => ({ label: e.label, side, ...(e.visual ? { visual: clip(e.visual) } : {}) }));
 }

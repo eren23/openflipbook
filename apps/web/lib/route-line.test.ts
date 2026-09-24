@@ -1,8 +1,8 @@
 import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
-import { blockDistance } from "./layout-control";
-import { aheadUpTransform, paintedShots, resample, routeFromStroke, routeShots, strokeToWorld, type RouteShot } from "./route-line";
+import { blockDistance, renderLayoutControl, type LayoutVisible } from "./layout-control";
+import { paintedShots, resample, routeFromStroke, routeShots, snapGround, snapMove, snapObjects, strokeToWorld, type RouteShot } from "./route-line";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -268,31 +268,6 @@ describe("routeFromStroke", () => {
   });
 });
 
-describe("aheadUpTransform", () => {
-  // Source image 200x100 px showing a world frame 100x50: 2 px per unit.
-  const frame = { x: 0, y: 0, w: 100, h: 50 };
-  const apply = (m: number[], wx: number, wy: number) => {
-    const [a, b, c, d, e, f] = m as [number, number, number, number, number, number];
-    const x = (wx - frame.x) * 2, y = (wy - frame.y) * 2; // world -> source px
-    return { x: a * x + c * y + e, y: b * x + d * y + f };
-  };
-  it("puts the camera at the lower middle and what it faces straight up", () => {
-    // Live 2026-09-24: over a north-up crop the model could not tell where it
-    // stood or which side the river was on.
-    const cam = { x: 50, y: 25 }, east = 0;
-    const m = aheadUpTransform(frame, 200, 100, { pos: cam, gaze: east }, 40, 400, 400);
-    const c = apply(m, cam.x, cam.y);
-    expect(c.x).toBeCloseTo(200, 6);
-    expect(c.y).toBeCloseTo(320, 6); // 80% down
-    const ahead = apply(m, cam.x + 10, cam.y);
-    expect(ahead.x).toBeCloseTo(200, 6);
-    expect(ahead.y).toBeCloseTo(220, 6); // 10 units = 100 px straight up
-    const north = apply(m, cam.x, cam.y - 10); // north of an east-facing camera is its left
-    expect(north.x).toBeCloseTo(100, 6);
-    expect(north.y).toBeCloseTo(320, 6);
-  });
-});
-
 describe("paintedShots", () => {
   const shot = (index: number, x: number, y: number, worth = true) =>
     ({ index, observer: { pos: { x, y }, eye_height: 1.7, gaze: 0, fov: 1, pitch: 0 }, distance: x, reason: "turn", sees: [], built: 0.3, worth }) as RouteShot;
@@ -301,5 +276,79 @@ describe("paintedShots", () => {
     // were the camera turning on the spot.
     const out = paintedShots([shot(0, 0, 0), shot(1, 0, 0), shot(2, 0, 0), shot(3, 19, 0), shot(4, 38, 0, false), shot(5, 40, 0)]);
     expect(out.map((s) => s.index)).toEqual([2, 3, 5]);
+  });
+});
+
+describe("the snap-point spec", () => {
+  const pose = (x: number, y: number, gaze: number) => ({ pos: { x, y }, eye_height: 1.7, gaze, fov: Math.PI / 2, pitch: 0 });
+
+  it("a turn to the right is positive: map y grows down", () => {
+    // Walking east (+x), then facing south, which is DOWN the map: seen from
+    // above with north up, that is clockwise, a turn to the right.
+    const move = snapMove(pose(10, 30, 0), pose(22, 35, Math.PI / 2));
+    expect(move.turn_deg).toBeCloseTo(90, 9);
+    expect(move.forward).toBeCloseTo(13, 9);
+    expect(snapMove(pose(0, 0, 0), pose(0, 0, -Math.PI / 2)).turn_deg).toBeCloseTo(-90, 9);
+  });
+
+  it("takes the short way round, in (-180, 180]", () => {
+    const deg = Math.PI / 180;
+    expect(snapMove(pose(0, 0, 170 * deg), pose(0, 0, -170 * deg)).turn_deg).toBeCloseTo(20, 9);
+    expect(snapMove(pose(0, 0, 0), pose(0, 0, Math.PI)).turn_deg).toBeCloseTo(180, 9);
+    expect(snapMove(pose(0, 0, 0), pose(0, 0, -Math.PI)).turn_deg).toBeCloseTo(180, 9);
+  });
+
+  it("names what the camera sees, left to right, with what the world says it looks like", () => {
+    // Facing east: north (smaller y) is on the camera's left.
+    const town = [
+      geo("Bellfounder Hall", 60, 40, 10, 10, 7.5, { visual: "a squat bell foundry" }),
+      geo("The Copper Kettle", 60, 20, 10, 10, 7.2, { visual: "x".repeat(400) }),
+      geo("River Quay", 60, 30, 100, 2, 1), // ground: never a block
+    ];
+    const at = pose(40, 30, 0);
+    const control = renderLayoutControl(town, at, 160, 96);
+    const objects = snapObjects(control.visible, town, at, 160 * 96);
+    expect(objects.map((o) => o.label)).toEqual(["The Copper Kettle", "Bellfounder Hall"]);
+    const [kettle, hall] = objects;
+    expect(kettle!.h_pos).toMatch(/left/);
+    expect(hall!.h_pos).toMatch(/right/);
+    expect(hall!.visual).toBe("a squat bell foundry");
+    expect(kettle!.visual!.length).toBe(240);
+    expect(hall!.height).toBe(7.5);
+    // to the nearest wall: the hall's west face is at x 55, its north face at y 35
+    expect(hall!.distance).toBeCloseTo(Math.hypot(15, 5), 6);
+    expect(hall!.share).toBeGreaterThan(0);
+    expect(hall!.share).toBeLessThan(1);
+  });
+
+  it("drops slivers", () => {
+    const seen = (id: string, x: number, pixels: number) =>
+      ({ id, label: id, x_pct: x, y_pct: 0.5, w_pct: 0.1, h_pct: 0.1, depth: 5, h_pos: "center", v_pos: "mid", size: "small", color: null, pixels }) as LayoutVisible;
+    const objects = snapObjects([seen("wide", 0.8, 500), seen("sliver", 0.2, 4)], [], pose(0, 0, 0), 1000);
+    expect(objects.map((o) => o.label)).toEqual(["wide"]);
+    expect(objects[0]!.visual).toBeUndefined();
+  });
+
+  it("puts the river on the side it is on, nearest first", () => {
+    const at = pose(40, 30, 0); // facing east
+    const ground = snapGround([
+      geo("River Lantern", 50, 45, 100, 6, 0.2, { visual: "slow green water" }), // south: right
+      geo("Fishmarket Quay", 50, 20, 100, 4, 0.5), // north: left
+      geo("Chapel Square", 10, 30, 8, 8, 0.1), // behind
+      geo("Rope Road", 70, 30, 4, 30, 0.1), // ahead
+      geo("Far Canal", 200, 30, 4, 30, 0.1), // ahead too, but fifth
+      geo("The Copper Kettle", 45, 30, 4, 4, 7), // a building, not ground
+    ], at);
+    expect(ground).toEqual([
+      { label: "Fishmarket Quay", side: "left" },
+      { label: "River Lantern", side: "right", visual: "slow green water" },
+      { label: "Chapel Square", side: "behind" },
+      { label: "Rope Road", side: "ahead" },
+    ]);
+  });
+
+  it("a river alongside is beside you, even when its middle is far ahead", () => {
+    const river = geo("The River", 120, 36, 200, 4, 0.2);
+    expect(snapGround([river], pose(40, 30, 0))).toEqual([{ label: "The River", side: "right" }]);
   });
 });
