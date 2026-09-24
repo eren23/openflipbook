@@ -214,6 +214,8 @@ def test_a_grounded_shot_is_painted_by_the_enter_model() -> None:
 def test_grounded_instruction_leads_with_the_map_and_asks_for_eye_level() -> None:
     text = walk.shot_instruction([("The Copper Kettle", 0.3)], grounded=True)
     assert "map" in text
+    # the crop is turned so the camera faces up from its lower middle
+    assert "the way you face is UP" in text and "lower middle" in text
     assert "eye level" in text
     assert "The Copper Kettle" in text
     # the whole point: it must refuse to hand back another aerial view

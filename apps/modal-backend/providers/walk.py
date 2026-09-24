@@ -112,8 +112,11 @@ def shot_instruction(
         return (
             "Image 1 is this town's own map seen from directly above, and it is the truth about "
             "what stands here: draw THESE buildings, with their own roof colours, shapes and "
-            f"arrangement, and the spaces between them. You are standing among them facing "
-            f"{subject}. Draw what that person actually sees at eye level, about 1.7 metres "
+            "arrangement, and the spaces between them, the streets, the quays and the water. "
+            "The map is turned so that the way you face is UP: you stand at the lower middle of "
+            "Image 1 looking toward its top edge, so what is left of you on it is on your left "
+            f"and what is right is on your right. You are facing {subject}. "
+            "Draw what that person actually sees at eye level, about 1.7 metres "
             "above the ground: those same buildings seen from the street, with doorways, "
             "shuttered windows, awnings, barrels and crates, worn cobbles underfoot and a soft "
             f"overcast sky. {style}. A view from INSIDE the town at human height -- not a map, "

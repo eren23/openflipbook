@@ -100,7 +100,7 @@ describe("RouteDrawLayer", () => {
     vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
     // jsdom's canvas has no 2d context unless one is stubbed
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      putImageData: () => {}, clearRect: () => {}, drawImage: () => {},
+      putImageData: () => {}, clearRect: () => {}, drawImage: () => {}, setTransform: () => {}, fillRect: () => {},
     } as unknown as CanvasRenderingContext2D);
     vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,AAA");
 
@@ -143,7 +143,7 @@ describe("RouteDrawLayer", () => {
     const tainted = new WeakSet<HTMLCanvasElement>();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
       return {
-        putImageData: () => {}, clearRect: () => {},
+        putImageData: () => {}, clearRect: () => {}, setTransform: () => {}, fillRect: () => {},
         drawImage: (img: HTMLImageElement) => { if (new URL(img.src).origin !== location.origin) tainted.add(this); },
       } as unknown as CanvasRenderingContext2D;
     } as never);

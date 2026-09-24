@@ -373,3 +373,46 @@ export function routeShots(
     };
   });
 }
+
+/** The shots a walk actually paints: the worth ones, one per standing spot.
+ *  A sharp bend adds turn-on-the-spot checkpoints, and each became its own
+ *  paid shot and clip: live, two of five clips were the camera turning where
+ *  the route began (2026-09-24). Keep the last of each spot, which faces the
+ *  way the walk then goes. */
+export function paintedShots(shots: readonly RouteShot[]): RouteShot[] {
+  const worth = shots.filter((s) => s.worth);
+  return worth.filter((s, i) => {
+    const next = worth[i + 1];
+    return !next || dist(s.observer.pos, next.observer.pos) > 0.5;
+  });
+}
+
+/** The canvas transform (ctx.setTransform order: a, b, c, d, e, f) that draws
+ *  a map image turned so the camera's gaze points UP, with the camera at the
+ *  lower middle and `span` world units across the output. Over a north-up
+ *  crop and "you are facing X", the model could not tell where it stood or
+ *  which side the river was on, and drew a generic square (2026-09-24). */
+export function aheadUpTransform(
+  frame: { x: number; y: number; w: number; h: number },
+  imageW: number,
+  imageH: number,
+  observer: { pos: WorldVec2; gaze: number },
+  span: number,
+  outW: number,
+  outH: number,
+): [number, number, number, number, number, number] {
+  const kx = imageW / frame.w, ky = imageH / frame.h; // source px per world unit
+  const s = outW / span; // output px per world unit
+  const phi = -Math.PI / 2 - observer.gaze; // gaze direction -> straight up
+  const cos = Math.cos(phi), sin = Math.sin(phi);
+  const tx = outW / 2, ty = outH * 0.8;
+  const ox = frame.x - observer.pos.x, oy = frame.y - observer.pos.y;
+  return [
+    (s * cos) / kx,
+    (s * sin) / kx,
+    (-s * sin) / ky,
+    (s * cos) / ky,
+    tx + s * (cos * ox - sin * oy),
+    ty + s * (sin * ox + cos * oy),
+  ];
+}
