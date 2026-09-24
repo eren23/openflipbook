@@ -407,6 +407,9 @@ export function snapMove(from: ObserverPose, to: ObserverPose): SnapMove {
 
 export interface SnapObject {
   label: string;
+  /** The block's colour in the control render ("red"), so a prompt can say
+   *  which block is which place. Absent past the palette (a grey block). */
+  color?: string;
   visual?: string;
   h_pos: string;
   v_pos: string;
@@ -440,6 +443,7 @@ export function snapObjects(
       const e = byId.get(v.id);
       return {
         label: v.label,
+        ...(v.color ? { color: v.color } : {}),
         ...(e?.visual ? { visual: clip(e.visual) } : {}),
         h_pos: v.h_pos,
         v_pos: v.v_pos,

@@ -319,6 +319,9 @@ describe("the snap-point spec", () => {
     expect(hall!.distance).toBeCloseTo(Math.hypot(15, 5), 6);
     expect(hall!.share).toBeGreaterThan(0);
     expect(hall!.share).toBeLessThan(1);
+    // the colour ties each name to its block in the control image
+    expect(kettle!.color).toBe(control.visible.find((v) => v.label === "The Copper Kettle")!.color);
+    expect(new Set(objects.map((o) => o.color)).size).toBe(2);
   });
 
   it("drops slivers", () => {
@@ -327,6 +330,7 @@ describe("the snap-point spec", () => {
     const objects = snapObjects([seen("wide", 0.8, 500), seen("sliver", 0.2, 4)], [], pose(0, 0, 0), 1000);
     expect(objects.map((o) => o.label)).toEqual(["wide"]);
     expect(objects[0]!.visual).toBeUndefined();
+    expect(objects[0]!.color).toBeUndefined(); // a grey block past the palette
   });
 
   it("puts the river on the side it is on, nearest first", () => {
