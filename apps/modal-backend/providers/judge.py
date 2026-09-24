@@ -12,11 +12,13 @@ same VLM + key the click resolver already requires.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
 import os
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -168,6 +170,17 @@ async def _ask_judge(
         if not result.rationale.startswith(_UNPARSEABLE_PREFIX):
             return result
     return result
+
+
+async def median_of(n: int, make: Callable[[], Awaitable[JudgeResult]]) -> JudgeResult:
+    """Run one judge `n` times at once and keep the median verdict.
+
+    A judge near a score boundary gives different scores for the same image.
+    The median of a few calls is steadier than one call. `make` must return a
+    new coroutine for each call. An even `n` keeps the higher middle verdict.
+    """
+    runs = await asyncio.gather(*(make() for _ in range(max(1, n))))
+    return sorted(runs, key=lambda r: r.score)[len(runs) // 2]
 
 
 async def score_style_pair(image_a: bytes, image_b: bytes) -> JudgeResult:
@@ -450,6 +463,85 @@ async def score_view_conformance(image: bytes, projection: str) -> JudgeResult:
         "Score how faithfully the image uses that projection (0-10)."
     )
     return await _ask_judge(system, user_text, [_image_block(image)])
+
+
+def _spec_lines(spec: dict[str, Any]) -> str:
+    """The walk snap-point spec as numbered text lines for the judge."""
+    # The spec comes from the web client: cap the lists and the text size.
+    objects = [o for o in spec.get("objects") or [] if isinstance(o, dict)][:12]
+    ground = [g for g in spec.get("ground") or [] if isinstance(g, dict)][:4]
+    lines = ["Named objects, in order from LEFT to RIGHT:"]
+    for n, obj in enumerate(objects, 1):
+        where = ", ".join(
+            str(obj[k]) for k in ("h_pos", "v_pos", "size") if obj.get(k)
+        )
+        if isinstance(obj.get("distance"), int | float):
+            where += f", {obj['distance']:.0f} units away"
+        visual = str(obj.get("visual") or "")[:240]
+        lines.append(
+            f"{n}. {str(obj.get('label', ''))[:80]} ({where})" + (f": {visual}" if visual else "")
+        )
+    if not objects:
+        lines.append("(none: the view must show no named landmark)")
+    lines.append("Ground features, relative to the viewer:")
+    for g in ground:
+        visual = str(g.get("visual") or "")[:240]
+        lines.append(
+            f"- {str(g.get('label', ''))[:80]} on the {g.get('side', 'ahead')}"
+            + (f": {visual}" if visual else "")
+        )
+    if not ground:
+        lines.append("(none)")
+    return "\n".join(lines)
+
+
+async def score_spec_conformance(image: bytes, spec: dict[str, Any]) -> JudgeResult:
+    """Does a walk frame show what the snap-point spec says this camera sees?
+
+    `spec` holds the wire's `objects` (left to right) and `ground` lists. The
+    judge checks that each named object is visible, in that order, that each
+    ground feature is on its side, and that no other named landmark appears.
+    The objects it missed and the landmarks it invented go to the start of the
+    rationale ("missed: a, b; invented: c; ..."), so JudgeResult keeps its shape.
+    """
+    system = (
+        "You are a strict scene-spec judge for one frame of a walk through an "
+        "illustrated town. You get the frame and a spec: the named objects this "
+        "camera must see, in order from left to right, and the ground features "
+        "(water, quay, square, road) with the side they are on. Check: (1) each "
+        "named object is visible and matches its description; (2) the objects "
+        "are in the stated left-to-right order, near the stated positions; "
+        "(3) each ground feature is on the stated side; (4) NO other named "
+        "landmark is in the frame: a distinct, prominent building, tower, "
+        "bridge or monument that the spec does not list. Plain houses, "
+        "streets, trees and people are fine. Score 0-10: 10 = every object "
+        "present and in order, the ground on the correct sides, nothing "
+        "invented; 5 = about half the objects, or the order or a side is "
+        "wrong; 0 = nothing of the spec, or a different place. Put the labels "
+        "of the objects you cannot find in \"missed\", and a short name for "
+        'each invented landmark in "invented". Return JSON exactly: '
+        '{"score": <0-10 number>, "missed": ["<label>"], "invented": '
+        '["<name>"], "rationale": "<one short sentence>"}.'
+    )
+    user_text = f"{_spec_lines(spec)}\n\nScore how faithfully the frame shows this spec (0-10)."
+    result = await _ask_judge(system, user_text, [_image_block(image)])
+    if result.rationale.startswith(_UNPARSEABLE_PREFIX):
+        return result
+    from providers.llm.client import salvage_json
+
+    # The lists come before the rationale in the reply, so they survive when
+    # the raw text is cut at 500 characters.
+    parsed, _ = salvage_json(result.raw)
+    notes = []
+    for key in ("missed", "invented"):
+        got = parsed.get(key) if isinstance(parsed, dict) else None
+        names = [str(v) for v in got if v] if isinstance(got, list) else []
+        if names:
+            notes.append(f"{key}: {', '.join(names)}")
+    if not notes:
+        return result
+    rationale = "; ".join([*notes, result.rationale])[:400]
+    return JudgeResult(score=result.score, rationale=rationale, raw=result.raw)
 
 
 async def score_annotation(

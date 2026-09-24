@@ -1,0 +1,12 @@
+```json
+{
+  "score": 6,
+  "missed": [
+    "Lantern Lighthouse"
+  ],
+  "invented": [
+    "domed clock tower"
+  ],
+  "rationale": "Bellfounder Hall is far-left and the river is on the right, but the lighthouse is absent and a domed clock tower stands centre-right."
+}
+```

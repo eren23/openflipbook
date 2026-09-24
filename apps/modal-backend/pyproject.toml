@@ -43,14 +43,14 @@ addopts = "-q --strict-markers"
 # Only markers that a test actually carries. `layout` and `grounding` were
 # declared for gates that turned out to be Makefile runners, not pytest tests
 # (`make eval-layout`, `make eval-grounding`) — so `pytest -m layout` selected
-# nothing while reading as if it covered the gate. Same for `paid`: no test
-# carries it, so `-m "not paid"` excluded nothing and the real protection is
-# each runner's own *_BENCH_RUN env gate. Re-declare one when a test wears it;
-# strict-markers will say so loudly.
+# nothing while reading as if it covered the gate. Re-declare one when a test
+# wears it; strict-markers will say so loudly. `paid` is back: the walk bench's
+# live test wears it (it also self-skips unless WALK_BENCH_RUN=1).
 markers = [
     "geometry: free deterministic 2.5D projection gate (P1)",
     "repair: verify->repair loop — free control-flow + paid convergence (P4)",
     "edit: entity NL-edit parse gate (P5)",
+    "paid: spends fal/openrouter; self-skips unless its *_BENCH_RUN flag is set",
 ]
 
 # The RATCHET: floor pinned just under the measured baseline (2026-09-23:

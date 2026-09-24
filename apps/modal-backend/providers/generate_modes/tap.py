@@ -893,10 +893,7 @@ async def stream_tap(
                 samples = 1
 
             async def _step_in(candidate: bytes) -> JudgeResult:
-                runs = await _asyncio.gather(
-                    *(step_in(region_bytes, candidate) for _ in range(samples))
-                )
-                return sorted(runs, key=lambda r: r.score)[len(runs) // 2]
+                return await judge.median_of(samples, lambda: step_in(region_bytes, candidate))
 
             async def _verdicts(
                 img: GeneratedImage,
