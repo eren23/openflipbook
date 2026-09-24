@@ -43,7 +43,7 @@ demo-logs:
 # Free gates run always (deterministic, no spend). Paid gates spend fal/openrouter
 # and only run when their *_BENCH_RUN flag is set — `make eval` excludes them.
 PY := apps/modal-backend/.venv/bin/python
-.PHONY: eval eval-geometry eval-silhouette eval-layout eval-grounding eval-repair eval-edit eval-paid
+.PHONY: eval eval-geometry eval-silhouette eval-layout eval-grounding eval-repair eval-edit eval-paid eval-walk eval-walk-dry
 
 # The always-on gate: every free phase gate + lints + typechecks. Run between
 # phases — must be green before the next phase's commit.
@@ -241,6 +241,15 @@ eval-matrix-dry:
 	cd apps/modal-backend && .venv/bin/python -m tests.matrix_bench.runner
 eval-matrix:
 	cd apps/modal-backend && MATRIX_BENCH_RUN=1 .venv/bin/python -m tests.matrix_bench.runner
+
+# Walk bench: judge one saved walk run (RUN=<dir> holds request.json,
+# response.json, map.png and an optional route.json). Dry ($0, no network):
+# make eval-walk-dry RUN=<dir>. PAID judges (about $0.02 a snap point, capped
+# by WALK_BENCH_BUDGET_USD, default $0.50): make eval-walk RUN=<dir>
+eval-walk-dry:
+	cd apps/modal-backend && .venv/bin/python -m tests.walk_bench.runner $(abspath $(RUN))
+eval-walk:
+	cd apps/modal-backend && WALK_BENCH_RUN=1 .venv/bin/python -m tests.walk_bench.runner $(abspath $(RUN))
 
 # ── Scenario Lab (unified test bench) ───────────────────────────────────────
 # bench-dry is the mandatory $0 cost preview. bench-run spends under the cap.
