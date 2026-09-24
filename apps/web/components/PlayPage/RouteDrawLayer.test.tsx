@@ -130,6 +130,47 @@ describe("RouteDrawLayer", () => {
   // coverage. vitest 2 never enforced the 5s default on it; vitest 3 does.
   }, 30_000);
 
+  it("crops a reopened page's map from its own bytes, not the R2 <img>", async () => {
+    // Live 2026-09-24: the page showed its R2 url, drawing that <img> tainted
+    // the canvas, toDataURL threw, and the walk failed before it was sent.
+    const posted: { shots: { surroundings_data_url?: string }[] }[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return { ok: true, json: async () => ({ clips: [], spent_usd: 0 }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    const tainted = new WeakSet<HTMLCanvasElement>();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+      return {
+        putImageData: () => {}, clearRect: () => {},
+        drawImage: (img: HTMLImageElement) => { if (new URL(img.src).origin !== location.origin) tainted.add(this); },
+      } as unknown as CanvasRenderingContext2D;
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(function (this: HTMLCanvasElement) {
+      if (tainted.has(this)) throw new DOMException("Tainted canvases may not be exported.", "SecurityError");
+      return "data:image/png;base64,AAA";
+    });
+    const decoded: string[] = [];
+    vi.spyOn(HTMLImageElement.prototype, "decode").mockImplementation(function (this: HTMLImageElement) {
+      decoded.push(this.src);
+      return Promise.resolve();
+    });
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(1376);
+    vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(768);
+    const shown = document.createElement("img");
+    shown.src = "https://pub.r2.dev/s/map.png";
+
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" nodeId="n1" imgRef={{ current: shown }} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    await act(async () => { fireEvent.click(screen.getByTestId("route-accept")); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(decoded[0]!).pathname).toBe("/api/image/n1");
+    expect(posted[0]!.shots.every((s) => s.surroundings_data_url === "data:image/png;base64,AAA")).toBe(true);
+    vi.unstubAllGlobals();
+  }, 30_000);
+
   it("offers nothing to paint without a session to bill", () => {
     vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
     render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);

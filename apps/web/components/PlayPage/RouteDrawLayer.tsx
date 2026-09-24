@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import type { MapCrop, ObserverPose, StoredWalk, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
+import { canvasSource } from "@/lib/image-click";
 import { renderLayoutControl } from "@/lib/layout-control";
 import { ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
 import { toAbsoluteEntities } from "@/lib/world-geometry";
@@ -105,7 +106,16 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       // The map around a camera is what makes a shot THIS town rather than a
       // competent generic street with the right geometry, so crop it from the
       // page's own image when there is one to crop.
-      const map = imgRef?.current ?? null;
+      // A reopened page shows its R2 url, and R2 sends no CORS header: drawing
+      // that <img> taints the canvas and toDataURL throws, which failed the
+      // whole walk before it was sent (live 2026-09-24). Crop the node's own
+      // bytes, served same-origin, instead.
+      let map = imgRef?.current ?? null;
+      if (map && canvasSource(map.src, nodeId) !== map.src) {
+        const same = new Image();
+        same.src = canvasSource(map.src, nodeId);
+        map = await same.decode().then(() => same, () => null);
+      }
       const mapCanvas = document.createElement("canvas");
       mapCanvas.width = CONTROL_W;
       mapCanvas.height = CONTROL_H;
@@ -120,7 +130,13 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
         const sw = (SURROUNDINGS_SPAN / frame.w) * map.naturalWidth;
         const sh = (SURROUNDINGS_SPAN / frame.h) * map.naturalHeight;
         mapCtx.drawImage(map, sx, sy, sw, sh, 0, 0, CONTROL_W, CONTROL_H);
-        return mapCanvas.toDataURL("image/png");
+        // The crop only makes a shot this town; without it the shot is still
+        // a street with the right geometry, so never fail the walk over it.
+        try {
+          return mapCanvas.toDataURL("image/png");
+        } catch {
+          return null;
+        }
       };
       const payload = worth.map((s) => {
         const control = renderLayoutControl(absolute, s.observer, CONTROL_W, CONTROL_H, frameParentId, ROUTE_LANE_GAP, true);
