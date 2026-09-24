@@ -203,6 +203,8 @@ async def test_build_writes_the_report_and_review_then_rebills_nothing(
     assert [s["index"] for s in report["snaps"]] == [0, 1, 2]
     assert all(s["spec_score"]["score"] == 8.5 for s in report["snaps"])
     assert all(s["style_score"]["score"] == 8.5 for s in report["snaps"])
+    # the first stop is judged against the map's medium, later ones for drift
+    assert [s["style_ref"] for s in report["snaps"]] == ["map", "first stop", "first stop"]
     # Both labels sit at 3 snap points: one first-vs-last identity call each.
     assert [(e["label"], e["from"], e["to"]) for e in report["entities"]] == [
         ("Bellfounder Hall", 0, 2), ("Lantern Lighthouse", 0, 2)

@@ -103,6 +103,8 @@ def test_keyframe_names_only_the_spec_and_forbids_inventions() -> None:
     text = walk.keyframe_instruction(shot, styled=True)
     assert "Bellfounder Hall (the red block, left" in text
     assert "block render" in text and "depth" not in text
+    # live 2026-09-24: without this the walls came out red, blue and yellow
+    assert "never paint a wall or roof in its block colour" in text
     # the correction has no render, so no colours
     assert "red block" not in walk.correction_instruction(shot)
     assert "Do not add any other named building" in text

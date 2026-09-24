@@ -200,7 +200,7 @@ async def _judged(
 
 
 async def _judge_snap(
-    row: dict[str, Any], image: bytes, map_png: bytes, jcache: JudgeCache, ledger: Ledger
+    row: dict[str, Any], image: bytes, reference: bytes, jcache: JudgeCache, ledger: Ledger
 ) -> None:
     spec = {k: row["spec"][k] for k in ("objects", "ground")}
     row["spec_score"] = await _judged(
@@ -209,8 +209,8 @@ async def _judge_snap(
         jcache, ledger,
     )
     row["style_score"] = await _judged(
-        "style_pair", image, image_sha(map_png), 1,
-        lambda: judge.score_style_pair(map_png, image), jcache, ledger,
+        "style_pair", image, image_sha(reference), 1,
+        lambda: judge.score_style_pair(reference, image), jcache, ledger,
     )
 
 
@@ -276,7 +276,13 @@ async def build(
             point["frame"] = f"snap-{point['index']}.jpg"
             (out / point["frame"]).write_bytes(image)
             report["snaps"].append(point)
-            await _judge_snap(point, image, map_png, jcache, ledger)
+            # The style judge marks perspective, so a street view against the
+            # top-down map scores low on format alone ("lacks the cartographic
+            # map format", 2026-09-24). The first stop answers "is this the
+            # town's medium"; every later stop answers "did the walk drift".
+            first = next(iter(frames.values()))
+            point["style_ref"] = "map" if len(frames) == 1 else "first stop"
+            await _judge_snap(point, image, map_png if len(frames) == 1 else first, jcache, ledger)
         for label, visual, first, last in entity_pairs(report["snaps"]):
             verdict = await _judge_entity(
                 label, visual, frames[first["index"]], frames[last["index"]], jcache, ledger
@@ -418,7 +424,7 @@ def review_html(
             f'<section class="pair"><figure><img src="{esc(s["frame"])}" alt="Snap {s["index"]}">'
             f"<figcaption>Snap point {s['index']}</figcaption></figure><div>"
             f"<h3>Spec, left to right</h3><ol>{objects}</ol><h3>Ground</h3><ul>{ground}</ul>"
-            f"<p>Spec: {_score(s.get('spec_score'))}</p><p>Style vs map: {_score(s.get('style_score'))}</p>"
+            f"<p>Spec: {_score(s.get('spec_score'))}</p><p>Style vs {s.get('style_ref', 'map')}: {_score(s.get('style_score'))}</p>"
             f"{reported}</div></section>"
         )
     entities = "".join(
