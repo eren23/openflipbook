@@ -32,4 +32,13 @@ describe('transition read contract', () => {
       expect(nodeToPage(wire)).toMatchObject({ imageKey: 'child.jpg', clickInParent: { xPct: .8, yPct: .3 }, transitionContext: state.row.transition_context });
     }
   });
+
+  it('brings a painted walk back when the session is reopened', async () => {
+    // Live 2026-09-24: the node held a paid 4-clip walk and the session
+    // reader dropped it, so a reopened page never showed it.
+    const walk = { clips: [{ from_shot: 0, to_shot: 1, video_url: 'https://v/a.mp4', model: 'm', seconds: 5 }], shots: [], spent_usd: 0.69, created_at: '2026-09-24T00:00:00Z' };
+    Object.assign(state.row, { walk });
+    const session = await (await getSession(new Request('http://localhost/api'), { params: Promise.resolve({ id: 'world' }) })).json();
+    expect(nodeToPage(session.nodes[0]).walk).toEqual(walk);
+  });
 });

@@ -55,6 +55,9 @@ export async function GET(req: Request, { params }: Params) {
       scene_view: row.scene_view,
       geo_extracted: row.geo_extracted,
       descent_video_url: row.descent_video_url,
+      // A painted walk is paid for and kept on its page; without this the
+      // ?continue= hydration dropped it and a reopened page never showed it.
+      walk: row.walk ?? null,
       created_at: row.created_at,
     })),
   });
