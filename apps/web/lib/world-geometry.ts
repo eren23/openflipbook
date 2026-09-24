@@ -417,7 +417,7 @@ export function resolveAbsoluteFrame(
  *  street frame nested in a quarter covers the same ground in more detail.
  *  Null (the root frame) when nothing covers the view. */
 export function frameForView(
-  entities: readonly (FrameNode & { kind?: string; height?: number; footprint: { w: number; d: number } })[],
+  entities: readonly (FrameNode & { kind?: string; height?: number; scene_id?: string | null; footprint: { w: number; d: number } })[],
   crop: { x: number; y: number; w: number; h: number } | null | undefined,
 ): string | null {
   if (!crop || !entities.length) return null;
@@ -425,7 +425,10 @@ export function frameForView(
   const byId = new Map(entities.map((e) => [e.id, e]));
   const inView = new Map<string | null, number>();
   for (const e of absolute) {
-    if (e.kind !== "place" || (e.height ?? 0) <= 0.5) continue;
+    // The 3D scene editor's objects describe its own scene, not the map: live,
+    // its authored town out-counted the district frame and walled a route with
+    // buildings standing where the map shows none (2026-09-24).
+    if (e.kind !== "place" || (e.height ?? 0) <= 0.5 || e.scene_id) continue;
     if (e.pos.x < crop.x || e.pos.x > crop.x + crop.w) continue;
     if (e.pos.y < crop.y || e.pos.y > crop.y + crop.h) continue;
     const frame = e.parent_id ?? null;

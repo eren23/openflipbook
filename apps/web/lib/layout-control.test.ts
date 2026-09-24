@@ -33,6 +33,11 @@ describe("solidBlocks", () => {
     expect(labels.filter((l) => l === "Ropewalk Store")).toHaveLength(1); // not the one inside the inn
   });
 
+  it("drops the 3D scene editor's objects: they are not buildings on the map", () => {
+    const edited = geo("Bellfounder Hall", 59, 40, 10, 12, 7.8, { scene_id: "scene_1" } as Partial<WorldEntityGeo>);
+    expect(solidBlocks([edited]).map((b) => b.label)).toEqual([]);
+  });
+
   it("tests footprints in the block's own heading", () => {
     const rotated = geo("Rotated", 0, 0, 10, 2, 5, { heading: Math.PI / 2 });
     expect(pointInBlock(rotated, { x: 0, y: 4 })).toBe(true);

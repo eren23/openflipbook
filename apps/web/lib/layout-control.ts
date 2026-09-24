@@ -9,7 +9,7 @@ import { hPos, sizeBin, vPos } from "./world-geometry";
 // blocks show the image model WHERE each building is; the per-block visible
 // boxes are occlusion-correct, unlike the centre-point projector.
 
-export type LayoutBlock = Pick<WorldEntityGeo, "id" | "label" | "pos" | "footprint" | "height" | "elevation" | "heading" | "parent_id" | "kind">;
+export type LayoutBlock = Pick<WorldEntityGeo, "id" | "label" | "pos" | "footprint" | "height" | "elevation" | "heading" | "parent_id" | "kind" | "scene_id">;
 
 // ponytail: label heuristic for ground-level areas the extractor stores as
 // "place" (rivers, quays, streets). Upgrade path: a solid/ground field on geos.
@@ -25,6 +25,8 @@ export function solidBlocks<T extends LayoutBlock>(entities: readonly T[], frame
     (e) =>
       (e.parent_id ?? null) === frameParentId &&
       e.kind === "place" &&
+      // The 3D scene editor's copy of a town stands where the map shows none.
+      !e.scene_id &&
       e.height > 0.5 &&
       !GROUND_LABEL.test(e.label ?? "") &&
       // One place with a non-finite number poisons every distance taken against

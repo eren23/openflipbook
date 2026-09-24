@@ -734,6 +734,10 @@ export interface WorldEntityGeo {
   // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
   source: "extracted" | "user" | "derived";
   updated_at: string;
+  // Set on objects the 3D scene editor authored. They describe its own scene,
+  // not the map image, so map geometry (route walls, block renders, the frame
+  // a view reads) leaves them out.
+  scene_id?: string | null;
   // VLM-segmented border polygon (B2 segmenter), in the SAME frame as `pos`
   // (the parent's local frame). 3..24 vertices; absent = only the rectangular
   // footprint is known. Persisted behind WORLD_SEGMENT_BORDERS.

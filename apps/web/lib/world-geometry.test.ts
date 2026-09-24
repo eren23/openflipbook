@@ -334,6 +334,20 @@ describe("frameForView", () => {
     expect(frameForView(world, { x: 25, y: 5, w: 20, h: 15 })).toBe("geo_quarter");
   });
 
+  it("ignores the 3D scene editor's copy of a town, however much of it is in view", () => {
+    // Live 2026-09-24: the editor's authored Lantern Quay (objects tagged
+    // with scene_id) out-counted the map's district frame, so a route was
+    // walled by buildings standing where the map shows none.
+    const edited = (id: string, x: number, y: number) =>
+      ({ ...(e(id, "place_scene", x, y) as object), scene_id: "scene_1" }) as never;
+    const withEditor = [
+      ...world,
+      { ...(e("place_scene", null, 0, 0, 4) as object), scene_id: "scene_1" } as never,
+      edited("s_a", 11, 11), edited("s_b", 13, 11), edited("s_c", 15, 11), edited("s_d", 17, 11),
+    ];
+    expect(frameForView(withEditor, view)).toBe("place_street");
+  });
+
   it("falls back to the root frame when nothing stands in the view", () => {
     expect(frameForView(world, { x: 500, y: 500, w: 10, h: 10 })).toBeNull();
     expect(frameForView(world, null)).toBeNull();
