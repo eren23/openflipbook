@@ -81,7 +81,7 @@ class SeenObject:
 
 @dataclass(frozen=True)
 class GroundFeature:
-    """Water, a quay or a square the blocks skip, placed by side."""
+    """Water, a quay or a square the blocks skip, placed by side ("here" = underfoot)."""
 
     label: str
     side: str
@@ -170,8 +170,12 @@ def describe(shot: WalkShot, blocks: bool = False) -> str:
     for g in shot.ground:
         if g.side == "behind":
             continue
+        look = f" ({g.visual})" if g.visual else ""
+        if g.side == "here":
+            text += f" You are standing on {g.label}{look}."
+            continue
         where = "ahead of you" if g.side == "ahead" else f"on your {g.side}"
-        text += f" {g.label} is {where}" + (f" ({g.visual})" if g.visual else "") + "."
+        text += f" {g.label} is {where}{look}."
     return text
 
 

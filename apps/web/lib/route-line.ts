@@ -460,7 +460,8 @@ export function snapObjects(
 
 export interface SnapGround {
   label: string;
-  side: "left" | "right" | "ahead" | "behind";
+  /** "here": the camera stands on it (a quay, a square). */
+  side: "left" | "right" | "ahead" | "behind" | "here";
   visual?: string;
 }
 
@@ -468,6 +469,10 @@ export interface SnapGround {
  *  on the camera's left or right so the painter puts it on the right side.
  *  Nearest first, at most `max`. */
 const GROUND_RANGE = 25;
+// How far along the line of sight a ground feature still counts as ahead.
+const GROUND_AHEAD = 12;
+// ...or when its nearest edge is this close to the line of sight.
+const GROUND_AHEAD_DEG = 15;
 
 export function snapGround(
   entities: readonly WorldEntityGeo[],
@@ -476,16 +481,27 @@ export function snapGround(
   max = 4,
 ): SnapGround[] {
   return groundBlocks(entities, frameParentId)
-    // A district is an area name, not something a camera sees. Ground the
-    // camera stands on has no side, and ground far off is not in the view.
+    // A district is an area name, not something a camera sees. Ground far
+    // off is not in the view. (scale_tier is the tier of the map a place was
+    // read from, not its own size, so it cannot tell a town from a quay.)
     // ponytail: fixed range in world units; scale it by the frame if regions need it.
-    .filter((e) => !/\bdistrict\b/i.test(e.label ?? "") && blockDistance(e, observer.pos) > 0 && blockDistance(e, observer.pos) <= GROUND_RANGE)
+    .filter((e) => !/\bdistrict\b/i.test(e.label ?? "") && blockDistance(e, observer.pos) <= GROUND_RANGE)
     .map((e) => {
-      // Aim at the nearest edge: a river alongside is beside you even when
-      // its middle is far ahead.
+      // The stored box of a quay or a river is often only its map label, so
+      // a camera on the quay stands inside it: say so rather than drop it.
+      if (blockDistance(e, observer.pos) <= 0) return { e, side: "here" as const, far: 0 };
+      // "Ahead" only when the line of sight runs into it. A quay alongside
+      // has its nearest edge ahead of the camera too, yet it is on one side
+      // (live 2026-09-24: the river quay read "ahead" on a walk beside it).
+      const dir = { x: Math.cos(observer.gaze), y: Math.sin(observer.gaze) };
+      const ahead = Array.from({ length: GROUND_AHEAD }, (_, k) => k + 1)
+        .some((t) => pointInBlock(e, { x: observer.pos.x + dir.x * t, y: observer.pos.y + dir.y * t }));
       const to = nearestPoint(e, observer.pos);
-      const turn = (wrapPi(Math.atan2(to.y - observer.pos.y, to.x - observer.pos.x) - observer.gaze) * 180) / Math.PI;
-      const side: SnapGround["side"] = Math.abs(turn) <= 45 ? "ahead" : Math.abs(turn) >= 135 ? "behind" : turn > 0 ? "right" : "left";
+      const v = { x: to.x - observer.pos.x, y: to.y - observer.pos.y };
+      const along = v.x * dir.x + v.y * dir.y;
+      const across = dir.x * v.y - dir.y * v.x; // + is right: map y grows down
+      const straight = along > 0 && Math.abs(across) <= along * Math.tan(GROUND_AHEAD_DEG * Math.PI / 180);
+      const side: SnapGround["side"] = ahead || straight ? "ahead" : along < -Math.abs(across) ? "behind" : across > 0 ? "right" : "left";
       return { e, side, far: Math.max(0, blockDistance(e, observer.pos)) };
     })
     .sort((a, b) => a.far - b.far)

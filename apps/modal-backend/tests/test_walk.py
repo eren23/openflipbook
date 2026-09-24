@@ -81,10 +81,12 @@ def test_describe_places_the_ground_by_side_and_skips_what_is_behind() -> None:
         ground=[
             walk.GroundFeature("River Leven", "right", "slow green water"),
             walk.GroundFeature("Market Square", "behind"),
+            walk.GroundFeature("River Quay", "here", "a stone pier"),
         ],
     )
     text = walk.describe(shot)
     assert "River Leven is on your right (slow green water)" in text
+    assert "You are standing on River Quay (a stone pier)" in text
     assert "Market Square" not in text
     assert "no named building" in text
 

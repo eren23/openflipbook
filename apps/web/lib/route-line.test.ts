@@ -351,13 +351,22 @@ describe("the snap-point spec", () => {
     ]);
   });
 
-  it("leaves out districts, ground underfoot and ground out of view", () => {
+  it("leaves out districts and ground out of view, and says what is underfoot", () => {
     const at = pose(40, 30, 0);
     expect(snapGround([
       geo("Harbour District", 50, 45, 20, 6, 0.2),
-      geo("Lantern Quay", 40, 30, 24, 20, 0.2), // the camera stands on it
       geo("Far Canal", 200, 30, 4, 30, 0.1),
-    ], at)).toEqual([]);
+      geo("Stone Quay", 40, 30, 10, 8, 0.2), // the camera stands on it
+    ], at)).toEqual([{ label: "Stone Quay", side: "here" }]);
+  });
+
+  it("a quay alongside is on its side even when its nearest edge is ahead", () => {
+    // Walking east just south of a quay that starts 5 units on: the nearest
+    // edge is ahead-left, the line of sight never enters it.
+    const quay = geo("River Quay", 65, 5, 60, 10, 0.2);
+    expect(snapGround([quay], pose(30, 13, -0.13))).toEqual([{ label: "River Quay", side: "left" }]);
+    // facing into it, it is ahead
+    expect(snapGround([quay], pose(40, 13, -Math.PI / 2))).toEqual([{ label: "River Quay", side: "ahead" }]);
   });
 
   it("a river alongside is beside you, even when its middle is far ahead", () => {
