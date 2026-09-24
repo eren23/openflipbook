@@ -144,7 +144,7 @@ def test_push_is_clamped_and_has_a_default() -> None:
 def test_estimate_is_the_planned_keyframes_the_fixes_and_the_legs() -> None:
     paint = spend.estimate_image(walk.KEYFRAME_MODEL)
     fix = spend.estimate_image(walk.CORRECT_MODEL)
-    leg = spend.estimate_video(walk.LEG_MODEL, walk.DEFAULT_CLIP_SECONDS)
+    leg = spend.estimate_video(walk.LEG_MODEL, walk.DEFAULT_CLIP_SECONDS, walk.LEG_RESOLUTION)
     # 4 stops: the last is never edited, so 2 paintings, 1 fix and 3 legs
     assert walk.estimate_usd(4, keyframes=2) == round(2 * paint + 1 * fix + 3 * leg, 4)
     # not knowing the turns, every stop but the last is a fresh painting
@@ -165,14 +165,18 @@ def test_keyframes_are_the_first_stop_and_each_after_a_real_turn() -> None:
 def test_the_models_a_walk_uses_are_priced_not_defaulted() -> None:
     assert spend.estimate_image(walk.KEYFRAME_MODEL) == 0.15
     assert spend.estimate_image(walk.CORRECT_MODEL) == 0.035
-    assert spend.estimate_video(walk.LEG_MODEL, 5) == pytest.approx(0.125)
+    assert spend.estimate_video(walk.LEG_MODEL, 5, walk.LEG_RESOLUTION) == pytest.approx(0.4)
 
 
 def test_h3_is_priced_per_second_and_turbo_is_not_priced_as_max() -> None:
     turbo = "minimax/h3-max-turbo/image-to-video"
-    assert spend.estimate_video(turbo, 10) == pytest.approx(0.125)
-    assert spend.estimate_video("minimax/h3-max/image-to-video", 10) == pytest.approx(0.25)
-    assert spend.estimate_video("minimax/h3-max/camera-controls", 4) == pytest.approx(0.1)
+    # fal's pricing API returns only the 480P rate; 768P and 1080P cost more
+    assert spend.estimate_video(turbo, 10, "768P") == pytest.approx(0.4)
+    assert spend.estimate_video("minimax/h3-max/image-to-video", 10, "768P") == pytest.approx(0.8)
+    assert spend.estimate_video("minimax/h3-max/image-to-video", 5, "1080P") == pytest.approx(0.8)
+    assert spend.estimate_video("minimax/h3-max/camera-controls", 4, "480P") == pytest.approx(0.2)
+    # an unknown resolution is priced at the dearest one
+    assert spend.estimate_video(turbo, 5, "4K") == pytest.approx(0.4)
     # a per-clip slug ignores the duration; a bad duration is never a refund
     assert spend.estimate_video("fal-ai/ltx-2.3/image-to-video/fast", 10) == 0.04
     assert spend.estimate_video(turbo, -5) == 0.0
@@ -228,6 +232,7 @@ async def test_a_stop_under_the_gate_is_corrected_and_the_next_leg_starts_there(
     assert "Keep the camera" in str(mocked.calls[1]["instruction"])
     assert mocked.calls[1]["model_override"] == walk.CORRECT_MODEL
     assert mocked.calls[0]["model_override"] == walk.KEYFRAME_MODEL
+    assert mocked.calls[0]["aspect_ratio"] == "1:1"
     assert result.snaps[1].corrected and result.snaps[1].conformance == 3.0
     assert not result.snaps[2].corrected and result.snaps[2].conformance == 3.0
 
@@ -411,3 +416,123 @@ async def test_a_provider_failure_becomes_a_502_not_a_crash(
     monkeypatch.setattr(walk, "paint", boom)
     res = await generate.walk(_Req(), _body(2))
     assert res.status_code == 502
+
+
+# ── review fixes: money and paid work kept ─────────────────────────────────
+
+
+def test_over_cap_refuses_what_would_cross_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_SESSION_SPEND", "1")
+    monkeypatch.delenv("MAX_DAILY_SPEND", raising=False)
+    spend.record("cap-s", 0.5)
+    assert spend.over_cap("cap-s") is None
+    assert spend.over_cap("cap-s", 0.4) is None
+    assert "session spend cap" in (spend.over_cap("cap-s", 0.6) or "")
+
+
+@pytest.mark.asyncio
+async def test_a_walk_that_cannot_finish_under_the_cap_is_refused_before_it_paints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    import generate
+
+    monkeypatch.setattr(generate, "_rate_limited", lambda _req: None)
+    monkeypatch.setenv("MAX_SESSION_SPEND", "0.5")
+    painted: list[object] = []
+
+    async def spy(**kw: object) -> None:
+        painted.append(kw)
+
+    monkeypatch.setattr(walk, "paint", spy)
+    res = await generate.walk(_Req(), _body(4))
+    assert res.status_code == 402
+    assert painted == []
+    assert json.loads(bytes(res.body))["estimate_usd"] > 0.5
+
+
+def test_clip_seconds_stays_inside_what_h3_bills() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        _body(2, clip_seconds=0)
+    with pytest.raises(pydantic.ValidationError):
+        _body(2, clip_seconds=16)
+
+
+@pytest.mark.asyncio
+async def test_an_unparseable_reply_is_no_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import judge
+
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+    replies = iter([0.0, 0.0, 8.0])
+
+    async def score(*_a: object, **_kw: object):
+        s = next(replies)
+        why = judge._UNPARSEABLE_PREFIX + "blank" if s == 0.0 else "fine"
+        return judge.JudgeResult(score=s, rationale=why, raw="")
+
+    monkeypatch.setattr(judge, "score_spec_conformance", score)
+    # two blank replies must not outvote the one real verdict into a paid fix
+    assert await walk._conformance(_C, _shot(0)) == 8.0
+
+
+@pytest.mark.asyncio
+async def test_a_frame_that_cannot_be_read_or_judged_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+
+    async def unreadable(_url: str) -> bytes:
+        raise RuntimeError("cdn down")
+
+    monkeypatch.setattr(walk, "_image_bytes", unreadable)
+    assert await walk._conformance("https://x/frame.jpg", _shot(0)) is None
+    # an old client's names are no spec to judge against
+    old = walk.WalkShot(index=0, control_data_url=_C, sees=[("Hall", 0.3)])
+    assert await walk._conformance(_C, old) is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_merge_keeps_the_paid_legs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import image
+
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+
+    async def boom(*_a: object, **_kw: object) -> dict[str, object]:
+        raise RuntimeError("merge 500")
+
+    monkeypatch.setattr(image, "_fal_subscribe", boom)
+    assert await walk._merge(["https://a.mp4", "https://b.mp4"]) is None
+
+
+def test_an_old_client_gets_no_made_up_position() -> None:
+    old = walk.WalkShot(index=0, control_data_url=_C, sees=[("Hall", 0.3)])
+    text = walk.describe(old)
+    assert "Hall" in text and "center" not in text and "()" not in text
+
+
+def test_the_judge_reads_here_as_underfoot() -> None:
+    from providers import judge
+
+    lines = judge._spec_lines({"objects": [], "ground": [{"label": "River Quay", "side": "here"}]})
+    assert "River Quay underfoot" in lines and "on the here" not in lines
+
+
+@pytest.mark.asyncio
+async def test_edit_image_passes_an_aspect_ratio_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import image_edit
+
+    monkeypatch.delenv("MOCK_PROVIDERS", raising=False)
+    monkeypatch.setenv("FAL_KEY", "test")
+    seen: dict[str, object] = {}
+
+    async def subscribe(model: str, args: dict[str, object], **_kw: object) -> dict[str, object]:
+        seen.update(args)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(image_edit, "_fal_subscribe", subscribe)
+    with pytest.raises(RuntimeError, match="stop here"):
+        await image_edit.edit_image("https://x/a.png", "paint", model_override=walk.KEYFRAME_MODEL, aspect_ratio="1:1")
+    assert seen["aspect_ratio"] == "1:1"

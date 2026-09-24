@@ -85,6 +85,7 @@ async def edit_image(
     style_ref_url: str | None = None,
     identity_ref_url: str | None = None,
     budget: RenderBudget | None = None,
+    aspect_ratio: str | None = None,
 ) -> GeneratedImage:
     from obs import span
     from providers import mock
@@ -110,6 +111,11 @@ async def edit_image(
     args = _edit_args_for(model, instruction, image_url, style_fal)
     if identity_ref_url:
         args["image_urls"].insert(1, await to_fal_url(identity_ref_url))
+    if aspect_ratio:
+        # Left to itself nano-banana-pro picked 16:9 for one walk stop and 1:1
+        # for the next from the same square render, and the merged walk
+        # squashed one of them (2026-09-24).
+        args["aspect_ratio"] = aspect_ratio
     async with span("image.edit", model=model, instr_len=len(instruction)) as ctx:
         result = await _fal_subscribe(
             model,

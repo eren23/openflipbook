@@ -40,14 +40,21 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
 )
 _DEFAULT_IMAGE_PRICE = 0.15  # unknown slug: assume the balanced default
 
-# Video: (slug prefix, dollars, per_second). Most slugs bill per CLIP. H3 bills
-# per second of clip, and the longest prefix wins, so turbo is not priced as
-# h3-max. An unknown slug falls back to the image default, which is the
-# conservative direction for a reservation.
+# H3 bills per second, by resolution. fal's pricing API returns only the 480P
+# rate ($0.025/s for h3-max), which under-reserved 768P and 1080P. These are
+# the regular rates published on the model pages (read 2026-09-24). Launch
+# rates are half of these until 2026-09-30, so a reservation is conservative
+# until then and exact after. camera-controls publishes no price of its own:
+# priced as h3-max. Longest prefix wins, so turbo is not priced as h3-max.
+_H3_PER_SECOND: tuple[tuple[str, dict[str, float]], ...] = (
+    ("minimax/h3-max-turbo", {"480P": 0.025, "768P": 0.04, "1080P": 0.08}),
+    ("minimax/h3-max", {"480P": 0.05, "768P": 0.08, "1080P": 0.16}),
+)
+
+# Video: (slug prefix, dollars, per_second). Most slugs bill per CLIP. An
+# unknown slug falls back to the image default, which is the conservative
+# direction for a reservation.
 _VIDEO_PRICES: tuple[tuple[str, float, bool], ...] = (
-    ("minimax/h3-max-turbo", 0.0125, True),
-    # image-to-video and camera-controls bill the same rate.
-    ("minimax/h3-max", 0.025, True),
     ("fal-ai/ltx-2.3-quality", 0.12, False),
     ("fal-ai/ltx-2.3", 0.04, False),
     ("fal-ai/ltx-2", 0.06, False),
@@ -76,9 +83,15 @@ def estimate_image(model: str | None) -> float:
     return best if best is not None else _DEFAULT_IMAGE_PRICE
 
 
-def estimate_video(model: str | None, duration_s: float = 5) -> float:
+def estimate_video(model: str | None, duration_s: float = 5, resolution: str = "768P") -> float:
     """What one clip from this model costs, longest matching prefix wins."""
     slug = (model or "").strip().lower()
+    # A negative duration must not turn a reservation into a refund.
+    seconds = max(0.0, duration_s)
+    for prefix, rates in _H3_PER_SECOND:
+        if slug.startswith(prefix):
+            # An unknown resolution is priced at the dearest one.
+            return rates.get(resolution.upper(), max(rates.values())) * seconds
     best: tuple[float, bool] | None = None
     best_len = -1
     for prefix, price, per_second in _VIDEO_PRICES:
@@ -87,8 +100,7 @@ def estimate_video(model: str | None, duration_s: float = 5) -> float:
     if best is None:
         return _DEFAULT_IMAGE_PRICE
     price, per_second = best
-    # A negative duration must not turn a reservation into a refund.
-    return price * max(0.0, duration_s) if per_second else price
+    return price * seconds if per_second else price
 
 
 def _today() -> str:
@@ -179,20 +191,28 @@ def session_cap_exceeded(session_id: str) -> bool:
     return cap > 0 and session_total(session_id) >= cap
 
 
-def over_cap(session_id: str | None = None) -> str | None:
+def over_cap(session_id: str | None = None, amount: float = 0.0) -> str | None:
     """A human-readable reason if a hard cap is already crossed, else None — the
     single pre-flight gate shared by every paid endpoint. Daily-global first,
-    then the optional per-session cap. Both default off (env unset) → None."""
-    if cap_exceeded():
+    then the optional per-session cap. Both default off (env unset) → None.
+
+    With `amount`, also refuse when spending that much more would cross a cap:
+    a request made of many paid calls must not run out of cap halfway."""
+    extra = f" and this needs ≈${amount:.2f} more" if amount > 0 else ""
+    daily = daily_cap()
+    if daily > 0 and (daily_total() >= daily or daily_total() + amount > daily):
         return (
             f"daily spend cap reached (≈${daily_total():.2f} of "
-            f"MAX_DAILY_SPEND=${daily_cap():.2f})"
+            f"MAX_DAILY_SPEND=${daily:.2f}{extra})"
         )
-    if session_id and session_cap_exceeded(session_id):
-        return (
-            f"session spend cap reached (≈${session_total(session_id):.2f} of "
-            f"MAX_SESSION_SPEND=${session_cap():.2f})"
-        )
+    session = session_cap()
+    if session_id and session > 0:
+        total = session_total(session_id)
+        if total >= session or total + amount > session:
+            return (
+                f"session spend cap reached (≈${total:.2f} of "
+                f"MAX_SESSION_SPEND=${session:.2f}{extra})"
+            )
     return None
 
 

@@ -1240,7 +1240,8 @@ class WalkBody(BaseModel):
     shots: list[WalkShotBody]
     style_ref_url: str | None = None
     medium: str | None = None
-    clip_seconds: int = 5
+    # H3 camera-controls takes 3-15 s; outside that the price and the bill differ.
+    clip_seconds: int = Field(default=5, ge=3, le=15)
     trace_id: str | None = None
     # Ask what it would cost without painting anything.
     estimate_only: bool = False
@@ -1293,6 +1294,17 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
     if body.estimate_only:
         return JSONResponse(
             {"shots": len(body.shots), "estimate_usd": estimate},
+            headers={"X-Trace-Id": trace_id},
+        )
+    # A walk is many paid calls. Refuse up front rather than run out of cap
+    # halfway and throw away the stops already paid for.
+    from providers import spend
+
+    refusal = spend.over_cap(body.session_id, estimate)
+    if refusal is not None:
+        return JSONResponse(
+            {"error": refusal, "estimate_usd": estimate},
+            status_code=402,
             headers={"X-Trace-Id": trace_id},
         )
     log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate)

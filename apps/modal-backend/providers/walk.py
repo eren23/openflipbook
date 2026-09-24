@@ -77,7 +77,8 @@ class SeenObject:
     """One known place in a stop's view, from the block render."""
 
     label: str
-    h_pos: str = "center"
+    # None when an old client sent the name only: never make a position up.
+    h_pos: str | None = None
     distance: float | None = None
     share: float = 0.0
     visual: str = ""
@@ -163,13 +164,16 @@ def describe(shot: WalkShot, blocks: bool = False) -> str:
     """
     seen = shot.seen()
     if seen:
-        items = [
-            f"{o.label} ("
-            + (f"the {o.color} block, " if blocks and o.color else "")
-            + f"{o.h_pos.replace('-', ' ')}{_nearness(o.distance)})"
-            + (f": {o.visual}" if o.visual else "")
-            for o in seen
-        ]
+        items = []
+        for o in seen:
+            parts = [f"the {o.color} block"] if blocks and o.color else []
+            parts += [o.h_pos.replace("-", " ")] if o.h_pos else []
+            place = ", ".join(parts) + _nearness(o.distance)
+            items.append(
+                o.label
+                + (f" ({place.lstrip(', ')})" if place else "")
+                + (f": {o.visual}" if o.visual else "")
+            )
         text = "From left to right this camera sees: " + "; ".join(items) + "."
     else:
         text = "This camera faces an open street with no named building in view."
@@ -281,7 +285,7 @@ def estimate_usd(
     fresh = edited if keyframes is None else max(0, min(keyframes, edited))
     frames = spend.estimate_image(_keyframe_model()) * fresh
     fixes = spend.estimate_image(_correct_model()) * (edited - fresh)
-    legs = spend.estimate_video(LEG_MODEL, clip_seconds) * max(0, shots - 1)
+    legs = spend.estimate_video(LEG_MODEL, clip_seconds, LEG_RESOLUTION) * max(0, shots - 1)
     return round(frames + fixes + legs, 4)
 
 
@@ -303,18 +307,32 @@ async def _conformance(frame_url: str, shot: WalkShot) -> float | None:
     from obs import log
     from providers import judge, mock
 
-    if mock.on():
+    # Names alone (an old client) are no spec to judge a frame against.
+    if mock.on() or not shot.objects:
         return None
-    image = await _image_bytes(frame_url)
+    try:
+        image = await _image_bytes(frame_url)
+    except Exception as exc:  # the frame is paid for; never lose the walk over a check
+        log("warning", "walk.snap.frame_unreadable", shot=shot.index, error=str(exc)[:200])
+        return None
     spec = {
-        "objects": [{"label": o.label, "h_pos": o.h_pos, "visual": o.visual} for o in shot.seen()],
-        "ground": [{"label": g.label, "side": g.side} for g in shot.ground],
+        "objects": [
+            {"label": o.label, "h_pos": o.h_pos, "visual": o.visual}
+            for o in shot.seen()
+        ],
+        # The camera cannot see what is behind it.
+        "ground": [{"label": g.label, "side": g.side} for g in shot.ground if g.side != "behind"],
     }
     results = await asyncio.gather(
         *(judge.score_spec_conformance(image, spec) for _ in range(SNAP_SAMPLES)),
         return_exceptions=True,
     )
-    scores = [r.score for r in results if not isinstance(r, BaseException)]
+    # An unparseable reply comes back as a 0, not an exception: it is no verdict.
+    scores = [
+        r.score
+        for r in results
+        if not isinstance(r, BaseException) and not r.rationale.startswith(judge._UNPARSEABLE_PREFIX)
+    ]
     if not scores:
         log("warning", "walk.snap.judge_failed", shot=shot.index)
         return None
@@ -338,6 +356,7 @@ async def _last_frame(video_url: str) -> str:
 
 
 async def _merge(video_urls: list[str]) -> str | None:
+    from obs import log
     from providers import mock
     from providers.image import _fal_subscribe
 
@@ -345,7 +364,11 @@ async def _merge(video_urls: list[str]) -> str | None:
         return video_urls[0] if video_urls else None
     if mock.on():
         return video_urls[0]
-    result: dict[str, Any] = await _fal_subscribe(MERGE_MODEL, {"video_urls": video_urls})
+    try:
+        result: dict[str, Any] = await _fal_subscribe(MERGE_MODEL, {"video_urls": video_urls})
+    except Exception as exc:  # the legs are paid for; the player plays them in order
+        log("warning", "walk.merge_failed", legs=len(video_urls), error=str(exc)[:200])
+        return None
     url = (result.get("video") or {}).get("url")
     return url if isinstance(url, str) and url else None
 
@@ -373,7 +396,7 @@ async def paint(
     edit_usd = spend.estimate_image(model)
     fixer = _correct_model()
     fix_usd = spend.estimate_image(fixer)
-    leg_usd = spend.estimate_video(LEG_MODEL, clip_seconds)
+    leg_usd = spend.estimate_video(LEG_MODEL, clip_seconds, LEG_RESOLUTION)
     snaps: list[Snap] = []
     clips: list[WalkClip] = []
     frame = ""
@@ -391,6 +414,9 @@ async def paint(
                     keyframe_instruction(shot, medium, styled=bool(style_ref_url)),
                     model_override=model,
                     style_ref_url=style_ref_url,
+                    # The block render is square: keep every keyframe, and so
+                    # every leg, the same shape.
+                    aspect_ratio="1:1",
                 )
             frame = encode_data_url(image.jpeg_bytes, image.mime_type)
             snaps.append(Snap(index=shot.index, image_url=frame))

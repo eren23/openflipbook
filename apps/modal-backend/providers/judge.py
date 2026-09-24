@@ -486,9 +486,10 @@ def _spec_lines(spec: dict[str, Any]) -> str:
     lines.append("Ground features, relative to the viewer:")
     for g in ground:
         visual = str(g.get("visual") or "")[:240]
+        side = str(g.get("side") or "ahead")
+        where = "underfoot: the viewer stands on it" if side == "here" else f"on the {side}"
         lines.append(
-            f"- {str(g.get('label', ''))[:80]} on the {g.get('side', 'ahead')}"
-            + (f": {visual}" if visual else "")
+            f"- {str(g.get('label', ''))[:80]} {where}" + (f": {visual}" if visual else "")
         )
     if not ground:
         lines.append("(none)")
