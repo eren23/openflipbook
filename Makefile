@@ -5,7 +5,7 @@
 #
 .PHONY: demo demo-world demo-mock demo-local demo-down demo-clean demo-logs
 
-# Local stores (Mongo + Minio) + backend + web, with cloud AI.
+# Local stores (Mongo + a local S3 store, RustFS) + backend + web, with cloud AI.
 # Needs FAL_KEY + OPENROUTER_API_KEY in .env (see .env.example).
 demo:
 	docker compose up --build
@@ -27,7 +27,7 @@ demo-mock:
 demo-local:
 	docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 
-# Stop + remove containers (keeps the mongo / minio / ollama data volumes).
+# Stop + remove containers (keeps the mongo / s3 / ollama data volumes).
 demo-down:
 	docker compose -f docker-compose.yml -f docker-compose.local.yml down
 
