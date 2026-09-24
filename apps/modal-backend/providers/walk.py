@@ -255,8 +255,11 @@ def _correct_model() -> str:
 
 
 def keyframes_for(shots: list[WalkShot]) -> int:
-    """How many stops are painted fresh: the first, and each after a real turn."""
-    return 1 + sum(_cuts_after(s) for s in shots[:-1]) if shots else 0
+    """How many stops are painted fresh: the first, and each after a real turn.
+
+    Not the last stop: no leg leaves from it, so a painting there is never seen.
+    """
+    return 1 + sum(_cuts_after(s) for s in shots[:-2]) if shots else 0
 
 
 def estimate_usd(
@@ -264,15 +267,18 @@ def estimate_usd(
 ) -> float:
     """What a walk of this many stops can cost at most, before any of it runs.
 
-    `keyframes` stops are painted fresh (every stop when not known); every
-    other stop is priced as if its snap check asks for a correction.
+    `keyframes` stops are painted fresh (every stop but the last when not
+    known); every other stop but the last is priced as if its snap check
+    asks for a correction.
     """
     from providers import spend
 
     shots = max(0, min(shots, MAX_SHOTS))
-    fresh = shots if keyframes is None else max(0, min(keyframes, shots))
+    # The last stop is never painted or fixed: no leg leaves from it.
+    edited = max(1, shots - 1) if shots else 0
+    fresh = edited if keyframes is None else max(0, min(keyframes, edited))
     frames = spend.estimate_image(_keyframe_model()) * fresh
-    fixes = spend.estimate_image(_correct_model()) * (shots - fresh)
+    fixes = spend.estimate_image(_correct_model()) * (edited - fresh)
     legs = spend.estimate_video(LEG_MODEL, clip_seconds) * max(0, shots - 1)
     return round(frames + fixes + legs, 4)
 
@@ -370,7 +376,9 @@ async def paint(
     clips: list[WalkClip] = []
     frame = ""
     for i, shot in enumerate(shots):
-        if i == 0 or _cuts_after(shots[i - 1]):
+        last = i == len(shots) - 1
+        after_turn = i > 0 and _cuts_after(shots[i - 1])
+        if i == 0 or (after_turn and not last):
             # Reserve BEFORE submitting: a timeout cannot prove the provider
             # did not bill, and a walk is many calls in a row.
             spend.reserve(session_id, edit_usd)
@@ -384,9 +392,14 @@ async def paint(
                 )
             frame = encode_data_url(image.jpeg_bytes, image.mime_type)
             snaps.append(Snap(index=shot.index, image_url=frame))
+        elif after_turn:
+            # The last stop, reached by a turn. Its spec is for the new
+            # heading and no leg leaves from it, so keep the arrival as it is.
+            snaps.append(Snap(index=shot.index, image_url=frame))
         else:
             score = await _conformance(frame, shot)
-            corrected = score is not None and score < SNAP_GATE
+            # Nothing leaves the last stop, so a fix there would never be seen.
+            corrected = not last and score is not None and score < SNAP_GATE
             if corrected:
                 spend.reserve(session_id, fix_usd)
                 spent += fix_usd
@@ -398,7 +411,7 @@ async def paint(
             snaps.append(
                 Snap(index=shot.index, image_url=frame, corrected=corrected, conformance=score)
             )
-        if i == len(shots) - 1:
+        if last:
             break
         spend.reserve(session_id, leg_usd)
         spent += leg_usd
@@ -419,7 +432,7 @@ async def paint(
                 seconds=leg.duration_seconds,
             )
         )
-        if not _cuts_after(shot):
+        if not _cuts_after(shot) or i + 1 == len(shots) - 1:
             frame = await _last_frame(leg.video_url)
 
     merged = await _merge([c.video_url for c in clips])

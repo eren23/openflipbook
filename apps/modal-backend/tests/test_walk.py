@@ -143,18 +143,20 @@ def test_estimate_is_the_planned_keyframes_the_fixes_and_the_legs() -> None:
     paint = spend.estimate_image(walk.KEYFRAME_MODEL)
     fix = spend.estimate_image(walk.CORRECT_MODEL)
     leg = spend.estimate_video(walk.LEG_MODEL, walk.DEFAULT_CLIP_SECONDS)
-    assert walk.estimate_usd(4, keyframes=2) == round(2 * paint + 2 * fix + 3 * leg, 4)
-    # not knowing the turns, every stop is priced as a fresh painting
-    assert walk.estimate_usd(4) == round(4 * paint + 3 * leg, 4)
+    # 4 stops: the last is never edited, so 2 paintings, 1 fix and 3 legs
+    assert walk.estimate_usd(4, keyframes=2) == round(2 * paint + 1 * fix + 3 * leg, 4)
+    # not knowing the turns, every stop but the last is a fresh painting
+    assert walk.estimate_usd(4) == round(3 * paint + 3 * leg, 4)
+    assert walk.estimate_usd(1) == round(paint, 4)
     assert walk.estimate_usd(500) == walk.estimate_usd(walk.MAX_SHOTS)
 
 
 def test_keyframes_are_the_first_stop_and_each_after_a_real_turn() -> None:
     shots = [_shot(0, turn_deg=5.0), _shot(1, turn_deg=-40.0), _shot(2, turn_deg=90.0), _shot(3)]
-    # stop 0, then stops 2 and 3 after the two big turns; the last stop's
-    # move goes nowhere, so its turn never cuts
-    assert walk.keyframes_for(shots) == 3
-    assert walk.keyframes_for([*shots[:3], _shot(3, turn_deg=180.0)]) == 3
+    # stop 0 and stop 2 (after the turn at 1); the turn at 2 leads into the
+    # last stop, which no leg leaves, so it is never painted
+    assert walk.keyframes_for(shots) == 2
+    assert walk.keyframes_for([_shot(0)]) == 1
     assert walk.keyframes_for([]) == 0
 
 
@@ -198,6 +200,14 @@ async def test_a_real_turn_cuts_to_a_new_keyframe_at_the_new_heading(mocked: _Ed
 
 
 @pytest.mark.asyncio
+async def test_a_turn_into_the_last_stop_paints_nothing_there(mocked: _Edits) -> None:
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1, turn_deg=90.0), _shot(2, forward=None)])
+    assert len(mocked.calls) == 1
+    # the arrival is the last leg's own frame, not a painting nobody sees
+    assert result.snaps[2].image_url != _C and not result.snaps[2].corrected
+
+
+@pytest.mark.asyncio
 async def test_a_small_turn_does_not_cut(mocked: _Edits) -> None:
     await walk.paint(session_id="s1", shots=[_shot(0, turn_deg=8.0), _shot(1, forward=None)])
     assert len(mocked.calls) == 1
@@ -211,12 +221,13 @@ async def test_a_stop_under_the_gate_is_corrected_and_the_next_leg_starts_there(
         return 3.0
 
     monkeypatch.setattr(walk, "_conformance", low)
-    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1, forward=None)])
-    assert len(mocked.calls) == 2
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1), _shot(2, forward=None)])
+    assert len(mocked.calls) == 2  # the keyframe and stop 1's fix; never the last stop
     assert "Keep the camera" in str(mocked.calls[1]["instruction"])
     assert mocked.calls[1]["model_override"] == walk.CORRECT_MODEL
     assert mocked.calls[0]["model_override"] == walk.KEYFRAME_MODEL
     assert result.snaps[1].corrected and result.snaps[1].conformance == 3.0
+    assert not result.snaps[2].corrected and result.snaps[2].conformance == 3.0
 
 
 @pytest.mark.asyncio
