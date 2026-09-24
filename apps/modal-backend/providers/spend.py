@@ -40,16 +40,19 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
 )
 _DEFAULT_IMAGE_PRICE = 0.15  # unknown slug: assume the balanced default
 
-# Video is billed per CLIP here, not per second: these are the fixed-price
-# slugs the descent/walk paths use. An unknown one falls back to the image
-# default, which is the conservative direction for a reservation.
-_VIDEO_PRICES: tuple[tuple[str, float], ...] = (
-    ("minimax/h3-max", 0.12),
-    ("fal-ai/ltx-2.3-quality", 0.12),
-    ("fal-ai/ltx-2.3", 0.04),
-    ("fal-ai/ltx-2", 0.06),
-    ("fal-ai/ltx-video", 0.02),
-    ("fal-ai/wan-i2v", 0.05),
+# Video: (slug prefix, dollars, per_second). Most slugs bill per CLIP. H3 bills
+# per second of clip, and the longest prefix wins, so turbo is not priced as
+# h3-max. An unknown slug falls back to the image default, which is the
+# conservative direction for a reservation.
+_VIDEO_PRICES: tuple[tuple[str, float, bool], ...] = (
+    ("minimax/h3-max-turbo", 0.0125, True),
+    # image-to-video and camera-controls bill the same rate.
+    ("minimax/h3-max", 0.025, True),
+    ("fal-ai/ltx-2.3-quality", 0.12, False),
+    ("fal-ai/ltx-2.3", 0.04, False),
+    ("fal-ai/ltx-2", 0.06, False),
+    ("fal-ai/ltx-video", 0.02, False),
+    ("fal-ai/wan-i2v", 0.05, False),
 )
 VLM_STACK_FLAT = 0.02  # planner + judges + extraction, per generation
 
@@ -73,15 +76,19 @@ def estimate_image(model: str | None) -> float:
     return best if best is not None else _DEFAULT_IMAGE_PRICE
 
 
-def estimate_video(model: str | None) -> float:
+def estimate_video(model: str | None, duration_s: float = 5) -> float:
     """What one clip from this model costs, longest matching prefix wins."""
     slug = (model or "").strip().lower()
-    best: float | None = None
+    best: tuple[float, bool] | None = None
     best_len = -1
-    for prefix, price in _VIDEO_PRICES:
+    for prefix, price, per_second in _VIDEO_PRICES:
         if slug.startswith(prefix) and len(prefix) > best_len:
-            best, best_len = price, len(prefix)
-    return best if best is not None else _DEFAULT_IMAGE_PRICE
+            best, best_len = (price, per_second), len(prefix)
+    if best is None:
+        return _DEFAULT_IMAGE_PRICE
+    price, per_second = best
+    # A negative duration must not turn a reservation into a refund.
+    return price * max(0.0, duration_s) if per_second else price
 
 
 def _today() -> str:
