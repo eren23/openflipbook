@@ -128,10 +128,10 @@ def test_redraw_zoom_is_fresh_rerender_wording() -> None:
         style_anchor="hand-drawn engraving, sepia ink",
         redraw=True,
     )
-    assert 'Draw a closer, richer, MORE DETAILED map of "Ankh-Morpork"' in s
-    assert "the area the reference image shows" in s
-    assert "individual buildings, lanes, courtyards" in s
-    assert "in the same positions" in s
+    assert 'sharper, more detailed map of "Ankh-Morpork"' in s
+    assert "EXACTLY the same framing" in s
+    assert "show nothing beyond the reference's edges" in s
+    assert "individual buildings, lanes, courtyards" not in s  # invited invention
     assert "The Shades" in s and "Unseen University" in s
     assert "hand-drawn engraving, sepia ink" in s  # the medium lock
     assert "photograph" in s.lower()  # the photoreal guard rides the lock
@@ -148,7 +148,7 @@ def test_redraw_zoom_label_free_swaps_lettering_guard() -> None:
     )
     assert LETTERING_GUARD not in s
     assert NO_LETTERING in s
-    assert "MORE DETAILED map" in s
+    assert "EXACTLY the same framing" in s
 
 
 def test_golden_layout_default_call() -> None:

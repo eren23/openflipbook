@@ -559,6 +559,55 @@ async def test_zoom_judge_pass_is_single_attempt(
     assert step.await_args.args[0] == b"region-crop"  # judged vs the REGION
 
 
+async def test_map_zoom_at_the_same_framing_passes_first_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A map zoom's target is the tapped crop's own framing, which step-in
+    # scores 5 ("the same place at the same framing"). At the shared 6.0
+    # floor no map zoom passed, and every map tap rendered twice.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [5.0, 5.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+
+
+async def test_view_zoom_at_the_same_framing_still_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A close-up has to come closer: the same framing is not a close-up.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [5.0, 5.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                prefetched_enter_as="scene",  # -> place_closeup, the view register
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
+
+
 async def test_zoom_judge_fail_retries_with_rationale_and_keeps_best(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -973,7 +1022,7 @@ async def test_world_submap_redraw_rides_edit_seam_with_loose_refs_model(
     gen.assert_not_awaited()
     edit.assert_not_awaited()
     assert cont.await_args.args[0] == "data:r"  # the region crop is the source
-    assert "MORE DETAILED map" in cont.await_args.args[1]
+    assert "EXACTLY the same framing" in cont.await_args.args[1]
     assert (
         cont.await_args.kwargs["model_override"] == "fal-ai/nano-banana-pro/edit"
     )
@@ -1072,14 +1121,14 @@ async def test_redraw_prompt_carries_clauses_and_style(
     events = await _collect(_event_stream(_world_submap_body(), "t1"))
 
     prompt = cont.await_args.args[1]
-    assert 'Draw a closer, richer, MORE DETAILED map of "The Stone Castle"' in prompt
-    assert "individual buildings, lanes, courtyards" in prompt
+    assert 'sharper, more detailed map of "The Stone Castle"' in prompt
+    assert "EXACTLY the same framing" in prompt
     assert "The Inner Bailey" in prompt  # the planner's facts ride in
     assert "hand-drawn engraving, sepia ink" in prompt  # the medium lock
     assert "garbled" in prompt  # the lettering guard
     assert "FLAT TOP-DOWN" in prompt  # the map lever rides the redraw
     final = next(e for e in events if e["type"] == "final")
-    assert "MORE DETAILED map" in final["final_prompt"]
+    assert "EXACTLY the same framing" in final["final_prompt"]
 
 
 # ---------- the zoom legibility gate (TAP_ZOOM_DETAIL, default ON) -------------
@@ -1312,7 +1361,7 @@ async def test_zoom_detail_gates_the_redraw_op_too(
     gen.assert_not_awaited()
     retry_prompt = cont.await_args_list[1].args[1]
     assert "smeared mush" in retry_prompt
-    assert "MORE DETAILED map" in retry_prompt  # still the redraw instruction
+    assert "EXACTLY the same framing" in retry_prompt  # still the redraw instruction
     assert [c.kwargs["model_override"] for c in cont.await_args_list] == [
         "fal-ai/nano-banana-pro/edit",
         "fal-ai/nano-banana-pro/edit",
@@ -1368,7 +1417,7 @@ async def test_zoom_receipt_keep_best_reports_not_accepted(
         image_edit_mod, "continue_image", AsyncMock(side_effect=[first, second])
     )
     _mock_fresh(monkeypatch)
-    _mock_step_in(monkeypatch, [4.0, 5.5])  # both below the 6.0 floor
+    _mock_step_in(monkeypatch, [4.0, 4.5])  # both below the map floor (5.0)
 
     events = await _collect(
         _event_stream(
@@ -1382,7 +1431,7 @@ async def test_zoom_receipt_keep_best_reports_not_accepted(
     final = next(e for e in events if e["type"] == "final")
     v = final["view_verdict"]
     assert v["accepted"] is False and v["attempts"] == 2
-    assert v["same_place"] == 5.5  # the kept (better) attempt's score
+    assert v["same_place"] == 4.5  # the kept (better) attempt's score
 
 
 async def test_unjudged_enter_carries_no_receipt(

@@ -858,10 +858,18 @@ async def stream_tap(
             region_bytes = render_loop.data_url_bytes(region_ref)
             if region_bytes is None:
                 return first
+            # score_step_in gives "the same place at the same framing" 5 and
+            # "closer" more. A MAP zoom's target is the tapped crop's own
+            # framing drawn in more detail, so a correct one tops out at 5:
+            # at the shared 6.0 floor no map zoom passed and every map tap
+            # paid for a second render (measured 2026-09-24).
+            floor_env, floor_default = (
+                ("TAP_ZOOM_MAP_ACCEPT", 5.0) if zoom_register == "map" else ("TAP_ZOOM_ACCEPT", 6.0)
+            )
             try:
-                accept = float(os.environ.get("TAP_ZOOM_ACCEPT", "6.0"))
+                accept = float(os.environ.get(floor_env, str(floor_default)))
             except ValueError:
-                accept = 6.0
+                accept = floor_default
             try:
                 detail_accept = float(
                     os.environ.get("TAP_ZOOM_DETAIL_ACCEPT", "6.0")

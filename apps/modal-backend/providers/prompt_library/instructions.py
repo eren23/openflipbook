@@ -682,16 +682,24 @@ def _redraw_zoom_instruction(
     detail) while keeping the reference's landmarks in place; medium_lock
     carries the style anchor and the lettering guard rides inside it."""
     title = page_title.strip() or "this place"
+    # Framing-locked (A/B 2026-09-24, 6 map crops, nano-banana-pro/edit): the
+    # old wording asked for "individual buildings, lanes, courtyards" and to
+    # work in features, and the model drew them: 5 of 6 zooms widened or
+    # invented around the tapped area (framing drift median 15.5). Locked to
+    # the reference's edges: drift 2.3, legibility 9.2, every sample judged
+    # "the same place at the same framing".
     text = (
-        f'Draw a closer, richer, MORE DETAILED map of "{title}" — the area '
-        "the reference image shows. Redraw it at this larger scale with finer "
-        "architectural and street detail (individual buildings, lanes, "
-        "courtyards), keeping every named landmark, wall and waterway the "
-        "reference shows in the same positions"
+        f'Redraw the reference image as a sharper, more detailed map of "{title}" '
+        "at EXACTLY the same framing: the reference's four edges are your map's "
+        "edges. Keep every structure, road, shoreline, ship and label where the "
+        "reference has it, at the same size. Add fine detail only inside what is "
+        "already drawn (roof tiles, window rows, stonework, rigging, water "
+        "texture). Do not add, move or enlarge anything, and show nothing beyond "
+        "the reference's edges"
     )
     named = [f.strip() for f in facts if f and f.strip()]
     if named:
-        text += ", working in the features that belong here: " + "; ".join(named[:8])
+        text += ". Named features to keep where they are: " + "; ".join(named[:8])
     text += ". " + medium_lock(style_anchor)
     if layout_clause.strip():
         text += "\n\n" + layout_clause.strip()
