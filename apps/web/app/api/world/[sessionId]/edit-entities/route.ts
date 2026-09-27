@@ -12,7 +12,7 @@ import { requireOwner } from "@/lib/session-owner";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { EntityEditPlan, EntityGeoEdit, SceneView } from "@openflipbook/config";
-import { requireCreator, CreatorError, checkCreatorWrite } from "@/lib/creator";
+import { CreatorError, checkCreatorWrite } from "@/lib/creator";
 import { applyLegacySceneEdits } from "@/lib/place-scene-server";
 
 export const runtime = "nodejs";
@@ -41,7 +41,10 @@ function overridesEnabled(): boolean {
 
 export async function POST(req: Request, { params }: Params) {
   const { sessionId } = await params;
-  try { checkCreatorWrite(req); await requireCreator(sessionId); }
+  // Same-origin JSON only. Ownership is requireOwner's job below: it claims
+  // a world nobody owns yet for this browser, where the verify-only creator
+  // gate refused it.
+  try { checkCreatorWrite(req); }
   catch (e) { return NextResponse.json({ error: e instanceof CreatorError ? e.message : "World unavailable" }, { status: e instanceof CreatorError ? e.status : 503 }); }
   if (!overridesEnabled()) {
     return NextResponse.json(
