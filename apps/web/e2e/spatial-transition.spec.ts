@@ -33,7 +33,7 @@ test("spatial navigation holds the source, commits at the cut, and replays witho
   await expect(image).toHaveAttribute("src", source);
   expect(page.url()).toBe(oldUrl);
   await expect(page.getByTestId("spatial-transition")).toHaveCount(0);
-  await expect(page).toHaveURL(new RegExp(`/n/${saved.id}`));
+  await expect(page).toHaveURL(new RegExp(`[?&]node=${saved.id}`));
   const arrival = await image.getAttribute("src");
   await page.getByRole("button", { name: "Replay arrival", exact: true }).click();
   await expect(page.getByTestId("spatial-transition")).toBeVisible();
@@ -45,7 +45,7 @@ test("spatial navigation holds the source, commits at the cut, and replays witho
   await expect(page.getByTestId("spatial-transition")).toHaveCount(0);
   await expect(image).toHaveAttribute("src", source);
   await page.getByTitle("Go forward (→)").click();
-  await expect(page).toHaveURL(new RegExp(`/n/${saved.id}`));
+  await expect(page).toHaveURL(new RegExp(`[?&]node=${saved.id}`));
   await page.reload();
   await page.getByRole("link", { name: "Continue this session", exact: true }).click();
   await waitForStableImage(page);
