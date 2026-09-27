@@ -463,7 +463,7 @@ export function frameForView(
 }
 
 export function toAbsoluteEntities<
-  T extends FrameNode & { footprint: { w: number; d: number } },
+  T extends FrameNode & { footprint: { w: number; d: number }; border?: WorldVec2[] },
 >(subset: T[], all: FrameNode[]): T[] {
   const byId = new Map(all.map((e) => [e.id, e]));
   return subset.map((e) => {
@@ -474,6 +474,7 @@ export function toAbsoluteEntities<
       ...e,
       pos: f.pos,
       footprint: { w: e.footprint.w * f.unit, d: e.footprint.d * f.unit },
+      ...(e.border ? { border: e.border.map(p => ({ x: f.pos.x + (p.x - e.pos.x) * f.unit, y: f.pos.y + (p.y - e.pos.y) * f.unit })) } : {}),
     };
   });
 }

@@ -5,6 +5,8 @@ import { PlaceError, updatePlace } from "@/lib/places";
 import { getStoredBytes } from "@/lib/r2";
 import { requireOwner } from "@/lib/session-owner";
 import { getWorldMap } from "@/lib/world-map";
+import { requireWorldRead } from "@/lib/world-access";
+import { CreatorError } from "@/lib/creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,12 +32,13 @@ export async function GET(_req: Request, { params }: Params) {
   const { sessionId, geoId } = await params;
   if (!isSafeId(sessionId) || !isSafeId(geoId)) return new Response(null, { status: 400 });
   try {
+    await requireWorldRead(sessionId);
     const anchor = (await getWorldMap(sessionId)).entities.find(e => e.id === geoId)?.identity_anchor;
     const stored = anchor ? await getStoredBytes(anchor.image_key) : null;
     if (!stored) return new Response(null, { status: 404 });
     if (!stored.contentType.startsWith("image/") || stored.bytes.length > 20 * 1024 * 1024) return new Response(null, { status: 422 });
     return new Response(new Uint8Array(stored.bytes), { headers: { "Content-Type": stored.contentType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
-  } catch {
-    return new Response(null, { status: 503 });
+  } catch (e) {
+    return new Response(null, { status: e instanceof CreatorError ? e.status : 503 });
   }
 }

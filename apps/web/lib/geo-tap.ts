@@ -215,6 +215,9 @@ export function geoTapRequest(
   opts?: { enterDirect?: boolean },
 ): GeoTap | null {
   if (map.entities.length === 0) return null;
+  // Imported perspective images have no calibrated camera. Defer to image
+  // classification rather than treating local world coordinates as map pixels.
+  if (currentView && currentView.level !== "map" && !currentView.observer) return null;
   const insideId =
     currentView && currentView.level !== "map"
       ? currentView.focus_id ?? null
@@ -516,10 +519,16 @@ export function geoTapForEntity(
   const byId = new Map(map.entities.map((e) => [e.id, e]));
   // Stand at the frame centre looking at the place — the same default a
   // footprint hit synthesizes when the viewer has no prior pose.
-  const route = routeToFocus(entity, {
-    x: MAP_IMAGE_FRAME.x + MAP_IMAGE_FRAME.w / 2,
-    y: MAP_IMAGE_FRAME.y + MAP_IMAGE_FRAME.h / 2,
-  });
+  // The camera stands in the ABSOLUTE map frame: after a zoom-out the town's
+  // stored numbers are re-expressed under the new parent (x200 footprints,
+  // unchanged heights), but absolute positions and sizes are conserved.
+  const absolute = toAbsoluteEntities(map.entities, map.entities);
+  const frame = currentView?.level === "map" && currentView.map_crop ? currentView.map_crop : MAP_IMAGE_FRAME;
+  const route = routeToFocus(
+    absolute.find((e) => e.id === entity.id) ?? entity,
+    { x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 },
+    absolute,
+  );
   return buildSceneTap(
     map.entities,
     nodeId,

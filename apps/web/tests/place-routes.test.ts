@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Places from "@/lib/places";
-const mocks = vi.hoisted(() => ({ requireOwner: vi.fn(), updatePlace: vi.fn(), getWorldMap: vi.fn(), getStoredBytes: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireOwner: vi.fn(), requireWorldRead: vi.fn(), updatePlace: vi.fn(), getWorldMap: vi.fn(), getStoredBytes: vi.fn() }));
+vi.mock("@/lib/world-access", () => mocks);
 vi.mock("@/lib/session-owner", () => mocks);
 vi.mock("@/lib/places", async original => ({ ...await original<typeof Places>(), updatePlace: mocks.updatePlace }));
 vi.mock("@/lib/world-map", () => mocks);
 vi.mock("@/lib/r2", () => mocks);
 import { PATCH, GET } from "@/app/api/world/[sessionId]/places/[geoId]/route";
 import { PlaceError } from "@/lib/places";
+import { CreatorError } from "@/lib/creator";
 const params = { params: Promise.resolve({ sessionId: "world", geoId: "tower" }) };
 const patch = { expected_updated_at: "2026-09-06T00:00:00.000Z", label: "Beacon" };
 const request = (body: unknown = patch) => new Request("http://localhost/api/world/world/places/tower", { method: "PATCH", body: JSON.stringify(body) });
@@ -18,6 +20,11 @@ beforeEach(() => {
   mocks.getStoredBytes.mockResolvedValue({ bytes: Buffer.from("original"), contentType: "image/png" });
 });
 describe("place routes", () => {
+  it("does not fetch a private world's map or reference before read authorization", async () => {
+    mocks.requireWorldRead.mockRejectedValue(new CreatorError("Not owner", 403));
+    expect((await GET(request(), params)).status).toBe(403);
+    expect(mocks.getWorldMap).not.toHaveBeenCalled(); expect(mocks.getStoredBytes).not.toHaveBeenCalled();
+  });
   it("checks ownership before any mutation", async () => {
     mocks.requireOwner.mockResolvedValue({ ok: false, res: new Response(null, { status: 403 }) });
     expect((await PATCH(request(), params)).status).toBe(403);

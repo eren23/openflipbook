@@ -67,6 +67,23 @@ function manualResponse(): {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("useExpandBloom", () => {
+  it("saves distinct tiles under distinct keys and preserves supplied view classification", async () => {
+    const records = new Map<string, string>();
+    const persist = vi.fn(async (_body, _trace, key) => {
+      if (!records.has(key)) records.set(key, `node-${records.size}`);
+      return { id: records.get(key)! };
+    });
+    const scene_view = { node_id: "", level: "street", observer: null, map_crop: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(cannedResponse([
+      neighbor({ index: 0, scene_view }), neighbor({ index: 1 }), { type: "expand_done", count: 2 },
+    ])));
+    const { result } = renderHook(() => useExpandBloom(persist));
+    act(() => result.current.start(BODY));
+    await waitFor(() => expect(result.current.bloom?.items.map(i => i.nodeId)).toEqual(["node-0", "node-1"]));
+    expect(persist.mock.calls[0]![0].scene_view).toEqual(scene_view);
+    expect(persist.mock.calls[1]![0].scene_view).toBeUndefined();
+    expect(persist.mock.calls[0]![1]).toBe(persist.mock.calls[1]![1]);
+  });
   it("fills the tray + persists each neighbour as a relation:expand child", async () => {
     const persist = vi.fn().mockResolvedValue({ id: "node-x" });
     vi.stubGlobal(
@@ -97,6 +114,7 @@ describe("useExpandBloom", () => {
     expect(persist).toHaveBeenCalledWith(
       expect.objectContaining({ relation: "expand", scale: "container", query: "The Factory" }),
       expect.anything(),
+      expect.stringMatching(/:neighbor:0$/),
     );
     // nodeId back-patched once persist resolves.
     await waitFor(() =>
@@ -123,6 +141,7 @@ describe("useExpandBloom", () => {
     expect(persist).toHaveBeenCalledWith(
       expect.objectContaining({ relation: "expand", scale_tier: "room" }),
       expect.anything(),
+      expect.stringMatching(/:neighbor:0$/),
     );
   });
 

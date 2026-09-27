@@ -77,6 +77,23 @@ export type OwnerCheck =
   | { ok: true }
   | { ok: false; res: NextResponse };
 
+/** Mint only the browser credential. World ownership is a separate DB write. */
+export async function getExistingOwnerToken(): Promise<string | null> {
+  return (await cookies()).get(OWNER_COOKIE)?.value ?? null;
+}
+
+export async function getOrCreateOwnerToken(): Promise<string> {
+  const store = await cookies();
+  let token = store.get(OWNER_COOKIE)?.value;
+  if (!token) {
+    token = crypto.randomUUID();
+    store.set(OWNER_COOKIE, token, {
+      httpOnly: true, sameSite: "lax", path: "/", maxAge: ONE_YEAR_S,
+    });
+  }
+  return token;
+}
+
 /**
  * Gate a mutation/cost route on session ownership. Reads (or mints) the
  * `ofb_owner` cookie, claims/verifies the session, and sets the cookie on the
@@ -93,17 +110,7 @@ export async function requireOwner(sessionId: string): Promise<OwnerCheck> {
   // No store configured → nothing is persisted to own, so ownership can't (and
   // needn't) be enforced. Don't crash the no-persistence demo mode.
   if (!ownershipStoreConfigured()) return { ok: true };
-  const store = await cookies();
-  let token = store.get(OWNER_COOKIE)?.value ?? null;
-  if (!token) {
-    token = crypto.randomUUID();
-    store.set(OWNER_COOKIE, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: ONE_YEAR_S,
-    });
-  }
+  const token = await getOrCreateOwnerToken();
   const verdict = await claimOrVerify(sessionId, token);
   if (verdict === "forbidden") {
     return {

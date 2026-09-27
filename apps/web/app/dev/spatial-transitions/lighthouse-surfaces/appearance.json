@@ -1,0 +1,20 @@
+{
+  "id": "crystal-lighthouse-surfaces-v1",
+  "geometry": "crystal-lighthouse-local-v2",
+  "baselineHashes": {
+    "scene.json": "57390cc849c7b08b6a5991f7e10a5696b0015db3b07e01382b63e1b8a7202640",
+    "contract.ts": "4cac3dd208e5518e1d601f3952a4f8bcbaafe72c998ea4b29f185ccc9de49bb9",
+    "world.ts": "5ed3de7b11b0680c93eb8a084ce7eebaaf901e0259c33d50c52f7e2982481f4c",
+    "reference.png": "b3d20adf5e70bef5c5dcb698992e6405cafbfcc64e1e0ce88440c16a44ceae1c"
+  },
+  "method": "Deterministic object-space surface shading; authored, not AI-generated or source-projected",
+  "structuralReview": [
+    "Crown arms and basin profile remain approximate",
+    "Base recesses are simplified; the source has richer arched stonework",
+    "Annex proportions and opening depth are not calibrated",
+    "Crystal facets and relative scale differ from the illustration",
+    "Cliff, access route and all hidden architecture remain unknown"
+  ],
+  "palette": {"stone": "#cac7bf", "band": "#a8acb9", "roof": "#c3664e", "recess": "#354958", "ground": "#89aca0", "ink": "#302b3c", "sky": "#b2d9e4"},
+  "accepted": false
+}

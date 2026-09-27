@@ -1,8 +1,11 @@
 import type { EntityBBox, GroundingSummary, PlaceUpdate, SceneView, WorldEntityGeo, ViewVerdict } from "@openflipbook/config";
 import { isSafeId } from "./ids";
 
-export function isVerifiedView(verdict: ViewVerdict | null | undefined, options: { outward?: boolean; interior?: boolean } = {}): boolean {
+export function isVerifiedView(verdict: ViewVerdict | null | undefined, options: { outward?: boolean; interior?: boolean; exterior?: boolean } = {}): boolean {
   if (!verdict?.accepted) return false;
+  if (options.exterior || verdict.arrival) {
+    if (verdict.arrival?.status !== "pass" || (["near_target", "exterior", "single_target", "scene_not_map"] as const).some(key => verdict.arrival?.checks?.[key] !== "pass")) return false;
+  }
   const required = [verdict.medium, verdict.conformance, options.interior ? verdict.interior : verdict.same_place];
   if (!options.outward) required.push(verdict.detail);
   return required.every(value => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 10);

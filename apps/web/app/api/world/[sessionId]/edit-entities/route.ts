@@ -12,6 +12,8 @@ import { requireOwner } from "@/lib/session-owner";
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import type { EntityEditPlan, EntityGeoEdit, SceneView } from "@openflipbook/config";
+import { requireCreator, CreatorError, checkCreatorWrite } from "@/lib/creator";
+import { applyLegacySceneEdits } from "@/lib/place-scene-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +41,8 @@ function overridesEnabled(): boolean {
 
 export async function POST(req: Request, { params }: Params) {
   const { sessionId } = await params;
+  try { checkCreatorWrite(req); await requireCreator(sessionId); }
+  catch (e) { return NextResponse.json({ error: e instanceof CreatorError ? e.message : "World unavailable" }, { status: e instanceof CreatorError ? e.status : 503 }); }
   if (!overridesEnabled()) {
     return NextResponse.json(
       {
@@ -160,7 +164,9 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   try {
-    const snapshot = await applyEntityEdits(sessionId, plan.edits as EntityGeoEdit[]);
+    const targetScene = map.entities.find(g => g.scene_id && plan.edits.some(e => e.op !== "add" && e.target === g.id))?.scene_id;
+    if (targetScene) await applyLegacySceneEdits(sessionId, targetScene, plan.edits);
+    const snapshot = targetScene ? await getWorldMap(sessionId) : await applyEntityEdits(sessionId, plan.edits as EntityGeoEdit[]);
     return NextResponse.json(
       { plan, snapshot, trace_id: traceId },
       { headers: { [TRACE_HEADER]: traceId } }
@@ -168,7 +174,7 @@ export async function POST(req: Request, { params }: Params) {
   } catch (err) {
     return NextResponse.json(
       { error: `apply failed: ${(err as Error).message}`, trace_id: traceId },
-      { status: 500, headers: { [TRACE_HEADER]: traceId } }
+      { status: err instanceof CreatorError ? err.status : 500, headers: { [TRACE_HEADER]: traceId } }
     );
   }
 }

@@ -99,6 +99,22 @@ async def test_expand_blooms_all_neighbours(monkeypatch: pytest.MonkeyPatch) -> 
     assert events[-1]["count"] == 3
 
 
+@pytest.mark.parametrize("level", ["street", "eye", "map"])
+async def test_outpaint_preserves_perspective_kind_without_fake_camera(monkeypatch, level):
+    import providers.image_edit as edits
+
+    monkeypatch.setenv("EXPAND_MAP_PAN", "true")
+    monkeypatch.setattr(edits, "expand_image", AsyncMock(return_value=GeneratedImage(b"pixels", "image/jpeg", "fal-model", "req")))
+    events = await _collect(_event_stream(_expand_body(scene_view={"node_id": "source", "level": level, "focus_id": "old-focus"}), "trace-pan"))
+    tiles = [e for e in events if e["type"] == "neighbor"]
+    assert len(tiles) == 4
+    for tile in tiles:
+        if level == "map":
+            assert "scene_view" not in tile
+        else:
+            assert tile["scene_view"] == {"node_id": "", "level": level, "observer": None, "map_crop": None}
+
+
 async def test_expand_neighbor_event_matches_wire_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

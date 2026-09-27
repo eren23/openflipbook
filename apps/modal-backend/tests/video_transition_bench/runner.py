@@ -16,6 +16,7 @@ import os
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -64,8 +65,9 @@ def money(value: object) -> Decimal:
 class Ledger:
     """A separate lock inode protects atomic replacements across processes."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, cap: Decimal = CAP):
         self.path = path
+        self.cap = money(cap)
         self.lock = None
         self.cells: dict = {}
 
@@ -76,10 +78,10 @@ class Ledger:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             if self.path.exists():
                 data = json.loads(self.path.read_text())
-                if data["cap_usd"] != str(CAP):
+                if data["cap_usd"] != str(self.cap):
                     raise ValueError("Unexpected pilot cap; reconcile the ledger")
                 self.cells = data["cells"]
-                if not isinstance(self.cells, dict) or self.total > CAP:
+                if not isinstance(self.cells, dict) or self.total > self.cap:
                     raise ValueError("Invalid pilot ledger")
             elif list(self.path.parent.glob("*.mp4")) or list(
                 self.path.parent.glob("*-receipt.json")
@@ -99,13 +101,13 @@ class Ledger:
         return sum((money(c["reserved_usd"]) for c in self.cells.values()), Decimal(0))
 
     def save(self) -> None:
-        atomic_json(self.path, {"cap_usd": str(CAP), "cells": self.cells})
+        atomic_json(self.path, {"cap_usd": str(self.cap), "cells": self.cells})
 
     def reserve(self, key: str, amount: Decimal) -> dict:
         if key in self.cells:
             raise RuntimeError("A submitted cell cannot be submitted again")
         amount = money(amount)
-        if self.total + amount > CAP:
+        if self.total + amount > self.cap:
             raise RuntimeError("Pilot budget exhausted; no request submitted")
         self.cells[key] = {"reserved_usd": str(amount), "state": "reserved"}
         self.save()
@@ -170,12 +172,15 @@ async def generate_cell(
     model: str,
     arguments: dict,
     amount: Decimal,
+    on_update: Callable[[dict], None] | None = None,
 ) -> dict:
     cell = ledger.cells.get(key)
     if cell and cell.get("result"):
         return cell
     if cell is None:
         cell = ledger.reserve(key, amount)
+        if on_update:
+            on_update(cell)
         # Raw httpx has no automatic POST retries (fal-client's submit does).
         response = await client.post(f"https://queue.fal.run/{model}", json=arguments, headers=auth)
         response.raise_for_status()
@@ -187,6 +192,8 @@ async def generate_cell(
             state="submitted",
         )
         ledger.save()
+        if on_update:
+            on_update(cell)
     if not cell.get("request_id"):
         raise RuntimeError("Earlier submission is ambiguous; no automatic resubmission")
     deadline = time.monotonic() + 600

@@ -372,7 +372,9 @@ async def click_to_subject(
             # label"), which the label rule in the prompt fixes.
             # CLICK_REASONING_EFFORT="" restores the model's default.
             extra_body=_reasoning_extra(os.environ.get("CLICK_REASONING_EFFORT", "low").strip()) or None,
-            max_tokens=_llm.REASONING_HEADROOM + 400,
+            # The reply leaves room for arrival and surroundings in the
+            # multi-field schema.
+            max_tokens=_llm.REASONING_HEADROOM + 1600,
             span_ctx=ctx,
         )
     return _build_click_resolution(parsed, x_pct=x_pct, y_pct=y_pct, fallback_subject=parent_title)

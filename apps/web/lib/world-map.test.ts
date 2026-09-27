@@ -218,7 +218,7 @@ describe("applyEntityEdit (P5 structured geo edits)", () => {
   it("removing a scaled nested container preserves surviving descendants' positions and extents", () => {
     const ancestor = { ...geo("ancestor", "user", 10, 20), scale: 0.5 };
     const parent = { ...geo("parent", "user", 4, 8), parent_id: "ancestor", scale: 0.2 };
-    const child = { ...geo("child", "user", 5, 15), parent_id: "parent", scale: 2 };
+    const child = { ...geo("child", "user", 5, 15), parent_id: "parent", scale: 2, border: [{ x: 3, y: 12 }, { x: 7, y: 12 }, { x: 7, y: 18 }, { x: 3, y: 18 }] };
     const grandchild = { ...geo("grandchild", "user", 1, 3), parent_id: "child" };
     const original = [ancestor, parent, child, grandchild];
     const out = applyEntityEdit(original, { op: "remove", target: "parent" }, "t");
@@ -232,6 +232,10 @@ describe("applyEntityEdit (P5 structured geo edits)", () => {
       expect(entity.footprint.w * after.unit).toBeCloseTo(beforeById.get(entity.id)!.footprint.w * before.unit);
     }
     expect(afterById.get("child")!.scale).toBeCloseTo(0.2);
+    child.border.forEach((p, i) => {
+      expect(afterById.get("child")!.border![i]!.x).toBeCloseTo(12 + p.x * 0.1);
+      expect(afterById.get("child")!.border![i]!.y).toBeCloseTo(24 + p.y * 0.1);
+    });
     expect(afterById.get("grandchild")!.parent_id).toBe("child");
   });
 

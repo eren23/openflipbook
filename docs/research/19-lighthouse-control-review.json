@@ -1,0 +1,15 @@
+{
+  "reviewer": "assistant_visual_review",
+  "human_review": null,
+  "production_promotion": false,
+  "trials": {
+    "guide_color-521": {"accepted": false, "note": "Standing-height impression and single scene, but four large crown arms replace the two prominent arms. The long arcade annex becomes a boxy house. Surrounding terrain is invented."},
+    "guide_color-522": {"accepted": false, "note": "Low camera and two crown arms, but the tiered base and arcade are lost. The plain annex and empty ground closely follow the coarse proxy. Surface detail is weak."},
+    "guide_clay-521": {"accepted": false, "note": "Most convincing illustrated exterior of the guide trials, but not the same architecture: a small gabled cottage replaces the long arcade and the tiered tower base disappears. Sunset and cliff layout are invented."},
+    "guide_clay-522": {"accepted": false, "note": "Tower and annex remain simplified. A small painted ground patch floats against a flat gray foreground; this reads as an isolated illustration rather than an inhabitable exterior. Do not infer a measured camera height from the output."},
+    "qwen_eye-521": {"accepted": false, "note": "Retains the important visible crown, faceted base and long arcade. Still an elevated view into the bowl and onto the roof. Wider invented surroundings are not evidence of recovered space."},
+    "qwen_eye-522": {"accepted": false, "note": "Visible landmark architecture is recognizable, but the eye-level setting leaves the same overhead perspective. Rear platform, small column and vegetation vary from the paired output."},
+    "qwen_low-521": {"accepted": false, "note": "The low-angle setting still looks down into the crown and onto the annex roof. Similar framing to the eye-level run, not a convincing change of camera elevation."},
+    "qwen_low-522": {"accepted": false, "note": "Again an expanded overhead illustration, not a standing-height arrival. Crown and arcade remain recognizable, but invented peripheral details vary. Not pixel-identical artwork or persistent geometry."}
+  }
+}

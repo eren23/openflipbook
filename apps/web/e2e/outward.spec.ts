@@ -48,7 +48,7 @@ for (const viewport of [
     const saveResponse = await save;
     expect(saveResponse.ok()).toBe(true);
     const parent = await saveResponse.json() as { parent_node_id: string };
-    await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
+    await expect(page).toHaveURL(new RegExp(`[?&]node=${parent.parent_node_id}`));
     await waitForStableImage(page);
     const minimapExpand = page.getByTitle("Open the full map (M)");
     await expect(minimapExpand).toBeVisible();
@@ -56,12 +56,12 @@ for (const viewport of [
     await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeVisible();
     await expect(minimapExpand).toBeHidden();
     await page.getByRole("button", { name: `Jump to ${originalNode.page_title}`, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/n/${root.id}`));
+    await expect(page).toHaveURL(new RegExp(`[?&]node=${root.id}`));
     await page.getByRole("button", { name: "Close time-scrubber", exact: true }).click();
     await expect(page.getByRole("region", { name: "Session time-scrubber", exact: true })).toBeHidden();
     await expect(minimapExpand).toBeVisible();
     await page.getByRole("navigation", { name: "Location", exact: true }).getByRole("button").first().click();
-    await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
+    await expect(page).toHaveURL(new RegExp(`[?&]node=${parent.parent_node_id}`));
     expect(generations).toBe(2);
 
     const savedSource = await (await page.request.get(`/api/nodes/${root.id}`)).json();
@@ -80,14 +80,14 @@ for (const viewport of [
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     await page.getByTitle("Go back (←)").click();
-    await expect(page).toHaveURL(new RegExp(`/n/${root.id}`));
+    await expect(page).toHaveURL(new RegExp(`[?&]node=${root.id}`));
     expect(await waitForStableImage(page)).toBe(source);
     expect(generations).toBe(2);
     const returnedScreenshot = testInfo.outputPath(`${viewport.name}-returned.png`);
     await page.screenshot({ path: returnedScreenshot, fullPage: true });
     await testInfo.attach(`${viewport.name}-returned`, { path: returnedScreenshot, contentType: "image/png" });
     await page.getByRole("button", { name: "forward →", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/n/${parent.parent_node_id}`));
+    await expect(page).toHaveURL(new RegExp(`[?&]node=${parent.parent_node_id}`));
     await waitForStableImage(page);
     expect(generations).toBe(2);
     expect(errors).toEqual([]);

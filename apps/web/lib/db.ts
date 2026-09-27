@@ -1,4 +1,4 @@
-import { MongoClient, type ClientSession, type Collection, type Db, type Document } from "mongodb";
+import { MongoClient, type ClientSession, type Collection, type Db, type Document, type TransactionOptions } from "mongodb";
 import type { GroundingSummary, ScaleTier, SceneView, StoredWalk, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
 
@@ -32,11 +32,17 @@ export async function getDb(): Promise<Db> {
       maxPoolSize: 5,
       serverSelectionTimeoutMS: 10_000,
     });
-    await client.connect();
-    const db = client.db(cfg.db);
-    await ensureIndexes(db);
-    globalThis.__endlessCanvasMongo = { client, db };
-    return db;
+    try {
+      await client.connect();
+      const db = client.db(cfg.db);
+      await ensureIndexes(db);
+      globalThis.__endlessCanvasMongo = { client, db };
+      return db;
+    } catch (error) {
+      // Failed index initialization must not leave an unpublished pool alive.
+      await client.close().catch(() => undefined);
+      throw error;
+    }
   })();
   globalThis.__endlessCanvasMongoBootstrap = bootstrap;
   try {
@@ -63,6 +69,28 @@ async function ensureIndexes(db: Db): Promise<void> {
   // viewer count uses a tighter window on top.
   const presenceCol = db.collection("session_presence");
   await Promise.all([
+    db.collection("session_owners").createIndex({ owner_token: 1 }, { name: "creator_owner_idx" }),
+    db.collection("place_scenes").createIndex({ session_id: 1, updated_at: -1 }, { name: "scene_session_updated_idx" }),
+    db.collection("place_views").createIndex({ session_id: 1, root_place_id: 1, created_at: -1 }, { name: "place_view_library_idx" }),
+    db.collection("motion_studies").createIndex({ session_id: 1, view_id: 1, created_at: -1 }, { name: "motion_study_library_idx" }),
+    db.collection("motion_jobs").createIndex({ status: 1, next_check: 1, created_at: 1 }, { name: "motion_dispatch_idx" }),
+    db.collection("motion_jobs").createIndex({ session_id: 1, study_id: 1, created_at: -1 }, { name: "motion_history_idx" }),
+    db.collection("motion_assets").createIndex({ session_id: 1, study_id: 1, created_at: -1 }, { name: "motion_asset_idx" }),
+    db.collection("motion_reviews").createIndex({ session_id: 1, study_id: 1, created_at: -1 }, { name: "motion_review_idx" }),
+    db.collection("place_connections").createIndex({ session_id: 1 }, { name: "place_connections_session_idx" }),
+    db.collection("place_scene_versions").createIndex({ session_id: 1, place_id: 1, revision: -1 }, { name: "scene_history_idx" }),
+    db.collection("place_build_jobs").createIndex({ session_id: 1, place_id: 1, created_at: -1 }, { name: "place_build_history_idx" }),
+    db.collection("place_build_jobs").createIndex({ status: 1, created_at: 1, _id: 1 }, { name: "place_build_dispatch_idx" }),
+    db.collection("mesh_jobs").createIndex({ status: 1, next_check: 1, created_at: 1 }, { name: "mesh_job_dispatch_idx" }),
+    db.collection("mesh_jobs").createIndex({ session_id: 1, created_at: -1 }, { name: "mesh_job_history_idx" }),
+    db.collection("material_jobs").createIndex({ status: 1, next_check: 1, created_at: 1 }, { name: "material_job_dispatch_idx" }),
+    db.collection("material_jobs").createIndex({ session_id: 1, created_at: -1 }, { name: "material_job_history_idx" }),
+    db.collection("material_assets").createIndex({ session_id: 1, created_at: -1 }, { name: "material_asset_history_idx" }),
+    db.collection("illustration_jobs").createIndex({ status: 1, next_check: 1, created_at: 1 }, { name: "illustration_dispatch_idx" }),
+    db.collection("illustration_jobs").createIndex({ session_id: 1, "view_dependency.view_id": 1, created_at: -1 }, { name: "illustration_history_idx" }),
+    db.collection("illustration_assets").createIndex({ session_id: 1, "view_dependency.view_id": 1, created_at: -1 }, { name: "illustration_asset_idx" }),
+    db.collection("generation_workers").createIndex({ last_seen: 1 }, { name: "generation_worker_ttl_idx", expireAfterSeconds: 120 }),
+    db.collection("creator_notes").createIndex({ session_id: 1, updated_at: -1 }, { name: "creator_notes_session_idx" }),
     presenceCol.createIndex(
       { last_seen: 1 },
       { name: "presence_ttl_idx", expireAfterSeconds: 120 }
@@ -92,11 +120,11 @@ async function ensureIndexes(db: Db): Promise<void> {
 }
 
 /** Cross-collection identity edits must either update both registries or neither. */
-export async function withDbTransaction<T>(run: (db: Db, session: ClientSession) => Promise<T>): Promise<T> {
+export async function withDbTransaction<T>(run: (db: Db, session: ClientSession) => Promise<T>, options?: TransactionOptions): Promise<T> {
   const db = await getDb();
   const session = globalThis.__endlessCanvasMongo!.client.startSession();
   try {
-    return await session.withTransaction(() => run(db, session), { maxCommitTimeMS: 10_000 });
+    return await session.withTransaction(() => run(db, session), { maxCommitTimeMS: 10_000, ...options });
   } finally {
     await session.endSession();
   }
@@ -117,6 +145,7 @@ export interface NodeSource {
 }
 
 export interface NodeDoc extends Document {
+  scene_outdated?: boolean;
   transition_context?: TransitionContextV1 | null;
   _id: string;
   parent_id: string | null;
@@ -191,6 +220,7 @@ export interface NodeInsert {
 }
 
 export interface NodeRow {
+  scene_outdated?: boolean;
   transition_context?: TransitionContextV1 | null;
   id: string;
   parent_id: string | null;
@@ -266,7 +296,7 @@ export function toRow(doc: NodeDoc): NodeRow {
   };
 }
 
-export async function insertNode(n: NodeInsert): Promise<NodeRow> {
+export async function insertNode(n: NodeInsert, session?: ClientSession): Promise<NodeRow> {
   const collection = await nodes();
   const doc: NodeDoc = {
     transition_context: n.transition_context ?? null,
@@ -290,7 +320,8 @@ export async function insertNode(n: NodeInsert): Promise<NodeRow> {
     ...(n.grounding ? { grounding: n.grounding } : {}),
     created_at: new Date(),
   };
-  await collection.insertOne(doc);
+  if (session) await collection.insertOne(doc, { session });
+  else await collection.insertOne(doc);
   return toRow(doc);
 }
 

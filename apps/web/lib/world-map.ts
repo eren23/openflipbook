@@ -125,6 +125,10 @@ export function applyGeoUpsert(
   const byId = new Map(existing.map((e) => [e.id, e]));
   for (const incomingGeo of incoming) {
     const prev = byId.get(incomingGeo.id);
+    // Scene bindings are user-authored. Extraction and legacy upserts cannot
+    // bypass the scene revision/preview contract, including equal-rank writes.
+    if (prev?.scene_id) continue;
+    if (incomingGeo.scene_id) continue;
     const g = prev ? preservePlaceIdentity(prev, incomingGeo) : incomingGeo;
     if (!prev) {
       byId.set(g.id, { ...g, updated_at: nowIso });
@@ -195,6 +199,7 @@ function removeAndReroot(
       parent_id: null,
       pos: frame.pos,
       footprint: { w: e.footprint.w * frame.unit, d: e.footprint.d * frame.unit },
+      ...(e.border ? { border: e.border.map(p => ({ x: frame.pos.x + (p.x - e.pos.x) * frame.unit, y: frame.pos.y + (p.y - e.pos.y) * frame.unit })) } : {}),
       scale: (e.scale ?? 1) * frame.unit,
     };
   });
@@ -378,6 +383,7 @@ export async function applyEntityEdits(
       const now = new Date();
       const nowIso = now.toISOString();
       let entities = existing ? existing.entities : [];
+      if (edits.some(edit => edit.op !== "add" && entities.some(e => e.id === edit.target && e.scene_id))) throw new Error("Edit scene-backed objects in the World editor");
       for (const edit of edits) entities = applyEntityEdit(entities, edit, nowIso);
       return {
         _id: sessionId,
@@ -407,6 +413,7 @@ export async function removeEntityGeos(
     sessionId,
     (existing) => {
       const now = new Date();
+      if (existing?.entities.some(e => ids.includes(e.id) && e.scene_id)) throw new Error("Remove scene-backed objects in the World editor");
       const kept = removeAndReroot(existing ? existing.entities : [], ids);
       return {
         _id: sessionId,

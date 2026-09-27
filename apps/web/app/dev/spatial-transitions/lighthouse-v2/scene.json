@@ -1,0 +1,28 @@
+{
+  "id": "crystal-lighthouse-local-v2",
+  "version": 2,
+  "provenance": "Authored interpretation, not reconstructed geometry",
+  "source": {"sha256": "b3d20adf5e70bef5c5dcb698992e6405cafbfcc64e1e0ce88440c16a44ceae1c", "file": "reference.png"},
+  "units": "assumed metres",
+  "features": [
+    {"id": "base", "observed": "Tiered faceted stone base with arched recesses", "assumed": "Eight sides, dimensions and hidden recesses"},
+    {"id": "annex", "observed": "Long attached red-roofed annex with an arched facade", "assumed": "Three bays, recess depth, roof pitch and unseen rear wall"},
+    {"id": "crown", "observed": "Open bowl with two prominent broad curved arms", "assumed": "Arm thickness, back profile and exact bowl depth"},
+    {"id": "crystal", "observed": "Floating faceted cyan crystal and smaller shards", "assumed": "Depth and hidden facets"}
+  ],
+  "unknown": ["Terrain and access route", "Entrance connectivity and all interior geometry", "Absolute dimensions and source camera calibration", "Unseen facade details"],
+  "tower": {"sides": 8, "lowerRadius": 2.55, "upperRadius": 2.2, "shaftTopRadius": 1.3, "lowerHeight": 1.9, "upperHeight": 1.55, "shaftHeight": 6.25},
+  "annex": {"start": 1.6, "end": 9.1, "centerZ": 0, "depth": 2.8, "eave": 3.1, "roofHeight": 1.2, "bays": [3.6, 5.7, 7.8]},
+  "camera": {"fov": 45, "eyeHeight": 1.65, "near": 0.1, "far": 120},
+  "duration": 24,
+  "route": [
+    {"time": 0, "label": "Arrival", "position": [13, 1.65, 24], "target": [2, 6.1, 0]},
+    {"time": 6, "label": "Side view", "position": [5, 1.65, 24], "target": [2, 6.1, 0]},
+    {"time": 12, "label": "Arcade approach", "position": [5.7, 1.65, 7], "target": [5.7, 2.1, 1.4]},
+    {"time": 16, "label": "Outside", "position": [7.8, 1.65, 6], "target": [5.7, 2.1, 1.4]},
+    {"time": 20, "label": "Returning", "position": [5, 1.65, 24], "target": [2, 6.1, 0]},
+    {"time": 24, "label": "Return", "position": [13, 1.65, 24], "target": [2, 6.1, 0]}
+  ],
+  "inspection": {"position": [16, 19, 27], "target": [2, 6, 0]},
+  "landmarks": {"base": [0, 1, 2.55], "crown": [0, 10.1, 0], "crystal": [0, 13, 0], "arcade": [5.7, 2.4, 1.4], "roof": [5.7, 4.3, 0]}
+}

@@ -57,4 +57,47 @@ describe("server-resolved identity context", () => {
     mocks.node.mockResolvedValue({ _id: "root", session_id: "world", scene_view: { level: "building" }, image_key: "owned.png" });
     await expect(resolvePlaceGeneration(body())).rejects.toMatchObject({ status: 422 });
   });
+  it("does not project world footprints onto an unknown uploaded image for exterior arrivals", async () => {
+    await expect(resolvePlaceGeneration({ ...body(), arrival_intent: "exterior" })).rejects.toMatchObject({ status: 422 });
+    mocks.map.mockResolvedValue({ entities: [{ ...place, entity_id: "entity" }], bounds: { x: 0, y: 0, w: 100, h: 60 } });
+    mocks.state.mockResolvedValue({ entities: [{ id: "entity", appearance_bboxes: { root: { x_pct: .1, y_pct: .2, w_pct: .2, h_pct: .3 } } }] });
+    const next = await resolvePlaceGeneration({ ...body(), arrival_intent: "exterior" });
+    expect(next.place_reference?.provenance).toMatchObject({ kind: "source_bbox", node_id: "root" });
+    expect(next.place_reference?.provenance?.image_sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(next.scene_view?.place_form).toBe("generic");
+    expect(next.scene_view?.view?.projection).toBe("eye_level");
+  });
+  it("known map scene arrivals default outside and preserve map projection provenance", async () => {
+    mocks.node.mockResolvedValue({ _id: "root", scene_view: { level: "map" }, image_key: "owned.png" });
+    const next = await resolvePlaceGeneration(body());
+    expect(next.arrival_intent).toBe("exterior");
+    expect(next.place_reference?.provenance?.kind).toBe("map_projection");
+  });
+  it("does not let a client aerial hint weaken the explicit exterior camera gate", async () => {
+    mocks.node.mockResolvedValue({ _id: "root", scene_view: { level: "map" }, image_key: "owned.png" });
+    const next = await resolvePlaceGeneration({ ...body(), arrival_intent: "exterior", scene_view: {
+      node_id: "root", level: "map", observer: null, map_crop: null, focus_id: "tower", view: { projection: "top_down", source: "user" },
+    } });
+    expect(next.scene_view?.level).toBe("eye");
+    expect(next.scene_view?.view).toEqual({ projection: "eye_level", source: "policy" });
+  });
+  it("prefers a valid first appearance, falls back after an invalid one, and never replaces a curated anchor", async () => {
+    const box = { x_pct: .1, y_pct: .1, w_pct: .2, h_pct: .3 };
+    mocks.map.mockResolvedValue({ entities: [{ ...place, entity_id: "entity" }], bounds: { x: 0, y: 0, w: 100, h: 60 } });
+    mocks.node.mockImplementation(async (q: { _id: string }) => ({ _id: q._id, scene_view: { level: "map" }, image_key: `${q._id}.png` }));
+    mocks.state.mockResolvedValue({ entities: [{ id: "entity", first_seen_node_id: "first", appearance_bboxes: { first: box, root: box } }] });
+    expect((await resolvePlaceGeneration(body())).place_reference?.provenance).toMatchObject({ kind: "first_seen", node_id: "first" });
+    mocks.state.mockResolvedValue({ entities: [{ id: "entity", first_seen_node_id: "first", appearance_bboxes: { first: { ...box, w_pct: 2 }, root: box } }] });
+    expect((await resolvePlaceGeneration(body())).place_reference?.provenance?.kind).toBe("source_bbox");
+    mocks.map.mockResolvedValue({ entities: [{ ...place, identity_anchor: { node_id: "curated", image_key: "immutable.png", bbox: box } }], bounds: { x: 0, y: 0, w: 100, h: 60 } });
+    expect((await resolvePlaceGeneration(body())).place_reference?.provenance?.kind).toBe("curated");
+    expect(mocks.bytes).toHaveBeenLastCalledWith("immutable.png");
+    mocks.node.mockImplementation(async (q: { _id: string }) => q._id === "curated" ? null : { _id: q._id, image_key: "owned.png" });
+    await expect(resolvePlaceGeneration(body())).rejects.toMatchObject({ status: 422 });
+  });
+  it("strips experimental intent outside strict scene generation and rejects invalid values", async () => {
+    expect((await resolvePlaceGeneration({ ...body(), strict_world: false, arrival_intent: "exterior" })).arrival_intent).toBeUndefined();
+    expect((await resolvePlaceGeneration({ ...body(), render_mode: "place_submap", arrival_intent: "exterior" })).arrival_intent).toBeUndefined();
+    await expect(resolvePlaceGeneration({ ...body(), arrival_intent: "wrong" as never })).rejects.toMatchObject({ status: 400 });
+  });
 });

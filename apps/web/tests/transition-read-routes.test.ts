@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({ row: {
   transition_context: { version: 1, source_node_id: 'parent', source_image_key: 'parent.jpg', target_point: { x_pct: .8, y_pct: .3 }, source_view: null, destination_view: null, target_bbox: null, target_geo_id: null, target_provenance: 'tap' },
 } }));
 vi.mock('@/lib/db', () => ({
+  getDb: async () => ({ collection: () => ({ findOne: async () => null }) }),
   getNode: async () => state.row,
   listNodesByParent: async () => [state.row],
   listNodesBySession: async () => ({ rows: [state.row], next_cursor: null }),

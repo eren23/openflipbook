@@ -1,93 +1,106 @@
 import { NextResponse } from "next/server";
-
-import { listNodesBySession } from "@/lib/db";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { readServerEnv } from "@/lib/env";
 import { buildWorldZip, type WorldExportNode } from "@/lib/export-build";
 import { getStoredBytes } from "@/lib/r2";
-import { getWorldState } from "@/lib/world";
-import { getWorldMap } from "@/lib/world-map";
+import { meshSourceBytes, wireMeshSource } from "@/lib/mesh-source";
+import { CreatorError } from "@/lib/creator-error";
+import { snapshotWorldExport } from "@/lib/world-export-snapshot";
+import { downloadPlaceViewExports } from "@/lib/place-view-server";
+import { downloadMotionArchive } from "@/lib/motion-archive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+interface Params { params: Promise<{ sessionId: string }> }
+const privateHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie" };
+const BUNDLE_BYTES = 384 * 1024 * 1024;
 
-interface Params {
-  params: Promise<{ sessionId: string }>;
-}
-
-// Bound memory on a runaway session: export the first NODE_CAP nodes and set a
-// header so the truncation isn't silent. A session that large is already an
-// outlier; the whole-DAG walk stays O(nodes) regardless.
-const NODE_CAP = 500;
-
-/** GET /api/export/session/[sessionId] — the whole-world bundle (ZIP): every
- * branch's image + graph.json (topology + provenance + poses) + world-map.json
- * (geometry) + entities.json (registry). Session-scoped, unlike the node-path
- * /api/export/[nodeId]. */
+/** One metadata snapshot, then immutable downloads. Never return a truncated
+ * or missing-image success response masquerading as a whole-world export. */
 export async function GET(_req: Request, { params }: Params) {
   const { sessionId } = await params;
   const env = readServerEnv();
-  if (!env.MONGODB_URI || !env.MONGODB_DB) {
-    return NextResponse.json({ error: "persistence not configured" }, { status: 503 });
+  if (!env.MONGODB_URI || !env.MONGODB_DB) return NextResponse.json({ error: "Persistence not configured" }, { status: 503, headers: privateHeaders });
+  try {
+    const snapshot = await snapshotWorldExport(sessionId);
+    let totalBytes = 0;
+    function account(bytes: Uint8Array) {
+      totalBytes += bytes.length;
+      if (totalBytes > BUNDLE_BYTES) throw new CreatorError("World export exceeds 384 MiB; nothing was exported", 413);
+      return bytes;
+    }
+    async function required(key: string, label: string, expected?: { bytes: number; sha256: string }) {
+      if (expected && (expected.bytes < 1 || expected.bytes > BUNDLE_BYTES - totalBytes)) throw new CreatorError("World export exceeds its asset size limit", 413);
+      const stored = await getStoredBytes(key, AbortSignal.timeout(90_000));
+      if (!stored || !stored.bytes.length) throw new CreatorError(`Saved ${label} is unavailable; nothing was exported`, 503);
+      account(stored.bytes);
+      if (expected && (stored.bytes.length !== expected.bytes || createHash("sha256").update(stored.bytes).digest("hex") !== expected.sha256)) throw new CreatorError(`Saved ${label} is corrupted; nothing was exported`, 503);
+      return stored;
+    }
+    const nodes: WorldExportNode[] = [];
+    for (const doc of snapshot.nodes) {
+      const stored = await required(doc.image_key, "page image");
+      const { _id, session_id: _sid, created_at, geo_extracted_at, ...metadata } = doc;
+      nodes.push({ id: _id, parent_id: doc.parent_id, title: doc.page_title || doc.query, query: doc.query,
+        created_at: created_at.toISOString(), relation: doc.relation ?? "descend", scale_tier: doc.scale_tier ?? null,
+        click_in_parent: doc.click_in_parent, scene_view: doc.scene_view ?? null, sources: doc.sources ?? [],
+        transition_context: doc.transition_context ?? null, content_type: stored.contentType, bytes: stored.bytes,
+        metadata: { ...metadata, geo_extracted_at: geo_extracted_at?.toISOString() ?? null } });
+    }
+    const scenes = snapshot.scenes.map(({ _id: _unused, ...scene }) => scene);
+    const referenceKeys = [...new Set([
+      ...snapshot.worldMap.entities.flatMap(e => e.identity_anchor ? [e.identity_anchor.image_key] : []),
+      ...scenes.flatMap(s => s.source_image_key ? [s.source_image_key] : []),
+      ...snapshot.nodes.flatMap(n => n.transition_context?.source_image_key ? [n.transition_context.source_image_key] : []),
+    ])];
+    if (referenceKeys.length > 500) throw new CreatorError("World export exceeds 500 reference images; nothing was exported", 413);
+    const references = [];
+    for (const image_key of referenceKeys) {
+      const stored = await required(image_key, "reference image");
+      references.push({ image_key, bytes: stored.bytes, contentType: stored.contentType });
+    }
+    const packs = [];
+    if (scenes.some(s => s.definition.material_pack === "ankh-street-v1")) packs.push({ id: "ankh-street-v1", bytes: account(await readFile(join(process.cwd(), "public/demos/ankh-morpork/material-atlas.png"))) });
+    const meshes = []; let meshBytes = 0;
+    for (const asset of snapshot.meshes) {
+      meshBytes += asset.bytes;
+      if (asset.image_input && snapshot.privateOwner) meshBytes += asset.image_input.bytes + asset.image_input.original.bytes;
+      if (meshBytes > 200 * 1024 * 1024) throw new CreatorError("Mesh export exceeds 200 MiB", 413);
+      const stored = await required(asset.key, "mesh", asset);
+      let image_input;
+      if (asset.image_input && snapshot.privateOwner) {
+        image_input = { ...wireMeshSource(asset.image_input), bytes: account(await meshSourceBytes(asset.image_input)),
+          original: { bytes: account(await meshSourceBytes(asset.image_input, true)), sha256: asset.image_input.original.sha256, content_type: asset.image_input.original.content_type } };
+      }
+      meshes.push({ id: asset.id, sha256: asset.sha256, model: asset.model, prompt: asset.prompt, bytes: stored.bytes,
+        ...(image_input ? { image_input } : {}), ...(asset.request_id ? { request_id: asset.request_id } : {}),
+        ...(asset.imported ? { imported: asset.imported } : {}), ...(asset.parameters ? { parameters: asset.parameters } : {}),
+        ...(asset.dependency ? { dependency: asset.dependency } : {}), created_at: new Date(asset.created_at).toISOString() });
+    }
+    const materials = []; let materialBytes = 0;
+    for (const asset of snapshot.materials) {
+      if (!asset.request_id) throw new CreatorError("Material provider provenance is missing", 503);
+      materialBytes += asset.bytes;
+      if (materialBytes > 64 * 1024 * 1024) throw new CreatorError("Material export exceeds 64 MiB", 413);
+      const stored = await required(asset.key, "material", asset);
+      materials.push({ id: asset.id, sha256: asset.sha256, prompt: asset.prompt, model: asset.model, request_id: asset.request_id,
+        ...(asset.parameters ? { parameters: asset.parameters } : {}), ...(asset.image ? { image: asset.image } : {}),
+        ...(asset.dependency ? { dependency: asset.dependency } : {}), created_at: new Date(asset.created_at).toISOString(), bytes: stored.bytes });
+    }
+    const views = await downloadPlaceViewExports(snapshot.views);
+    for (const view of views) { for (const pass of view.passes) account(pass.bytes); for (const illustration of view.illustrations ?? []) account(illustration.bytes); }
+    const motion = await downloadMotionArchive(snapshot.motion, required);
+    const bytes = await buildWorldZip(nodes, snapshot.worldMap, snapshot.entities, references, scenes, packs,
+      snapshot.artwork, meshes, snapshot.connections, materials, views, {
+        session_id: sessionId, captured_at: snapshot.captured_at, visibility: snapshot.privateOwner ? "owner" : "shared",
+        scene_heads: snapshot.sceneHeads.map(({ _id: _unused, ...s }) => s), entity_registry: snapshot.registry, workspace: snapshot.workspace,
+        external_resources: snapshot.nodes.flatMap(n => n.descent_video_url ? [{ kind: "arrival_video", node_id: n._id, url: n.descent_video_url }] : []),
+      }, motion);
+    return new Response(Buffer.from(bytes), { headers: { ...privateHeaders, "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="openflipbook-world-${sessionId.slice(0, 8)}.zip"` } });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof CreatorError ? e.message : "World export unavailable. No archive was created; try again." }, { status: e instanceof CreatorError ? e.status : 503, headers: privateHeaders });
   }
-
-  // The whole DAG — listNodesBySession is cursor-paged, so accumulate up to the
-  // cap. Sorted by created_at, so graph.json reads chronologically.
-  const rows: Awaited<ReturnType<typeof listNodesBySession>>["rows"] = [];
-  let cursor: string | null = null;
-  do {
-    const page = await listNodesBySession(sessionId, { cursor, limit: 200 });
-    rows.push(...page.rows);
-    cursor = page.next_cursor;
-  } while (cursor && rows.length < NODE_CAP);
-  if (rows.length === 0) {
-    return NextResponse.json({ error: "session not found or empty" }, { status: 404 });
-  }
-  const capped = rows.slice(0, NODE_CAP);
-  const truncated = rows.length > NODE_CAP || (cursor != null && rows.length >= NODE_CAP);
-  if (truncated) {
-    console.warn(
-      `[export.world] session ${sessionId} exceeds ${NODE_CAP} nodes — bundle truncated`,
-    );
-  }
-
-  const [worldMap, entities] = await Promise.all([
-    getWorldMap(sessionId),
-    getWorldState(sessionId),
-  ]);
-
-  const nodes: WorldExportNode[] = [];
-  for (const r of capped) {
-    const stored = await getStoredBytes(r.image_key);
-    nodes.push({
-      id: r.id,
-      parent_id: r.parent_id,
-      title: r.page_title || r.query,
-      query: r.query,
-      created_at: r.created_at,
-      relation: r.relation,
-      scale_tier: r.scale_tier,
-      click_in_parent: r.click_in_parent,
-      scene_view: r.scene_view,
-      transition_context: r.transition_context ?? null,
-      sources: r.sources,
-      bytes: stored ? stored.bytes : null,
-    });
-  }
-
-  const referenceKeys = [...new Set(worldMap.entities.flatMap(e => e.identity_anchor ? [e.identity_anchor.image_key] : []))];
-  const references = [];
-  for (const image_key of referenceKeys.slice(0, NODE_CAP)) {
-    const stored = await getStoredBytes(image_key);
-    references.push({ image_key, bytes: stored?.bytes ?? null, contentType: stored?.contentType ?? "image/jpeg" });
-  }
-  const bytes = await buildWorldZip(nodes, worldMap, entities, references);
-  const stamp = sessionId.slice(0, 8);
-  return new Response(Buffer.from(bytes), {
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="openflipbook-world-${stamp}.zip"`,
-      ...(truncated ? { "X-Export-Truncated": String(NODE_CAP) } : {}),
-      ...(referenceKeys.length > NODE_CAP ? { "X-Export-References-Truncated": String(NODE_CAP) } : {}),
-    },
-  });
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getWorldState } from "@/lib/world";
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
+import { requireWorldRead } from "@/lib/world-access";
+import { CreatorError } from "@/lib/creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,15 +39,16 @@ export async function GET(_req: Request, { params }: Params) {
     );
   }
   try {
+    await requireWorldRead(sessionId);
     const snapshot = await getWorldState(sessionId);
     return NextResponse.json({
       ...snapshot,
       override_enabled: overridesEnabled(),
-    });
+    }, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
   } catch (err) {
     return NextResponse.json(
-      { error: (err as Error).message },
-      { status: 502 }
+      { error: err instanceof CreatorError ? err.message : "World unavailable" },
+      { status: err instanceof CreatorError ? err.status : 502, headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } }
     );
   }
 }

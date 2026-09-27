@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {readFile, writeFile, mkdir} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {dirname, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const root = dirname(fileURLToPath(import.meta.url));
+const receipt = JSON.parse(await readFile(resolve(root, 'public/render-receipt.json'), 'utf8'));
+const metadata = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', receipt.output], {encoding: 'utf8'}));
+assert.equal(metadata.streams.length, 1, 'The pilot must have only a video stream, no audio');
+const video = metadata.streams[0];
+assert.equal(video.codec_name, 'h264');
+assert.equal(video.width, 1920);
+assert.equal(video.height, 1080);
+assert.equal(video.r_frame_rate, '25/1');
+assert.equal(Number(video.nb_frames), receipt.frames);
+assert.ok(Math.abs(Number(metadata.format.duration) - receipt.frames / receipt.fps) < 0.01);
+execFileSync('ffmpeg', ['-hide_banner', '-v', 'error', '-xerror', '-i', receipt.output, '-f', 'null', '-'], {stdio: 'pipe'});
+const output = resolve(root, 'output');
+await mkdir(output, {recursive: true});
+execFileSync('ffmpeg', ['-hide_banner', '-v', 'error', '-i', receipt.output, '-vf', 'fps=1,scale=640:-1,tile=7x3', '-frames:v', '1', '-y', resolve(output, 'contact-sheet.jpg')]);
+const sha256 = createHash('sha256').update(await readFile(receipt.output)).digest('hex');
+const result = {...receipt, duration_seconds: Number(metadata.format.duration), sha256, checks: {silent: true, full_decode: true, dimensions: true, native_fps: true, frame_count: true}, visual_review: 'Requires separate inspection of rendered frames and playback'};
+await writeFile(resolve(output, 'verification.json'), JSON.stringify(result, null, 2));
+console.log(JSON.stringify(result, null, 2));

@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+  ...(process.env.NEXT_TSCONFIG_PATH ? { typescript: { tsconfigPath: process.env.NEXT_TSCONFIG_PATH } } : {}),
   output: "standalone",
   outputFileTracingRoot: new URL("../..", import.meta.url).pathname,
+  outputFileTracingIncludes: { "/api/export/session/*": ["./public/demos/ankh-morpork/material-atlas.png"] },
   reactStrictMode: true,
   // Nothing renders next/image, but /_next/image still answered and ran
   // sharp (libvips CVEs; the unauthenticated RCE fixed in #277 lived here).

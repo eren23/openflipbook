@@ -8,6 +8,19 @@ or zooming. No production flags or deployments were changed.
 
 ## Method
 
+**2026-09-09 routing correction:** this pilot explicitly pinned
+`fal-ai/nano-banana-pro`, the text-to-image endpoint. Its schema does not
+declare image-reference inputs; the reference-aware sibling is
+`fal-ai/nano-banana-pro/edit`. Edit/continue now normalize that legacy pin.
+The frozen outputs remain real observations, but this run is **not a valid
+test of the edit endpoint's reference fidelity**. Do not infer that correctly
+routed canonical references were ineffective from this comparison. The normal
+enter router already selected the edit endpoint; this was not a universal
+failure of all enter generation. No paid rerun has been performed.
+
+Schema receipts: [text-to-image API](https://fal.ai/models/fal-ai/nano-banana-pro/api)
+and [reference-aware edit API](https://fal.ai/models/fal-ai/nano-banana-pro/edit/api).
+
 Three checked-in, verified illustrated maps from `tests/click_bench/fixtures`:
 fishing village / North Point Lighthouse, oasis / citadel, harbor / Crystal
 Lighthouse. Each target gets enter and close-up, baseline versus strict, for

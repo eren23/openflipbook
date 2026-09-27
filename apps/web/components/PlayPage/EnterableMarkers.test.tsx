@@ -66,6 +66,20 @@ describe("EnterableMarkers (W3 idle enter affordance)", () => {
     expect(markerIds(container).sort()).toEqual(["p", "palace"]);
   });
 
+  it("the 3D editor's scene copy of the town gets no rings", () => {
+    const { container } = render(
+      <EnterableMarkers
+        entities={[
+          geo("inn", 37, 29),
+          geo("scene", 40, 40, { scene_id: "s1", footprint: { w: 80, d: 80 } }),
+          geo("inn-copy", -29, -2, { parent_id: "scene", scene_id: "s1" }),
+        ]}
+        currentView={null}
+      />,
+    );
+    expect(markerIds(container)).toEqual(["inn"]);
+  });
+
   it("inside an entered place (scene frame) → renders nothing", () => {
     const inside: SceneView = {
       node_id: "n1",

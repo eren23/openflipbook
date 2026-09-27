@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "image": "street-environment.png",
+  "width": 1672,
+  "height": 941,
+  "provenance": "Manual visible feature annotations, not surveyed or automatically recovered geometry",
+  "anchors": [
+    { "id": "near_eave", "label": "Near eave", "point": [18, 5.5, 13], "pixel": [852, 179], "fit": true, "height": "eave" },
+    { "id": "rear_eave", "label": "Rear eave", "point": [18, 5.5, 18.4], "pixel": [445, 244], "fit": true, "height": "eave" },
+    { "id": "roof_ridge", "label": "Roof ridge", "point": [13, 7, 13], "pixel": [937, 65], "fit": true, "height": "ridge" },
+    { "id": "far_eave", "label": "Far eave", "point": [8, 5.5, 13], "pixel": [1011, 307], "fit": true, "height": "eave" },
+    { "id": "near_ground", "label": "Near wall foot", "point": [18, 0, 13], "pixel": [856, 665], "fit": true },
+    { "id": "door", "label": "Door threshold", "point": [12.6, 0, 12.86], "pixel": [952, 621], "fit": false },
+    { "id": "barrels", "label": "Barrel tops", "point": [19.3, 1.1, 14], "pixel": [718, 580], "fit": true },
+    { "id": "well", "label": "Well rim center", "point": [25.3, 0.9, 12.8], "pixel": [160, 865], "fit": false }
+  ]
+}

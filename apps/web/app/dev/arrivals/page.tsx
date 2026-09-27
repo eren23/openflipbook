@@ -1,0 +1,7 @@
+import { notFound } from "next/navigation";
+import ArrivalStudy from "@/components/arrival-study";
+
+export default function Page() {
+  if (process.env.SPATIAL_STUDY !== "1" || process.env.NODE_ENV === "production") notFound();
+  return <ArrivalStudy />;
+}

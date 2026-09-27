@@ -29,7 +29,10 @@ ARG NEXT_PUBLIC_ENTER_COACH
 ARG NEXT_PUBLIC_BENCH_UI
 ARG NEXT_PUBLIC_DESCENT_AUTO
 ARG NEXT_PUBLIC_SPATIAL_TRANSITIONS
+ARG NEXT_PUBLIC_WORLD_LAYOUT_CONTROL
 ARG NEXT_PUBLIC_WORLD_ROUTE_DRAW
+ARG NEXT_PUBLIC_WORLD_SCENES=0
+ARG NEXT_PUBLIC_SKETCH_ENABLED=0
 ENV NEXT_PUBLIC_WORLD_MODE=$NEXT_PUBLIC_WORLD_MODE \
     NEXT_PUBLIC_WORLD_IDENTITY_STRICT=$NEXT_PUBLIC_WORLD_IDENTITY_STRICT \
     NEXT_PUBLIC_DOM_LABELS=$NEXT_PUBLIC_DOM_LABELS \
@@ -38,7 +41,10 @@ ENV NEXT_PUBLIC_WORLD_MODE=$NEXT_PUBLIC_WORLD_MODE \
     NEXT_PUBLIC_BENCH_UI=$NEXT_PUBLIC_BENCH_UI \
     NEXT_PUBLIC_DESCENT_AUTO=$NEXT_PUBLIC_DESCENT_AUTO \
     NEXT_PUBLIC_SPATIAL_TRANSITIONS=$NEXT_PUBLIC_SPATIAL_TRANSITIONS \
-    NEXT_PUBLIC_WORLD_ROUTE_DRAW=$NEXT_PUBLIC_WORLD_ROUTE_DRAW
+    NEXT_PUBLIC_WORLD_LAYOUT_CONTROL=$NEXT_PUBLIC_WORLD_LAYOUT_CONTROL \
+    NEXT_PUBLIC_WORLD_ROUTE_DRAW=$NEXT_PUBLIC_WORLD_ROUTE_DRAW \
+    NEXT_PUBLIC_WORLD_SCENES=$NEXT_PUBLIC_WORLD_SCENES \
+    NEXT_PUBLIC_SKETCH_ENABLED=$NEXT_PUBLIC_SKETCH_ENABLED
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -46,7 +52,26 @@ COPY packages/config ./packages/config
 COPY apps/web ./apps/web
 RUN pnpm --filter @openflipbook/web build
 
+# Independent queue execution uses the existing workspace tsx runtime. It does
+# not need Next, a running web process, browser cookies or client build flags.
+FROM base AS place-worker
+RUN apk add --no-cache ffmpeg
+WORKDIR /repo/apps/web
+ENV NODE_ENV=production
+COPY --from=deps /repo/node_modules /repo/node_modules
+COPY --from=deps /repo/apps/web/node_modules ./node_modules
+COPY package.json tsconfig.base.json /repo/
+COPY packages/config /repo/packages/config
+COPY apps/web/package.json apps/web/tsconfig.json ./
+COPY apps/web/lib ./lib
+COPY apps/web/scripts/place-build-worker.ts ./scripts/place-build-worker.ts
+COPY apps/web/scripts/owner-recovery.ts ./scripts/owner-recovery.ts
+USER node
+CMD ["node", "--import", "tsx", "scripts/place-build-worker.ts"]
+
 FROM base AS runner
+# Archive imports verify saved video streams locally without provider calls.
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

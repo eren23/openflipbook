@@ -56,6 +56,9 @@ const closeupViewOf = (
 
 
 describe("geoTapRequest (close the geometric tap loop)", () => {
+  it("defers an uncalibrated street image to image classification", () => {
+    expect(geoTapRequest({ entities: [geo("drum", "Drum", 50, 30)], bounds: CROP }, "street", { x_pct: .5, y_pct: .5 }, 16 / 9, undefined, { node_id: "street", level: "street", observer: null, map_crop: null })).toBeNull();
+  });
   it("tapping a place → scene_view (observer); a FIRST enter steers by nothing", () => {
     const map = {
       entities: [

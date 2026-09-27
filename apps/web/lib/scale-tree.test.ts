@@ -8,6 +8,7 @@ import {
   type FrameNode,
   resolveAbsoluteFrame,
   resolveAbsolutePos,
+  toAbsoluteEntities,
 } from "./world-geometry";
 
 // Build a WorldEntityGeo with sensible defaults; override what a test cares about.
@@ -53,6 +54,19 @@ function absMap(geos: WorldEntityGeo[]): Map<string, { x: number; y: number }> {
 const NOW = "2026-06-09T12:00:00Z";
 
 describe("scale-tree reparent (B2 OUTWARD)", () => {
+  it("preserves authored polygon borders through nested scale changes", () => {
+    const before = cityTree();
+    before[0]!.border = [{ x: 30, y: 15 }, { x: 70, y: 15 }, { x: 70, y: 30 }, { x: 50, y: 30 }, { x: 50, y: 45 }, { x: 30, y: 45 }];
+    before[1]!.border = [{ x: 8, y: 3 }, { x: 12, y: 3 }, { x: 12, y: 7 }, { x: 8, y: 7 }];
+    const expected = toAbsoluteEntities(before, before);
+    const { geos: after } = reparent(before, "c", geo({ id: "p", pos: { x: 70, y: 80 }, scale_tier: "region" }), NOW);
+    const resolved = toAbsoluteEntities(after, after);
+    for (const e of expected.filter(e => e.border)) {
+      const actual = resolved.find(g => g.id === e.id)!;
+      expect(actual.border).toHaveLength(e.border!.length);
+      e.border!.forEach((p, i) => { expect(actual.border![i]!.x).toBeCloseTo(p.x, 8); expect(actual.border![i]!.y).toBeCloseTo(p.y, 8); });
+    }
+  });
   it("INV-1: every entity's absolute position is conserved across the reparent", () => {
     const before = cityTree();
     const beforeAbs = absMap(before);

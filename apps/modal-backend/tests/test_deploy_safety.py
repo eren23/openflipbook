@@ -52,6 +52,18 @@ def test_token_set_gates_everything_but_health(
     assert wrong.status_code == 401
 
 
+def test_motion_transport_is_registered_and_behind_shared_token(monkeypatch):
+    monkeypatch.setenv("SHARED_TOKEN", "motion-test")
+    monkeypatch.setenv("MOTION_CALIBRATION_ENABLED", "0")
+    client = TestClient(fastapi_app)
+    assert client.get("/motion/capabilities").status_code == 401
+    assert client.post("/motion/submit", json={}).status_code == 401
+    assert client.get("/motion/requests/saved-id").status_code == 401
+    result = client.get("/motion/capabilities", headers={"x-openflipbook-token": "motion-test"})
+    assert result.status_code == 200
+    assert result.json()["enabled"] is False
+
+
 # ── Rate limit ──────────────────────────────────────────────────────────────
 
 

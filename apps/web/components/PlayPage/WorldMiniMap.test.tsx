@@ -54,6 +54,16 @@ function mapPayload(entities: WorldEntityGeo[]) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("WorldMiniMap", () => {
+  it("draws the full compound border in the same frame as the entity", async () => {
+    const e = ent("a", "Workshop", 20, 15);
+    e.border = [{ x: 17, y: 12 }, { x: 23, y: 12 }, { x: 23, y: 15 }, { x: 20, y: 15 }, { x: 20, y: 18 }, { x: 17, y: 18 }];
+    vi.stubGlobal("fetch", vi.fn(async () => ok(mapPayload([e]))));
+    render(<WorldMiniMap sessionId="s1"/>);
+    const outline = await screen.findByTestId("minimap-outline");
+    const points = outline.getAttribute("points")!.split(" ").map(p => p.split(",").map(Number));
+    expect(points).toHaveLength(6); expect(points.flat().every(Number.isFinite)).toBe(true);
+    expect(points[2]![0]).toBeGreaterThan(points[3]![0]!); expect(points[3]![1]).toBeLessThan(points[4]![1]!);
+  });
   it("renders a dot per entity + the coordinate frame (origin)", async () => {
     vi.stubGlobal(
       "fetch",

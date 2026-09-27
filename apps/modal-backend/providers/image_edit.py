@@ -9,6 +9,7 @@ Every tier must name an endpoint that takes the source image. The balanced
 slot named `fal-ai/nano-banana-pro`, the text-to-image endpoint: its input
 has no `image_urls` (fal's schema, read 2026-09-24), so each balanced edit
 was painted from the text alone and never saw its source.
+Legacy balanced pins that name the text-to-image slug are normalized here.
 """
 
 from __future__ import annotations
@@ -45,6 +46,20 @@ EDIT_TIER_ENV_KEYS: dict[str, str] = {
 }
 DEFAULT_EDIT_TIER = "balanced"
 
+# Explicitly verified schema; other edit families retain their native behavior.
+ASPECT_EDIT_MODELS = {"fal-ai/nano-banana/edit", "fal-ai/nano-banana-pro/edit"}
+EDIT_ASPECT_RATIOS = {"auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16"}
+
+
+def _reference_endpoint(model: str) -> str:
+    # The base Pro endpoint is text-only; image_urls is not in its schema.
+    # Older env pins and the shared image-model picker still send this slug.
+    return "fal-ai/nano-banana-pro/edit" if model == "fal-ai/nano-banana-pro" else model
+
+
+def supports_aspect_ratio(model: str) -> bool:
+    return _reference_endpoint(model) in ASPECT_EDIT_MODELS
+
 
 def _resolve_edit_tier(tier: str | None) -> str:
     candidate = (tier or os.environ.get("FAL_EDIT_TIER") or DEFAULT_EDIT_TIER).lower()
@@ -55,16 +70,16 @@ def _resolve_edit_tier(tier: str | None) -> str:
 
 def _resolve_edit_model(tier: str | None, model_override: str | None) -> str:
     if model_override:
-        return model_override
+        return _reference_endpoint(model_override)
     resolved = _resolve_edit_tier(tier)
     env_key = EDIT_TIER_ENV_KEYS[resolved]
-    return os.environ.get(env_key) or EDIT_TIER_MODELS[resolved]
+    return _reference_endpoint(os.environ.get(env_key) or EDIT_TIER_MODELS[resolved])
 
 
 def _edit_args_for(
     model: str, instruction: str, image_url: str, style_ref_url: str | None = None
 ) -> dict[str, Any]:
-    # nano-banana/edit + nano-banana-pro both take `image_urls` (list) — append
+    # Nano Banana edit endpoints take `image_urls` (list) — append
     # the style exemplar (when present) so the edit keeps the world's art medium.
     if "nano-banana" in model:
         urls = [image_url] + ([style_ref_url] if style_ref_url else [])
@@ -86,18 +101,23 @@ async def edit_image(
     style_ref_url: str | None = None,
     identity_ref_url: str | None = None,
     budget: RenderBudget | None = None,
+    context_ref_url: str | None = None,
+    aspect_ratio: str | None = None,
+    layout_ref_url: str | None = None,
 ) -> GeneratedImage:
     from obs import span
     from providers import mock
 
+    model = _resolve_edit_model(tier, model_override)
+    if aspect_ratio is not None and (model not in ASPECT_EDIT_MODELS or aspect_ratio not in EDIT_ASPECT_RATIOS):
+        raise ValueError("This edit model cannot honor the requested aspect ratio")
     if mock.on():
-        m = mock.mock_image(instruction, op="edit")
+        m = mock.mock_image(instruction, op="edit", **({"aspect_ratio": aspect_ratio} if aspect_ratio and aspect_ratio != "auto" else {}))
         if budget is not None:
             budget.reserve(m.model)
         return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
-    model = _resolve_edit_model(tier, model_override)
-    if identity_ref_url and not supports_identity_reference(model):
+    if (identity_ref_url or context_ref_url) and not supports_identity_reference(model):
         raise ValueError("This edit model cannot honor the place reference")
     image_url = await to_fal_url(image_data_url)
     # Kontext is singular-ref and leans on the instruction's medium clause;
@@ -109,8 +129,17 @@ async def edit_image(
     if style_ref_url and "kontext" not in model:
         style_fal = await to_fal_url(style_ref_url)
     args = _edit_args_for(model, instruction, image_url, style_fal)
+    if aspect_ratio is not None:
+        args["aspect_ratio"] = aspect_ratio
     if identity_ref_url:
         args["image_urls"].insert(1, await to_fal_url(identity_ref_url))
+    if context_ref_url:
+        args["image_urls"].insert(2 if identity_ref_url else 1, await to_fal_url(context_ref_url))
+    # The block layout rides LAST: the instruction calls it "the last reference
+    # image". Single-reference models cannot take it; the prompt then lacks the
+    # layout sentence too (see layout_reference_sentence callers).
+    if layout_ref_url and supports_identity_reference(model):
+        args["image_urls"].append(await to_fal_url(layout_ref_url))
     async with span("image.edit", model=model, instr_len=len(instruction)) as ctx:
         result = await _fal_subscribe(
             model,
@@ -126,6 +155,24 @@ async def edit_image(
         mime_type=mime,
         model=model,
         provider_request_id=str(result.get("requestId") or "") or None,
+    )
+
+
+def layout_reference_sentence(legend: list[tuple[str, str]]) -> str:
+    """How to read the camera-view block layout the client renders from the
+    world map. Colours name the largest visible places; grey blocks are other
+    buildings."""
+    names = "; ".join(f"{color} = {label}" for color, label in legend if color and label)
+    return (
+        "The LAST reference image is a flat-coloured block layout rendered from this "
+        "exact camera position. Each coloured block is a real building at its true "
+        "position, width, height and overlap"
+        + (f" ({names})" if names else "")
+        + "; grey blocks are other buildings, the dark band is the ground and the pale "
+        "top is open sky. Put every building exactly where its block is and at its "
+        "block's size, with nothing standing where the layout shows open ground or sky. "
+        "The blocks are placeholders only: draw real architecture in the map's style, "
+        "never flat coloured boxes, and never copy the layout's colours."
     )
 
 
@@ -234,7 +281,7 @@ async def continue_image(
         m = mock.mock_image(instruction, op="zoom")
         return GeneratedImage(m.jpeg_bytes, m.mime_type, m.model, m.request_id)
     _ensure_fal_key()
-    model = (
+    model = _reference_endpoint(
         model_override
         or os.environ.get("FAL_CONTINUE_MODEL")
         or CONTINUE_MODEL_DEFAULT

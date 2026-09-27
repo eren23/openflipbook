@@ -1,0 +1,48 @@
+{
+  "reviewer": "Codex root and independent repo_and_eval agent",
+  "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+  "results": [
+    {
+      "id": "structural-35-101",
+      "output_sha256": "7310a90ca5774e835959eb3e7bda5aa6554f9b9eb83dffa4d4ead3d9d81acc69",
+      "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+      "notes": "Crystal, tower and base retained at inspected samples. Close preservation with mild smoothing and texture repainting. Retain as a conservative comparison candidate, not a production winner.",
+      "observed_boxes": null
+    },
+    {
+      "id": "structural-60-101",
+      "output_sha256": "b15d4d761a67cbdc7ca38a6c27e5bb22a7f6487425f9d177cfc92a5ab78d84a2",
+      "visual_verdict": "Anchored in sampled frames; additional repainting",
+      "notes": "Correct approach and framing. Softer linework and small shape shifts, especially tower-top and roof details. No demonstrated enhancement over denoise 0.35 or the reference.",
+      "observed_boxes": null
+    },
+    {
+      "id": "structural-35-202",
+      "output_sha256": "439ec9a817a6fe7ef55c012684b7cd865e4ec504e0afb336cf39239bb5a02134",
+      "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+      "notes": "Complete lighthouse retained at inspected samples. Similar to seed 101 with no obvious gross structural break or meaningful seed-dependent advantage.",
+      "observed_boxes": null
+    },
+    {
+      "id": "structural-60-202",
+      "output_sha256": "2bd9f0b7927db8886df13315d4bb1eb66edef4312e64683b26331b9aa82fe06d",
+      "visual_verdict": "Anchored in sampled frames; additional repainting",
+      "notes": "Correct approach, with stronger detail and shape changes around the top crystal/bowl alignment and nearby structures. No clear reason to prefer it over denoise 0.35.",
+      "observed_boxes": null
+    },
+    {
+      "id": "fast-101",
+      "output_sha256": "47aad809f7a61f7261a0f641be5563fd853521de5922cada6726fae27dc62928",
+      "visual_verdict": "Correct landmark; mid-clip zoom timing drifts",
+      "notes": "Recognizable source-derived lighthouse close-up at the end. The middle lags the intended zoom and catches up, with more surrounding repainting. This does not establish a continuous new-viewpoint arrival.",
+      "observed_boxes": null,
+      "supplementary_feature_check": {
+        "method": "Independent Pillow translated/scaled template search for the upper crystal, after cropping the documented content rectangles and resizing to 256 x 143. Coarse local-feature evidence, not full-landmark bounds.",
+        "samples": [
+          {"progress": 0.5, "reference_center": [54, 28.5], "observed_center": [43, 25], "relative_feature_scale": 0.8, "center_error_diagonal": 0.0394},
+          {"progress": 0.7, "reference_center": [63, 31.5], "observed_center": [53, 28.5], "relative_feature_scale": 0.85, "center_error_diagonal": 0.0356}
+        ]
+      }
+    }
+  ]
+}

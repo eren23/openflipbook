@@ -24,7 +24,8 @@ def test_import_exposes_the_generate_app(monkeypatch: pytest.MonkeyPatch) -> Non
     from generate import fastapi_app
 
     assert local_server.fastapi_app is fastapi_app
-    paths = {route.path for route in fastapi_app.routes}
+    # FastAPI 0.141 lists an included router as one entry without a path.
+    paths = {getattr(route, "path", None) for route in fastapi_app.routes}
     assert {
         "/sse/generate",
         "/animate",

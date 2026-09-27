@@ -61,7 +61,7 @@ export function MapLabelOverlay({
     // resolved to absolute pos (anchorsFromGeo culls what lands outside).
     const frame = currentView?.map_crop ?? MAP_IMAGE_FRAME;
     return layoutLabels(
-      anchorsFromGeo(toAbsoluteEntities(geoEntities, geoEntities), frame),
+      anchorsFromGeo(toAbsoluteEntities(geoEntities.filter((e) => !e.scene_id), geoEntities), frame),
     );
   }, [nodeId, entities, geoEntities, currentView]);
 

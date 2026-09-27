@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Camera, Lock, Save, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import PrivateNoteEditor from "@/components/private-note-editor";
+import { ArrowRight, Box, Camera, Lock, Save, Search, X } from "lucide-react";
 import type { EntityBBox, PlaceUpdate, WorldEntityGeo } from "@openflipbook/config";
 import type { Page } from "@/lib/session-pages";
 import { clamp } from "@/lib/clamp";
 import { validReferenceBox } from "@/lib/place-identity";
+import { placeScenesEnabled } from "@/lib/place-scene-enabled";
 
 interface Props {
   sessionId: string;
@@ -18,6 +20,8 @@ interface Props {
   onEnter: (place: WorldEntityGeo, newView: boolean) => void;
   onSaved: () => Promise<void>;
   busy: boolean;
+  notesEnabled?: boolean;
+  onNoteDirtyChange?: (dirty: boolean) => void;
 }
 
 const WHOLE: EntityBBox = { x_pct: 0, y_pct: 0, w_pct: 1, h_pct: 1 };
@@ -27,6 +31,11 @@ export default function PlaceInspector(props: Props) {
   const { onClose } = props;
   const [search, setSearch] = useState("");
   const [revision, setRevision] = useState(0);
+  const [tab, setTab] = useState<"details" | "notes">("details");
+  const noteDirty = useRef(false);
+  const onNoteDirtyChange = props.onNoteDirtyChange;
+  const setNoteDirty = useCallback((value: boolean) => { noteDirty.current = value; onNoteDirtyChange?.(value); }, [onNoteDirtyChange]);
+  const allowChange = () => !noteDirty.current || window.confirm("Discard unsaved note changes?");
   const closeRef = useRef<HTMLButtonElement>(null);
   const place = props.places.find(p => p.id === props.selectedId);
   useEffect(() => {
@@ -49,13 +58,14 @@ export default function PlaceInspector(props: Props) {
         <label className="relative block"><Search size={16} className="absolute left-2 top-2" /><input aria-label="Search places" value={search} onChange={e => setSearch(e.target.value)} className={`${control} pl-8`} /></label>
         <nav aria-label="Places" className="my-3 max-h-36 overflow-y-auto border-b border-[var(--color-edge)] pb-2">
           {props.places.filter(p => p.label.toLowerCase().includes(search.toLowerCase())).map(p => (
-            <button key={p.id} onClick={() => props.onSelect(p.id)} aria-pressed={p.id === place?.id} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${p.id === place?.id ? "bg-emerald-600/15" : "hover:bg-black/5"}`}>
+            <button key={p.id} onClick={() => { if (p.id === place?.id || allowChange()) props.onSelect(p.id); }} aria-pressed={p.id === place?.id} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${p.id === place?.id ? "bg-emerald-600/15" : "hover:bg-black/5"}`}>
               <span className="min-w-0 flex-1 break-words">{p.label}</span>{p.identity_locked && <Lock size={13} aria-label="Identity locked" />}
             </button>
           ))}
           {!props.places.length && <p className="py-3 text-sm opacity-60">No mapped places</p>}
         </nav>
-        {place && <PlaceDetails key={`${place.id}:${revision}`} {...props} place={place} onReload={async () => { await props.onSaved(); setRevision(v => v + 1); }} />}
+        {place && props.notesEnabled && <div role="tablist" aria-label="Place information" className="mb-4 flex gap-4 border-b border-[var(--color-edge)]">{(["details", "notes"] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} className={`border-b-2 px-1 py-2 text-sm ${tab === value ? "border-emerald-600" : "border-transparent"}`} onClick={() => { if (value !== tab && allowChange()) setTab(value); }}>{value === "details" ? "Details" : "Notes"}</button>)}</div>}
+        {place && tab === "notes" && props.notesEnabled ? <PrivateNoteEditor key={place.id} sessionId={props.sessionId} placeId={place.id} onDirtyChange={setNoteDirty} /> : place && <PlaceDetails key={`${place.id}:${revision}`} {...props} place={place} onReload={async () => { await props.onSaved(); setRevision(v => v + 1); }} />}
       </div>
     </aside>
   );
@@ -98,6 +108,7 @@ function PlaceDetails({ place, onReload, ...props }: Props & { place: WorldEntit
     finally { if (!ac.signal.aborted) setSaving(false); }
   };
   return <section className="space-y-4">
+    {placeScenesEnabled() && props.notesEnabled && (sourceId || sources[0]?.nodeId) && <a href={`/sketch/world?source=${encodeURIComponent(sourceId || sources[0]!.nodeId!)}&place=${encodeURIComponent(place.id)}`} className="flex items-center gap-2 rounded border border-[var(--color-edge)] px-3 py-2 text-sm"><Box size={16} />{place.scene_id ? "Open 3D place" : "Build 3D place"}</a>}
     <div className="flex items-center gap-2 text-xs opacity-70"><span>{parent?.label ?? "World"}</span><ArrowRight size={12} /><span className="break-words">{place.label}</span></div>
     <label className="block text-xs">Name<input className={`${control} mt-1`} value={label} maxLength={160} onChange={e => { setLabel(e.target.value); setSaved(false); }} /></label>
     <label className="block text-xs">Appearance<textarea className={`${control} mt-1 min-h-20 resize-y`} value={visual} maxLength={2000} onChange={e => { setVisual(e.target.value); setSaved(false); }} /></label>

@@ -29,6 +29,13 @@ vi.mock("@/lib/env", () => ({
   readServerEnv: () => ({ MODAL_API_URL: "https://modal.test", MONGODB_URI: "mongodb://test", MONGODB_DB: "test" }),
 }));
 vi.mock("@/lib/env-flag", () => ({ envFlag: () => true }));
+// The creator gate (same origin, JSON body, owner cookie) runs first. This file
+// pins the requireOwner check behind it, so the gate lets every request in.
+vi.mock("@/lib/creator", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  checkCreatorWrite: () => {},
+  requireCreator: async () => ({}),
+}));
 
 import { POST as editEntities } from "@/app/api/world/[sessionId]/edit-entities/route";
 import { POST as walk } from "@/app/api/world/[sessionId]/walk/route";
@@ -39,7 +46,7 @@ const forbidden = () => ({
 });
 const inSession = (sessionId: string) => ({ params: Promise.resolve({ sessionId }) });
 const post = (body: unknown) =>
-  new Request("http://localhost/x", { method: "POST", body: JSON.stringify(body) });
+  new Request("http://localhost/x", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 const upstream = vi.fn();
 

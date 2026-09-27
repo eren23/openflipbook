@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "world": "Aethelgard Harbor",
+  "shots": {
+    "market": {
+      "title": "Quayside Market",
+      "source": "root",
+      "click": [0.865, 0.405],
+      "attempts": {
+        "1": {
+          "seed": 91701,
+          "prompt": "Create the next playable view of THIS EXACT illustrated harbor, not a poster or a different world. Place the camera at human eye height ON the pale stone quayside market promenade at the RIGHT side of the supplied map, among the small red, green and yellow market stalls. We are standing at that market, not looking at it from a distant harbor or overhead. Look ALONG the curved promenade toward the cream-plaster and dark-timber houses with terracotta roofs. The canal is on camera LEFT and the market buildings on camera RIGHT. Foreground paving reaches the bottom edge. Show a clear walkable lane and one recognizable small ground-floor shop entrance in the right foreground, with its doorway and adjacent window fully visible, so a visitor could choose to step inside next. Keep the source's same crisp dark ink outlines, warm terracotta roof colors, cream stone, saturated turquoise water, cool shadow colors and richly drawn storybook illustration; the camera changes, the art medium DOES NOT. Preserve visible neighboring house forms, archways and the curving quay. Only distant glimpses of the crystal-sailed boats may appear on the water to the left. Do not bring the lighthouse into the foreground. No captions, no labels, no arrows, no layout panels, no map border, no typography, no photograph, no CG render, no depth-of-field blur. A single immersive horizontal 16:9 illustration, as if the original artist drew the ground-level reverse angle of this exact little market. The shop is an existing ordinary timber-fronted merchant shop, not a new castle or monumental structure. Keep its right-foreground facade complete in frame; do not crop away its roof or door."
+        }
+      }
+    },
+    "interior": {
+      "title": "Inside Quayside Provisions",
+      "source": "market-1",
+      "click": [0.912, 0.702],
+      "attempts": {
+        "1": {
+          "seed": 91703,
+          "prompt": "Image 1 is our current harbor market street. Image 2 is only a world-style reference. Create the INTERIOR arrival after entering the actual open doorway of the timber merchant shop at the FAR RIGHT FOREGROUND of image 1. The camera is now JUST INSIDE that doorway, looking deeper into the SAME modest provisions shop. This is a completely indoor scene; do not show the street view again and do not paste a new storefront onto it. Preserve the construction visible through the opening: dark thick timber posts and beams, warm cream plaster infill, wide worn wooden floorboards, modest low ceiling, shelves and hanging pale cloth provision sacks. The open paneled brown entry door remains as a small recognizable sliver on the LEFT FOREGROUND, with daylight from behind the camera falling diagonally onto the wooden floor. The existing display window was immediately to the RIGHT of the doorway outside, so its BACK and the inside faces of the red/yellow produce bins are now on camera RIGHT foreground; above them hang the same pale cloth sacks. Beyond, a walkable central aisle leads to a small wooden merchant counter at the back, with shelves of ceramic jars, baskets and folded cloth. No grand hall, no new staircase or fireplace, no tavern tables, no duplicated exterior facade, no giant window showing an invented city. This is a small ordinary provisions shop consistent with the original narrow timber building. Preserve image 1's precise black/brown ink outlines, warm cream surfaces, saturated but controlled colors, blue-violet shaded areas, hand-drawn storybook illustration. No photorealism, no brushy painterly medium, no captions, no labels, no signs, no UI, no map. Human-eye-height perspective. Single immersive horizontal 16:9 illustration."
+        }
+      }
+    },
+    "lighthouse": {
+      "title": "Crystal Lighthouse",
+      "source": "root",
+      "click": [0.139, 0.307],
+      "attempts": {
+        "1": {
+          "seed": 91704,
+          "prompt": "Create a playable closer arrival at the EXACT crystal lighthouse on the LEFT side of this supplied illustrated harbor map. We have chosen this place and now stand on the narrow curved stone approach beside its rocky promontory, looking up slightly at the tower, close enough to inspect its entrance but far enough to include its entire crown and floating crystal. Preserve the actual lighthouse design: a gently tapering pale warm-gray polygonal stone tower with dark vertical mortar lines and small narrow slit windows; its crown is a round open shallow bowl platform with two tall upward fork-like stone prongs around it. A large faceted pale-blue/cyan crystal hovers vertically ABOVE the bowl between the prongs, with two much smaller hovering crystals on either side. This is NOT a conventional lantern-room lighthouse: no glass cabin, no balcony railings, no conical roof, no round striped white tower. At the base, keep the single small attached cream-stone house with a terracotta gable roof on the tower's RIGHT, and the low arched doorway at the tower base facing the approach. Keep the turquoise sea and jagged pale ochre rocks around this little promontory. Only a glimpse of the curved harbor wall and distant terracotta buildings should remain on the RIGHT background, placing this exact tower at the mouth of the same harbor. Foreground is the walkable stone approach, NOT open water. Preserve the original artist's crisp dark ink outlines, detailed masonry, saturated turquoise water and colored graphic shadows. The same illustrated world, not a photograph or a painterly fantasy poster. No giant new castle, no duplicate tower, no text, no captions, no labels, no UI. Single horizontal 16:9 image."
+        },
+        "2": {
+          "seed": 91705,
+          "reference_crop": [0.035, 0.05, 0.26, 0.53],
+          "prompt": "This cropped illustration is an architectural IDENTITY REFERENCE for one specific crystal lighthouse, NOT a background plate to preserve. Draw an entirely new ground-level perspective of THIS EXACT tower. The camera stands on its narrow stone approach at the front door height, looking UP just enough to see its entire floating crystal above the crown. The tower fills most of the image height; foreground is just a short stretch of its stone path; background is a clear pale-cyan sky and a glimpse of turquoise open sea. From this LOW camera we cannot look down onto the harbor and cannot see a map. Do not repeat the reference image behind the tower. Preserve its exact silhouette: tapered faceted warm-gray masonry shaft, narrow dark slit windows, low arched entrance, shallow open bowl crown with two upward stone fork prongs, ONE large cyan/lilac faceted crystal floating above the bowl and a few small crystal satellites. No lantern room, no striped tower, no railing, no roof on top. The small cream-stone building attached on the RIGHT at its base keeps the same low terracotta gable roof. The tower is rooted on the same ochre coastal rock, not floating on another tower. Preserve crisp black ink outlines, precise stonework, terracotta color, turquoise sea and colorful storybook shading. Same artist, same building, new perspective, not a redesign. No picture-in-picture, no giant translucent background, no text, no people, no photography or painterly blur. Single horizontal 16:9 illustration."
+        }
+      }
+    },
+    "shop": {
+      "title": "Quayside Provisions",
+      "source": "market-1",
+      "click": [0.912, 0.702],
+      "attempts": {
+        "1": {
+          "seed": 91702,
+          "prompt": "Image 1 is our CURRENT street view. Image 2 is only the original world map for art-style reference. Move a few paces along the existing quay and turn RIGHT to face the SAME timber shop occupying the right foreground of image 1. This is a nearer view of that actual shop, not a new building. Frame the ground floor and a little upper facade, with the entrance centered and visible paving below. Preserve the dark brown timber frame, warm cream plaster, the green-blue upper window, and the large brown paneled door leaf standing partly open on the LEFT side of the entrance. The open passage is to the RIGHT of that door leaf. Immediately RIGHT of the open passage is the existing broad wooden provisions display with sloped bins of red and yellow goods and hanging pale sacks above it. Keep this exact adjacency: brown door leaf, open passage, provisions window. A barrel stands to the LEFT of the doorway. Through the opening see a modest dim timber-lined shop with shelves, not an outdoor courtyard. Show the facade at human eye height, nearly straight-on but enough angle to establish thickness of the threshold. The terracotta roof/upper story may continue beyond the top of the composition; do NOT invent a complete different roof. No new signs or lettering, no people blocking the doorway. Preserve image 1's crisp dark ink outlines, cream plaster, brown timber, warm paving and saturated storybook illustrated medium. No photography, no painterly restyling, no map view, no inset. Single horizontal 16:9 illustration."
+        }
+      }
+    }
+  }
+}

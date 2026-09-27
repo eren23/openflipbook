@@ -56,7 +56,8 @@ export interface UploadedObject {
 export async function uploadJpeg(
   key: string,
   body: Buffer,
-  contentType = "image/jpeg"
+  contentType = "image/jpeg",
+  signal?: AbortSignal
 ): Promise<UploadedObject> {
   const { s3, bucket, publicBaseUrl } = r2Client();
   await s3.send(
@@ -66,7 +67,8 @@ export async function uploadJpeg(
       Body: body,
       ContentType: contentType,
       CacheControl: "public, max-age=31536000, immutable",
-    })
+    }),
+    signal ? { abortSignal: signal } : undefined
   );
   return { key, url: `${publicBaseUrl}/${key}`, contentType };
 }
@@ -125,11 +127,12 @@ export async function inlineStoredImage(url: string): Promise<string | null> {
 /** Raw stored bytes by key (the nodes collection stores image_key directly).
  * Best-effort: null on any failure. */
 export async function getStoredBytes(
-  key: string
+  key: string,
+  signal?: AbortSignal
 ): Promise<{ bytes: Buffer; contentType: string } | null> {
   try {
     const { s3, bucket } = r2Client();
-    const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }), signal ? { abortSignal: signal } : undefined);
     if (!got.Body) return null;
     const bytes = Buffer.from(await got.Body.transformToByteArray());
     if (bytes.length === 0) return null;

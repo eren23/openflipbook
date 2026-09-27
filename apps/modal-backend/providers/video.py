@@ -88,6 +88,21 @@ def descent_arguments(
     return {"image_url": image_url, "end_image_url": end_image_url, "prompt": prompt}
 
 
+def object_action_prompt(subject: str, action: str, x_pct: float, y_pct: float) -> str:
+    """Anchor a clip on ONE tapped object. H3 has no mask input, so the
+    object's name and its position in the frame are the only steering."""
+    subject = " ".join(subject.split())[:120] or "the tapped object"
+    action = " ".join(action.split()).rstrip(".")[:300]
+    return (
+        f"Focus on {subject}, about {round(x_pct * 100)}% from the left and "
+        f"{round(y_pct * 100)}% from the top of the frame. "
+        f"{action or f'{subject} comes to life with clear, natural motion'}. "
+        "The camera eases slowly toward it. The rest of the illustrated scene "
+        "stays calm and keeps its drawing style, layout and colors. "
+        "One continuous shot, no cuts; add nothing the action does not need."
+    )
+
+
 # Video tier → fal model and its H3 resolution. Mirrors the image-tier pattern
 # in providers/image.py. `FAL_VIDEO_TIER_<TIER>` swaps one tier's slug.
 TIER_VIDEO_MODELS: dict[str, str] = {
@@ -135,21 +150,28 @@ def _animate_model(tier: str | None = None) -> str:
     return os.environ.get(env_key) or TIER_VIDEO_MODELS[resolved]
 
 
-def clip_model(tier: str | None = None, *, descent: bool = False) -> str:
+def clip_model(tier: str | None = None, *, descent: bool = False, action: bool = False) -> str:
     """The slug animate_image calls for this request."""
     if descent:
         return os.environ.get("FAL_DESCENT_MODEL") or DESCENT_ANIMATE_MODEL
+    if action:
+        # A tapped-object clip needs a model that follows a focused action
+        # prompt, so an ambient override must not capture it.
+        return os.environ.get("FAL_ACTION_MODEL") or H3_MAX_MODEL
     return _animate_model(tier)
 
 
-def estimate_usd(duration: int, tier: str | None = None, *, descent: bool = False) -> float:
+def estimate_usd(
+    duration: int, tier: str | None = None, *, descent: bool = False, action: bool = False
+) -> float:
     """What animate_image bills for this request, before it runs."""
     from . import spend
 
-    model = clip_model(tier, descent=descent)
+    model = clip_model(tier, descent=descent, action=action)
     seconds = _h3_seconds(model, duration) if is_h3(model) else duration
-    # A descent rides h3_arguments' default resolution.
-    resolution = "768P" if descent else TIER_VIDEO_RESOLUTIONS[_resolve_video_tier(tier)]
+    # Descent and action clips ride h3_arguments' default resolution.
+    fixed = descent or action
+    resolution = "768P" if fixed else TIER_VIDEO_RESOLUTIONS[_resolve_video_tier(tier)]
     return spend.estimate_video(model, seconds, resolution)
 
 
@@ -160,6 +182,7 @@ async def animate_image(
     duration: int = 5,
     tier: str | None = None,
     end_image_data_url: str | None = None,
+    object_action: bool = False,
 ) -> AnimatedClip:
     from obs import span
 
@@ -185,6 +208,17 @@ async def animate_image(
         model = clip_model(descent=True)
         arguments = descent_arguments(
             model, image_url, await to_fal_url(end_image_data_url), prompt, duration
+        )
+        async with span("video.animate", model=model, duration=duration):
+            result = await _fal_subscribe(model, arguments)
+        return _clip_from_result(result, model, arguments.get("duration", duration))
+    if object_action:
+        # Tapped-object clip: its own slot, never the ambient tier table.
+        model = clip_model(action=True)
+        arguments = (
+            h3_arguments(model, image_url, prompt, duration)
+            if is_h3(model)
+            else {"image_url": image_url, "prompt": prompt}
         )
         async with span("video.animate", model=model, duration=duration):
             result = await _fal_subscribe(model, arguments)

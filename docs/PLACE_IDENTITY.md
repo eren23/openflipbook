@@ -35,6 +35,12 @@ identity (or interior identity), medium, camera, detail, zoom direction, and
 spatial grounding when layout is known. OUTWARD adds source-containment judging.
 No corrective image edit happens after acceptance.
 
+Strict map-to-place scenes now default to an exterior arrival and additionally
+require categorical near-target, exterior, single-target and scene-not-map
+checks. Unknown evidence rejects. Automatic reference selection, experimental
+reference order and the no-spend study are documented in
+[Exterior Arrivals](EXTERIOR_ARRIVALS.md); fresh visual quality is not yet proven.
+
 Failed or unavailable judges produce an unpublished candidate with Retry and
 Dismiss. They do not replace the map, save a node, reparent an OUTWARD root, or
 start extraction. Strict requests make at most two image submissions, including

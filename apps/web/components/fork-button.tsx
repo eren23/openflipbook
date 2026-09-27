@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 // "Fork this world" on the share surfaces: copy the whole session (nodes +
 // world model, images by reference, $0) into a fresh one the viewer OWNS,
@@ -15,24 +15,32 @@ interface ForkButtonProps {
 export default function ForkButton({ sessionId, nodeId }: ForkButtonProps) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const pending = useRef<{ source: string; body: { node_id: string; request_id: string } } | null>(null);
+  const inFlight = useRef(false);
 
   const fork = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setFailed(false);
     try {
+      const identity = await fetch("/api/creator/identity", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      if (!identity.ok) throw new Error("Workspace identity unavailable");
+      const source = `${sessionId}:${nodeId}`;
+      if (pending.current?.source !== source) pending.current = { source, body: { node_id: nodeId, request_id: crypto.randomUUID() } };
       const res = await fetch(
         `/api/sessions/${encodeURIComponent(sessionId)}/fork`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ node_id: nodeId }),
+          body: JSON.stringify(pending.current.body),
         }
       );
       if (!res.ok) throw new Error(`fork ${res.status}`);
       const { session_id } = (await res.json()) as { session_id: string };
       window.location.href = `/play?continue=${encodeURIComponent(session_id)}`;
     } catch {
+      inFlight.current = false;
       setFailed(true);
       setBusy(false);
     }

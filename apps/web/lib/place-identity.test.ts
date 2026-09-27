@@ -33,6 +33,11 @@ describe("place identity validation", () => {
     expect(isVerifiedView({ ...receipt, accepted: false })).toBe(false);
     expect(isVerifiedView({ ...receipt, same_place: null, interior: 8 }, { interior: true })).toBe(true);
     expect(isVerifiedView({ ...receipt, detail: null }, { outward: true })).toBe(true);
+    expect(isVerifiedView(receipt, { exterior: true })).toBe(false);
+    const arrival = { status: "pass", checks: { near_target: "pass", exterior: "pass", single_target: "pass", scene_not_map: "pass" }, rationale: "verified" } as const;
+    expect(isVerifiedView({ ...receipt, arrival }, { exterior: true })).toBe(true);
+    expect(isVerifiedView({ ...receipt, arrival: { ...arrival, checks: { ...arrival.checks, near_target: "unknown" } } })).toBe(false);
+    expect(isVerifiedView({ ...receipt, arrival: { status: "pass" } as never })).toBe(false);
   });
 });
 
@@ -56,6 +61,14 @@ describe("place-aware navigation", () => {
     const child = { ...geo("tower"), parent_id: "region", pos: { x: 0, y: 0 } };
     expect(placeCandidates([parent, child], [], "root", null, { x_pct: .5, y_pct: .5 }).map(e => e.id)).toEqual(["tower"]);
   });
+  it("a zoomed-out painted place still hits, and the 3D editor's scene copy never does", () => {
+    const quarter = { ...geo("quarter"), footprint: { w: 100, d: 60 }, scale: 0.005 };
+    const inn = { ...geo("inn"), parent_id: "quarter", pos: { x: -2600, y: -180 }, footprint: { w: 3240, d: 2661 } };
+    const scene = { ...geo("scene", 40), pos: { x: 40, y: 40 }, footprint: { w: 80, d: 80 }, scene_id: "s1" };
+    const copy = { ...geo("inn-copy"), parent_id: "scene", pos: { x: -3, y: -10.9 }, scene_id: "s1" };
+    // (0.37, 0.485) is the painted inn at absolute (37, 29.1); the copy sits there too.
+    expect(placeCandidates([quarter, inn, scene, copy], [], "root", null, { x_pct: .37, y_pct: .485 }).map(e => e.id)).toEqual(["inn"]);
+  });
   it("a detection box covering most of the image does not claim every tap", () => {
     // Live: "River Leven" was drawn over a whole lake (92%x50% of the image),
     // so every tap in the top half resolved to the river.
@@ -74,6 +87,7 @@ describe("place-aware navigation", () => {
   });
   it("does not treat world coordinates as perspective-image detections", () => {
     expect(placeCandidates([{ ...geo("child"), parent_id: "tower" }], [], "inside", view("tower"), { x_pct: .5, y_pct: .5 })).toEqual([]);
+    expect(placeCandidates([geo("tower")], [], "street", { ...view("tower"), focus_id: null, level: "street" }, { x_pct: .5, y_pct: .5 })).toEqual([]);
   });
 });
 

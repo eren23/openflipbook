@@ -235,6 +235,12 @@ def conditioning_preamble(roles: list[str], mode: str) -> str:
                 "render, isometric line-art or any other medium, however much the "
                 "subject might invite it."
             )
+        elif role == "layout":
+            lines.append(
+                f"Image {i}: a flat-coloured block LAYOUT from this camera position — "
+                "each block is a building at its true place and size. Keep buildings "
+                "where their blocks are; never draw the flat colours themselves."
+            )
         else:
             lines.append(f"Image {i}: visual reference — stay consistent with it.")
     return (

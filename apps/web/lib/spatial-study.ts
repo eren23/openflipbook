@@ -1,3 +1,5 @@
+import { controlledAssetPath } from "./controlled-study";
+
 export const SPATIAL_STUDY_CASES = [
   { id: "fishing_lighthouse", title: "North Point Lighthouse", source: "fishing_village.jpg", x: .557, y: .192, destination: "Waking Docks", h3: "fishing_lighthouse-h3-c63f6dc519.mp4", ltx: "fishing_lighthouse-ltx-cb4313341e.mp4" },
   { id: "oasis_citadel", title: "Sandstone Citadel", source: "oasis_town.jpg", x: .631, y: .204, destination: "Oasis of Zaffar", h3: "oasis_citadel-h3-c455972127.mp4", ltx: "oasis_citadel-ltx-8fe4ef43ad.mp4" },
@@ -11,5 +13,5 @@ export function spatialAssetPath(name: string): string | null {
     if (name === `${c.id}-destination.jpg`) return `tests/video_transition_bench/fixtures/${name}`;
     if (name === c.h3 || name === c.ltx) return `tests/video_transition_bench/reports/${name}`;
   }
-  return null;
+  return controlledAssetPath(name);
 }

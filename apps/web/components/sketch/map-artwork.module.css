@@ -1,0 +1,13 @@
+.stage { min-width:0; min-height:0; padding:16px; display:flex; align-items:center; justify-content:center; overflow:auto; background:#e5ece8; }
+.artwork { width:100%; position:relative; flex-shrink:0; }
+.artwork img { width:100%; height:auto; display:block; }
+.overlay { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; }
+.changes { padding-left:18px; font-size:13px; }
+.revision { color:#637169; font-size:12px; }
+.mapLink { display:block; color:#246f5a; margin-top:20px; }
+.selectable { cursor:pointer; }
+.selectable:focus-visible { outline:none; stroke:#b46426; stroke-width:4px; }
+.landmarks { list-style:none; padding:0; margin:8px 0; }
+.landmarks li { border-bottom:1px solid #cbd5cf; padding:8px 0; }
+.landmarks strong,.landmarks span { display:block; overflow-wrap:anywhere; font-size:12px; }
+@media(max-width:720px) { .stage { padding:8px; } }

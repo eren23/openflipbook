@@ -22,6 +22,7 @@ export interface Page {
   // minimap to the place you're inside; null/absent on the world map + classic
   // pages → the minimap shows the whole world frame.
   sceneView?: SceneView | null;
+  sceneOutdated?: boolean;
   // Whether entity extraction has already run for this node (read back from
   // Mongo on revisit/reload). Gates the auto-localize effect so a revisit never
   // silently re-runs the non-deterministic VLM pass. Absent on freshly-created
@@ -52,6 +53,7 @@ export interface SessionNodeWire {
   click_in_parent: { x_pct: number; y_pct: number } | null;
   sources?: { url: string; title: string | null }[] | null;
   scene_view?: SceneView | null;
+  scene_outdated?: boolean;
   geo_extracted?: boolean;
   // DESCENT_AUTO's stored arrival clip; absent on legacy servers/rows.
   descent_video_url?: string | null;
@@ -106,6 +108,7 @@ export function nodeToPage(n: SessionNodeWire): Page {
     parentId: n.parent_id,
     sources: Array.isArray(n.sources) ? n.sources : [],
     sceneView: n.scene_view ?? null,
+    ...(n.scene_outdated ? { sceneOutdated: true } : {}),
     geoExtracted: n.geo_extracted ?? false,
     ...(n.descent_video_url ? { descentVideoUrl: n.descent_video_url } : {}),
     ...(n.walk ? { walk: n.walk } : {}),

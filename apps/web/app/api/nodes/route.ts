@@ -7,7 +7,7 @@ import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
 import { getIdempotentResult, saveIdempotentResult } from "@/lib/idempotency";
 import { isSafeId } from "@/lib/ids";
-import { cleanGrounding } from "@/lib/place-identity";
+import { cleanGrounding, isVerifiedView } from "@/lib/place-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +61,9 @@ export async function POST(req: Request) {
   // cross-tenant node insertion / poisoning).
   const auth = await requireOwner(body.session_id);
   if (!auth.ok) return auth.res;
+  if (body.view_verdict?.arrival && !isVerifiedView(body.view_verdict, { exterior: true })) {
+    return NextResponse.json({ error: "Unverified exterior arrival cannot be saved" }, { status: 422 });
+  }
 
   let parent: NodeRow | null = null;
   if (body.parent_id != null) {

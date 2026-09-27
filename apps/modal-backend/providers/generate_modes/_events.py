@@ -7,7 +7,9 @@ gate the FIELD SET; nested payloads stay loose dicts on purpose.
 """
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
+
+from providers.arrival import ArrivalResult
 
 
 class EditVerdict(TypedDict):
@@ -50,6 +52,7 @@ class ViewVerdict(TypedDict):
     interior: float | None
     attempts: int
     accepted: bool
+    arrival: NotRequired[ArrivalResult]
 
 
 class GenerateFinalEvent(TypedDict, total=False):

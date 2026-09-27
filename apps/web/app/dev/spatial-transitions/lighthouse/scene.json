@@ -1,0 +1,10 @@
+{
+  "id": "crystal-lighthouse-proxy-v1",
+  "provenance": "Authored interpretation of visible lighthouse features; not reconstructed geometry",
+  "units": "assumed metres",
+  "assumptions": ["All dimensions and unseen surfaces are authored estimates", "Level standing ground is assumed; surrounding cliffs and access route are not reconstructed", "Two visible crown arms are modeled; unseen supports are unknown", "Annex roof and wall depth are estimated from one oblique image"],
+  "tower": {"baseRadius": 2.05, "topRadius": 1.25, "height": 10},
+  "annex": {"position": [2.45, 1.65, -0.8], "size": [3.3, 3.3, 4.2], "roofHeight": 1.1},
+  "camera": {"position": [12, 1.65, 24], "target": [0.8, 6.6, 0], "fov": 39, "near": 0.1, "far": 100},
+  "landmarks": {"base": [0, 0.1, 0], "crown": [0, 10.5, 0], "crystal": [0, 13, 0], "annex": [2.45, 3.3, -0.8]}
+}

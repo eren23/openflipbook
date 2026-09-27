@@ -15,6 +15,8 @@
 
 [World walkthrough](docs/WORLD_WALKTHROUGH.md) | [Place identity and its limits](docs/PLACE_IDENTITY.md) | [H3 Max vs LTX transition pilot](docs/research/12-transition-video-pilot.md)
 
+[Automatic exterior arrivals: implementation and pending visual audit](docs/EXTERIOR_ARRIVALS.md)
+
 This is a saved product output, not a promise that every newly generated viewpoint will match it. Revisits retrieve saved images; new perspectives can still drift. The walkthrough separates persistence, generation accuracy, and animated transitions.
 
 <details>
@@ -133,7 +135,7 @@ Full setup walkthrough: [`docs/BYO-KEYS.md`](docs/BYO-KEYS.md).
 
 ```
 apps/
-  web/                Next.js 15 app (landing, /play, /n/:id, /status)
+  web/                Next.js 15 app (My Worlds, /play, /n/:id, /status)
   modal-backend/      FastAPI — SSE page gen, click VLM, optional LTX GPU worker
 packages/
   config/             Shared TS types (GenerateEvent, LTXStreamStartMessage, …)
@@ -148,6 +150,8 @@ docs/
 
 ## Further reading
 
+- **[Creator workspace](docs/CREATOR_WORKSPACE.md)**: saved-world library, reliable resume, private world/place notes, and browser-cookie access limits.
+- **[Current roadmap](docs/ROADMAP.md)** and **[controllable-model report](docs/research/15-controllable-model-landscape.md)** — priorities, tested evidence, model options, and decision gates for arrivals and spatial movement.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — code layout, where things live, how the play surface is split into hooks vs components vs lib.
 - **[docs/STORY.md](docs/STORY.md)** — the backstory + reverse-engineered LTXF protocol.
 - **[docs/BYO-KEYS.md](docs/BYO-KEYS.md)** — credential + deploy walkthrough.

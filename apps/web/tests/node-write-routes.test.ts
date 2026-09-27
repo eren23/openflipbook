@@ -57,6 +57,11 @@ beforeEach(() => {
 });
 
 describe("node write session boundaries", () => {
+  it("rejects an incomplete arrival receipt before storing bytes", async () => {
+    const response = await createNode(request({ ...createBody, view_verdict: { accepted: true, arrival: { status: "unknown" } } }));
+    expect(response.status).toBe(422);
+    expect(mocks.uploadJpeg).not.toHaveBeenCalled(); expect(mocks.insertNode).not.toHaveBeenCalled();
+  });
   it('persists server-bound transition context and returns it to fresh page state', async () => {
     mocks.getNode.mockResolvedValue({ ...child, image_key: 'original.png', scene_view: null });
     const res = await createNode(request({ ...createBody, parent_id: 'child', click_in_parent: { x_pct: .8, y_pct: .3 } }));
