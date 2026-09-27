@@ -41,6 +41,7 @@ it("rejects corrupt embedded images and over-budget textures", async () => {
   const huge = await sharp({ create: { width: 4097, height: 16, channels: 3, background: "#123456" } }).png().toBuffer();
   await expect(inspectMeshImport(fixtureTexturedGlb(huge))).rejects.toThrow("4096px");
 });
+// Encodes 4K textures: under 1 s alone, past the 5 s default on a loaded CI runner.
 it("round-trips a bounded 4K PBR texture set but still rejects combined texture overflow", async () => {
   const texture = await sharp({ create: { width: 4096, height: 4096, channels: 3, background: "#3167bb" } }).png().toBuffer();
   const fixture = (count: number) => fixtureTexturedGlb(texture, source => {
@@ -49,7 +50,7 @@ it("round-trips a bounded 4K PBR texture set but still rejects combined texture 
   });
   expect(await inspectMeshImport(fixture(4))).toMatchObject({ size: { width: 2, height: 4, depth: 3 } });
   await expect(inspectMeshImport(fixture(5))).rejects.toThrow("64 megapixels");
-});
+}, 30_000);
 it("stores immutable import provenance without fabricating a model job or provider request", async () => {
   const bytes = fixtureGlb(); const result = await importMesh("world", bytes, "Monument.glb");
   const asset = f.assets.get(`world:${result.asset.id}`)!;

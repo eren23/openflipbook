@@ -49,6 +49,8 @@ it("plays on explicit intent, stops on manual input and cancels its animation on
   fireEvent.change(numeric("Azimuth"), { target: { value: "180" } });
   fireEvent.click(screen.getByRole("button", { name: "Play camera path" }));
   await screen.findByRole("button", { name: "Pause camera path" });
+  // The frame loop starts in an effect after the Pause button renders.
+  await waitFor(() => expect(raf).toHaveBeenCalled());
   act(() => step(3000)); expect(value.azimuth).toBe(90);
   act(() => listener("start")); expect(screen.getByRole("button", { name: "Play camera path" })).toBeTruthy(); expect(cancel).toHaveBeenCalledWith(42);
   fireEvent.click(screen.getByRole("button", { name: "Play camera path" }));
