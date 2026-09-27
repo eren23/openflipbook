@@ -46,8 +46,11 @@ test("spatial navigation holds the source, commits at the cut, and replays witho
   await expect(image).toHaveAttribute("src", source);
   await page.getByTitle("Go forward (→)").click();
   await expect(page).toHaveURL(new RegExp(`[?&]node=${saved.id}`));
+  // A reload stays in the live explorer on the same node; only /n/ is the
+  // read-only share page with a "Continue this session" link.
   await page.reload();
-  await page.getByRole("link", { name: "Continue this session", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`[?&]node=${saved.id}`));
+  await expect(page.getByRole("link", { name: "Continue this session", exact: true })).toHaveCount(0);
   await waitForStableImage(page);
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
