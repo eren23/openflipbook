@@ -1,6 +1,8 @@
 import {expect, test} from "@playwright/test";
 import * as THREE from "three";
 
+test.skip(process.env.E2E_GENERATED_MESH !== "1", "Loads a fixture GLB in the Sketch editor (needs NEXT_PUBLIC_SKETCH_ENABLED=1); no model calls");
+
 // A labelled geometry fixture exercises the real GLB loader, not model quality.
 function fixtureGlb() {
   const geometry = new THREE.BoxGeometry(2, 4, 3).toNonIndexed();

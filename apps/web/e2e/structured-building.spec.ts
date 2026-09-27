@@ -1,5 +1,7 @@
 import {expect, test, type Page} from "@playwright/test";
 
+test.skip(process.env.E2E_STRUCTURED_BUILDING !== "1", "Builds and walks a structure in the Sketch editor (needs NEXT_PUBLIC_SKETCH_ENABLED=1); no model calls");
+
 const camera = async (page: Page) => (await page.getByTestId("place-viewport").getAttribute("data-camera"))!.split(",").map(Number);
 const ready = async (page: Page) => expect(page.getByTestId("place-viewport")).toHaveAttribute("data-ready","true");
 
