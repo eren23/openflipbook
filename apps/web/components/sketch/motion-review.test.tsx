@@ -74,3 +74,47 @@ it("keeps measurement disabled during continuous playback", async () => {
   Object.defineProperty(video, "paused", { configurable: true, value: true }); fireEvent.pause(video);
   expect((screen.getByLabelText("Observed landmark visibility") as HTMLSelectElement).disabled).toBe(false);
 });
+it("draws bounds with the pointer, walks samples and landmarks, and reports media errors", async () => {
+  const ui = render(<MotionReview {...props}/>); const video = await ready(ui.container);
+  const surface = screen.getByRole("img", { name: "Video landmark bounds" });
+  vi.spyOn(surface, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+  // A cancelled or lost gesture measures nothing.
+  fireEvent.pointerDown(surface, { button: 0, pointerId: 1, clientX: 10, clientY: 20 }); fireEvent.pointerCancel(surface, { pointerId: 1 });
+  fireEvent.pointerDown(surface, { button: 0, pointerId: 2, clientX: 10, clientY: 20 }); fireEvent.lostPointerCapture(surface, { pointerId: 2 });
+  expect(screen.getByText(/^0 \/ \d+ measurements$/)).toBeTruthy();
+  fireEvent.pointerDown(surface, { button: 0, pointerId: 3, clientX: 10, clientY: 20 });
+  fireEvent.pointerMove(surface, { pointerId: 3, clientX: 40, clientY: 60 });
+  fireEvent.pointerUp(surface, { pointerId: 3, clientX: 40, clientY: 60 });
+  await waitFor(() => expect((screen.getByLabelText("Observed right percent") as HTMLInputElement).value).toBe("40"));
+  fireEvent.click(screen.getByRole("button", { name: "Clear landmark measurement" }));
+  expect((screen.getByLabelText("Observed right percent") as HTMLInputElement).value).toBe("");
+  fireEvent.change(screen.getByLabelText("Observed landmark visibility"), { target: { value: "absent" } });
+  fireEvent.change(screen.getByLabelText("Observed landmark visibility"), { target: { value: "unreviewed" } });
+  expect(screen.getByText(/^0 \/ \d+ measurements$/)).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("Architecture and landmark identity"), { target: { value: "pass" } });
+  fireEvent.change(screen.getByLabelText("Motion review notes"), { target: { value: "Steady dolly" } });
+  fireEvent.change(screen.getByLabelText("Comparison landmark"), { target: { value: "0" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next sample" }));
+  expect((screen.getByLabelText("Comparison sample") as HTMLSelectElement).value).toBe("1");
+  fireEvent.click(screen.getByRole("button", { name: "Previous sample" }));
+  expect((screen.getByLabelText("Comparison sample") as HTMLSelectElement).value).toBe("0");
+  fireEvent.click(screen.getByRole("button", { name: "Return to sample" }));
+  video.currentTime = 1.5; fireEvent.timeUpdate(video); fireEvent.seeking(video);
+  expect(screen.getByLabelText("Video sample time").textContent).toContain("1.50s");
+
+  fireEvent.error(screen.getByAltText("Geometry sample 1"));
+  expect((await screen.findByRole("alert")).textContent).toBe("Reference image unavailable");
+  fireEvent.error(video);
+  expect(screen.getByRole("alert").textContent).toBe("Video unavailable");
+
+  fireEvent.click(screen.getByRole("button", { name: "Save comparison review" }));
+  await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+  expect(props.onSave.mock.calls[0]![0]).toMatchObject({ review: { notes: "Steady dolly", visual: { architecture: "pass" } } });
+});
+it("closes from the button and from Escape when no save is running", () => {
+  render(<MotionReview {...props}/>);
+  fireEvent.click(screen.getByRole("button", { name: "Close camera comparison" }));
+  fireEvent(screen.getByRole("dialog", { hidden: true }), new Event("cancel", { cancelable: true }));
+  expect(props.onClose).toHaveBeenCalledTimes(2);
+});
