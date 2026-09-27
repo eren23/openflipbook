@@ -29,12 +29,14 @@ vi.mock("@/lib/env", () => ({
   readServerEnv: () => ({ MODAL_API_URL: "https://modal.test", MONGODB_URI: "mongodb://test", MONGODB_DB: "test" }),
 }));
 vi.mock("@/lib/env-flag", () => ({ envFlag: () => true }));
-// The creator gate (same origin, JSON body, owner cookie) runs first. This file
-// pins the requireOwner check behind it, so the gate lets every request in.
+// Only the same-origin JSON check runs before requireOwner. The verify-only
+// creator gate refuses a world with no owner record, so it must not guard
+// these routes: requireOwner claims such a world instead.
+const creator = vi.hoisted(() => ({ requireCreator: vi.fn() }));
 vi.mock("@/lib/creator", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   checkCreatorWrite: () => {},
-  requireCreator: async () => ({}),
+  requireCreator: creator.requireCreator,
 }));
 
 import { POST as editEntities } from "@/app/api/world/[sessionId]/edit-entities/route";
@@ -62,6 +64,21 @@ beforeEach(() => {
 });
 
 describe("editing a world's map", () => {
+  it("claims a world nobody owns yet instead of refusing it", async () => {
+    // requireOwner claims the unowned world; the creator gate would have said 403.
+    creator.requireCreator.mockRejectedValue(Object.assign(new Error("This world is not owned by this browser"), { status: 403 }));
+    mocks.getWorldMap.mockResolvedValue({
+      entities: [{ id: "geo_inn", entity_id: "inn", label: "Inn", pos: { x: 0, y: 0 }, height: 6, footprint: { w: 8, d: 6 }, visual: "" }],
+      bounds: { x: 0, y: 0, w: 8, h: 6 },
+    });
+    upstream.mockResolvedValue(new Response(JSON.stringify({ edits: [] }), { status: 200 }));
+    const res = await editEntities(post({ instruction: "move the inn north" }), inSession("s1"));
+    expect(res.status).not.toBe(403);
+    expect(mocks.requireOwner).toHaveBeenCalledWith("s1");
+    expect(creator.requireCreator).not.toHaveBeenCalled();
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses someone who does not own the session, before spending or writing", async () => {
     mocks.requireOwner.mockResolvedValue(forbidden());
     const res = await editEntities(post({ instruction: "move the inn north" }), inSession("s1"));
