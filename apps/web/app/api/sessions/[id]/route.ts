@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { listNodesBySession } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
+import { requireWorldRead } from "@/lib/world-access";
+import { CreatorError } from "@/lib/creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,8 @@ export async function GET(req: Request, { params }: Params) {
   }
 
   const url = new URL(req.url);
+  try { await requireWorldRead(id); }
+  catch (e) { return NextResponse.json({ error: e instanceof CreatorError ? e.message : "World unavailable" }, { status: e instanceof CreatorError ? e.status : 503, headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } }); }
   const cursor = url.searchParams.get("cursor");
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Number(limitParam) : 200;

@@ -68,6 +68,12 @@ async function imageFramePoint(
   return pt;
 }
 
+/** When each captioned beat began, relative to the recording. A cut made from
+ *  motion alone cannot tell a slow draft repaint from an interaction; the study
+ *  knows, so it says. Written beside the video as beats.json. */
+const beats: { at_ms: number; text: string }[] = [];
+let recordingStart = 0;
+
 const h: H = {
   base: BASE,
   img: imgLoc,
@@ -112,6 +118,7 @@ const h: H = {
   // A fixed caption banner so the clip is self-documenting. Re-inject after any
   // navigation (it lives in the DOM, which a nav clears).
   async caption(p, text) {
+    beats.push({ at_ms: Math.max(0, Date.now() - recordingStart), text });
     await p.evaluate((t) => {
       let el = document.getElementById("__study_caption");
       if (!el) {
@@ -549,7 +556,171 @@ const journeyInAndOut: Study = {
   },
 };
 
-const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander, enterAndInteriors, journeyInAndOut];
+/** Where the app itself says a place is: the enterable ring is positioned from
+ *  the resolved ABSOLUTE geometry through the page's own frame, so aiming at it
+ *  survives a zoom-out (a hardcoded fraction does not). Null when the world has
+ *  no ring for that name yet. */
+async function placePoint(p: Page, name: string, timeout = 30_000): Promise<{ x: number; y: number } | null> {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const pt = await p.evaluate((wanted) => {
+      const marker = [...document.querySelectorAll("[data-entity-id]")].find((el) =>
+        (el.getAttribute("title") ?? "").toLowerCase().includes(wanted.toLowerCase()));
+      if (!marker) return null;
+      const r = marker.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, name);
+    if (pt) return pt;
+    await p.waitForTimeout(1000);
+  }
+  return null;
+}
+
+/** The 60-second cut: one map, one tap in, one step back, one route drawn.
+ *  Seeded from a REAL map image (SIXTY_SEED_IMAGE) so the tour starts on the
+ *  artwork we know; the recording browser owns that new session, so the enter
+ *  and the zoom-out are real generations, not replays. */
+const sixtySecondTour: Study = {
+  name: "sixty-second-tour",
+  async run(p, h) {
+    const seedImage = process.env.SIXTY_SEED_IMAGE;
+    if (!seedImage) throw new Error("SIXTY_SEED_IMAGE must point at the seed map");
+    const ENTER_TIMEOUT = 300_000;
+
+    // Beat 1 — the map. Uploaded, so the tour opens on real cartography.
+    await p.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
+    await p.getByRole("textbox").first().waitFor({ timeout: 30_000 });
+    await p.waitForTimeout(800);
+    await p.setInputFiles('input[type="file"]', seedImage);
+    await h.waitStable(p);
+    await h.caption(p, "A painted map. Every building on it is a place you can walk into.");
+    await p.waitForTimeout(2600);
+
+    // Beat 2 — tap the inn. One real generation; the wait is compressed in the cut.
+    const mapNode = h.node(p);
+    await h.caption(p, "Tap The Copper Kettle.");
+    await p.waitForTimeout(1200);
+    const innOnMap = await placePoint(p, "Copper Kettle");
+    if (innOnMap) {
+      await p.mouse.move(innOnMap.x, innOnMap.y, { steps: 4 });
+      await p.mouse.down();
+      await p.mouse.up();
+    } else {
+      await h.tap(p, 0.37, 0.485); // the inn's place on the seeded frame
+    }
+    await h.caption(p, "Generating the place itself — one real render, about a minute…");
+    await h.waitNodeChange(p, mapNode, ENTER_TIMEOUT).catch(() => "");
+    const innSrc = await h.waitStable(p, ENTER_TIMEOUT);
+    await h.caption(p, "You are there, and the page is saved: the world keeps it.");
+    await p.waitForTimeout(3000);
+
+    // Beat 3 — step back out. The container map is sized from where the town
+    // actually sits inside it, so the places keep their positions.
+    await p.getByTitle("Go back (←)").click().catch(() => {});
+    await p.waitForTimeout(2500);
+    await h.caption(p, "Step back for the wider country.");
+    const beforeAscend = h.node(p);
+    await p.getByRole("button", { name: /zoom out \/ step back/ }).click();
+    await h.waitNodeChange(p, beforeAscend, ENTER_TIMEOUT).catch(() => "");
+    await h.waitStable(p, ENTER_TIMEOUT);
+    await h.caption(p, "The town is smaller now — and the map knows exactly how much smaller.");
+    await p.waitForTimeout(2600);
+
+    // Beat 4 — tap the same inn from the wider map: it reopens the SAME page.
+    const innFromAbove = await placePoint(p, "Copper Kettle", 45_000);
+    if (innFromAbove) {
+      await h.caption(p, "Tap the same inn from up here.");
+      await p.waitForTimeout(1200);
+      await p.mouse.move(innFromAbove.x, innFromAbove.y, { steps: 4 });
+      await p.mouse.down();
+      await p.mouse.up();
+      await p.waitForTimeout(4500);
+      const reopened = (await h.img(p).getAttribute("src")) ?? "";
+      await h.caption(p, reopened === innSrc
+        ? "The same page, no new render: the wider map knows where the inn is."
+        : "Back at the inn, from the wider map.");
+      await p.waitForTimeout(3000);
+    } else {
+      // No ring means the wider map has no geometry for the inn yet; do not
+      // guess a spot and spend a generation on whatever happens to be there.
+      await h.caption(p, "The wider map keeps every place where the town put it.");
+      await p.waitForTimeout(2600);
+    }
+
+    // Beat 5 — draw a route. Free: checkpoints and previews are geometry, not generation.
+    await p.getByTitle("Go back (←)").click().catch(() => {});
+    await p.waitForTimeout(2500);
+    const routeBtn = p.getByRole("button", { name: /Route/ });
+    if (await routeBtn.count()) {
+      await routeBtn.first().click();
+      await h.caption(p, "Draw where the camera should walk.");
+      await p.waitForTimeout(1200);
+      const from = await imageFramePoint(p, 0.30, 0.70);
+      const to = await imageFramePoint(p, 0.68, 0.60);
+      await p.mouse.move(from.x, from.y, { steps: 4 });
+      await p.mouse.down();
+      for (let i = 1; i <= 24; i++) {
+        await p.mouse.move(from.x + ((to.x - from.x) * i) / 24, from.y + ((to.y - from.y) * i) / 24, { steps: 2 });
+        await p.waitForTimeout(25);
+      }
+      await p.mouse.up();
+      await p.waitForTimeout(1800);
+      await h.caption(p, "Checkpoints where a new image is needed — previewed before anything is generated.");
+      await p.waitForTimeout(3400);
+    }
+  },
+};
+
+/** The geometry half of the tour, recorded against a world that already
+ *  exists (SIXTY_SESSION + SIXTY_NODE point at a wider map). Read-only: the
+ *  geo overlay and the route tool are client-side, so this costs nothing and
+ *  can be re-shot until the framing is right. */
+const tourGeometryTail: Study = {
+  name: "tour-geometry-tail",
+  async run(p, h) {
+    const session = process.env.SIXTY_SESSION;
+    const node = process.env.SIXTY_NODE;
+    if (!session || !node) throw new Error("SIXTY_SESSION and SIXTY_NODE must point at a saved wider map");
+    await p.goto(`${BASE}/play?continue=${session}&node=${node}`, { waitUntil: "domcontentloaded" });
+    await h.waitStable(p, 120_000);
+    await p.waitForTimeout(1500);
+
+    // The claim: a zoomed-out map keeps every place where the town put it.
+    await h.caption(p, "The wider country. Where did the town's places go?");
+    await p.waitForTimeout(2200);
+    const geoToggle = p.getByRole("button", { name: /geo/ }).first();
+    if (await geoToggle.count()) {
+      await geoToggle.click();
+      await p.waitForTimeout(1500);
+      await h.caption(p, "Exactly where they were drawn — the wider map is sized from where the town sits in it.");
+      await p.waitForTimeout(3200);
+      await geoToggle.click();
+      await p.waitForTimeout(800);
+    }
+
+    // And the route tool, which needs no generation at all.
+    const routeBtn = p.getByRole("button", { name: /Route/ }).first();
+    if (await routeBtn.count()) {
+      await routeBtn.click({ timeout: 15_000 }).catch(() => {});
+      await h.caption(p, "Draw where the camera should walk.");
+      await p.waitForTimeout(1000);
+      const from = await imageFramePoint(p, 0.34, 0.62);
+      const to = await imageFramePoint(p, 0.62, 0.55);
+      await p.mouse.move(from.x, from.y, { steps: 4 });
+      await p.mouse.down();
+      for (let i = 1; i <= 26; i++) {
+        await p.mouse.move(from.x + ((to.x - from.x) * i) / 26, from.y + ((to.y - from.y) * i) / 26, { steps: 2 });
+        await p.waitForTimeout(22);
+      }
+      await p.mouse.up();
+      await p.waitForTimeout(1600);
+      await h.caption(p, "Checkpoints where a new image is needed — each one previewed before anything is generated.");
+      await p.waitForTimeout(3600);
+    }
+  },
+};
+
+const STUDIES: Study[] = [smarterTaps, zoomIntoTap, wander, enterAndInteriors, journeyInAndOut, sixtySecondTour, tourGeometryTail];
 
 // ── driver: record each study to studies/raw/<name>/*.webm ───────────────────
 async function record(study: Study): Promise<boolean> {
@@ -573,6 +744,8 @@ async function record(study: Study): Promise<boolean> {
     recordVideo: { dir: raw, size: VIEWPORT },
   });
   const page = await context.newPage();
+  beats.length = 0;
+  recordingStart = Date.now();
   const errs: string[] = [];
   page.on("console", (m) => m.type() === "error" && errs.push(m.text()));
   console.log(`\n[${study.name}] recording…`);
@@ -588,6 +761,7 @@ async function record(study: Study): Promise<boolean> {
   }
   if (errs.length) console.warn(`[${study.name}] ${errs.length} console error(s): ${errs.slice(0, 3).join(" | ")}`);
   await writeFile(path.join(raw, "console-errors.json"), JSON.stringify(errs, null, 2));
+  await writeFile(path.join(raw, "beats.json"), JSON.stringify({ ok, beats }, null, 2));
   console.log(`[${study.name}] raw → ${path.relative(HERE, raw)}  (ok=${ok})`);
   return ok;
 }

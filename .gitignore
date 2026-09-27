@@ -99,3 +99,8 @@ docs/CURSOR_KICKOFF.md
 
 # Local compose experiment overrides — never commit (temporary by definition)
 docker-compose.override.yml
+
+# Research captures (recordings, renders, world bundles) are large and regenerable.
+# The notes in docs/research cite them; the files stay on the machine that made them.
+docs/research/assets/*
+!docs/research/assets/transition-pilot/

@@ -10,13 +10,18 @@ export function placeCandidates(
 ): WorldEntityGeo[] {
   const inside = view && view.level !== "map" ? view.focus_id : null;
   const frame = !inside && view?.map_crop ? view.map_crop : MAP_IMAGE_FRAME;
-  const display = inside ? geos.filter(e => e.parent_id === inside) : toAbsoluteEntities(geos, geos);
+  // On the map, the 3D editor's scene objects (scene_id) are a second copy of
+  // the painted town at other positions; only the painted geos match the art.
+  const display = inside ? geos.filter(e => e.parent_id === inside) : toAbsoluteEntities(geos, geos).filter(e => !e.scene_id);
   const registry = new Map(entities.map(e => [e.id, e]));
   const hits = display.filter(e => {
     if (e.kind !== "place") return false;
     const b = e.entity_id ? registry.get(e.entity_id)?.appearance_bboxes[nodeId] : null;
-    if (b) return point.x_pct >= b.x_pct && point.x_pct <= b.x_pct + b.w_pct && point.y_pct >= b.y_pct && point.y_pct <= b.y_pct + b.h_pct;
-    if (inside) return false; // World coordinates are not image pixels in a perspective view.
+    // ponytail: a box over 40% of the image (live: River Leven drawn over a
+    // whole lake, 92%x50%) says nothing about where the place is; geometry
+    // decides instead. Upgrade path: reject such boxes at extraction.
+    if (b && b.w_pct * b.h_pct <= 0.4) return point.x_pct >= b.x_pct && point.x_pct <= b.x_pct + b.w_pct && point.y_pct >= b.y_pct && point.y_pct <= b.y_pct + b.h_pct;
+    if (view && view.level !== "map") return false; // World coordinates are not perspective image pixels, even without a focus ID.
     const x = frame.x + point.x_pct * frame.w;
     const y = frame.y + point.y_pct * frame.h;
     return Math.abs(x - e.pos.x) <= e.footprint.w / 2 && Math.abs(y - e.pos.y) <= e.footprint.d / 2;

@@ -180,6 +180,7 @@ export default function WorldMiniMap({
             : null;
           return (
             <g key={e.id} data-testid="minimap-dot">
+              {e.border && e.border.length >= 3 && <polygon data-testid="minimap-outline" points={e.border.map(p => { const v = worldToView(p, viewWindow, view); return `${v.x},${v.y}`; }).join(" ")} fill={KIND_COLOR[e.kind] ?? "#64748b"} fillOpacity={0.12} stroke={KIND_COLOR[e.kind] ?? "#64748b"} strokeWidth={0.7}/>}
               {parentPos && (
                 <line
                   x1={parentPos.x}

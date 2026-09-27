@@ -8,6 +8,8 @@ import {
 import { readServerEnv } from "@/lib/env";
 import { envFlag } from "@/lib/env-flag";
 import { requireOwner } from "@/lib/session-owner";
+import { requireWorldRead } from "@/lib/world-access";
+import { CreatorError } from "@/lib/creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,9 +44,10 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ ...emptyMap(sessionId), persistence_disabled: true });
   }
   try {
-    return NextResponse.json(await getWorldMap(sessionId));
+    await requireWorldRead(sessionId);
+    return NextResponse.json(await getWorldMap(sessionId), { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 502 });
+    return NextResponse.json({ error: err instanceof CreatorError ? err.message : "World map unavailable" }, { status: err instanceof CreatorError ? err.status : 502, headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
   }
 }
 

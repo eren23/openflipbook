@@ -18,6 +18,8 @@ import {
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 import { resolvePlaceGeneration } from "@/lib/place-generation";
 import { PlaceError } from "@/lib/places";
+import { generateSketch } from "@/lib/sketch-server";
+import { creatorRoute } from "@/lib/creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,11 +54,21 @@ export async function POST(req: Request) {
   // session, later ones must own it (blocks a stranger spending on / poisoning
   // someone else's session). Parsed separately from the enrichment try below so
   // a Mongo error here fails CLOSED (500) instead of silently bypassing.
-  let guardBody: GenerateRequestBody | null = null;
+  let guardBody: (GenerateRequestBody & { sketch_id?: string; sketch_revision?: number; sketch_exports?: { guide: string; mask?: string } }) | null = null;
   try {
     guardBody = JSON.parse(rawText) as GenerateRequestBody;
   } catch {
     guardBody = null;
+  }
+  if (guardBody?.sketch_id) {
+    try { return await generateSketch(req, guardBody); }
+    catch (error) {
+      console.error("[sketch] generation preparation failed", error);
+      return creatorRoute(async () => { throw error; });
+    }
+  }
+  if (guardBody && "sketch_input" in guardBody) {
+    return NextResponse.json({ error: "Sketch inputs must be bound to a saved draft" }, { status: 400 });
   }
   if (guardBody?.session_id) {
     // Verify-only (no claim/cookie on this streaming response); the claim +

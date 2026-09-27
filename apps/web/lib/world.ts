@@ -66,6 +66,7 @@ const CANONICAL_STATE_KEYS = new Set([
 ]);
 
 interface EntityDoc {
+  scene_id?: string;
   id: string;
   kind: EntityKind;
   name: string;
@@ -74,8 +75,8 @@ interface EntityDoc {
   reference_image_url: string | null;
   facts: string[];
   state: EntityState;
-  first_seen_node_id: string;
-  last_seen_node_id: string;
+  first_seen_node_id: string | null;
+  last_seen_node_id: string | null;
   appears_on_node_ids: string[];
   // Sparse map node_id → bbox. Pre-Phase-4 docs have no entries; the
   // hover-chip overlay falls back to no-render in that case.
@@ -182,7 +183,11 @@ export async function listPriorEntitiesForExtraction(
   // Tombstoned entities are not eligible for the prior slice. The extractor
   // would otherwise see them, match them to a depicted character, and emit a
   // presence-ping that revives the registry entry.
-  const liveEntities = doc.entities.filter((e) => !e.deleted_at);
+  // A 3D editor scene copies the painted town under the same names. The
+  // painted entity owns the name on pages; a match on the copy would pin
+  // bboxes (and derived geos) to the editor object instead.
+  const painted = new Set(doc.entities.filter((e) => !e.deleted_at && !e.scene_id).map((e) => e.name.trim().toLowerCase()));
+  const liveEntities = doc.entities.filter((e) => !e.deleted_at && !(e.scene_id && painted.has(e.name.trim().toLowerCase())));
   if (liveEntities.length === 0) return [];
 
   const hintLower = (captionHint ?? "").toLowerCase();
@@ -894,6 +899,11 @@ async function mutate(
     (existing) => {
       const entities = existing ? existing.entities.map(cloneEntity) : [];
       fn(entities);
+      for (const old of existing?.entities ?? []) {
+        if (!old.scene_id) continue;
+        const next = entities.find(e => e.id === old.id);
+        if (!next || next.name !== old.name || next.appearance !== old.appearance || next.pinned_by_user !== old.pinned_by_user || String(next.deleted_at) !== String(old.deleted_at)) throw new Error("Edit scene-backed objects or restore their revisions in World editor");
+      }
       return {
         _id: sessionId,
         entities,

@@ -57,6 +57,13 @@ async def stream_expand(
         pw, ph = _frame_dims(body.aspect_ratio)
         total = len(_dirs)
         parent_image = body.image  # non-None (checked above); narrows for the closure
+        # Outpainting preserves projection, not the source camera calibration.
+        # Unknown observer prevents treating street pixels as world-map coords.
+        expanded_view = (
+            {"node_id": "", "level": body.scene_view.level, "observer": None, "map_crop": None}
+            if body.scene_view and body.scene_view.level in ("street", "eye", "building")
+            else None
+        )
 
         async def _pan_one(idx: int, direction: str) -> tuple[int, str, GeneratedImage]:
             img = await image_edit_provider.expand_image(parent_image, direction, pw, ph)
@@ -97,6 +104,7 @@ async def stream_expand(
                         "session_id": body.session_id,
                         "index": idx,
                         "total": total,
+                        **({"scene_view": expanded_view} if expanded_view else {}),
                     },
                     trace_id,
                 )

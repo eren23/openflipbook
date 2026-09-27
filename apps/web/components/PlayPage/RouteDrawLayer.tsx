@@ -1,0 +1,141 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+
+import type { MapCrop, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+
+import { useContainRect } from "@/hooks/useContainRect";
+import { renderLayoutControl } from "@/lib/layout-control";
+import { routeFromStroke, strokeToWorld, type Route } from "@/lib/route-line";
+import { toAbsoluteEntities } from "@/lib/world-geometry";
+
+interface Props {
+  /** World map geometry (any frame; resolved to absolute here). */
+  entities: WorldEntityGeo[];
+  /** The world rect the page's image shows. */
+  frame: MapCrop;
+  /** The frame the drawn route lives in (null = the root map). */
+  frameParentId?: string | null;
+  imgRef?: RefObject<HTMLImageElement | null>;
+  /** Keep every camera aimed at this place instead of along the line. */
+  lookAt?: WorldVec2 | null;
+  onClose: () => void;
+}
+
+const PREVIEW_W = 320;
+const PREVIEW_H = 180;
+
+/**
+ * Draw a route on the map (Phase 3). The stroke becomes world positions, the
+ * camera looks along it, and checkpoints mark where a new keyframe image is
+ * needed. Everything here is free: the preview is the same block render the
+ * enter path already uses, so a route can be judged before any spend.
+ */
+export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, lookAt = null, onClose }: Props) {
+  const content = useContainRect(imgRef);
+  const [stroke, setStroke] = useState<{ x: number; y: number }[]>([]);
+  // A ref, not state: a burst of pointermove events inside one task would all
+  // read the pre-commit state value and the stroke would come out empty.
+  const drawingRef = useRef(false);
+  const [selected, setSelected] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const absolute = useMemo(() => toAbsoluteEntities(entities, entities), [entities]);
+  const route: Route | null = useMemo(() => {
+    if (stroke.length < 2) return null;
+    return routeFromStroke(strokeToWorld(stroke, frame), absolute, { frameParentId, ...(lookAt ? { lookAt } : {}) });
+  }, [stroke, frame, absolute, frameParentId, lookAt]);
+
+  const toImage = useCallback((p: WorldVec2) => ({ x: (p.x - frame.x) / frame.w, y: (p.y - frame.y) / frame.h }), [frame]);
+  const point = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const x = content ? (event.clientX - box.left - content.offsetX) / content.width : (event.clientX - box.left) / box.width;
+    const y = content ? (event.clientY - box.top - content.offsetY) / content.height : (event.clientY - box.top) / box.height;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  };
+
+  const checkpoint = route?.checkpoints[Math.min(selected, route.checkpoints.length - 1)] ?? null;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !checkpoint) return;
+    const control = renderLayoutControl(absolute, checkpoint.observer, PREVIEW_W, PREVIEW_H, frameParentId);
+    canvas.getContext("2d")?.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), PREVIEW_W, PREVIEW_H), 0, 0);
+  }, [checkpoint, absolute, frameParentId]);
+
+  const style = (p: { x: number; y: number }) =>
+    content
+      ? { left: `${content.offsetX + p.x * content.width}px`, top: `${content.offsetY + p.y * content.height}px` }
+      : { left: `${p.x * 100}%`, top: `${p.y * 100}%` };
+
+  return (
+    <div className="absolute inset-0 z-20">
+      <div
+        className="absolute inset-0 cursor-crosshair"
+        data-testid="route-canvas"
+        onPointerDown={(e) => { e.preventDefault(); drawingRef.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); setSelected(0); setStroke([point(e)]); }}
+        onPointerMove={(e) => { if (!drawingRef.current) return; const next = point(e); setStroke((prev) => [...prev, next]); }}
+        onPointerUp={() => { drawingRef.current = false; }}
+        onPointerLeave={() => { drawingRef.current = false; }}
+      />
+      <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full">
+        {route && content && (
+          <polyline
+            points={route.path.map(toImage).map((p) => `${content.offsetX + p.x * content.width},${content.offsetY + p.y * content.height}`).join(" ")}
+            fill="none" stroke="#e11d48" strokeWidth={2} strokeDasharray="6 4"
+          />
+        )}
+      </svg>
+      {route?.checkpoints.map((c, i) => {
+        const p = toImage(c.observer.pos);
+        return (
+          <button
+            key={`${c.distance}-${i}`}
+            data-checkpoint={c.reason}
+            data-blocked={c.blocked ? "1" : undefined}
+            aria-label={`Checkpoint ${i + 1}, ${c.reason}, ${c.distance.toFixed(0)} units${c.blocked ? ", no clear spot" : ""}`}
+            aria-pressed={i === selected}
+            onClick={() => setSelected(i)}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-1 text-[10px] leading-4 ${c.blocked ? "border-amber-600 bg-amber-500 text-white" : i === selected ? "border-rose-600 bg-rose-600 text-white" : "border-rose-600 bg-white/85 text-rose-700"}`}
+            style={{ ...style(p), transform: "translate(-50%, -50%)" }}
+          >
+            {i + 1}
+          </button>
+        );
+      })}
+      {route?.checkpoints.map((c, i) => {
+        const p = toImage(c.observer.pos);
+        return (
+          <span
+            key={`gaze-${c.distance}-${i}`}
+            aria-hidden
+            className="pointer-events-none absolute block h-0 w-0 border-y-4 border-l-8 border-y-transparent border-l-rose-600"
+            style={{ ...style(p), transform: `translate(4px, -50%) rotate(${(c.observer.gaze * 180) / Math.PI}deg)`, transformOrigin: "-4px 50%" }}
+          />
+        );
+      })}
+      <div className="absolute bottom-2 left-2 right-2 flex flex-wrap items-center gap-3 rounded border border-[var(--color-edge)] bg-[var(--color-canvas)]/95 p-2 text-xs">
+        <strong>Route</strong>
+        <span data-testid="route-summary">
+          {route
+            ? [
+                `${route.length.toFixed(0)} units`,
+                `${route.checkpoints.length} keyframes`,
+                checkpoint ? `#${selected + 1} ${checkpoint.reason} at ${checkpoint.distance.toFixed(0)}` : null,
+                // Say it once for the whole route: a camera inside a building
+                // would render from the dark, so it steps out sideways.
+                route.checkpoints.some((c) => c.moved) ? `${route.checkpoints.filter((c) => c.moved).length} cameras stepped aside` : null,
+                // Amber marks: the line crosses a place with no standable gap.
+                route.checkpoints.some((c) => c.blocked) ? `${route.checkpoints.filter((c) => c.blocked).length} have no clear spot — redraw around the buildings` : null,
+              ].filter(Boolean).join(" · ")
+            : "Drag across the map to draw where the camera walks."}
+        </span>
+        <canvas ref={canvasRef} width={PREVIEW_W} height={PREVIEW_H} aria-label="Checkpoint preview" className="h-[90px] w-[160px] rounded border border-[var(--color-edge)]" />
+        <span className="flex-1" />
+        <button className="rounded border border-[var(--color-edge)] px-2 py-1" onClick={() => { setStroke([]); setSelected(0); }}>Clear</button>
+        <button className="rounded border border-[var(--color-edge)] px-2 py-1" onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+export default RouteDrawLayer;

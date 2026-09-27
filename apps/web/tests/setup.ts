@@ -38,7 +38,7 @@ class MemoryStorage implements Storage {
   }
 }
 
-if (!(globalThis as { __ofbStorageInstalled?: boolean }).__ofbStorageInstalled) {
+if (typeof window !== "undefined" && !(globalThis as { __ofbStorageInstalled?: boolean }).__ofbStorageInstalled) {
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: new MemoryStorage(),

@@ -128,6 +128,8 @@ _SCRUB = (
     "CONTINUITY_BENCH_JUDGE_MODEL",
     # Video tier pins (providers/video.py) — same hermeticity reasoning.
     "FAL_ANIMATE_MODEL",
+    "MOTION_CALIBRATION_ENABLED",
+    "MOTION_RESERVATION_USD_PER_SECOND",
     "FAL_VIDEO_TIER",
     "FAL_VIDEO_TIER_FAST",
     "FAL_VIDEO_TIER_BALANCED",

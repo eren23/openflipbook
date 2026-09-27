@@ -2,6 +2,7 @@ import type { Document } from "mongodb";
 import type { PlaceIdentityAnchor, PlaceUpdate, WorldEntityGeo } from "@openflipbook/config";
 import { withDbTransaction, type NodeDoc } from "./db";
 import { getStoredBytes } from "./r2";
+import { writeSceneVersion, type SceneDoc } from "./place-scene-store";
 
 export class PlaceError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -34,6 +35,11 @@ export async function updatePlace(sessionId: string, geoId: string, patch: Place
       updated_at: now.toISOString(),
     };
     await maps.updateOne({ _id: sessionId }, { $set: { entities: map.entities.map(e => e.id === geoId ? next : e), updated_at: now } }, { session });
+    if (previous.scene_id && previous.label !== next.label) {
+      const scene = await db.collection<SceneDoc>("place_scenes").findOne({ session_id: sessionId, id: previous.scene_id }, { session });
+      if (!scene) throw new PlaceError("Local scene is unavailable", 409);
+      await writeSceneVersion(db, session, { ...scene, definition: { ...scene.definition, label: next.label }, revision: scene.revision + 1, updated_at: now.toISOString() });
+    }
     if (next.entity_id) {
       await db.collection<Document & { _id: string }>("world_state").updateOne(
         { _id: sessionId, "entities.id": next.entity_id },

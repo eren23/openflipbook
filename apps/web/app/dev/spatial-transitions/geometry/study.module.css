@@ -1,0 +1,51 @@
+.page { height: 100dvh; display: grid; grid-template-rows: 64px minmax(0, 1fr) 108px; background: #f7f9f8; color: #27312e; font-family: Arial, sans-serif; letter-spacing: 0; }
+.header { display: flex; align-items: center; gap: 14px; padding: 0 18px; border-bottom: 1px solid #d1d9d4; }
+.identity { display: flex; align-items: baseline; min-width: 0; flex: 1; gap: 20px; }
+.brand { font-size: 21px; font-weight: 700; }
+.title { font-size: 13px; color: #626f67; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid transparent; border-radius: 4px; color: inherit; cursor: pointer; }
+.icon:hover, .icon:focus-visible { background: #e4ece7; border-color: #c8d8ce; }
+.icon:disabled { opacity: .35; cursor: default; }
+.modes { display: flex; flex-shrink: 0; border: 1px solid #c9d4cd; border-radius: 4px; padding: 3px; gap: 3px; }
+.modes button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 31px; padding: 0 10px; border-radius: 2px; font-size: 12px; cursor: pointer; }
+.modes button[aria-pressed="true"] { background: #326b58; color: white; }
+.stage { position: relative; min-height: 0; background: #c5e4e9; overflow: hidden; }
+.canvas { position: absolute; inset: 0; }
+.canvas canvas { display: block; width: 100%; height: 100%; }
+.location { position: absolute; top: 18px; left: 24px; display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: #f9fffae6; border-radius: 3px; font-size: 12px; pointer-events: none; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: #328467; }
+.version { color: #6a756d; border-left: 1px solid #bdccc2; padding-left: 9px; margin-left: 3px; font-size: 11px; }
+.fullscreen { position: absolute; top: 14px; right: 18px; background: #f9fffae6; }
+.movement { position: absolute; bottom: 18px; right: 20px; display: grid; grid-template-columns: repeat(3, 40px); gap: 3px; background: #f9fffaeb; padding: 5px; border-radius: 4px; }
+.movement .icon { background: #f9fffa80; }
+.movement .icon:hover { background: #d9e8df; }
+.blocked { position: absolute; right: 28px; bottom: 118px; background: #fff6dc; color: #704910; padding: 5px 9px; font-size: 12px; border-radius: 3px; }
+.footer { padding: 9px 22px 12px; border-top: 1px solid #d1d9d4; }
+.transport { display: flex; align-items: center; gap: 6px; height: 42px; }
+.transport input { min-width: 40px; flex: 1; accent-color: #326b58; margin: 0 14px; }
+.time { font-variant-numeric: tabular-nums; width: 93px; text-align: right; font-size: 12px; flex-shrink: 0; }
+.details { display: flex; align-items: center; gap: 20px; margin: 6px 0 0 4px; font-size: 11px; color: #56655c; }
+.details select { height: 27px; width: 134px; max-width: 38%; border: 1px solid #d1d9d4; border-radius: 3px; padding: 0 6px; background: #fff; color: #354c40; font-size: 11px; }
+.coordinates { display: flex; gap: 12px; font-variant-numeric: tabular-nums; }
+.sceneId { margin-left: auto; color: #8b958e; }
+.notice { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; padding: 24px; text-align: center; background: #eaf0ed; font-size: 14px; }
+.notice button { padding: 8px 16px; border: 1px solid #627c6b; border-radius: 3px; }
+@media (max-width: 620px) {
+  .page { grid-template-rows: 60px minmax(0, 1fr) 110px; }
+  .header { padding: 0 9px; gap: 5px; }
+  .brand { font-size: 18px; }
+  .title { display: none; }
+  .identity { gap: 0; }
+  .modes button { padding: 0 8px; width: 35px; }
+  .modes button span { display: none; }
+  .location { left: 12px; top: 12px; }
+  .version { display: none; }
+  .fullscreen { top: 9px; right: 9px; }
+  .movement { right: 12px; bottom: 12px; }
+  .footer { padding: 8px 10px; }
+  .transport input { margin: 0 7px; }
+  .time { width: 75px; font-size: 11px; }
+  .details { gap: 12px; }
+  .coordinates { gap: 9px; }
+  .coordinates span, .sceneId { display: none; }
+}

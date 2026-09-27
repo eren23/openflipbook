@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
+import type { GroundingSummary, ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
 import { getNode, insertNode, type NodeRow } from "@/lib/db";
 import { bindTransitionContext } from "@/lib/transition-context";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
@@ -7,6 +7,7 @@ import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
 import { getIdempotentResult, saveIdempotentResult } from "@/lib/idempotency";
 import { isSafeId } from "@/lib/ids";
+import { cleanGrounding, isVerifiedView } from "@/lib/place-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ interface CreateBody {
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
+  grounding?: GroundingSummary | null;
 }
 
 export async function POST(req: Request) {
@@ -59,6 +61,9 @@ export async function POST(req: Request) {
   // cross-tenant node insertion / poisoning).
   const auth = await requireOwner(body.session_id);
   if (!auth.ok) return auth.res;
+  if (body.view_verdict?.arrival && !isVerifiedView(body.view_verdict, { exterior: true })) {
+    return NextResponse.json({ error: "Unverified exterior arrival cannot be saved" }, { status: 422 });
+  }
 
   let parent: NodeRow | null = null;
   if (body.parent_id != null) {
@@ -119,6 +124,7 @@ export async function POST(req: Request) {
     scene_view: sceneView,
     transition_context: transitionContext,
     view_verdict: body.view_verdict ?? null,
+    grounding: cleanGrounding(body.grounding),
   });
 
   const result = {

@@ -1467,3 +1467,34 @@ def test_sanitize_hint_caps_and_strips_the_injection_surface() -> None:
     # The cap bounds a token bomb AFTER stripping/trim.
     assert _sanitize_hint("x" * 5000, 160) == "x" * 160
     assert len(_sanitize_hint(" " * 50 + "y" * 500, 240)) == 240
+
+
+async def test_enter_attaches_the_block_layout_with_its_legend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    body = _tap_body(
+        condition_image_urls=["data:r", "data:p", "data:s", "data:l"],
+        condition_roles=["region", "parent", "style", "layout"],
+        layout_legend=[{"color": "red", "label": "The Stone Castle"}],
+    )
+    await _collect(_event_stream(body, "t1"))
+    assert edit.await_args.args[0] == "data:r"
+    assert edit.await_args.kwargs["style_ref_url"] == "data:s"
+    assert edit.await_args.kwargs["layout_ref_url"] == "data:l"
+    instruction = edit.await_args.args[1]
+    assert "LAST reference image is a flat-coloured block layout" in instruction
+    assert "red = The Stone Castle" in instruction
+
+
+async def test_enter_without_layout_role_sends_no_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    await _collect(_event_stream(_tap_body(), "t1"))
+    assert edit.await_args.kwargs["layout_ref_url"] is None
+    assert "block layout" not in edit.await_args.args[1]

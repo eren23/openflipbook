@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SceneView, ViewVerdict, WorldEntityGeo } from "@openflipbook/config";
-import { isVerifiedView, parsePlaceUpdate, preservePlaceIdentity, validReferenceBox } from "./place-identity";
+import { cleanGrounding, isVerifiedView, parsePlaceUpdate, preservePlaceIdentity, validReferenceBox } from "./place-identity";
 import { findRevisitTarget } from "./world-mode";
 import { placeCandidates } from "./place-selection";
 
@@ -33,6 +33,11 @@ describe("place identity validation", () => {
     expect(isVerifiedView({ ...receipt, accepted: false })).toBe(false);
     expect(isVerifiedView({ ...receipt, same_place: null, interior: 8 }, { interior: true })).toBe(true);
     expect(isVerifiedView({ ...receipt, detail: null }, { outward: true })).toBe(true);
+    expect(isVerifiedView(receipt, { exterior: true })).toBe(false);
+    const arrival = { status: "pass", checks: { near_target: "pass", exterior: "pass", single_target: "pass", scene_not_map: "pass" }, rationale: "verified" } as const;
+    expect(isVerifiedView({ ...receipt, arrival }, { exterior: true })).toBe(true);
+    expect(isVerifiedView({ ...receipt, arrival: { ...arrival, checks: { ...arrival.checks, near_target: "unknown" } } })).toBe(false);
+    expect(isVerifiedView({ ...receipt, arrival: { status: "pass" } as never })).toBe(false);
   });
 });
 
@@ -56,7 +61,33 @@ describe("place-aware navigation", () => {
     const child = { ...geo("tower"), parent_id: "region", pos: { x: 0, y: 0 } };
     expect(placeCandidates([parent, child], [], "root", null, { x_pct: .5, y_pct: .5 }).map(e => e.id)).toEqual(["tower"]);
   });
+  it("a zoomed-out painted place still hits, and the 3D editor's scene copy never does", () => {
+    const quarter = { ...geo("quarter"), footprint: { w: 100, d: 60 }, scale: 0.005 };
+    const inn = { ...geo("inn"), parent_id: "quarter", pos: { x: -2600, y: -180 }, footprint: { w: 3240, d: 2661 } };
+    const scene = { ...geo("scene", 40), pos: { x: 40, y: 40 }, footprint: { w: 80, d: 80 }, scene_id: "s1" };
+    const copy = { ...geo("inn-copy"), parent_id: "scene", pos: { x: -3, y: -10.9 }, scene_id: "s1" };
+    // (0.37, 0.485) is the painted inn at absolute (37, 29.1); the copy sits there too.
+    expect(placeCandidates([quarter, inn, scene, copy], [], "root", null, { x_pct: .37, y_pct: .485 }).map(e => e.id)).toEqual(["inn"]);
+  });
+  it("a detection box covering most of the image does not claim every tap", () => {
+    const lake = { ...geo("river", 90), entity_id: "river" };
+    const inn = { ...geo("inn"), entity_id: "inn" };
+    const entities = [
+      { id: "river", appearance_bboxes: { root: { x_pct: 0, y_pct: 0, w_pct: 0.92, h_pct: 0.5 } } },
+      { id: "inn", appearance_bboxes: { root: { x_pct: 0.45, y_pct: 0.4, w_pct: 0.1, h_pct: 0.2 } } },
+    ] as never;
+    expect(placeCandidates([lake, inn], entities, "root", null, { x_pct: 0.5, y_pct: 0.45 }).map(e => e.id)).toEqual(["inn"]);
+  });
   it("does not treat world coordinates as perspective-image detections", () => {
     expect(placeCandidates([{ ...geo("child"), parent_id: "tower" }], [], "inside", view("tower"), { x_pct: .5, y_pct: .5 })).toEqual([]);
+    expect(placeCandidates([geo("tower")], [], "street", { ...view("tower"), focus_id: null, level: "street" }, { x_pct: .5, y_pct: .5 })).toEqual([]);
   });
+});
+
+describe("cleanGrounding", () => {
+  it("keeps a well-formed summary and bounds its lists", () => {
+    const g = cleanGrounding({ score: 0.8, mean_iou: 0.5, matched: ["inn", 3, "x".repeat(200)], missing: [], extra: ["tree"], repaired: "yes", iterations: 99 });
+    expect(g).toEqual({ score: 0.8, mean_iou: 0.5, matched: ["inn", "x".repeat(120)], missing: [], extra: ["tree"], repaired: false, iterations: 10 });
+  });
+  it.each([null, "0.9", { score: 2, mean_iou: 0.5 }, { score: 0.5 }])("drops a malformed summary %#", g => expect(cleanGrounding(g)).toBeNull());
 });

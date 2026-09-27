@@ -1211,6 +1211,7 @@ async def test_click_to_subject_builds_resolution(monkeypatch: pytest.MonkeyPatc
     )
     assert isinstance(res, llm.ClickResolution)
     assert res.subject == "Boiler"
+    assert fake.chat.completions.calls[0]["max_tokens"] == 1600
     assert res.groundable is True
     assert res.confidence == 0.9
     assert res.point == (0.5, 0.4)

@@ -12,6 +12,7 @@ import type {
   ObserverPose,
   ScaleTier,
   SceneView,
+  GroundingSummary,
   ViewVerdict,
   ViewLevel,
   WorldEntityGeo,
@@ -25,7 +26,9 @@ import {
   type NormalizedClick,
 } from "@/lib/image-click";
 import { entityAtPoint, padBox, type EntityHit } from "@/lib/entity-hit";
+import { renderLayoutControl, type LayoutControl } from "@/lib/layout-control";
 import { applyPlanInstruction } from "@/lib/geo-to-edit";
+import { playNodeUrl } from "@/lib/play-url";
 import { coachPreDefault } from "@/lib/coach";
 import {
   getWSUrl,
@@ -50,7 +53,7 @@ import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
 import { useLoopKnobs, wireFields } from "@/hooks/useSpeedPreset";
 import { useSharedSession } from "@/hooks/useSharedSession";
-import { useExpandBloom } from "@/hooks/useExpandBloom";
+import { useExpandBloom, type PersistNeighbour } from "@/hooks/useExpandBloom";
 import { type Ascended, useAscend } from "@/hooks/useAscend";
 import {
   buildConditionRefs,
@@ -99,6 +102,7 @@ import SpatialPath from "@/components/PlayPage/SpatialPath";
 import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
+import { RouteDrawLayer } from "@/components/PlayPage/RouteDrawLayer";
 import { MapLabelOverlay } from "@/components/PlayPage/MapLabelOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { rasterToPngBlob } from "@/lib/image-export";
@@ -143,19 +147,19 @@ import { viewNeutralAppearance } from "@/lib/appearance";
 // ?continue= hydration mapper (nodeToPage) is a testable pure function.
 import {
   foldSceneViewStamp,
-  nodeToPage,
   type Page,
-  type SessionNodeWire,
 } from "@/lib/session-pages";
 import { useImageMorph } from "@/hooks/useImageMorph";
 import type { TransitionContextV1, TransitionSeed } from "@openflipbook/config";
 import { captureTransition } from "@/lib/transition-context";
-import { ScanSearch, X, RotateCcw, Film } from "lucide-react";
+import { ScanSearch, X, RotateCcw, Film, BookOpen, Library, Upload, Pencil } from "lucide-react";
 import { useSpatialNavigation, decodeSpatialImage } from "@/hooks/useSpatialNavigation";
 import { SpatialTransitionLayer } from "@/components/SpatialTransitionLayer";
 import { spatialPage, SPATIAL_TRANSITIONS_ENABLED } from "@/lib/spatial-mode";
 import { isVerifiedView } from "@/lib/place-identity";
 import PlaceInspector from "@/components/PlayPage/PlaceInspector";
+import CreatorNotebook from "@/components/creator-notebook";
+import { loadCreatorSession } from "@/lib/creator-resume";
 import { placeCandidates } from "@/lib/place-selection";
 import {
   isHoverResolved,
@@ -168,6 +172,22 @@ import {
 type Phase = "idle" | "generating" | "ready" | "error";
 type ClientGenerateBody = GenerateRequestBody & { transitionSeed?: TransitionSeed | undefined };
 const STRICT_WORLD_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_IDENTITY_STRICT ?? "").toLowerCase());
+// Enters from the map send a camera-view block render of the world map as the
+// "layout" reference, with exact per-place boxes (default off).
+const WORLD_LAYOUT_CONTROL_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_LAYOUT_CONTROL ?? "").toLowerCase());
+// Draw a camera route on the map (Phase 3). Free: the preview is the same
+// block render the enter path uses; nothing is generated until asked.
+const WORLD_ROUTE_DRAW_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_ROUTE_DRAW ?? "").toLowerCase());
+
+function layoutControlDataUrl(control: LayoutControl): string | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = control.width;
+  canvas.height = control.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), control.width, control.height), 0, 0);
+  return canvas.toDataURL("image/png");
+}
 
 // Select-area mask edits (E1). Build-time gate so the UI never offers a drag
 // whose mask a flag-off backend would silently ignore (a whole-image edit
@@ -234,6 +254,7 @@ interface PersistBody {
   scale_tier?: ScaleTier;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
+  grounding?: GroundingSummary | null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -256,6 +277,7 @@ async function persistNode(
   body: PersistBody,
   traceId: string | null,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ): Promise<{ id: string; image_url: string; image_key?: string; transition_context?: TransitionContextV1 | null } | null> {
   try {
     const headers: Record<string, string> = {
@@ -265,7 +287,7 @@ async function persistNode(
       headers[TRACE_HEADER] = traceId;
       // Idempotent create: a retry with the same trace returns the existing node
       // instead of inserting a duplicate.
-      headers["Idempotency-Key"] = traceId;
+      headers["Idempotency-Key"] = idempotencyKey ?? traceId;
     }
     const res = await fetch("/api/nodes", {
       method: "POST",
@@ -279,6 +301,8 @@ async function persistNode(
     return null;
   }
 }
+
+const persistNeighbour: PersistNeighbour = (body, traceId, key) => persistNode(body, traceId, undefined, key);
 
 // Fire-and-forget extraction trigger. The world-memory pass runs on the
 // modal backend (one VLM call) and the diff is merged into Mongo by
@@ -469,7 +493,7 @@ export default function PlayPage() {
     bloom,
     start: startBloom,
     close: closeBloom,
-  } = useExpandBloom(persistNode);
+  } = useExpandBloom(persistNeighbour);
   // An empty bloom (VLM proposed nothing usable) shows its brief "no neighbours
   // found" message, then auto-dismisses — so the coach + Around return instead
   // of a dead tray lingering at the bottom.
@@ -567,6 +591,18 @@ export default function PlayPage() {
     // World Mode semi-autonomy seeds this with the resolver's question(s).
     question?: string;
   } | null>(null);
+  // "Bring to life": the next tap picks the object that moves in an H3 clip
+  // instead of entering a place. A ref too, so the click listener reads it
+  // without re-binding.
+  const [lifeMode, setLifeMode] = useState(false);
+  const lifeModeRef = useRef(false);
+  const setLife = useCallback((on: boolean) => {
+    lifeModeRef.current = on;
+    setLifeMode(on);
+  }, []);
+  const startObjectClipRef = useRef<
+    ((focus: { x_pct: number; y_pct: number; subject: string; action: string }, image: string, title: string) => void) | null
+  >(null);
   const promptForHint = useCallback(
     (xPx: number, yPx: number, question?: string): Promise<string | null> => {
       return new Promise((resolve) => {
@@ -619,11 +655,23 @@ export default function PlayPage() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [codexOpen, setCodexOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [creatorOwned, setCreatorOwned] = useState(false);
+  const [resumeAttempt, setResumeAttempt] = useState(0);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [uploadRequested, setUploadRequested] = useState(false);
+  const noteDirty = useRef(false);
+  const setNoteDirty = useCallback((dirty: boolean) => { noteDirty.current = dirty; }, []);
   const [inspectMode, setInspectMode] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [placeChoice, setPlaceChoice] = useState<{ places: WorldEntityGeo[]; click: NormalizedClick } | null>(null);
-  const closeInspector = useCallback(() => { setInspectorOpen(false); setInspectMode(false); }, []);
+  const closeInspector = useCallback(() => {
+    if (noteDirty.current && !window.confirm("Discard unsaved note changes?")) return false;
+    noteDirty.current = false; setInspectorOpen(false); setInspectMode(false); return true;
+  }, []);
   const [geoOverlayOn, setGeoOverlayOn] = useState(false);
+  const [routeDrawOn, setRouteDrawOn] = useState(false);
   // In-image entity chips are opt-in to keep the rendered illustration
   // visually quiet by default. Toggle alongside the codex pill (Alt-K
   // would conflict with keyboard tab-order; we expose a small toggle
@@ -707,7 +755,7 @@ export default function PlayPage() {
     // load). Never auto-re-run the non-deterministic VLM on a revisit/reload —
     // that's what made geo results drift between visits. Manual localize still
     // forces a re-run.
-    if (page?.geoExtracted) return;
+    if (page?.geoExtracted || resumedNodes.current.has(nodeId)) return;
     // Wait for the world snapshot to hydrate before deciding the node is
     // box-less — `entities` is empty during the initial fetch, so acting on
     // `phase` alone would re-extract a node whose geometry is already in Mongo.
@@ -1028,7 +1076,7 @@ export default function PlayPage() {
               imageDataUrl: lastImage,
             }));
           } else if (evt.type === "final") {
-            if (strict && (!isVerifiedView(evt.view_verdict, { interior: evt.scene_view?.place_form === "interior" || body.scene_view?.place_form === "interior" }) || evt.render_unjudged || evt.layout_suppressed)) {
+            if (strict && (!isVerifiedView(evt.view_verdict, { exterior: body.arrival_intent === "exterior", interior: body.arrival_intent !== "exterior" && (evt.scene_view?.place_form === "interior" || body.scene_view?.place_form === "interior") }) || evt.render_unjudged || evt.layout_suppressed)) {
               setFailedCandidate(evt.image_data_url);
               throw new Error("This view could not be verified. Your world is unchanged.");
             }
@@ -1134,6 +1182,7 @@ export default function PlayPage() {
                 scene_view: foldedSceneView,
                 transition_context: transitionSeed,
                 view_verdict: evt.view_verdict ?? null,
+                grounding: evt.grounding ?? null,
               },
               traceId,
               ac.signal,
@@ -1199,9 +1248,7 @@ export default function PlayPage() {
                     const trail = [...prev.trail.slice(0, prev.trailIdx + 1), newId];
                     return { items, trail, trailIdx: trail.length - 1 };
                   });
-                  const url = new URL(window.location.href);
-                  url.pathname = `/n/${saved.id}`;
-                  window.history.replaceState({}, "", url.toString());
+                  window.history.replaceState({}, "", playNodeUrl(evt.session_id, saved.id));
                   void triggerExtraction({
                     sessionId: evt.session_id,
                     nodeId: saved.id,
@@ -1351,6 +1398,7 @@ export default function PlayPage() {
       session_id: page.sessionId,
       current_node_id: page.nodeId ?? "",
       mode: "expand",
+      ...(page.sceneView ? { scene_view: page.sceneView } : {}),
       image: page.imageDataUrl,
       parent_query: page.query,
       parent_title: page.title,
@@ -1389,6 +1437,7 @@ export default function PlayPage() {
 
   const acceptUploadedImage = useCallback(
     async (file: File) => {
+      if (resuming || resumeError) return;
       if (!file.type.startsWith("image/")) {
         setError("Only image files can be used as a seed page.");
         return;
@@ -1460,9 +1509,7 @@ export default function PlayPage() {
               ];
               return { items, trail, trailIdx: trail.length - 1 };
             });
-            const url = new URL(window.location.href);
-            url.pathname = `/n/${saved.id}`;
-            window.history.replaceState({}, "", url.toString());
+            window.history.replaceState({}, "", playNodeUrl(sessionId, saved.id));
             void triggerExtraction({
               sessionId,
               nodeId: saved.id,
@@ -1483,7 +1530,7 @@ export default function PlayPage() {
         setPhase("error");
       }
     },
-    [sessionId, bindTrace, spatialCancel]
+    [sessionId, bindTrace, spatialCancel, resuming, resumeError]
   );
 
   const onFileInputChange = useCallback(
@@ -1510,6 +1557,7 @@ export default function PlayPage() {
   // page. Parsing happens client-side; only the capped list crosses the wire.
   const acceptImportJson = useCallback(
     async (file: File) => {
+      if (resuming || resumeError) return;
       try {
         const parsed = parseAzgaarExport(JSON.parse(await file.text()));
         if (!parsed) {
@@ -1539,7 +1587,7 @@ export default function PlayPage() {
         setError(`Map import failed: ${(err as Error).message}`);
       }
     },
-    [sessionId, geoRefetch]
+    [sessionId, geoRefetch, resuming, resumeError]
   );
 
   const onDrop = useCallback(
@@ -1837,7 +1885,7 @@ export default function PlayPage() {
 
   const enterInspectedPlace = useCallback(async (place: WorldEntityGeo, newView: boolean) => {
     if (!page?.nodeId || phase === "generating") return;
-    setInspectorOpen(false); setInspectMode(false);
+    if (!closeInspector()) return;
     let override: GeoTapOverride | undefined;
     let note = "";
     if (newView) {
@@ -1851,9 +1899,11 @@ export default function PlayPage() {
     if (currentNodeRef.current !== page.nodeId) return;
     const bbox = worldState.entities.find(e => e.id === place.entity_id)?.appearance_bboxes[page.nodeId];
     const frame = page.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
+    // The map frame is absolute; a place under a zoomed-out parent stores local numbers.
+    const pos = toAbsoluteEntities([place], geoMap.entities)[0]?.pos ?? place.pos;
     placeIntentRef.current = { id: place.id, newView, note, ...(override ? { override } : {}) };
-    dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (place.pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (place.pos.y-frame.y)/frame.h)));
-  }, [page, phase, geoMap.entities, geoMap.bounds, worldState.entities, promptForClickDetail, dispatchTapAt]);
+    dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (pos.y-frame.y)/frame.h)));
+  }, [page, phase, geoMap.entities, geoMap.bounds, worldState.entities, promptForClickDetail, dispatchTapAt, closeInspector]);
 
   // Wander (auto-explore): reuse the ranked precompute candidates + the tap flow
   // to let the world explore itself, hands-free. Toggled by the ▶ button.
@@ -2072,14 +2122,12 @@ export default function PlayPage() {
       setStatusMsg(null);
       commitTrail();
       if (target.nodeId) {
-        const url = new URL(window.location.href);
-        url.pathname = `/n/${target.nodeId}`;
-        window.history.replaceState({}, "", url.toString());
+        window.history.replaceState({}, "", playNodeUrl(target.sessionId ?? sessionId, target.nodeId));
       }
     };
     if (SPATIAL_TRANSITIONS_ENABLED) void spatialNavigate(spatialPage(pageRef.current), spatialPage(target), commit);
     else commit();
-  }, [setMorphFx, spatialNavigate]);
+  }, [sessionId, setMorphFx, spatialNavigate]);
 
   const navigateToTrailIdx = useCallback((nextIdx: number) => {
     if (nextIdx === history.trailIdx) return;
@@ -2159,9 +2207,7 @@ export default function PlayPage() {
           revertTo: null,
         });
       }
-      const url = new URL(window.location.href);
-      url.pathname = `/n/${a.parentNodeId}`;
-      window.history.replaceState({}, "", url.toString());
+      window.history.replaceState({}, "", playNodeUrl(sessionId, a.parentNodeId));
       void geoRefetch();
     },
     [sessionId, geoRefetch, spatialCancel],
@@ -2214,6 +2260,7 @@ export default function PlayPage() {
     onToggleGeoOverlay: () => setGeoOverlayOn((g) => !g),
     onExpandOutward: triggerExpand,
     onCloseOverlays: () => {
+      if (!closeInspector()) return;
       setHelpOpen(false);
       setQuickbarOpen(false);
       setContextMenu(null);
@@ -2228,47 +2275,45 @@ export default function PlayPage() {
 
   // Hydrate the session graph from the server when landing with ?continue=.
   // Pages are sorted by created_at on the server (see listNodesBySession).
-  const hydratedRef = useRef(false);
+  const resumedNodes = useRef(new Set<string>());
   useEffect(() => {
-    if (hydratedRef.current) return;
     if (typeof window === "undefined") return;
-    const cont = new URLSearchParams(window.location.search)
-      .get("continue")
-      ?.trim();
+    const params = new URLSearchParams(window.location.search);
+    setUploadRequested(params.get("upload") === "1");
+    const cont = params.get("continue")?.trim();
     if (!cont) return;
-    hydratedRef.current = true;
-
-    let cancelled = false;
+    const ac = new AbortController();
+    setResuming(true); setResumeError(null);
     void (async () => {
       try {
-        const hydrationTrace = newTraceId();
-        bindTrace(hydrationTrace);
-        const res = await fetch(
-          `/api/sessions/${encodeURIComponent(cont)}`,
-          { headers: { [TRACE_HEADER]: hydrationTrace } }
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as { nodes: SessionNodeWire[] };
-        if (cancelled) return;
-        if (!data.nodes?.length) return;
-        // Node rows carry `relation` (expand/edit/ascend/descend) — nodeToPage
-        // rides it onto each Page so the map views keep breadth vs depth.
-        const items: Page[] = data.nodes.map(nodeToPage);
-        const last = items[items.length - 1];
-        const trail = last && last.nodeId ? [last.nodeId] : [];
-        setHistory({ items, trail, trailIdx: trail.length - 1 });
-        if (last) {
-          setPage(last);
-          setPhase("ready");
-        }
-      } catch {
-        // best-effort hydration; user can still click around
-      }
+        const target = new URLSearchParams(window.location.search).get("node");
+        const result = await loadCreatorSession(cont, target, ac.signal);
+        await decodeSpatialImage(result.page.imageDataUrl!);
+        if (ac.signal.aborted) return;
+        resumedNodes.current = new Set(result.history.items.flatMap(p => p.nodeId ? [p.nodeId] : []));
+        setHistory(result.history); setPage(result.page); setPhase("ready");
+      } catch (e) { if (!ac.signal.aborted) setResumeError((e as Error).message); }
+      finally { if (!ac.signal.aborted) setResuming(false); }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => ac.abort();
+  }, [resumeAttempt]);
+
+  useEffect(() => {
+    if (!page?.nodeId || !page.imageDataUrl || phase !== "ready") return;
+    const ac = new AbortController();
+    const endpoint = `/api/creator/worlds/${encodeURIComponent(sessionId)}`;
+    void (async () => {
+      try {
+        const owner = await fetch(endpoint, { signal: ac.signal, cache: "no-store" });
+        if (ac.signal.aborted) return;
+        setCreatorOwned(owner.ok);
+        if (!owner.ok) return;
+        await decodeSpatialImage(page.imageDataUrl!);
+        if (!ac.signal.aborted) await fetch(endpoint, { method: "PATCH", signal: ac.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume_node_id: page.nodeId }) });
+      } catch { /* Workspace metadata never blocks the saved view. */ }
+    })();
+    return () => ac.abort();
+  }, [sessionId, page?.nodeId, page?.imageDataUrl, phase]);
 
   // Release the click re-entry guard whenever generation settles into a
   // terminal state. `phase` is the canonical signal; abort/cancel paths
@@ -2547,8 +2592,19 @@ export default function PlayPage() {
       }
       const click = normalizeClickOnImage(evt, img);
       if (!click) return;
+      if (lifeModeRef.current) {
+        setLife(false);
+        const rect = img.getBoundingClientRect();
+        const action = await promptForHint(evt.clientX - rect.left, evt.clientY - rect.top, "What should it do? Enter lets it choose.");
+        if (action === null) return;
+        const subject = entityAtPoint(worldState.entities, currentNodeId ?? null, click.x_pct, click.y_pct)?.entity.name
+          ?? (await resolveClickRemote(click.x_pct, click.y_pct))?.subject ?? "";
+        startObjectClipRef.current?.({ x_pct: click.x_pct, y_pct: click.y_pct, subject, action: action.trim() }, currentImage, page.title);
+        return;
+      }
       const hits = worldEnabled ? placeCandidates(geoMap.entities, worldState.entities, currentNodeId ?? "", page.sceneView, click) : [];
       if (worldEnabled && inspectMode && !placeIntent) {
+        if (noteDirty.current && !window.confirm("Discard unsaved note changes?")) return;
         setSelectedPlaceId(hits[0]?.id ?? null); setInspectorOpen(true);
         return;
       }
@@ -2923,6 +2979,24 @@ export default function PlayPage() {
       } catch {
         // leave condition empty → text-only generation
       }
+      // The world map's geometry as pixels: the entered place's siblings, in
+      // the absolute frame the enter camera stands in (zoom-out safe).
+      let layoutControl: LayoutControl | null = null;
+      if (WORLD_LAYOUT_CONTROL_ENABLED && condition.urls.length && worldTap?.kind === "scene" && worldTap.scene_view.observer) {
+        const frameParentId = geoEntities.find((e) => e.id === worldTap.focus_id)?.parent_id ?? null;
+        const rendered = renderLayoutControl(
+          toAbsoluteEntities(geoEntities, geoEntities),
+          worldTap.scene_view.observer,
+          480,
+          270,
+          frameParentId,
+        );
+        const url = rendered.visible.length ? layoutControlDataUrl(rendered) : null;
+        if (url) {
+          layoutControl = rendered;
+          condition = { urls: [...condition.urls, url], roles: [...condition.roles, "layout"] };
+        }
+      }
       // World OFF + a wide mapped region (the river): a fresh re-composition
       // relocates landmarks, so zoom-cut the map instead (see wideRegionCut).
       const wideCut =
@@ -2944,6 +3018,7 @@ export default function PlayPage() {
         mode: "tap",
         transitionSeed: captureTransition(page, click, worldTap?.focus_id ?? null, worldState.entities, geoEntities),
         ...(worldEnabled && STRICT_WORLD_ENABLED ? { strict_world: true } : {}),
+        ...(worldEnabled && STRICT_WORLD_ENABLED && worldTap?.kind === "scene" && (!page.sceneView || page.sceneView.level === "map") ? { arrival_intent: "exterior" as const } : {}),
         ...(worldTap?.focus_id ? { target_geo_id: worldTap.focus_id } : {}),
         image: annotated,
         parent_query: page.query,
@@ -3023,7 +3098,14 @@ export default function PlayPage() {
         ...(worldTap
           ? {
               scene_view: worldTap.scene_view,
-              expected_layout: worldTap.expected_layout,
+              // The block render's occlusion-correct boxes, so the layout words,
+              // the layout image and the grounding check describe one scene.
+              expected_layout: layoutControl
+                ? layoutControl.visible.map(({ color: _color, pixels: _pixels, ...box }) => box)
+                : worldTap.expected_layout,
+              ...(layoutControl
+                ? { layout_legend: layoutControl.visible.flatMap((v) => (v.color ? [{ color: v.color, label: v.label }] : [])) }
+                : {}),
               // Enter the aligned-zoom path: a submap stays in map mode and
               // zoom-continues (Kontext) rather than a loose fresh gen, so the
               // sub-map is a true zoom of the tapped region. A scene first-enter
@@ -3407,7 +3489,7 @@ export default function PlayPage() {
       inflight.clear();
       prefetchCurrentKeyRef.current = null;
     };
-  }, [page, phase, generate, imageTier, loopWire, devModel, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap, inspectMode, geoMap.entities, geoMap.bounds, worldState.entities]);
+  }, [page, phase, generate, imageTier, loopWire, devModel, editMode, outputLocale, bucketKey, streamStatus, styleAnchor, promptForHint, worldEnabled, worldAutonomy, history, selectFromMap, inspectMode, geoMap.entities, geoMap.bounds, worldState.entities, setLife]);
 
   // When the page changes, tear down any running stream.
   useEffect(() => {
@@ -3496,6 +3578,11 @@ export default function PlayPage() {
       if (animateAbortRef.current === ac) animateAbortRef.current = null;
     }
   }, []);
+  useEffect(() => {
+    startObjectClipRef.current = (focus, image, title) => {
+      void requestClip({ image_data_url: image, prompt: title, video_tier: videoTier, focus });
+    };
+  }, [requestClip, videoTier]);
 
   // Descent clip: first frame = the parent map, last frame = this page — the
   // tap hard-cut replayed as a real camera move (fal ltx-2.3 first+last mode).
@@ -3628,10 +3715,10 @@ export default function PlayPage() {
         t={t}
         input={input}
         onInputChange={setInput}
-        onSubmit={submitQuery}
+        onSubmit={e => { if (resuming || resumeError) { e.preventDefault(); return; } submitQuery(e); }}
         fileInputRef={fileInputRef}
         onFileInputChange={onFileInputChange}
-        busy={phase === "generating"}
+        busy={phase === "generating" || resuming || !!resumeError}
         outputLocale={outputLocale}
         setOutputLocale={setOutputLocale}
         theme={theme}
@@ -3651,7 +3738,11 @@ export default function PlayPage() {
         setDomLabels={setWorldDomLabels}
       />
 
-      <div className="-mt-2 flex justify-end gap-2">
+      <div className="-mt-2 flex flex-wrap justify-end gap-2">
+        <a href="/" className="mr-auto flex items-center gap-2 rounded border border-[var(--color-edge)] px-3 py-1 text-xs"><Library size={15} />My Worlds</a>
+        {(process.env.NEXT_PUBLIC_SKETCH_ENABLED === "1" || (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_SKETCH_ENABLED !== "0")) && <a href={page?.nodeId ? `/sketch?source=${encodeURIComponent(page.nodeId)}` : "/sketch"} className="flex items-center gap-2 rounded border border-[var(--color-edge)] px-3 py-1 text-xs"><Pencil size={15} />{page?.nodeId ? "Draw to Edit" : "Sketch"}</a>}
+        {page?.sceneOutdated && <span className="text-xs text-amber-700">Saved illustration: world geometry has changed</span>}
+        {creatorOwned && <button className="flex items-center gap-2 rounded border border-[var(--color-edge)] px-3 py-1 text-xs" onClick={() => { if (closeInspector()) setNotebookOpen(true); }}><BookOpen size={15} />Notebook</button>}
         {/* Always-on gallery entrance: the published-worlds feed at /gallery
             was only reachable AFTER you publish (window.open on success), so a
             first-time visitor could never discover other people's worlds — the
@@ -3680,6 +3771,10 @@ export default function PlayPage() {
       </div>
 
       {isDraggingFile && <DragDropOverlay />}
+      {resuming && <p role="status" className="py-3 text-sm">Opening saved world...</p>}
+      {resumeError && <div role="alert" className="flex items-center gap-3 py-3 text-sm text-red-700">{resumeError}<button className="rounded border px-3 py-2" onClick={() => setResumeAttempt(v => v + 1)}>Retry saved world</button></div>}
+      {!page && uploadRequested && <div className="flex justify-center border-y border-[var(--color-edge)] py-8"><button disabled={resuming || !!resumeError} className="flex items-center gap-2 rounded border border-[var(--color-edge)] px-4 py-3" onClick={() => fileInputRef.current?.click()}><Upload size={18} />Choose map image</button></div>}
+      {notebookOpen && <CreatorNotebook sessionId={sessionId} title={page?.title || "World notes"} onClose={() => setNotebookOpen(false)} />}
 
       {spatialError && <div role="alert" className="flex items-center gap-3 border-b border-red-400 py-2 text-sm">
         <span>{spatialError}</span>
@@ -4094,6 +4189,17 @@ export default function PlayPage() {
                     prominent={ENTER_COACH_ENABLED}
                   />
                 )}
+              {WORLD_ROUTE_DRAW_ENABLED && routeDrawOn && worldEnabled && page?.imageDataUrl && (!page.sceneView || page.sceneView.level === "map") && (
+                <RouteDrawLayer
+                  entities={geoMap.entities}
+                  frame={page.sceneView?.map_crop ?? MAP_IMAGE_FRAME}
+                  // After a zoom-out the places sit under this page's own
+                  // container geo; on a seeded map they are top level.
+                  frameParentId={geoMap.entities.some(e => e.id === `geo_${page.nodeId}`) ? `geo_${page.nodeId}` : null}
+                  imgRef={imgRef}
+                  onClose={() => setRouteDrawOn(false)}
+                />
+              )}
               {worldEnabled &&
                 worldDomLabels &&
                 // The ⊞ geo debug layer already names every localized entity
@@ -4277,6 +4383,18 @@ export default function PlayPage() {
                 <BloomGlyph className="h-3.5 w-3.5" />
                 Around
               </button>
+              {WORLD_ROUTE_DRAW_ENABLED && worldEnabled && (!page?.sceneView || page.sceneView.level === "map") && (
+                <button
+                  type="button"
+                  onClick={() => setRouteDrawOn((v) => !v)}
+                  aria-pressed={routeDrawOn}
+                  disabled={!page?.imageDataUrl || phase === "generating"}
+                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-edge)] px-3 py-1 text-xs disabled:opacity-50"
+                  title="Draw a camera route on the map: checkpoints mark where a new image is needed"
+                >
+                  ✎ Route
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setGeoOverlayOn((v) => !v)}
@@ -4309,7 +4427,7 @@ export default function PlayPage() {
                   </span>
                 )}
               </button>
-              {worldEnabled && <button type="button" aria-label="Inspect places" title="Inspect places" aria-pressed={inspectMode} disabled={phase === "generating"} onClick={() => { setInspectMode(v => !v); setInspectorOpen(v => !v); setCodexOpen(false); }} className="grid h-8 w-8 shrink-0 place-items-center rounded bg-emerald-700 text-white disabled:opacity-50"><ScanSearch size={17} /></button>}
+              {worldEnabled && <button type="button" aria-label="Inspect places" title="Inspect places" aria-pressed={inspectMode} disabled={phase === "generating"} onClick={() => { if (inspectorOpen) { closeInspector(); return; } setInspectMode(true); setInspectorOpen(true); setCodexOpen(false); }} className="grid h-8 w-8 shrink-0 place-items-center rounded bg-emerald-700 text-white disabled:opacity-50"><ScanSearch size={17} /></button>}
               <button
                 type="button"
                 onClick={() => {
@@ -4392,21 +4510,36 @@ export default function PlayPage() {
                     if (parent) void spatialNavigate(spatialPage(parent), spatialPage(page), () => {});
                   }}><RotateCcw size={16} /></button>
               )}
-              {streamStatus === "off" && (!SPATIAL_TRANSITIONS_ENABLED || page?.descentVideoUrl) &&
+              {streamStatus === "off" &&
                 descentParentImage &&
                 page?.imageDataUrl && (
                   <button
                     type="button"
                     onClick={descendClip}
                     className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
-                    title={SPATIAL_TRANSITIONS_ENABLED ? "Play saved generated clip" : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"}
+                    title={SPATIAL_TRANSITIONS_ENABLED
+                      ? page.descentVideoUrl ? "Play saved generated clip" : "Generate an AI clip that travels from the parent page into this one (first→last-frame video, saved on this page)"
+                      : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"}
                   >
-                    {SPATIAL_TRANSITIONS_ENABLED ? <span className="flex items-center gap-1"><Film size={14} /> Generated clip</span> : <>⤵ {t.descendClip}</>}
+                    {SPATIAL_TRANSITIONS_ENABLED
+                      ? <span className="flex items-center gap-1"><Film size={14} /> {page.descentVideoUrl ? "Generated clip" : "Make travel clip"}</span>
+                      : <>⤵ {t.descendClip}</>}
                   </button>
                 )}
+              {streamStatus === "off" && page?.imageDataUrl && (
+                <button
+                  type="button"
+                  aria-pressed={lifeMode}
+                  onClick={() => setLife(!lifeModeRef.current)}
+                  className={`rounded-full px-3 py-1 text-xs text-white ${lifeMode ? "bg-amber-600" : "bg-black/60"}`}
+                  title="Tap an object on the image, say what it does, and get a short AI clip of it moving"
+                >
+                  {lifeMode ? "Tap what should move…" : "✨ Bring to life"}
+                </button>
+              )}
             </div>
         </figure>
-      ) : phase !== "generating" &&
+      ) : resuming || resumeError ? null : phase !== "generating" &&
         history.items.length === 0 &&
         styleAnchor === null &&
         !styleGalleryDismissed ? (
@@ -4499,6 +4632,7 @@ export default function PlayPage() {
         onInspectPlace={entityId => {
           const place = geoMap.entities.find(e => e.kind === "place" && e.entity_id === entityId);
           if (!place) return;
+          if (noteDirty.current && !window.confirm("Discard unsaved note changes?")) return;
           setSelectedPlaceId(place.id); setCodexOpen(false); setInspectorOpen(true);
         }}
       />
@@ -4507,6 +4641,8 @@ export default function PlayPage() {
           bottom-centre, so they'd overlap; mid-bloom the hint is noise anyway.
           It returns when the tray is closed. */}
       {coachMounted &&
+        !resuming &&
+        !resumeError &&
         !helpOpen &&
         !bloom &&
         !coachDismissed &&
@@ -4548,7 +4684,7 @@ export default function PlayPage() {
           done={bloom.done}
           failed={bloom.failed}
           onPick={(item) => {
-            if (item.nodeId) window.location.href = `/n/${item.nodeId}`;
+            if (item.nodeId) window.location.href = playNodeUrl(sessionId, item.nodeId);
           }}
           onClose={closeBloom}
         />
@@ -4631,7 +4767,7 @@ export default function PlayPage() {
       )}
 
       <DebugHud />
-      {inspectorOpen && <PlaceInspector sessionId={sessionId} places={geoMap.entities.filter(e => e.kind === "place")} pages={history.items} selectedId={selectedPlaceId} onSelect={setSelectedPlaceId} onClose={closeInspector} onOpen={id => { closeInspector(); selectFromMap(id); }} onEnter={(place, fresh) => { void enterInspectedPlace(place, fresh); }} onSaved={async () => { await geoRefetch(); await refreshWorldState(); }} busy={phase === "generating"} />}
+      {inspectorOpen && <PlaceInspector sessionId={sessionId} places={geoMap.entities.filter(e => e.kind === "place" && !(e.scene_id && e.parent_id))} pages={history.items} selectedId={selectedPlaceId} onSelect={setSelectedPlaceId} onClose={closeInspector} onOpen={id => { if (closeInspector()) selectFromMap(id); }} onEnter={(place, fresh) => { void enterInspectedPlace(place, fresh); }} onSaved={async () => { await geoRefetch(); await refreshWorldState(); }} busy={phase === "generating"} notesEnabled={creatorOwned} onNoteDirtyChange={setNoteDirty} />}
       {placeChoice && <div role="dialog" aria-label="Choose a place" className="fixed bottom-4 left-1/2 z-[65] w-[min(340px,92vw)] -translate-x-1/2 rounded-lg border border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 shadow-xl">
         <h2 className="mb-2 text-sm font-medium">Choose a place</h2>
         {placeChoice.places.map(p => <button key={p.id} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-emerald-600/15" onClick={() => { placeIntentRef.current = { id: p.id, newView: false }; const point = placeChoice.click; setPlaceChoice(null); dispatchTapAt(point.x_pct, point.y_pct); }}>{p.label}</button>)}

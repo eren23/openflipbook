@@ -1,5 +1,6 @@
 **/node_modules
 **/.next
+**/.next-*
 **/.turbo
 **/dist
 **/.venv
@@ -19,6 +20,13 @@
 .env.*.local
 **/.env
 **/.env.local
+**/.env*
+!**/.env.example
+
+**/test-results
+**/playwright-report
+**/coverage
+apps/modal-backend/tests
 
 .DS_Store
 .idea

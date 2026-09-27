@@ -1,0 +1,11 @@
+.main { height: 100dvh; display: flex; flex-direction: column; background: #e7ecec; color: #24352f; letter-spacing: 0; }
+.bar { min-height: 64px; display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #fafcfb; border-bottom: 1px solid #c6d3cc; }
+.bar > div { flex: 1; min-width: 0; }
+.bar h1 { font-size: 18px; line-height: 22px; margin: 0; font-weight: 600; }
+.bar span { font-size: 12px; color: #64756c; }
+.bar select { height: 34px; width: 78px; background: white; border: 1px solid #adbbb3; border-radius: 4px; padding: 4px; }
+.bar button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #adbbb3; background: white; border-radius: 4px; flex-shrink: 0; cursor: pointer; }
+.bar button:hover { background: #e8f1ec; }
+.stage { flex: 1; min-height: 0; width: 100%; overflow: hidden; }
+.stage canvas { display: block; }
+@media (max-width: 480px) { .bar { padding: 8px; gap: 4px; } .bar h1 { font-size: 15px; line-height: 19px; } .bar select { width: 64px; } .bar button { width: 30px; } }

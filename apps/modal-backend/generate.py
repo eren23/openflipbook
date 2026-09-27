@@ -23,7 +23,7 @@ import threading as _threading
 import time as _time_mod
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import modal
 
@@ -43,6 +43,11 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from _env import env_flag
+from providers.camera_motion import router as motion_router
+from providers.illustration_generation import router as illustration_router
+from providers.material_generation import router as material_router
+from providers.mesh_generation import router as mesh_router
+from providers.place_build import router as place_build_router
 
 APP_NAME = "openflipbook-generate"
 
@@ -68,6 +73,11 @@ secrets = [
 
 app = modal.App(APP_NAME, image=image)
 fastapi_app = FastAPI(title="Endless Canvas — generate")
+fastapi_app.include_router(mesh_router)
+fastapi_app.include_router(material_router)
+fastapi_app.include_router(illustration_router)
+fastapi_app.include_router(motion_router)
+fastapi_app.include_router(place_build_router)
 
 # ── Public-deploy safety (Wave 5; all default OFF) ───────────────────────────
 SHARED_TOKEN_HEADER = "x-openflipbook-token"
@@ -259,6 +269,11 @@ class ProjectedEntity(BaseModel):
     size: str
 
 
+class LayoutLegendItem(BaseModel):
+    color: str = Field(max_length=20)
+    label: str = Field(max_length=120)
+
+
 class PlaceReferenceBox(BaseModel):
     x_pct: float = Field(ge=0, le=1, allow_inf_nan=False)
     y_pct: float = Field(ge=0, le=1, allow_inf_nan=False)
@@ -272,12 +287,14 @@ class PlaceRenderReference(BaseModel):
     visual: str
     image_data_url: str
     bbox: PlaceReferenceBox
+    provenance: dict[str, str] | None = None
 
 
 class GenerateBody(BaseModel):
     target_geo_id: str | None = None
     place_reference: PlaceRenderReference | None = None
     strict_world: bool = False
+    arrival_intent: Literal["exterior", "interior"] | None = None
     query: str
     aspect_ratio: str = "16:9"
     web_search: bool = True
@@ -298,6 +315,7 @@ class GenerateBody(BaseModel):
     max_attempts: int | None = None
     verify: bool | None = None
     edit_instruction: str | None = None
+    sketch_input: dict[str, Any] | None = None
     # Mask-scoped edit (EDIT_REGION, default off): an opaque PNG data URL at
     # the page's natural dims, WHITE = edit / black = keep, plus the selection
     # box that produced it. Absent -> the legacy whole-image edit path,
@@ -378,6 +396,9 @@ class GenerateBody(BaseModel):
     # geometry engine's expected per-entity layout for this frame.
     scene_view: SceneView | None = None
     expected_layout: list[ProjectedEntity] = Field(default_factory=list)
+    # Colour → place for the "layout" condition image (the client's camera-view
+    # block render of the world map).
+    layout_legend: list[LayoutLegendItem] = Field(default_factory=list, max_length=8)
     trace_id: str | None = None
 
 
@@ -1044,6 +1065,17 @@ async def _event_stream(
     web_search_on_tap = env_flag("WEB_SEARCH_ON_TAP")
     effective_web_search = body.web_search and (body.mode != "tap" or web_search_on_tap)
     try:
+        if body.sketch_input is not None:
+            from providers.sketch import SketchInput, render_sketch
+
+            if not env_flag("SKETCH_ENABLED"):
+                yield _sse({"type": "error", "message": "Sketch rendering is not enabled on the image backend"}, trace_id)
+                return
+            sketch = SketchInput.model_validate(body.sketch_input)
+            yield _sse({"type": "status", "stage": "generating_image"}, trace_id)
+            result, outside = await render_sketch(sketch, body.image, body.query, body.image_model or "openai/gpt-image-2.5/flare/edit", body.session_id)
+            yield _sse({"type": "final", "image_data_url": "data:image/png;base64," + base64.b64encode(result.jpeg_bytes).decode(), "page_title": body.query, "session_id": body.session_id, "image_model": result.model, "prompt_author_model": "sketch", "outside_changed": outside, "mock": result.provider_request_id == "mock-sketch"}, trace_id)
+            return
         # Edit mode short-circuits the planner: we already have an image, the
         # user just wants to mutate it. Persisted as a child node so the
         # original is preserved in history + world map.
@@ -1180,6 +1212,13 @@ async def sse_generate(req: Request) -> Response:
     )
 
 
+class AnimateFocus(BaseModel):
+    x_pct: float = Field(ge=0.0, le=1.0)
+    y_pct: float = Field(ge=0.0, le=1.0)
+    subject: str = Field(default="", max_length=200)
+    action: str = Field(default="", max_length=500)
+
+
 class AnimateBody(BaseModel):
     image_data_url: str
     prompt: str
@@ -1190,6 +1229,9 @@ class AnimateBody(BaseModel):
     # frame) and this is the entered page (last frame) — the clip is the
     # camera move between them, not an ambient animation.
     end_image_data_url: str | None = None
+    # Object action clip: the tapped object (and the user's optional action)
+    # is the subject of the motion. Ignored when end_image_data_url is set.
+    focus: AnimateFocus | None = None
 
 
 @fastapi_app.post("/animate")
@@ -1217,8 +1259,16 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
         image_kb=img_size_kb,
         duration=body.duration,
         descent=bool(body.end_image_data_url),
+        focus=bool(body.focus),
     )
-    if body.end_image_data_url:
+    focus = None if body.end_image_data_url else body.focus
+    if focus is not None:
+        # The tapped object carries its own brief — the page-level rewriter
+        # would pull attention back to the whole scene.
+        motion_prompt = video_provider.object_action_prompt(
+            focus.subject, focus.action, focus.x_pct, focus.y_pct
+        )
+    elif body.end_image_data_url:
         # A descent clip carries a fixed camera brief — the ambient motion
         # rewriter would fight the first→last-frame move.
         motion_prompt = (
@@ -1247,6 +1297,7 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
             duration=body.duration,
             tier=body.video_tier,
             end_image_data_url=body.end_image_data_url,
+            object_action=focus is not None,
         )
     except Exception as exc:
         record_error("animate", exc, image_kb=img_size_kb)

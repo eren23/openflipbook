@@ -7,6 +7,7 @@ import type {
   GenerateRequestBody,
   ScaleKind,
   ScaleTier,
+  SceneView,
 } from "@openflipbook/config";
 
 import type { NeighbourItem } from "@/components/PlayPage/NeighbourTray";
@@ -42,8 +43,10 @@ export type PersistNeighbour = (
     // B2 logical AROUND: the rung these same-scale peers sit at (the focus's tier),
     // when the bloom was constrained by SCALE_AROUND_LOGICAL. Omitted otherwise.
     scale_tier?: ScaleTier;
+    scene_view?: SceneView;
   },
   traceId: string | null,
+  idempotencyKey?: string,
 ) => Promise<{ id: string } | null>;
 
 /**
@@ -118,8 +121,10 @@ export function useExpandBloom(persist: PersistNeighbour): {
                   relation: "expand",
                   scale: evt.scale,
                   ...(body.around_tier ? { scale_tier: body.around_tier } : {}),
+                  ...(evt.scene_view ? { scene_view: evt.scene_view } : {}),
                 },
                 traceId,
+                `${traceId}:neighbor:${evt.index}`,
               ).then((saved) => {
                 if (!saved) return;
                 setBloom((prev) =>

@@ -1,0 +1,538 @@
+{
+  "version": 1,
+  "cap_usd": "3.00",
+  "reserved_usd": "1.90",
+  "promotion": false,
+  "fixture": {
+    "signature": {
+      "version": "lighthouse-affine-canny-v1",
+      "source_sha256": "0d330c72ae943e4b7576740fc717774fd145d387af71335beb59b01176ccce16",
+      "landmark": [
+        0.082,
+        0.074,
+        0.127,
+        0.438
+      ],
+      "tap": [
+        0.138,
+        0.312
+      ],
+      "padding": 0.045,
+      "crop": [
+        0,
+        0.028999999999999998,
+        0.528
+      ],
+      "size": [
+        1280,
+        704
+      ],
+      "frames": 121,
+      "fps": 24
+    },
+    "assets": {
+      "first.png": "dfe13b3cd10a7603eb504761f0685bee066d168d025e5a1dd20f0287b1d0dfee",
+      "middle.png": "59092a91ae6a838df66b87756a87526a39a4a51731b2b28321cdc6a501f4e282",
+      "last.png": "dcea6739efc04a1515274bd8ff26e6cf3d3b193dccaccab3b81cb15fe17a0ac7",
+      "fast-first.png": "849a1327504ea97f23db672b66d7078a0b2d7115de3056d242df0dee3e406242",
+      "fast-last.png": "d08b1e1afdddd30d7fdc349c0893eba0db3d3e9832f4a86084701e38f330a852",
+      "reference.mp4": "beded576f1eba13d30ed73eb94770b5bda05c5c4332fd10641b9f73f3460e22a",
+      "edges.mp4": "b82d8d1e86fbbdff6636714f8174ae7b1ad369721ca8f08822762346cf652447"
+    },
+    "source_size": [
+      1376,
+      768
+    ],
+    "content_rect": [
+      9,
+      0,
+      1261,
+      704
+    ],
+    "fast_content_rect": [
+      0,
+      4,
+      1920,
+      1072
+    ],
+    "expected_boxes": [
+      [
+        0.082,
+        0.074,
+        0.127,
+        0.438
+      ],
+      [
+        0.08405248484848485,
+        0.07431436363636364,
+        0.13017884848484848,
+        0.4489632727272727
+      ],
+      [
+        0.08962351515151515,
+        0.07516763636363635,
+        0.13880715151515152,
+        0.47872072727272724
+      ],
+      [
+        0.09783345454545454,
+        0.07642509090909089,
+        0.15152254545454544,
+        0.5225738181818181
+      ],
+      [
+        0.10780266666666667,
+        0.077952,
+        0.16696266666666668,
+        0.575824
+      ],
+      [
+        0.11865151515151515,
+        0.07961363636363636,
+        0.1837651515151515,
+        0.6337727272727272
+      ],
+      [
+        0.12950036363636364,
+        0.08127527272727271,
+        0.20056763636363636,
+        0.6917214545454545
+      ],
+      [
+        0.13946957575757574,
+        0.0828021818181818,
+        0.21600775757575755,
+        0.7449716363636363
+      ],
+      [
+        0.14767951515151514,
+        0.08405963636363636,
+        0.22872315151515152,
+        0.7888247272727272
+      ],
+      [
+        0.15325054545454544,
+        0.0849129090909091,
+        0.23735145454545453,
+        0.8185821818181818
+      ],
+      [
+        0.1553030303030303,
+        0.08522727272727272,
+        0.240530303030303,
+        0.8295454545454545
+      ]
+    ]
+  },
+  "results": [
+    {
+      "id": "structural-35-101",
+      "label": "Structural / denoise 0.35 / seed 101",
+      "model": "fal-ai/ltx-2.3-quality/reference-video-to-video",
+      "fingerprint": "a994e4ad2ca8485bfa388c249c47c8c5ff28d55c190a3024f797f7d38cc0493d",
+      "arguments": {
+        "prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+        "seed": 101,
+        "strength": 0.35,
+        "video_strength": 0.9,
+        "skip_control_preprocess": true,
+        "preserve_original_video": true,
+        "num_frames": 121,
+        "frames_per_second": 24,
+        "resolution": {
+          "width": 1280,
+          "height": 704
+        },
+        "num_inference_steps": 15,
+        "guidance_scale": 1,
+        "enable_prompt_expansion": false,
+        "generate_audio": false,
+        "enable_safety_checker": true,
+        "negative_prompt": "warped architecture, replaced landmarks, flicker, blur, distortion, added text",
+        "video_quality": "high",
+        "video_write_mode": "balanced"
+      },
+      "asset_hashes": {
+        "video_url": "beded576f1eba13d30ed73eb94770b5bda05c5c4332fd10641b9f73f3460e22a",
+        "control_video_url": "b82d8d1e86fbbdff6636714f8174ae7b1ad369721ca8f08822762346cf652447",
+        "image_url": "dfe13b3cd10a7603eb504761f0685bee066d168d025e5a1dd20f0287b1d0dfee",
+        "mid_image_url": "59092a91ae6a838df66b87756a87526a39a4a51731b2b28321cdc6a501f4e282",
+        "end_image_url": "dcea6739efc04a1515274bd8ff26e6cf3d3b193dccaccab3b81cb15fe17a0ac7"
+      },
+      "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+      "reported_cost_usd": null,
+      "metadata": {
+        "width": 1280,
+        "height": 704,
+        "frame_count": 121,
+        "fps": "24/1",
+        "duration_seconds": 5.041667,
+        "sample_indices": [
+          0,
+          12,
+          24,
+          36,
+          48,
+          60,
+          72,
+          84,
+          96,
+          108,
+          120
+        ],
+        "sha256": "7310a90ca5774e835959eb3e7bda5aa6554f9b9eb83dffa4d4ead3d9d81acc69"
+      },
+      "state": "complete",
+      "output": "structural-35-101.mp4",
+      "request_id": "01a083d0-1d3c-7551-8da6-1c0efdbd0c63",
+      "reserved_usd": "0.35",
+      "effective_prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+      "elapsed_seconds": 296.977,
+      "returned_seed": 101,
+      "geometry": {
+        "sampled_geometry": "unverified",
+        "threshold": 0.03
+      },
+      "review": {
+        "reviewer": "Codex root and independent repo_and_eval agent",
+        "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+        "id": "structural-35-101",
+        "output_sha256": "7310a90ca5774e835959eb3e7bda5aa6554f9b9eb83dffa4d4ead3d9d81acc69",
+        "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+        "notes": "Crystal, tower and base retained at inspected samples. Close preservation with mild smoothing and texture repainting. Retain as a conservative comparison candidate, not a production winner.",
+        "observed_boxes": null
+      }
+    },
+    {
+      "id": "structural-60-101",
+      "label": "Structural / denoise 0.60 / seed 101",
+      "model": "fal-ai/ltx-2.3-quality/reference-video-to-video",
+      "fingerprint": "a3e05bdc17a7abf72c5e15fe6579e19d450c23c4f92e75a7bb015686ad890f0d",
+      "arguments": {
+        "prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+        "seed": 101,
+        "strength": 0.6,
+        "video_strength": 0.9,
+        "skip_control_preprocess": true,
+        "preserve_original_video": true,
+        "num_frames": 121,
+        "frames_per_second": 24,
+        "resolution": {
+          "width": 1280,
+          "height": 704
+        },
+        "num_inference_steps": 15,
+        "guidance_scale": 1,
+        "enable_prompt_expansion": false,
+        "generate_audio": false,
+        "enable_safety_checker": true,
+        "negative_prompt": "warped architecture, replaced landmarks, flicker, blur, distortion, added text",
+        "video_quality": "high",
+        "video_write_mode": "balanced"
+      },
+      "asset_hashes": {
+        "video_url": "beded576f1eba13d30ed73eb94770b5bda05c5c4332fd10641b9f73f3460e22a",
+        "control_video_url": "b82d8d1e86fbbdff6636714f8174ae7b1ad369721ca8f08822762346cf652447",
+        "image_url": "dfe13b3cd10a7603eb504761f0685bee066d168d025e5a1dd20f0287b1d0dfee",
+        "mid_image_url": "59092a91ae6a838df66b87756a87526a39a4a51731b2b28321cdc6a501f4e282",
+        "end_image_url": "dcea6739efc04a1515274bd8ff26e6cf3d3b193dccaccab3b81cb15fe17a0ac7"
+      },
+      "visual_verdict": "Anchored in sampled frames; additional repainting",
+      "reported_cost_usd": null,
+      "metadata": {
+        "width": 1280,
+        "height": 704,
+        "frame_count": 121,
+        "fps": "24/1",
+        "duration_seconds": 5.041667,
+        "sample_indices": [
+          0,
+          12,
+          24,
+          36,
+          48,
+          60,
+          72,
+          84,
+          96,
+          108,
+          120
+        ],
+        "sha256": "b15d4d761a67cbdc7ca38a6c27e5bb22a7f6487425f9d177cfc92a5ab78d84a2"
+      },
+      "state": "complete",
+      "output": "structural-60-101.mp4",
+      "request_id": "01a083d3-a574-7383-9544-1a10634152b1",
+      "reserved_usd": "0.35",
+      "effective_prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+      "elapsed_seconds": 217.15,
+      "returned_seed": 101,
+      "geometry": {
+        "sampled_geometry": "unverified",
+        "threshold": 0.03
+      },
+      "review": {
+        "reviewer": "Codex root and independent repo_and_eval agent",
+        "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+        "id": "structural-60-101",
+        "output_sha256": "b15d4d761a67cbdc7ca38a6c27e5bb22a7f6487425f9d177cfc92a5ab78d84a2",
+        "visual_verdict": "Anchored in sampled frames; additional repainting",
+        "notes": "Correct approach and framing. Softer linework and small shape shifts, especially tower-top and roof details. No demonstrated enhancement over denoise 0.35 or the reference.",
+        "observed_boxes": null
+      }
+    },
+    {
+      "id": "structural-35-202",
+      "label": "Structural / denoise 0.35 / seed 202",
+      "model": "fal-ai/ltx-2.3-quality/reference-video-to-video",
+      "fingerprint": "2d9633509e6a299db25a75bf543c0b10b58958245df5c7adcc7cbc27eeac14b0",
+      "arguments": {
+        "prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+        "seed": 202,
+        "strength": 0.35,
+        "video_strength": 0.9,
+        "skip_control_preprocess": true,
+        "preserve_original_video": true,
+        "num_frames": 121,
+        "frames_per_second": 24,
+        "resolution": {
+          "width": 1280,
+          "height": 704
+        },
+        "num_inference_steps": 15,
+        "guidance_scale": 1,
+        "enable_prompt_expansion": false,
+        "generate_audio": false,
+        "enable_safety_checker": true,
+        "negative_prompt": "warped architecture, replaced landmarks, flicker, blur, distortion, added text",
+        "video_quality": "high",
+        "video_write_mode": "balanced"
+      },
+      "asset_hashes": {
+        "video_url": "beded576f1eba13d30ed73eb94770b5bda05c5c4332fd10641b9f73f3460e22a",
+        "control_video_url": "b82d8d1e86fbbdff6636714f8174ae7b1ad369721ca8f08822762346cf652447",
+        "image_url": "dfe13b3cd10a7603eb504761f0685bee066d168d025e5a1dd20f0287b1d0dfee",
+        "mid_image_url": "59092a91ae6a838df66b87756a87526a39a4a51731b2b28321cdc6a501f4e282",
+        "end_image_url": "dcea6739efc04a1515274bd8ff26e6cf3d3b193dccaccab3b81cb15fe17a0ac7"
+      },
+      "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+      "reported_cost_usd": null,
+      "metadata": {
+        "width": 1280,
+        "height": 704,
+        "frame_count": 121,
+        "fps": "24/1",
+        "duration_seconds": 5.041667,
+        "sample_indices": [
+          0,
+          12,
+          24,
+          36,
+          48,
+          60,
+          72,
+          84,
+          96,
+          108,
+          120
+        ],
+        "sha256": "439ec9a817a6fe7ef55c012684b7cd865e4ec504e0afb336cf39239bb5a02134"
+      },
+      "state": "complete",
+      "output": "structural-35-202.mp4",
+      "request_id": "01a083d6-f5b9-7da3-a368-d68e0dc9cbcc",
+      "reserved_usd": "0.35",
+      "effective_prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+      "elapsed_seconds": 75.316,
+      "returned_seed": 202,
+      "geometry": {
+        "sampled_geometry": "unverified",
+        "threshold": 0.03
+      },
+      "review": {
+        "reviewer": "Codex root and independent repo_and_eval agent",
+        "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+        "id": "structural-35-202",
+        "output_sha256": "439ec9a817a6fe7ef55c012684b7cd865e4ec504e0afb336cf39239bb5a02134",
+        "visual_verdict": "Anchored in sampled frames; no clear gain over source pixels",
+        "notes": "Complete lighthouse retained at inspected samples. Similar to seed 101 with no obvious gross structural break or meaningful seed-dependent advantage.",
+        "observed_boxes": null
+      }
+    },
+    {
+      "id": "structural-60-202",
+      "label": "Structural / denoise 0.60 / seed 202",
+      "model": "fal-ai/ltx-2.3-quality/reference-video-to-video",
+      "fingerprint": "6549f4544bdfa14b2f81b3e594c66e5afba03cc24a75e36e8d87b9c78cad725b",
+      "arguments": {
+        "prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+        "seed": 202,
+        "strength": 0.6,
+        "video_strength": 0.9,
+        "skip_control_preprocess": true,
+        "preserve_original_video": true,
+        "num_frames": 121,
+        "frames_per_second": 24,
+        "resolution": {
+          "width": 1280,
+          "height": 704
+        },
+        "num_inference_steps": 15,
+        "guidance_scale": 1,
+        "enable_prompt_expansion": false,
+        "generate_audio": false,
+        "enable_safety_checker": true,
+        "negative_prompt": "warped architecture, replaced landmarks, flicker, blur, distortion, added text",
+        "video_quality": "high",
+        "video_write_mode": "balanced"
+      },
+      "asset_hashes": {
+        "video_url": "beded576f1eba13d30ed73eb94770b5bda05c5c4332fd10641b9f73f3460e22a",
+        "control_video_url": "b82d8d1e86fbbdff6636714f8174ae7b1ad369721ca8f08822762346cf652447",
+        "image_url": "dfe13b3cd10a7603eb504761f0685bee066d168d025e5a1dd20f0287b1d0dfee",
+        "mid_image_url": "59092a91ae6a838df66b87756a87526a39a4a51731b2b28321cdc6a501f4e282",
+        "end_image_url": "dcea6739efc04a1515274bd8ff26e6cf3d3b193dccaccab3b81cb15fe17a0ac7"
+      },
+      "visual_verdict": "Anchored in sampled frames; additional repainting",
+      "reported_cost_usd": null,
+      "metadata": {
+        "width": 1280,
+        "height": 704,
+        "frame_count": 121,
+        "fps": "24/1",
+        "duration_seconds": 5.041667,
+        "sample_indices": [
+          0,
+          12,
+          24,
+          36,
+          48,
+          60,
+          72,
+          84,
+          96,
+          108,
+          120
+        ],
+        "sha256": "2bd9f0b7927db8886df13315d4bb1eb66edef4312e64683b26331b9aa82fe06d"
+      },
+      "state": "complete",
+      "output": "structural-60-202.mp4",
+      "request_id": "01a083d8-1bf5-7002-86a0-81601ce70cbb",
+      "reserved_usd": "0.35",
+      "effective_prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+      "elapsed_seconds": 85.558,
+      "returned_seed": 202,
+      "geometry": {
+        "sampled_geometry": "unverified",
+        "threshold": 0.03
+      },
+      "review": {
+        "reviewer": "Codex root and independent repo_and_eval agent",
+        "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+        "id": "structural-60-202",
+        "output_sha256": "2bd9f0b7927db8886df13315d4bb1eb66edef4312e64683b26331b9aa82fe06d",
+        "visual_verdict": "Anchored in sampled frames; additional repainting",
+        "notes": "Correct approach, with stronger detail and shape changes around the top crystal/bowl alignment and nearby structures. No clear reason to prefer it over denoise 0.35.",
+        "observed_boxes": null
+      }
+    },
+    {
+      "id": "fast-101",
+      "label": "Endpoint only / Fast / seed 101",
+      "model": "fal-ai/ltx-2.3/image-to-video/fast",
+      "fingerprint": "4dad7240006d81d09a88dca96b053ef8154fa9ebb16c06054542e1a25a9cda44",
+      "arguments": {
+        "prompt": "One continuous camera reframe toward the Crystal Lighthouse on the LEFT of this map. Keep the entire floating crystal, stone tower and base visible throughout. Preserve the exact architecture, landmark positions, lettering, palette and illustrated style. Only subtle water motion may be added. End on the supplied close-up. No new viewpoint, 3D dive, new buildings, cuts, fades, dissolves, titles or music.",
+        "seed": 101,
+        "duration": 6,
+        "resolution": "1080p",
+        "fps": 24,
+        "generate_audio": false,
+        "aspect_ratio": "16:9"
+      },
+      "asset_hashes": {
+        "image_url": "849a1327504ea97f23db672b66d7078a0b2d7115de3056d242df0dee3e406242",
+        "end_image_url": "d08b1e1afdddd30d7fdc349c0893eba0db3d3e9832f4a86084701e38f330a852"
+      },
+      "visual_verdict": "Correct landmark; mid-clip zoom timing drifts",
+      "reported_cost_usd": null,
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "frame_count": 145,
+        "fps": "24/1",
+        "duration_seconds": 6.041667,
+        "sample_indices": [
+          0,
+          14,
+          29,
+          43,
+          58,
+          72,
+          86,
+          101,
+          115,
+          130,
+          144
+        ],
+        "sha256": "47aad809f7a61f7261a0f641be5563fd853521de5922cada6726fae27dc62928"
+      },
+      "state": "complete",
+      "output": "fast-101.mp4",
+      "request_id": "01a083d9-8487-7b21-87e7-2c5e5806363d",
+      "reserved_usd": "0.50",
+      "effective_prompt": null,
+      "elapsed_seconds": 68.235,
+      "returned_seed": null,
+      "geometry": {
+        "sampled_geometry": "unverified",
+        "threshold": 0.03
+      },
+      "review": {
+        "reviewer": "Codex root and independent repo_and_eval agent",
+        "method": "Assistant visual review of 11 decoded samples per clip against the pixel reference, supplemented by full-size off-keyframe checks. Not a blind human preference test or an exhaustive frame-by-frame audit. Independent local-feature matching is supplementary, not the full-landmark geometry metric.",
+        "id": "fast-101",
+        "output_sha256": "47aad809f7a61f7261a0f641be5563fd853521de5922cada6726fae27dc62928",
+        "visual_verdict": "Correct landmark; mid-clip zoom timing drifts",
+        "notes": "Recognizable source-derived lighthouse close-up at the end. The middle lags the intended zoom and catches up, with more surrounding repainting. This does not establish a continuous new-viewpoint arrival.",
+        "observed_boxes": null,
+        "supplementary_feature_check": {
+          "method": "Independent Pillow translated/scaled template search for the upper crystal, after cropping the documented content rectangles and resizing to 256 x 143. Coarse local-feature evidence, not full-landmark bounds.",
+          "samples": [
+            {
+              "progress": 0.5,
+              "reference_center": [
+                54,
+                28.5
+              ],
+              "observed_center": [
+                43,
+                25
+              ],
+              "relative_feature_scale": 0.8,
+              "center_error_diagonal": 0.0394
+            },
+            {
+              "progress": 0.7,
+              "reference_center": [
+                63,
+                31.5
+              ],
+              "observed_center": [
+                53,
+                28.5
+              ],
+              "relative_feature_scale": 0.85,
+              "center_error_diagonal": 0.0356
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "complete": true,
+  "billing": {
+    "status": "unavailable"
+  }
+}

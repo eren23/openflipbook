@@ -1,0 +1,75 @@
+import { expect, test } from "@playwright/test";
+import sharp from "sharp";
+
+test.skip(process.env.E2E_CAMERA_PATH !== "1", "Runs the local scene preview only, without generation");
+for (const width of [1280, 390]) test.describe(`Camera path ${width}`, () => {
+  test.use({ viewport: { width, height: 900 }, hasTouch: width === 390 });
+  test("controls actual world coordinates, edits keyframes and cleans up playback", async ({ page }) => {
+    page.setDefaultTimeout(15000);
+    const errors: string[] = [], writes: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    page.on("request", request => {
+      if (request.method() === "POST" && new URL(request.url()).pathname !== "/__nextjs_disable_dev_indicator") writes.push(request.url());
+    });
+    await page.goto("/sketch/world?demo=1");
+    const devTools = page.getByRole("button", { name: "Open Next.js Dev Tools", exact: true });
+    if (await devTools.isVisible()) {
+      await devTools.click(); await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+      await page.getByRole("button", { name: "Hide", exact: true }).click();
+    }
+    await page.getByRole("button", { name: "3D", exact: true }).click();
+    const viewport = page.getByTestId("place-viewport");
+    await expect(viewport).toHaveAttribute("data-ready", "true");
+    const panel = page.getByRole("region", { name: "Camera path" });
+    const toggle = panel.getByRole("button", { name: "Camera path", exact: true });
+    if (width === 390) await toggle.tap(); else await toggle.click();
+    const edit = async (name: string, value: string) => { await panel.getByRole("spinbutton", { name: `${name} value` }).fill(value); };
+    const camera = async () => (await viewport.getAttribute("data-camera"))!.split(",").map(Number);
+    await edit("Elevation", "30"); await edit("Distance", "20"); await edit("Azimuth", "0");
+    await expect(panel.getByRole("spinbutton", { name: "Azimuth value" })).toHaveValue("0");
+    await page.waitForTimeout(100); const a = await camera();
+    const first = await viewport.screenshot();
+    await edit("Azimuth", "90");
+    await expect.poll(async () => (await camera())[0]! - a[0]!).toBeCloseTo(Math.sqrt(300), 2);
+    const b = await camera(); expect(b[1]).toBeCloseTo(a[1]!, 2); expect(b[2]! - a[2]!).toBeCloseTo(-Math.sqrt(300), 2);
+    const second = await viewport.screenshot(); expect(first.equals(second)).toBe(false);
+    const stats = await sharp(second).stats(); expect(Math.max(...stats.channels.slice(0, 3).map(c => c.stdev))).toBeGreaterThan(10);
+    await panel.getByRole("button", { name: "Camera keyframe 2" }).click(); await edit("Azimuth", "180");
+    const timeline = panel.getByRole("slider", { name: "Camera timeline" });
+    await timeline.focus(); await timeline.press("Home");
+    await timeline.evaluate(input => { const range = input as HTMLInputElement; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; setter.call(range, "0.5"); range.dispatchEvent(new Event("input", { bubbles: true })); range.dispatchEvent(new Event("change", { bubbles: true })); });
+    await panel.getByRole("button", { name: "Add camera keyframe" }).click();
+    await expect(panel.getByRole("button", { name: "Camera keyframe 3" })).toBeVisible();
+    await expect(panel.getByRole("spinbutton", { name: "Azimuth value" })).toHaveValue("135");
+    await panel.getByRole("button", { name: "Rewind camera path" }).click();
+    await panel.getByRole("button", { name: "Play camera path" }).click();
+    await expect(panel.getByRole("button", { name: "Pause camera path" })).toBeVisible();
+    await expect(panel.getByText("Camera clearance passed / No target selected", { exact: true })).toBeVisible();
+    const playing = await camera(); await expect.poll(camera).not.toEqual(playing);
+    await panel.getByRole("button", { name: "Pause camera path" }).click();
+    await page.waitForTimeout(100); const paused = await camera(); await page.waitForTimeout(150); expect(await camera()).toEqual(paused);
+    await panel.getByRole("button", { name: "Rewind camera path" }).click();
+    const rect = await viewport.boundingBox(); expect(rect!.height).toBeGreaterThan(140);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `test-results/camera-path-${width}.png`, fullPage: false });
+    await edit("Elevation", "3"); await edit("Distance", "2");
+    await expect(panel.getByRole("spinbutton", { name: "Elevation value" })).toHaveValue("3");
+    await expect.poll(async () => (await camera())[1]).toBeCloseTo(2 * Math.sin(3 * Math.PI / 180), 2);
+    await panel.getByRole("button", { name: "Check camera path" }).click();
+    await expect(panel.getByText("Path blocked", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Play camera path" })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: /Collision risk at/ }).first()).toBeVisible();
+    await page.screenshot({ path: `test-results/camera-path-blocked-${width}.png`, fullPage: false });
+    await edit("Elevation", "30"); await edit("Distance", "20");
+    await expect(panel.getByText("Path unchecked", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Play camera path" }).click();
+    await expect(panel.getByRole("button", { name: "Pause camera path" })).toBeVisible();
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Camera path" })).toHaveCount(0);
+    await expect(viewport).toHaveAttribute("data-ready", "true");
+    await page.waitForTimeout(100); const plan = await camera(); await page.waitForTimeout(200); expect(await camera()).toEqual(plan);
+    await page.getByRole("button", { name: "3D", exact: true }).click();
+    await expect(toggle).toBeVisible(); await expect(viewport.locator("canvas")).toHaveCount(1);
+    expect(errors).toEqual([]); expect(writes).toEqual([]);
+  });
+});

@@ -45,13 +45,32 @@ def descent_arguments(
         "prompt": prompt,
     }
     if model == H3_MAX_MODEL:
-        arguments.update(
-            duration=max(5, min(15, duration)),
-            resolution="768P",
-            prompt_expansion_mode="balanced",
-            enable_safety_checker=True,
-        )
+        arguments.update(_h3_fields(duration))
     return arguments
+
+
+def _h3_fields(duration: int) -> dict:
+    return {
+        "duration": max(5, min(15, duration)),
+        "resolution": "768P",
+        "prompt_expansion_mode": "balanced",
+        "enable_safety_checker": True,
+    }
+
+
+def object_action_prompt(subject: str, action: str, x_pct: float, y_pct: float) -> str:
+    """Anchor a clip on ONE tapped object. H3 has no mask input, so the
+    object's name and its position in the frame are the only steering."""
+    subject = " ".join(subject.split())[:120] or "the tapped object"
+    action = " ".join(action.split()).rstrip(".")[:300]
+    return (
+        f"Focus on {subject}, about {round(x_pct * 100)}% from the left and "
+        f"{round(y_pct * 100)}% from the top of the frame. "
+        f"{action or f'{subject} comes to life with clear, natural motion'}. "
+        "The camera eases slowly toward it. The rest of the illustrated scene "
+        "stays calm and keeps its drawing style, layout and colors. "
+        "One continuous shot, no cuts; add nothing the action does not need."
+    )
 
 
 # Video tier → fal model. Mirrors the image-tier pattern in providers/image.py.
@@ -104,6 +123,7 @@ async def animate_image(
     duration: int = 5,
     tier: str | None = None,
     end_image_data_url: str | None = None,
+    object_action: bool = False,
 ) -> AnimatedClip:
     from obs import span
 
@@ -130,6 +150,16 @@ async def animate_image(
         arguments = descent_arguments(
             model, image_url, await to_fal_url(end_image_data_url), prompt, duration
         )
+        async with span("video.animate", model=model, duration=duration):
+            result = await _fal_subscribe(model, arguments)
+        return _clip_from_result(result, model, arguments.get("duration", duration))
+    if object_action:
+        # Tapped-object clip: its own slot (H3 Max follows a focused action
+        # prompt), never the ambient tier table.
+        model = os.environ.get("FAL_ACTION_MODEL") or H3_MAX_MODEL
+        arguments = {"image_url": image_url, "prompt": prompt}
+        if model == H3_MAX_MODEL:
+            arguments.update(_h3_fields(duration))
         async with span("video.animate", model=model, duration=duration):
             result = await _fal_subscribe(model, arguments)
         return _clip_from_result(result, model, arguments.get("duration", duration))

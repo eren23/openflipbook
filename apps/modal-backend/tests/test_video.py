@@ -183,3 +183,98 @@ async def test_content_type_and_duration_fall_back(monkeypatch: pytest.MonkeyPat
     )
     assert clip.content_type == "video/mp4"
     assert clip.duration_seconds == 7.0  # requested duration when fal omits it
+
+
+# ── tapped-object action clips ──────────────────────────────────────────────
+
+
+async def test_object_action_uses_h3_slot_not_the_tier_table(monkeypatch):
+    # An ambient override must not capture object clips: they need a model
+    # that follows a focused action prompt.
+    monkeypatch.setenv("FAL_ANIMATE_MODEL", "fal-ai/ambient-override")
+    clip, subscribe = await _animate(monkeypatch, tier="pro", duration=30, object_action=True)
+    model, arguments = subscribe.await_args.args
+    assert model == video.H3_MAX_MODEL
+    assert arguments == {
+        "image_url": "https://fal.media/in.png",
+        "prompt": "gentle pan",
+        "duration": 15,
+        "resolution": "768P",
+        "prompt_expansion_mode": "balanced",
+        "enable_safety_checker": True,
+    }
+    assert "end_image_url" not in arguments
+    assert clip.model == video.H3_MAX_MODEL
+
+    monkeypatch.setenv("FAL_ACTION_MODEL", "fal-ai/custom-action")
+    _, subscribe = await _animate(monkeypatch, object_action=True)
+    model, arguments = subscribe.await_args.args
+    assert model == "fal-ai/custom-action"
+    assert arguments == {"image_url": "https://fal.media/in.png", "prompt": "gentle pan"}
+
+
+async def test_object_action_does_not_escape_mock_mode(monkeypatch):
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    clip, subscribe = await _animate(monkeypatch, object_action=True)
+    assert clip.model == "mock/animate"
+    subscribe.assert_not_awaited()
+
+
+def test_object_action_prompt_anchors_the_tapped_object():
+    prompt = video.object_action_prompt(
+        "  the copper\n kettle   sign ", "It swings in a gust of wind.", 0.456, 0.3
+    )
+    assert "Focus on the copper kettle sign, about 46% from the left and 30% from the top" in prompt
+    assert "It swings in a gust of wind. The camera eases" in prompt
+    assert "no cuts" in prompt
+    blank = video.object_action_prompt("", "   ", 0, 1)
+    assert "Focus on the tapped object, about 0% from the left and 100% from the top" in blank
+    assert "the tapped object comes to life with clear, natural motion." in blank
+
+
+def test_animate_endpoint_routes_focus_to_the_object_slot(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from generate import fastapi_app
+    from providers import llm
+
+    rewrite = AsyncMock(return_value="rewritten")
+    monkeypatch.setattr(llm, "rewrite_motion_prompt", rewrite)
+    animate = AsyncMock(
+        return_value=video.AnimatedClip(
+            "https://fal.media/o.mp4", "video/mp4", video.H3_MAX_MODEL, 5.0
+        )
+    )
+    monkeypatch.setattr(video, "animate_image", animate)
+    client = TestClient(fastapi_app)
+    focus = {"x_pct": 0.4, "y_pct": 0.6, "subject": "the tavern door", "action": "it swings open"}
+    res = client.post(
+        "/animate",
+        json={
+            "image_data_url": "data:image/png;base64,x",
+            "prompt": "The Copper Kettle",
+            "focus": focus,
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["video_url"] == "https://fal.media/o.mp4"
+    rewrite.assert_not_awaited()
+    kwargs = animate.await_args.kwargs
+    assert kwargs["object_action"] is True
+    assert kwargs["prompt"].startswith("Focus on the tavern door, about 40% from the left and 60%")
+
+    # A descent request keeps its own brief even if a focus rides along.
+    animate.reset_mock()
+    res = client.post(
+        "/animate",
+        json={
+            "image_data_url": "data:image/png;base64,x",
+            "end_image_data_url": "data:image/png;base64,y",
+            "prompt": "The Copper Kettle",
+            "focus": focus,
+        },
+    )
+    assert res.status_code == 200
+    kwargs = animate.await_args.kwargs
+    assert kwargs["object_action"] is False
+    assert kwargs["prompt"].startswith("Smooth cinematic camera descent")

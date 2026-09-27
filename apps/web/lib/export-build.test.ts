@@ -45,6 +45,29 @@ describe("sampleEvenly", () => {
 });
 
 describe("buildZip", () => {
+  it("exports imported mesh provenance without inventing a provider receipt", async () => {
+    const imported = { kind: "imported_mesh" as const, filename: "Tower.glb", validator_version: "2.0.0-dev.3.10", warnings: [] };
+    const bytes = new Uint8Array([1, 2, 3]);
+    const zip = await JSZip.loadAsync(await buildWorldZip([], null, null, [], [], [], { heads: [], versions: [] }, [{ id: "import_hash", sha256: "hash", model: "imported/glb", prompt: "Tower.glb", bytes, imported }]));
+    const asset = JSON.parse(await zip.file("mesh-assets.json")!.async("string"))[0]; expect(asset.imported).toEqual(imported); expect(asset).not.toHaveProperty("request_id"); expect(await zip.file(asset.file)!.async("uint8array")).toEqual(bytes);
+  });
+  it("bundles original and exact image-to-mesh inputs with portable provenance", async () => {
+    const source = { id: "concept", label: "Tower concept", sha256: "normalized-hash", width: 64, height: 96, origin: { kind: "imported_reference" as const }, bytes: new Uint8Array([2, 3]), original: { bytes: new Uint8Array([4, 5]), sha256: "original-hash", content_type: "image/jpeg" } };
+    const zip = await JSZip.loadAsync(await buildWorldZip([], null, null, [], [], [], { heads: [], versions: [] }, [{ id: "mesh", sha256: "mesh-hash", model: "image-model", prompt: "Name only", bytes: new Uint8Array([1]), image_input: source }]));
+    const input = JSON.parse(await zip.file("mesh-assets.json")!.async("string"))[0].image_input;
+    expect(input).toMatchObject({ id: "concept", origin: source.origin, sha256: source.sha256, original: { sha256: source.original.sha256 } });
+    expect(await zip.file(input.file)!.async("uint8array")).toEqual(source.bytes);
+    expect(await zip.file(input.original.file)!.async("uint8array")).toEqual(source.original.bytes);
+    expect(input).not.toHaveProperty("key");
+  });
+  it("includes immutable place definitions and their source bytes in world bundles", async () => {
+    const scenes = [{ id: "scene", revision: 2, source_image_key: "source.png", definition: { material_pack: "ankh-street-v1", objects: [{ id: "tavern", entity_id: "entity_tavern", eave_height: 6.2, roof_offset: 2, roof_material: "teal" }] } }];
+    const zip = await JSZip.loadAsync(await buildWorldZip([], null, null, [{ image_key: "source.png", bytes: new Uint8Array([1, 2, 3]), contentType: "image/png" }], scenes, [{ id: "ankh-street-v1", bytes: new Uint8Array([4, 5, 6]) }]));
+    expect(JSON.parse(await zip.file("place-scenes.json")!.async("string"))).toEqual(scenes);
+    expect(await zip.file("references/001.png")!.async("uint8array")).toEqual(new Uint8Array([1, 2, 3]));
+    expect(JSON.parse(await zip.file("material-packs.json")!.async("string"))[0]).toMatchObject({ id: "ankh-street-v1", image: "materials/1-atlas.png" });
+    expect(await zip.file("materials/1-atlas.png")!.async("uint8array")).toEqual(new Uint8Array([4, 5, 6]));
+  });
   it("one entry per page + a graph.json that rebuilds the path", async () => {
     const jpg = await tinyJpeg();
     const bytes = await buildZip([page("a", jpg, null), page("b", jpg, "a")]);
@@ -80,6 +103,31 @@ function worldNode(
 }
 
 describe("buildWorldZip", () => {
+  it("labels missing legacy content and does not claim it is restorable", async () => {
+    const zip = await JSZip.loadAsync(await buildWorldZip([worldNode("missing", null, null)], null, null));
+    const manifest = JSON.parse(await zip.file("manifest.json")!.async("string"));
+    expect(manifest).toMatchObject({ version: 1, metadata_consistency: "caller_supplied", restore_supported: false, missing_files: [{ kind: "node", id: "missing" }] });
+    expect(manifest.files.every((f: { sha256: string; bytes: number }) => /^[a-f0-9]{64}$/.test(f.sha256) && f.bytes > 0)).toBe(true);
+  });
+  it("bundles mesh bytes and provenance with stable asset ids", async () => {
+    const bytes=new Uint8Array([1,2,3]);
+    const zip=await JSZip.loadAsync(await buildWorldZip([],null,null,[],[],[],undefined,[{id:"mesh_one",sha256:"digest",model:"provider-model",prompt:"A bakery",bytes}]));
+    expect(await zip.file("meshes/1.glb")!.async("uint8array")).toEqual(bytes);
+    expect(JSON.parse(await zip.file("mesh-assets.json")!.async("string"))).toEqual([{id:"mesh_one",sha256:"digest",model:"provider-model",prompt:"A bakery",file:"meshes/1.glb",missing:false}]);
+  });
+  it("retains build-bound mesh dependency provenance in the portable manifest", async () => {
+    const dependency = { kind: "mesh", place_id: "district", revision: 2, input_sha256: "source", build_key: "world:district:build", result_sha256: "layout", plan_sha256: "meshes" };
+    const mesh = { id: "mesh_built", sha256: "digest", model: "provider-model", prompt: "A monument", bytes: new Uint8Array([4, 5, 6]), request_id: "provider-request", parameters: { textured: true }, dependency };
+    const zip = await JSZip.loadAsync(await buildWorldZip([], null, null, [], [], [], undefined, [mesh]));
+    const manifest = JSON.parse(await zip.file("mesh-assets.json")!.async("string"));
+    expect(manifest).toEqual([{ id: mesh.id, sha256: mesh.sha256, model: mesh.model, prompt: mesh.prompt, request_id: mesh.request_id, parameters: mesh.parameters, dependency, file: "meshes/1.glb", missing: false }]);
+    expect(await zip.file(manifest[0].file)!.async("uint8array")).toEqual(mesh.bytes);
+  });
+  it("exports map artwork heads and geometry-bound provenance", async () => {
+    const artwork = { heads: [{ node_id: "painted", map_root_node_id: "map" }], versions: [{ node_id: "painted", scene_revision: 3, registration: { x: 45, y: 60, width: 10, rotation: 0 } }] };
+    const zip = await JSZip.loadAsync(await buildWorldZip([], null, null, [], [], [], artwork));
+    expect(JSON.parse(await zip.file("map-artwork.json")!.async("string"))).toEqual(artwork);
+  });
   it("preserves the immutable transition binding in the exported graph", async () => {
     const transition = {
       version: 1 as const, source_node_id: "a", source_image_key: "original.jpg",

@@ -1,0 +1,461 @@
+{
+  "version": 2,
+  "solver": "scipy.optimize.least_squares",
+  "success": true,
+  "selected": "shape_fit",
+  "footprints_changed": true,
+  "footprint_change": "Rear depth changes; front wall, entrance, camera, barrels and well remain fixed. Preview before applying.",
+  "observations": {
+    "version": 1,
+    "image": "street-environment.png",
+    "width": 1672,
+    "height": 941,
+    "provenance": "Manual visible feature annotations, not surveyed or automatically recovered geometry",
+    "anchors": [
+      {
+        "id": "near_eave",
+        "label": "Near eave",
+        "point": [
+          18,
+          5.5,
+          13
+        ],
+        "pixel": [
+          852,
+          179
+        ],
+        "fit": true,
+        "height": "eave"
+      },
+      {
+        "id": "rear_eave",
+        "label": "Rear eave",
+        "point": [
+          18,
+          5.5,
+          18.4
+        ],
+        "pixel": [
+          445,
+          244
+        ],
+        "fit": true,
+        "height": "eave"
+      },
+      {
+        "id": "roof_ridge",
+        "label": "Roof ridge",
+        "point": [
+          13,
+          7,
+          13
+        ],
+        "pixel": [
+          937,
+          65
+        ],
+        "fit": true,
+        "height": "ridge"
+      },
+      {
+        "id": "far_eave",
+        "label": "Far eave",
+        "point": [
+          8,
+          5.5,
+          13
+        ],
+        "pixel": [
+          1011,
+          307
+        ],
+        "fit": true,
+        "height": "eave"
+      },
+      {
+        "id": "near_ground",
+        "label": "Near wall foot",
+        "point": [
+          18,
+          0,
+          13
+        ],
+        "pixel": [
+          856,
+          665
+        ],
+        "fit": true
+      },
+      {
+        "id": "door",
+        "label": "Door threshold",
+        "point": [
+          12.6,
+          0,
+          12.86
+        ],
+        "pixel": [
+          952,
+          621
+        ],
+        "fit": false
+      },
+      {
+        "id": "barrels",
+        "label": "Barrel tops",
+        "point": [
+          19.3,
+          1.1,
+          14
+        ],
+        "pixel": [
+          718,
+          580
+        ],
+        "fit": true
+      },
+      {
+        "id": "well",
+        "label": "Well rim center",
+        "point": [
+          25.3,
+          0.9,
+          12.8
+        ],
+        "pixel": [
+          160,
+          865
+        ],
+        "fit": false
+      }
+    ]
+  },
+  "results": [
+    {
+      "name": "original",
+      "parameters": [
+        27.0,
+        2.2,
+        9.4,
+        2.7187387274568526,
+        0.03906246991872197,
+        60.0,
+        5.5,
+        7.0
+      ],
+      "fit_rms_px": 86.78557166969118,
+      "held_out_rms_px": 28.178783260137273,
+      "anchors": [
+        {
+          "id": "near_eave",
+          "projected": [
+            870.1031319714334,
+            227.89531671948595
+          ],
+          "error_px": 52.13900060678164
+        },
+        {
+          "id": "rear_eave",
+          "projected": [
+            529.9692630984522,
+            278.45264342019425
+          ],
+          "error_px": 91.68838699711672
+        },
+        {
+          "id": "roof_ridge",
+          "projected": [
+            975.1400396140864,
+            230.89080243875858
+          ],
+          "error_px": 170.2187444306276
+        },
+        {
+          "id": "far_eave",
+          "projected": [
+            1030.4462825671844,
+            360.08952401508316
+          ],
+          "error_px": 56.53897298174837
+        },
+        {
+          "id": "near_ground",
+          "projected": [
+            870.8668421743768,
+            689.4161899401207
+          ],
+          "error_px": 28.586243674709685
+        },
+        {
+          "id": "door",
+          "projected": [
+            991.2677001944744,
+            626.4776809136899
+          ],
+          "error_px": 39.64791629777444
+        },
+        {
+          "id": "barrels",
+          "projected": [
+            740.7963418830386,
+            603.606229130362
+          ],
+          "error_px": 32.816569854321
+        },
+        {
+          "id": "well",
+          "projected": [
+            159.00371694566422,
+            868.8907332681515
+          ],
+          "error_px": 4.016265091880457
+        }
+      ]
+    },
+    {
+      "name": "free_camera",
+      "parameters": [
+        27.37417718175045,
+        2.4430477730618043,
+        9.871444756843733,
+        2.8013201103957965,
+        -0.0317715270654346,
+        54.285958176097985,
+        5.152681217352293,
+        8.344016377004754
+      ],
+      "fit_rms_px": 11.249366808615308,
+      "held_out_rms_px": 51.4043606824097,
+      "anchors": [
+        {
+          "id": "near_eave",
+          "projected": [
+            852.8178013908597,
+            187.19013443581827
+          ],
+          "error_px": 8.230862724627853
+        },
+        {
+          "id": "rear_eave",
+          "projected": [
+            447.1662168285607,
+            226.6850021693478
+          ],
+          "error_px": 17.44997550782895
+        },
+        {
+          "id": "roof_ridge",
+          "projected": [
+            953.7896432990453,
+            65.0449981755558
+          ],
+          "error_px": 16.78970359908064
+        },
+        {
+          "id": "far_eave",
+          "projected": [
+            1003.9992301290463,
+            311.82783086122816
+          ],
+          "error_px": 8.504041957250706
+        },
+        {
+          "id": "near_ground",
+          "projected": [
+            852.5412386091378,
+            666.7025552893358
+          ],
+          "error_px": 3.855090773531021
+        },
+        {
+          "id": "door",
+          "projected": [
+            965.3618727675902,
+            590.9339309476384
+          ],
+          "error_px": 32.90149163972122
+        },
+        {
+          "id": "barrels",
+          "projected": [
+            714.2956862976067,
+            577.9398461903072
+          ],
+          "error_px": 4.238652347778752
+        },
+        {
+          "id": "well",
+          "projected": [
+            199.04070922959318,
+            916.7506663248528
+          ],
+          "error_px": 64.82521455588012
+        }
+      ]
+    },
+    {
+      "name": "vertical_only",
+      "parameters": [
+        27.0,
+        2.2,
+        9.4,
+        2.7187387274568526,
+        0.03906246991872197,
+        60.0,
+        6.1170629661490405,
+        9.997777138980648
+      ],
+      "fit_rms_px": 44.80538177233861,
+      "held_out_rms_px": 28.178783260137273,
+      "anchors": [
+        {
+          "id": "near_eave",
+          "projected": [
+            870.0195310445781,
+            177.37409464387008
+          ],
+          "error_px": 18.092735207635315
+        },
+        {
+          "id": "rear_eave",
+          "projected": [
+            530.5815516418587,
+            237.11819010005368
+          ],
+          "error_px": 85.85779690236134
+        },
+        {
+          "id": "roof_ridge",
+          "projected": [
+            974.0195704508006,
+            64.90615279603588
+          ],
+          "error_px": 37.019689405227105
+        },
+        {
+          "id": "far_eave",
+          "projected": [
+            1030.198915281655,
+            333.70334664951724
+          ],
+          "error_px": 32.888707336659635
+        },
+        {
+          "id": "near_ground",
+          "projected": [
+            870.8668421743768,
+            689.4161899401207
+          ],
+          "error_px": 28.586243674709685
+        },
+        {
+          "id": "door",
+          "projected": [
+            991.2677001944744,
+            626.4776809136899
+          ],
+          "error_px": 39.64791629777444
+        },
+        {
+          "id": "barrels",
+          "projected": [
+            740.7963418830386,
+            603.606229130362
+          ],
+          "error_px": 32.816569854321
+        },
+        {
+          "id": "well",
+          "projected": [
+            159.00371694566422,
+            868.8907332681515
+          ],
+          "error_px": 4.016265091880457
+        }
+      ]
+    },
+    {
+      "name": "shape_fit",
+      "parameters": [
+        27.0,
+        2.2,
+        9.4,
+        2.7187387274568526,
+        0.03906246991872197,
+        60.0,
+        6.215066544955754,
+        8.998207218762014,
+        7.163506037787302,
+        1.9999999999999998
+      ],
+      "fit_rms_px": 23.12871334074881,
+      "held_out_rms_px": 28.178783260137273,
+      "anchors": [
+        {
+          "id": "near_eave",
+          "projected": [
+            870.0062910274598,
+            169.37296510765026
+          ],
+          "error_px": 20.41828389909642
+        },
+        {
+          "id": "rear_eave",
+          "projected": [
+            445.3500639733679,
+            245.95701117820562
+          ],
+          "error_px": 1.9880738258605695
+        },
+        {
+          "id": "roof_ridge",
+          "projected": [
+            941.5248765715546,
+            64.97764163505673
+          ],
+          "error_px": 4.524931809904628
+        },
+        {
+          "id": "far_eave",
+          "projected": [
+            1030.1596856589194,
+            329.5188006564231
+          ],
+          "error_px": 29.566703190452667
+        },
+        {
+          "id": "near_ground",
+          "projected": [
+            870.8668421743768,
+            689.4161899401207
+          ],
+          "error_px": 28.586243674709685
+        },
+        {
+          "id": "door",
+          "projected": [
+            991.2677001944744,
+            626.4776809136899
+          ],
+          "error_px": 39.64791629777444
+        },
+        {
+          "id": "barrels",
+          "projected": [
+            740.7963418830386,
+            603.606229130362
+          ],
+          "error_px": 32.816569854321
+        },
+        {
+          "id": "well",
+          "projected": [
+            159.00371694566422,
+            868.8907332681515
+          ],
+          "error_px": 4.016265091880457
+        }
+      ]
+    }
+  ]
+}

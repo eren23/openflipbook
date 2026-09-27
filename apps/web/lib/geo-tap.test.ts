@@ -56,6 +56,9 @@ const closeupViewOf = (
 
 
 describe("geoTapRequest (close the geometric tap loop)", () => {
+  it("defers an uncalibrated street image to image classification", () => {
+    expect(geoTapRequest({ entities: [geo("drum", "Drum", 50, 30)], bounds: CROP }, "street", { x_pct: .5, y_pct: .5 }, 16 / 9, undefined, { node_id: "street", level: "street", observer: null, map_crop: null })).toBeNull();
+  });
   it("tapping a place → scene_view (observer); a FIRST enter steers by nothing", () => {
     const map = {
       entities: [
@@ -569,7 +572,8 @@ describe("geoTapForEntity (W2: enter the place the lettering names)", () => {
 
   it("carries the focus's frame-mates as surroundings", () => {
     const tower = geo("tower", "Tower of Art", 60, 30, { height: 18 });
-    const bridge = geo("bridge", "Brass Bridge", 40, 40, {
+    // Beyond the tower, in front of the camera that frames it from the west.
+    const bridge = geo("bridge", "Brass Bridge", 80, 32, {
       visual: "an iron bridge with hippo statues",
     });
     const t = geoTapForEntity(

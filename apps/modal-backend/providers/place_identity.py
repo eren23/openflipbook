@@ -12,7 +12,7 @@ from typing import Any
 
 from PIL import Image
 
-from providers import judge
+from providers import arrival, judge
 from providers.generate_modes._events import ViewVerdict
 from providers.image import GeneratedImage, encode_data_url
 from providers.render_budget import RenderBudget
@@ -72,6 +72,7 @@ async def verify_and_render(
     facts: list[str],
     abort: Callable[[str], Awaitable[None]],
     interior: bool = False,
+    exterior: bool = False,
     zoom: bool = False,
     map_zoom: bool = False,
     outward: bool = False,
@@ -114,6 +115,8 @@ async def verify_and_render(
             calls["direction"] = judge.score_step_in(reference, image.jpeg_bytes)
         if grounding:
             calls["spatial"] = grounding(image)
+        if exterior:
+            calls["arrival"] = arrival.check_exterior(reference, image.jpeg_bytes, label)
         # All judges review these exact final bytes. No corrective edit runs
         # after this gate; a retry is a new attempt through the entire gate.
         results = await asyncio.gather(*(
@@ -123,7 +126,14 @@ async def verify_and_render(
         scores: dict[str, float | None] = {}
         report = None
         failures: list[str] = []
+        arrival_result = None
         for axis, result in zip(calls, results, strict=True):
+            if axis == "arrival":
+                arrival_result = arrival.parse_arrival(result)
+                if arrival_result["status"] != "pass":
+                    failed_axes = [key for key, state in arrival_result["checks"].items() if state != "pass"]
+                    failures.append(f"Arrival ({', '.join(failed_axes)}): {arrival_result['rationale']}")
+                continue
             if axis == "spatial":
                 report = result if isinstance(result, dict) else None
                 value = report.get("score") if report else None
@@ -145,6 +155,8 @@ async def verify_and_render(
             "medium": scores.get("medium"), "detail": scores.get("detail"), "interior": scores.get("interior"),
             "attempts": max(index + 1, budget.attempts), "accepted": not failures,
         }
+        if arrival_result is not None:
+            receipt["arrival"] = arrival_result
         candidate = VerifiedRender(image, receipt, report, "Quality checks did not pass." if failures else "")
         score = min((v if v is not None else -1) for v in scores.values())
         if not failures:

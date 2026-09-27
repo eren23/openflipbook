@@ -49,7 +49,9 @@ services:
   # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
   # URLs from the published port (R2_PUBLIC_BASE_URL=http://localhost:9000/...).
   minio:
-    image: minio/minio:latest
+    # MinIO pulled its images from Docker Hub, so this reads from their own
+    # registry, pinned: `latest` there has since dropped the web console.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: openflipbook-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -66,7 +68,7 @@ services:
   # browser's <img src> GETs aren't 403'd. Retries until Minio answers, then
   # exits — `web` waits on it completing.
   minio-setup:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: openflipbook-minio-setup
     depends_on:
       - minio
@@ -137,6 +139,37 @@ services:
       timeout: 5s
       retries: 3
 
+  place-worker:
+    profiles: ["world-build"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: place-worker
+    restart: unless-stopped
+    # Allow in-flight provider, download and storage operations to drain.
+    stop_grace_period: 360s
+    env_file:
+      - path: .env
+        required: false
+      - path: apps/web/.env.local
+        required: false
+    environment:
+      MODAL_API_URL: http://backend:8787
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/?directConnection=true}
+      MONGODB_DB: ${MONGODB_DB:-openflipbook}
+      R2_ENDPOINT: ${R2_ENDPOINT:-http://minio:9000}
+      R2_BUCKET: ${R2_BUCKET:-openflipbook}
+      R2_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
+      R2_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:9000/openflipbook}
+    depends_on:
+      backend:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      minio-setup:
+        condition: service_completed_successfully
+
   web:
     build:
       context: .
@@ -156,6 +189,10 @@ services:
         # DESCENT_AUTO: background arrival clips (~$0.24/edge). Default off.
         NEXT_PUBLIC_DESCENT_AUTO: ${NEXT_PUBLIC_DESCENT_AUTO:-}
         NEXT_PUBLIC_SPATIAL_TRANSITIONS: ${NEXT_PUBLIC_SPATIAL_TRANSITIONS:-}
+        NEXT_PUBLIC_WORLD_LAYOUT_CONTROL: ${NEXT_PUBLIC_WORLD_LAYOUT_CONTROL:-}
+        NEXT_PUBLIC_WORLD_ROUTE_DRAW: ${NEXT_PUBLIC_WORLD_ROUTE_DRAW:-}
+        NEXT_PUBLIC_WORLD_SCENES: ${NEXT_PUBLIC_WORLD_SCENES:-0}
+        NEXT_PUBLIC_SKETCH_ENABLED: ${NEXT_PUBLIC_SKETCH_ENABLED:-0}
     container_name: openflipbook-web
     restart: unless-stopped
     # Same posture as the backend: the root .env (single-file demo) carries

@@ -43,7 +43,7 @@ function normAngle(a: number): number {
   return v;
 }
 
-function hPos(x: number): string {
+export function hPos(x: number): string {
   if (x < 0.2) return "far-left";
   if (x < 0.4) return "left";
   if (x < 0.6) return "center";
@@ -51,13 +51,13 @@ function hPos(x: number): string {
   return "far-right";
 }
 
-function vPos(y: number): string {
+export function vPos(y: number): string {
   if (y < 0.4) return "top";
   if (y < 0.66) return "mid";
   return "bottom";
 }
 
-function sizeBin(s: number): string {
+export function sizeBin(s: number): string {
   if (s < 0.08) return "tiny";
   if (s < 0.18) return "small";
   if (s < 0.35) return "medium";
@@ -404,7 +404,7 @@ export function resolveAbsoluteFrame(
  *  untouched — pre-nesting data stays byte-identical. `all` supplies the
  *  parent chains: pass the full map, not the filtered subset. */
 export function toAbsoluteEntities<
-  T extends FrameNode & { footprint: { w: number; d: number } },
+  T extends FrameNode & { footprint: { w: number; d: number }; border?: WorldVec2[] },
 >(subset: T[], all: FrameNode[]): T[] {
   const byId = new Map(all.map((e) => [e.id, e]));
   return subset.map((e) => {
@@ -415,6 +415,7 @@ export function toAbsoluteEntities<
       ...e,
       pos: f.pos,
       footprint: { w: e.footprint.w * f.unit, d: e.footprint.d * f.unit },
+      ...(e.border ? { border: e.border.map(p => ({ x: f.pos.x + (p.x - e.pos.x) * f.unit, y: f.pos.y + (p.y - e.pos.y) * f.unit })) } : {}),
     };
   });
 }

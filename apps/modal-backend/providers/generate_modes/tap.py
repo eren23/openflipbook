@@ -367,6 +367,40 @@ async def stream_tap(
     if session_lock:
         style_anchor = session_lock
 
+    arrival_intent = body.arrival_intent if strict and render_mode == "place_scene" else None
+    physical_reference_receipt = None
+    if arrival_intent == "exterior":
+        from providers.arrival import EXTERIOR
+
+        if env_flag("WORLD_ARRIVAL_PHYSICAL_REFERENCE"):
+            import asyncio
+
+            from providers.arrival_reference import resolve_physical_reference
+
+            await _abort_if_disconnected("pre-reference")
+            yield _sse({"type": "status", "stage": "planning"}, trace_id)
+            try:
+                physical = await asyncio.wait_for(resolve_physical_reference(
+                    body.place_reference.image_data_url, body.place_reference.bbox,
+                    body.place_reference.label, body.place_reference.visual,
+                    curated=(body.place_reference.provenance or {}).get("kind") == "curated",
+                ), timeout=60)
+                physical_reference_receipt = physical.receipt
+                canonical_bytes = physical.crop
+            except Exception:
+                canonical_bytes = None
+                physical_reference_receipt = {"status": "unknown", "rationale": "Reference inspection unavailable."}
+            log("info", "arrival.physical_reference", target_geo_id=body.target_geo_id, **physical_reference_receipt)
+            await _abort_if_disconnected("post-reference")
+            if canonical_bytes is None:
+                yield _sse({"type": "error", "message": "The full selected structure could not be verified in the reference. Your world is unchanged.", "reference_verdict": physical_reference_receipt}, trace_id)
+                return
+        place_form_resolved = "generic"
+        subject_context = f"{subject_context or ''}\n{EXTERIOR}"
+        effective_query = f"{effective_query}\n{EXTERIOR}"
+    elif arrival_intent == "interior":
+        place_form_resolved = "interior"
+
     # 2. Plan (with optional style anchor for visual continuity, and
     #    parent + subject_context for semantic continuity — keeps an
     #    ambiguous click subject in the parent page's domain instead of
@@ -516,6 +550,8 @@ async def stream_tap(
         subject_context=subject_context,
         place_form=place_form_resolved,
     )
+    if arrival_intent == "exterior" and view_spec is not None:
+        view_spec = {**view_spec, "projection": "eye_level", "source": "policy"}
     if view_spec is not None:
         log(
             "info",
@@ -751,7 +787,11 @@ async def stream_tap(
     # paints before the judge tail + keep-best retry. None = feature off.
     zoom_preview_q: _asyncio.Queue[bytes] | None = None
     strict_grounding: dict[str, Any] | None = None
+    strict_final_prompt: str | None = None
     if strict:
+        import hashlib
+
+        from providers.arrival import reference_inputs
         from providers.place_identity import verify_and_render
         from providers.render_budget import RenderBudget
 
@@ -763,19 +803,32 @@ async def stream_tap(
             yield _sse({"type": "error", "message": "The selected model cannot honor a place reference."}, trace_id)
             return
         budget = RenderBudget(body.session_id, min(2, body.max_attempts or 2), _time.monotonic() + max(0, ingress_timeout_s - 120 - (_time.perf_counter() - started)))
-        instruction = (zoom_instruction if use_continuation else enter_instruction) + (
-            "\nImage 1 is the current world context. Image 2 is the canonical crop of "
-            f"{body.place_reference.label}. Render this SPECIFIC place, not a similar one. "
-            f"Preserve its layout and distinctive features: {body.place_reference.visual}. "
-            "Context is not permission to invent, move or rename landmarks."
+        refs = reference_inputs(
+            body.image, region_ref,
+            zoom_instruction if use_continuation else enter_instruction,
+            body.place_reference.label, body.place_reference.visual,
+            exterior=arrival_intent == "exterior",
         )
-        source_image = body.image
+        log("info", "arrival.references", target_geo_id=body.target_geo_id,
+            policy=refs.policy, reference_sha256=hashlib.sha256(canonical_bytes).hexdigest(),
+            provenance=body.place_reference.provenance,
+            bbox=physical_reference_receipt.get("effective_bbox") if physical_reference_receipt else body.place_reference.bbox.model_dump(),
+            original_bbox=body.place_reference.bbox.model_dump(),
+            physical_reference=physical_reference_receipt)
 
         async def _strict_render(suffix: str, index: int) -> GeneratedImage:
-            return await image_edit_provider.edit_image(
-                source_image, instruction + "\n" + suffix, model_override=model,
-                identity_ref_url=region_ref, budget=budget,
+            nonlocal strict_final_prompt
+            strict_final_prompt = refs.instruction + "\n" + suffix
+            rendered = await image_edit_provider.edit_image(
+                refs.source, strict_final_prompt, model_override=model,
+                identity_ref_url=refs.identity, budget=budget,
+                **({"context_ref_url": refs.context} if refs.context else {}),
+                **({"aspect_ratio": body.aspect_ratio} if arrival_intent == "exterior" and image_edit_provider.supports_aspect_ratio(model) else {}),
             )
+            log("info", "arrival.candidate", target_geo_id=body.target_geo_id, attempt=index + 1,
+                policy=refs.policy, output_sha256=hashlib.sha256(rendered.jpeg_bytes).hexdigest(),
+                model=rendered.model, provider_request_id=rendered.provider_request_id)
+            return rendered
 
         async def _strict_ground(img: GeneratedImage) -> dict[str, Any] | None:
             _, report = await _run_grounding(img, [e.model_dump() for e in body.expected_layout], repair_on=False, abort=_abort_if_disconnected)
@@ -786,6 +839,7 @@ async def stream_tap(
             label=body.place_reference.label, visual=body.place_reference.visual,
             projection=str(view_spec["projection"]), facts=plan.facts,
             abort=_abort_if_disconnected, interior=interior_enter,
+            exterior=arrival_intent == "exterior",
             zoom=use_continuation, map_zoom=use_continuation and zoom_register == "map",
             grounding=_strict_ground if body.expected_layout else None,
         )
@@ -959,6 +1013,21 @@ async def stream_tap(
         # dispatch: explicit per-request model > the steep-aware router
         # pick (enter_model_slug, resolved above with the view).
         enter_style_ref = _condition_url_for_role(body, "style")
+        # Camera-view block layout of the world map (client role "layout"):
+        # the geometry as pixels instead of left/right words. Only when every
+        # model this enter may call takes a multi-image reference.
+        enter_layout_ref = _condition_url_for_role(body, "layout")
+        if enter_layout_ref and all(
+            image_edit_provider.supports_identity_reference(m)
+            for m in (enter_model_slug, enter_retry_model_slug)
+            if m
+        ):
+            enter_instruction += "\n\n" + image_edit_provider.layout_reference_sentence(
+                [(item.color, item.label) for item in body.layout_legend]
+            )
+        else:
+            enter_layout_ref = None
+        log("info", "tap.layout_control", attached=enter_layout_ref is not None, legend=len(body.layout_legend))
         # The render loop (VIEW_LOOP, default ON): EVERY deliberate-camera
         # enter is judged — same-place + medium floors always, conformance
         # per projection. The loop used to arm on steep projections only
@@ -1007,6 +1076,7 @@ async def stream_tap(
                     instr,
                     model_override=model,
                     style_ref_url=enter_style_ref,
+                    layout_ref_url=enter_layout_ref,
                 )
 
             async def _render_enter(suffix: str) -> GeneratedImage:
@@ -1114,6 +1184,7 @@ async def stream_tap(
                     enter_instruction,
                     model_override=enter_model_slug,
                     style_ref_url=enter_style_ref,
+                    layout_ref_url=enter_layout_ref,
                 )
             )
     else:
@@ -1235,7 +1306,7 @@ async def stream_tap(
         "prompt_author_model": text_model,
         "session_id": body.session_id,
         "final_prompt": (
-            zoom_instruction
+            strict_final_prompt if strict_final_prompt is not None else zoom_instruction
             if use_continuation
             else enter_instruction
             if use_enter_edit
@@ -1263,6 +1334,10 @@ async def stream_tap(
     if strict and body.scene_view:
         # Persist the server-resolved camera and focus, not the client's hint.
         final_payload["scene_view"] = body.scene_view.model_dump()
+        if arrival_intent == "exterior":
+            final_payload["scene_view"]["place_form"] = "generic"
+            final_payload["scene_view"]["level"] = "eye"
+            final_payload["scene_view"]["view"] = {"projection": "eye_level", "source": "policy"}
     # INTERIOR ENTERS arrival stamp (additive; absent otherwise → unchanged
     # wire shape): the arrival is INDOORS at the room rung — echo the
     # request's scene_view with scale_tier/place_form stamped so the client

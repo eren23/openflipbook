@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowLeft, Play, RotateCcw } from "lucide-react";
 import { SpatialTransitionLayer } from "@/components/SpatialTransitionLayer";
 import { useSpatialNavigation, decodeSpatialImage } from "@/hooks/useSpatialNavigation";
@@ -40,6 +41,7 @@ export default function SpatialStudy() {
   const motion = scrub === null ? player.motion : { plan, progress: scrub, ...dimensions };
   return <main style={{ maxWidth: 1500, margin: "auto", padding: 24 }}>
     <h1 style={{ fontSize: 24 }}>Spatial Transition Study</h1>
+    <Link href="/dev/spatial-transitions/controlled" className="underline">Controlled lighthouse pilot</Link>
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, margin: "20px 0" }}>
       <select aria-label="Fixture" value={selection} onChange={e => { reset(); setSelection(Number(e.target.value)); setControlImage(null); }}>
         {SPATIAL_STUDY_CASES.map((c, i) => <option key={c.id} value={i}>{c.title}</option>)}

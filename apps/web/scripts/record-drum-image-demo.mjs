@@ -1,0 +1,78 @@
+import { chromium } from "@playwright/test";
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { resolve } from "node:path";
+import JSZip from "jszip";
+
+if (process.env.DRUM_LIVE_EDIT !== "1") throw new Error("Requires DRUM_LIVE_EDIT=1: one paid native Sketch edit");
+const base = process.env.E2E_BASE_URL || "http://127.0.0.1:3003";
+if (new URL(base).hostname !== "127.0.0.1") throw new Error("Local demo only");
+const out = resolve(process.env.DRUM_DEMO_OUTPUT || "../../docs/research/assets/ankh-image-first");
+await mkdir(out, { recursive: true });
+const receiptPath = resolve(out, "receipt.json");
+try { await access(receiptPath); throw new Error("Receipt exists; refusing another generation"); } catch (e) { if (e.code !== "ENOENT") throw e; }
+const browser = await chromium.launch();
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, recordVideo: { dir: out, size: { width: 1440, height: 1000 } } });
+const page = await context.newPage(), video = page.video(), errors = [];
+page.on("pageerror", e => errors.push(e.message));
+const record = { status: "started", provider: "fal-ai/nano-banana-pro/edit", reservation_usd: 0.3, events: [] };
+const started = Date.now();
+const event = name => record.events.push({ name, seconds: (Date.now() - started) / 1000 });
+try {
+  await page.goto(`${base}/sketch/world/ankh`);
+  await page.getByAltText("Ankh-Morpork city map").evaluate(img => img.decode()); event("map");
+  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "Focus Mended Drum", exact: true }).click();
+  await page.waitForTimeout(2200); event("map_detail");
+  await page.getByRole("button", { name: "Enter the Drum's street", exact: true }).click();
+  await page.getByAltText("The Mended Drum on Filigree Street").evaluate(img => img.decode());
+  await page.screenshot({ path: resolve(out, "environment.png") }); event("environment");
+  await page.waitForTimeout(1600);
+  await page.getByRole("link", { name: "Edit in Sketch", exact: true }).click();
+  await page.getByRole("radio", { name: "Rectangle", exact: true }).waitFor();
+  await page.getByRole("textbox", { name: "Sketch title" }).waitFor();
+  if (await page.getByRole("combobox", { name: "Image model" }).inputValue() !== "nano") throw new Error("Unexpected model selection");
+  await page.getByRole("button", { name: "Rectangle region", exact: true }).click();
+  const bounds = await page.getByTestId("sketch-canvas").boundingBox();
+  const width = 1672, height = 941, scale = Math.min(1, (1440 - 380) / width, (1000 - 360) / height);
+  const left = bounds.x + bounds.width / 2 - width * scale / 2, top = bounds.y + bounds.height / 2 - height * scale / 2;
+  await page.mouse.move(left + 400 * scale, top + 40 * scale); await page.mouse.down();
+  await page.mouse.move(left + 1040 * scale, top + 340 * scale, { steps: 35 }); await page.mouse.up(); event("mask_drawn");
+  await page.getByRole("button", { name: "Save drawing", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "Saved" }).waitFor();
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "Bundle", exact: true }).click();
+  await (await download).saveAs(resolve(out, "roof-edit.ofb-sketch"));
+  const zip = await JSZip.loadAsync(await readFile(resolve(out, "roof-edit.ofb-sketch")));
+  for (const name of ["preview.png", "mask.png", "sketch.json"]) await writeFile(resolve(out, name), await zip.file(name).async("nodebuffer"));
+  const state = JSON.parse(await zip.file("sketch.json").async("string"));
+  const mask = state.scene.elements.find(e => e.customData?.role === "mask");
+  if (!mask || mask.x > 420 || mask.y > 60 || mask.x + mask.width < 1010 || mask.y + mask.height < 320) throw new Error("Drawn region misses the roof; not submitting");
+  await page.screenshot({ path: resolve(out, "drawn-edit.png") });
+  record.draft_url = page.url(); record.prompt = state.prompt;
+  await writeFile(receiptPath, JSON.stringify(record, null, 2));
+  const pending = page.waitForResponse(r => r.url().endsWith("/api/generate-page") && r.request().method() === "POST", { timeout: 900000 });
+  event("generation_start"); await page.getByRole("button", { name: "Generate", exact: true }).click();
+  const response = await pending, result = await response.json();
+  record.candidate = result.candidate;
+  if (!response.ok() || result.candidate?.mock || result.candidate?.status !== "ready") throw new Error(result.error || "Generation was not a real ready candidate");
+  if (result.candidate.outside_changed !== 0) throw new Error("Protected image pixels changed");
+  event("generation_complete");
+  await page.getByAltText("Generated candidate").evaluate(img => img.decode());
+  await page.getByRole("slider", { name: "Before and after comparison" }).fill("100"); await page.waitForTimeout(800);
+  await page.getByRole("slider", { name: "Before and after comparison" }).fill("0");
+  await page.screenshot({ path: resolve(out, "edited-environment.png") }); event("edit_shown");
+  const imageResponse = await context.request.get(result.candidate.image_url);
+  if (!imageResponse.ok()) throw new Error("Candidate download failed");
+  await writeFile(resolve("public/demos/ankh-morpork/street-edit.png"), await imageResponse.body());
+  await page.getByRole("button", { name: "Keep Version", exact: true }).click();
+  await page.getByRole("link", { name: "Open in World", exact: true }).waitFor(); event("kept");
+  await page.reload(); await page.getByRole("button", { name: "Compare", exact: true }).click();
+  await page.getByRole("link", { name: "Open in World", exact: true }).waitFor();
+  await page.screenshot({ path: resolve(out, "saved-version.png") }); event("reloaded");
+  record.status = "complete"; record.errors = errors;
+} catch (error) { record.status = "failed"; record.error = String(error); await page.screenshot({ path: resolve(out, "failed.png") }); }
+finally {
+  await writeFile(receiptPath, JSON.stringify(record, null, 2));
+  await context.close(); await video.saveAs(resolve(out, "image-first-uncut.webm")); await browser.close();
+}
+console.log(JSON.stringify(record));
+if (record.status !== "complete") process.exitCode = 1;

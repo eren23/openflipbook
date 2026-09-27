@@ -43,9 +43,10 @@ export function EnterableMarkers({
     // Nested places resolve through their parent chain to the absolute map
     // frame (after an OUTWARD ascend every former root is nested — the old
     // top-level-only filter blanked the whole map); the crop culls whatever
-    // resolves outside the displayed window.
+    // resolves outside the displayed window. 3D-editor scene objects
+    // (scene_id) are a second copy of the town at other positions: no rings.
     const places = toAbsoluteEntities(
-      entities.filter((e) => e.kind === "place"),
+      entities.filter((e) => e.kind === "place" && !e.scene_id),
       entities,
     );
     return cropEntities(places, frame).map((e) => ({

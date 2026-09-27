@@ -62,8 +62,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.ts", "**/*.config.{js,mjs,cjs,ts}"],
-    languageOptions: { globals: { ...globals.node } },
+    files: ["scripts/**/*.{ts,mjs}", "apps/*/scripts/**/*.mjs", "**/*.config.{js,mjs,cjs,ts}"],
+    // Recorders drive a browser, so page.evaluate bodies use DOM globals.
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
     rules: {
       "no-console": "off",
     },

@@ -234,6 +234,16 @@ describe("listPriorEntitiesForExtraction (prior slice scoring)", () => {
     expect(await listPriorEntitiesForExtraction("s1")).toEqual([]);
   });
 
+  it("a 3D scene copy never shadows the painted entity with the same name", async () => {
+    seed("s1", [
+      doc("inn", { name: "The Copper Kettle", updated_at: new Date("2026-01-01") }),
+      doc("scene-inn", { name: "the copper kettle ", scene_id: "sc1", updated_at: new Date("2026-06-01") }),
+      doc("scene-only", { name: "Candleworks", scene_id: "sc1" }),
+    ]);
+    const ids = (await listPriorEntitiesForExtraction("s1", "The Copper Kettle")).map((e) => e.id);
+    expect(ids).toEqual(["inn", "scene-only"]);
+  });
+
   it("caption whole-word hits outrank recency; substring-only hits do not", async () => {
     seed("s1", [
       doc("Ana", { aliases: ["Annie"], updated_at: new Date("2026-01-01") }),

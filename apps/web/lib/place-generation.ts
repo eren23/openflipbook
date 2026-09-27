@@ -1,4 +1,5 @@
 import type { GenerateRequestBody } from "@openflipbook/config";
+import { createHash } from "node:crypto";
 import { getDb, type NodeDoc } from "./db";
 import { envFlag } from "./env-flag";
 import { frameCropToImageBox, geoTapForEntity, MAP_IMAGE_FRAME } from "./geo-tap";
@@ -15,6 +16,8 @@ export async function resolvePlaceGeneration(body: GenerateRequestBody): Promise
   const next = { ...body };
   delete next.place_reference;
   delete next.strict_world;
+  delete next.arrival_intent;
+  if (body.arrival_intent !== undefined && !["exterior", "interior"].includes(body.arrival_intent)) throw new PlaceError("Invalid arrival intent", 400);
   if (body.strict_world && !envFlag("WORLD_IDENTITY_STRICT")) throw new PlaceError("Strict world generation is not enabled on this server", 409);
   const strict = !!body.world_mode && !!body.strict_world;
   if (strict) next.strict_world = true;
@@ -45,12 +48,18 @@ export async function resolvePlaceGeneration(body: GenerateRequestBody): Promise
   next.prefetched_subject = place.label;
   next.prefetched_subject_context = place.visual;
   if (!strict) return next;
+  if (body.render_mode === "place_scene") {
+    const intent = body.arrival_intent ?? (node.scene_view?.level === "map" ? "exterior" : undefined);
+    if (intent) next.arrival_intent = intent;
+  }
+  const exterior = next.arrival_intent === "exterior";
   const absolute = toAbsoluteEntities(map.entities, map.entities).find(e => e.id === place.id)!;
   const placeCrop = { x: absolute.pos.x - absolute.footprint.w / 2, y: absolute.pos.y - absolute.footprint.d / 2, w: absolute.footprint.w, h: absolute.footprint.d };
   const tap = geoTapForEntity(map, node._id, place, 16 / 9, node.scene_view, {
     ...(body.scene_view?.observer ? { observer: body.scene_view.observer } : {}),
     ...(body.scene_view?.view ? { view: body.scene_view.view } : {}),
     ...(body.scene_view?.level ? { level: body.scene_view.level } : {}),
+    ...(exterior ? { level: "eye" as const, view: { projection: "eye_level" as const, source: "policy" as const } } : {}),
   });
   const isZoom = body.render_mode === "place_submap" || body.render_mode === "place_closeup";
   next.scene_view = isZoom ? {
@@ -59,6 +68,7 @@ export async function resolvePlaceGeneration(body: GenerateRequestBody): Promise
     focus_id: place.id, closeup: true, map_crop: body.render_mode === "place_submap" ? placeCrop : null,
     ...(body.render_mode === "place_submap" ? { view: { projection: "top_down", source: "policy" } } : node.scene_view?.view ? { view: node.scene_view.view } : {}),
   } : tap.scene_view;
+  if (exterior) next.scene_view = { ...next.scene_view, place_form: "generic" };
   next.expected_layout = isZoom ? [] : tap.expected_layout;
   next.prefetched_surroundings = tap.surroundings;
   next.surroundings_pov = tap.surroundings_pov ?? false;
@@ -68,20 +78,24 @@ export async function resolvePlaceGeneration(body: GenerateRequestBody): Promise
   const entity = state.entities.find(e => e.id === place.entity_id);
   const localBox = entity?.appearance_bboxes[node._id];
   const box = frameCropToImageBox(placeCrop, node.scene_view?.map_crop ?? MAP_IMAGE_FRAME);
-  const fallback = localBox ?? (node.scene_view?.level === "map" || !node.scene_view ? { x_pct: box.x, y_pct: box.y, w_pct: box.w, h_pct: box.h } : null);
+  const projected = node.scene_view?.level === "map" || (!exterior && !node.scene_view) ? { x_pct: box.x, y_pct: box.y, w_pct: box.w, h_pct: box.h } : null;
+  const fallback = validReferenceBox(localBox) ? localBox : validReferenceBox(projected) ? projected : null;
   let anchor = place.identity_anchor;
+  let kind: "curated" | "first_seen" | "source_bbox" | "map_projection" = "curated";
   // Uncurated places use their first recorded appearance, not the latest
   // generated view. Otherwise every revisit could ratchet a small drift.
   if (!anchor && entity?.first_seen_node_id) {
     const first = await (await getDb()).collection<NodeDoc>("nodes").findOne({ _id: entity.first_seen_node_id, session_id: body.session_id });
     const firstBox = entity.appearance_bboxes[entity.first_seen_node_id];
-    if (first && firstBox) anchor = { node_id: first._id, image_key: first.image_key, bbox: firstBox };
+    if (first && validReferenceBox(firstBox)) { anchor = { node_id: first._id, image_key: first.image_key, bbox: firstBox }; kind = "first_seen"; }
   }
-  anchor ??= fallback ? { node_id: node._id, image_key: node.image_key, bbox: fallback } : null;
+  if (!anchor && fallback) { anchor = { node_id: node._id, image_key: node.image_key, bbox: fallback }; kind = validReferenceBox(localBox) ? "source_bbox" : "map_projection"; }
   if (!anchor || !validReferenceBox(anchor.bbox)) throw new PlaceError("Choose a reference image for this place first", 422);
+  if (kind === "curated" && !await (await getDb()).collection<NodeDoc>("nodes").findOne({ _id: anchor.node_id, session_id: body.session_id })) throw new PlaceError("Reference source is not in this world", 422);
   const stored = await getStoredBytes(anchor.image_key);
   if (!stored || !stored.contentType.startsWith("image/") || stored.bytes.length > 20 * 1024 * 1024) throw new PlaceError("Place reference is unavailable", 422);
-  next.place_reference = { geo_id: place.id, label: place.label, visual: place.visual, image_data_url: `data:${stored.contentType};base64,${stored.bytes.toString("base64")}`, bbox: anchor.bbox };
+  next.place_reference = { geo_id: place.id, label: place.label, visual: place.visual, image_data_url: `data:${stored.contentType};base64,${stored.bytes.toString("base64")}`, bbox: anchor.bbox,
+    provenance: { kind, node_id: anchor.node_id, image_sha256: createHash("sha256").update(stored.bytes).digest("hex") } };
   next.max_attempts = Math.min(2, body.max_attempts ?? 2);
   return next;
 }

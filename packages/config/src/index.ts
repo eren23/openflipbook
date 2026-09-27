@@ -93,6 +93,7 @@ export interface GenerateRequestBody {
   // Server-resolved; clients never choose the canonical reference bytes.
   place_reference?: PlaceRenderReference;
   strict_world?: boolean;
+  arrival_intent?: "exterior" | "interior";
   query: string;
   aspect_ratio: AspectRatio;
   web_search: boolean;
@@ -116,6 +117,7 @@ export interface GenerateRequestBody {
   max_attempts?: number;
   verify?: boolean;
   edit_instruction?: string;
+  sketch_input?: Record<string, unknown> | null;
   // Mask-scoped edit (EDIT_REGION; the backend gates it behind the env flag so
   // it's a no-op until enabled). `edit_mask` is an opaque PNG data URL at the
   // page's natural dims, WHITE = edit / black = keep (flux fill's native
@@ -212,6 +214,9 @@ export interface GenerateRequestBody {
   // can constrain placement and the grounding loop has a target to check against.
   scene_view?: SceneView;
   expected_layout?: ProjectedEntity[];
+  // Colour → place for the "layout" condition image: the camera-view block
+  // render of the world map (NEXT_PUBLIC_WORLD_LAYOUT_CONTROL).
+  layout_legend?: { color: string; label: string }[];
   trace_id?: string;
 }
 
@@ -347,6 +352,7 @@ export interface EditVerdict {
 // Degraded judges send render_unjudged instead — a receipt of dashes is
 // noise, not honesty.
 export interface ViewVerdict {
+  arrival?: { status: "pass" | "fail" | "unknown"; checks: Record<"near_target" | "exterior" | "single_target" | "scene_not_map", "pass" | "fail" | "unknown">; rationale: string };
   same_place: number | null; // 0-10: the tapped region / place, closer
   conformance: number | null; // 0-10: the intended camera landed
   medium: number | null; // 0-10: the art medium held
@@ -454,6 +460,7 @@ export interface GenerateNeighborEvent {
   // and a "3 of 4" progress read.
   index: number;
   total: number;
+  scene_view?: SceneView;
   trace_id?: string;
 }
 
@@ -606,8 +613,8 @@ export interface Entity {
   reference_image_url: string | null;
   facts: string[];
   state: EntityState;
-  first_seen_node_id: string;
-  last_seen_node_id: string;
+  first_seen_node_id: string | null;
+  last_seen_node_id: string | null;
   // Atlas tile ids (== node ids in the current world-layout) the entity has
   // appeared on. Used for the atlas-pin overlay.
   appears_on_node_ids: string[];
@@ -640,6 +647,8 @@ export interface Entity {
 // projects (map + observer) → the per-frame layout below.
 
 // A point in world units (arbitrary scale; origin top-left, +x east, +y south).
+export type { PlaceComponent, PlaceSceneObject, PlaceSceneDefinition, PlaceSceneSnapshot, WorldEditProposal, BuildingSide, BuildingOpening, BuildingStructure, BuildingSurface, SurfaceMaterial, RoomLayout, PlaceConnection, PlaceBuildConnectionInput, PlaceBuildFloorTarget, PlaceNetwork, ConnectedPlaceChunk, SceneGenerationReceipt } from "./place-scene";
+
 export interface WorldVec2 {
   x: number;
   y: number;
@@ -657,6 +666,7 @@ export interface PlaceRenderReference {
   visual: string;
   image_data_url: string;
   bbox: EntityBBox;
+  provenance?: { kind: "curated" | "first_seen" | "source_bbox" | "map_projection"; node_id: string; image_sha256: string };
 }
 
 export interface PlaceUpdate {
@@ -676,6 +686,11 @@ export interface PlaceUpdate {
 // ONCE and stays consistent across every view of it, and editing one ripples to
 // its siblings. Top-level city entities have `parent_id: null` (pos == world).
 export interface WorldEntityGeo {
+  // Derived from scene-owned furnishing placement; edited through that scene.
+  floor_id?: string;
+  room_id?: string;
+  // Owned local-scene geometry can only change through the scene commit service.
+  scene_id?: string;
   identity_anchor?: PlaceIdentityAnchor | null;
   identity_locked?: boolean;
   id: string;
@@ -712,9 +727,10 @@ export interface WorldEntityGeo {
   // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
   source: "extracted" | "user" | "derived";
   updated_at: string;
-  // VLM-segmented border polygon (B2 segmenter), in the SAME frame as `pos`
+  // Segmented or scene-authored border polygon, in the SAME frame as `pos`
   // (the parent's local frame). 3..24 vertices; absent = only the rectangular
-  // footprint is known. Persisted behind WORLD_SEGMENT_BORDERS.
+  // footprint is known. Segmentation writes require WORLD_SEGMENT_BORDERS;
+  // authored scene outlines instead follow the scene preview/apply transaction.
   border?: WorldVec2[];
   // Inferred ABSOLUTE height in meters - from the segmenter's anchored
   // relative ladder, NOT from map pixels (map symbology is not metric).

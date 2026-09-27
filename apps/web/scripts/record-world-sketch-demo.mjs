@@ -1,0 +1,94 @@
+import { chromium, expect } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const base = process.env.E2E_BASE_URL || "http://127.0.0.1:3003";
+if (new URL(base).hostname !== "127.0.0.1") throw new Error("Local proof only");
+const output = resolve(process.argv[2] || "../../docs/research/assets/world-sketch-sync-2026-09-11");
+await mkdir(output, { recursive: true });
+const browser = await chromium.launch();
+const context = await browser.newContext({ baseURL: base, viewport: { width: 1600, height: 1000 }, recordVideo: { dir: output, size: { width: 1600, height: 1000 } } });
+const page = await context.newPage(), video = page.video(), errors = [], events = [];
+const started = Date.now(), event = name => events.push({ name, seconds: (Date.now() - started) / 1000 });
+let status = "failed", saved = null, checks = null;
+page.on("pageerror", e => errors.push(e.message));
+for (const route of ["**/api/generate-page", "**/api/sketches/*/generate"]) await page.route(route, r => { errors.push("Unexpected generation request"); return r.abort(); });
+const json = async path => { const response = await page.request.get(path); if (!response.ok()) throw new Error(`Read failed: ${response.status()}`); return response.json(); };
+const ready = async count => {
+  await expect(page.getByTestId("place-viewport")).toHaveCount(count);
+  for (const p of await page.getByTestId("place-viewport").all()) await expect(p).toHaveAttribute("data-ready", "true");
+};
+const pause = ms => page.waitForTimeout(ms);
+const field = (name, value) => page.getByRole("spinbutton", { name, exact: true }).fill(String(value));
+try {
+  await page.goto("/sketch/world/ankh");
+  await page.getByRole("button", { name: "Save to world", exact: true }).click();
+  await page.waitForURL("**/sketch/world?**"); await ready(1);
+  await page.getByRole("checkbox", { name: "Confirm authored dimensions" }).check();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Apply to world", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Revision 1 · Saved");
+  const url = new URL(page.url()); url.searchParams.set("view", "split");
+  await page.goto(url.toString()); await ready(2);
+  const contextUrl = `/api/world/scene-context?source=${url.searchParams.get("source")}`;
+  const initial = await json(contextUrl), mapUrl = `/api/world/${initial.session_id}/map`;
+  const initialMap = await json(mapUrl);
+  const hashImage = async () => {
+    const response = await page.request.get(initial.source_url);
+    if (!response.ok()) throw new Error("Reference unavailable");
+    return createHash("sha256").update(await response.body()).digest("hex");
+  };
+  const initialImage = await hashImage();
+  event("before"); await pause(1600); await page.screenshot({ path: `${output}/before.png` });
+  await page.getByRole("button", { name: "The Mended Drum tavern", exact: true }).click();
+  await field("Object width", 9.4); await ready(2); await pause(900);
+  await field("Object height", 9.6); await ready(2); await pause(1200);
+  event("building_updated"); await page.screenshot({ path: `${output}/building-updated.png` });
+  await page.getByRole("combobox", { name: "Component type", exact: true }).selectOption("house");
+  await page.getByRole("button", { name: "Draw footprint", exact: true }).click();
+  const box = await page.getByRole("region", { name: "Live plan", exact: true }).locator("canvas").boundingBox();
+  const half = Math.max(13, 21 * box.height / box.width);
+  const point = (x, z) => ({ x: box.x + box.width / 2 + (x - 20) * box.height / (2 * half), y: box.y + box.height / 2 + (z - 12) * box.height / (2 * half) });
+  const a = point(21, 13), b = point(24, 16);
+  await page.mouse.move(a.x, a.y); await page.mouse.down();
+  for (let j = 1; j <= 24; j++) { await page.mouse.move(a.x + (b.x - a.x) * j / 24, a.y + (b.y - a.y) * j / 24); await pause(45); }
+  event("sketched"); await page.screenshot({ path: `${output}/footprint-sketch.png` }); await pause(650);
+  await page.mouse.up(); await ready(2);
+  await page.getByRole("textbox", { name: "Object name", exact: true }).fill("Filigree workshop");
+  for (const [key, value] of [["x", 22.5], ["z", 14.5], ["width", 3], ["depth", 3], ["height", 4]]) await field(`Object ${key}`, value);
+  await ready(2);
+  await page.getByRole("button", { name: "Frame selected in 3D", exact: true }).click();
+  event("workshop_added"); await pause(1800); await page.screenshot({ path: `${output}/workshop-added.png` });
+  // Drafts must not leak into the world map before a reviewed Apply.
+  expect(await json(mapUrl)).toEqual(initialMap);
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByRole("region", { name: "World change preview" })).toContainText("Add Filigree workshop");
+  event("review"); await pause(1200);
+  await page.getByRole("button", { name: "Apply to world", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Revision 2 · Saved"); await ready(2);
+  event("saved"); await pause(1000); await page.reload(); await ready(2);
+  await expect(page.getByRole("status")).toHaveText("Revision 2 · Saved");
+  await page.getByRole("button", { name: "Filigree workshop house", exact: true }).click();
+  await page.getByRole("button", { name: "Frame selected in 3D", exact: true }).click();
+  await expect(page.getByRole("spinbutton", { name: "Object height", exact: true })).toHaveValue("4");
+  saved = await json(contextUrl); const map = await json(mapUrl);
+  const changed = saved.scene.definition.objects.filter(o => o.kind === "tavern" || o.label === "Filigree workshop");
+  for (const o of changed) expect(map.entities.find(g => g.id === o.id)).toMatchObject({ entity_id: o.entity_id, parent_id: saved.place_id, pos: { x: o.x - 20, y: o.z - 12 }, footprint: { w: o.width, d: o.depth }, height: o.height, heading: o.heading });
+  const parentBefore = initialMap.entities.find(g => g.id === saved.place_id), parentAfter = map.entities.find(g => g.id === saved.place_id);
+  expect(parentAfter.pos).toEqual(parentBefore.pos); expect(parentAfter.footprint).toEqual(parentBefore.footprint);
+  const changedIds = new Set([saved.place_id, ...changed.map(o => o.id)]);
+  const stable = g => Object.fromEntries(Object.entries(g).filter(([k]) => k !== "updated_at"));
+  expect(map.entities.filter(g => !changedIds.has(g.id)).map(stable)).toEqual(initialMap.entities.filter(g => !changedIds.has(g.id)).map(stable));
+  expect(await hashImage()).toBe(initialImage);
+  checks = { draft_map_unchanged: true, geometry_and_map_match: true, parent_placement_unchanged: true, unrelated_objects_unchanged: true, reference_image_sha256: initialImage, reference_image_unchanged: true, saved_revision: saved.scene.revision };
+  event("reloaded"); await pause(2200); await page.screenshot({ path: `${output}/saved-reloaded.png` }); event("end");
+  await writeFile(`${output}/saved-scene.json`, JSON.stringify(saved.scene, null, 2));
+  await writeFile(`${output}/saved-map.json`, JSON.stringify(map, null, 2));
+  status = errors.length ? "failed" : "complete";
+} finally {
+  await context.close(); await video.saveAs(`${output}/uncut.webm`); await browser.close();
+  await writeFile(`${output}/receipt.json`, JSON.stringify({ status, errors, events, checks, model_calls: 0, source: saved?.source_node_id, session_id: saved?.session_id, place_id: saved?.place_id, note: "Actual plan footprint drawing, shared authored 3D objects and persisted world-map mirrors. Existing illustration remains historical; no image repaint or generated 3D reconstruction." }, null, 2));
+}
+if (errors.length) throw new Error(errors.join("\n"));
+console.log(JSON.stringify({ output, checks, events }));

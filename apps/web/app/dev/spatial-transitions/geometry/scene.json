@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "id": "aethelgard-quay-blockout-v1",
+  "title": "Quayside Provisions",
+  "provenance": "Authored 3D interpretation, not reconstructed geometry",
+  "units": "meters",
+  "duration": 20,
+  "outboundDuration": 10,
+  "camera": { "height": 1.65, "fov": 64, "near": 0.08, "far": 100 },
+  "shop": { "front": 3.4, "back": 11.4, "left": -2.8, "right": 4.8, "height": 3.2 },
+  "door": { "center": 1, "width": 1.6, "height": 2.65 },
+  "landmarks": [
+    { "id": "doorway", "label": "Doorway", "position": [3.4, 1.3, 1] },
+    { "id": "provisions", "label": "Provisions window", "position": [3.4, 1.5, 3.1] },
+    { "id": "counter", "label": "Merchant counter", "position": [9.8, 1.05, 1] },
+    { "id": "quay-post", "label": "Quay post", "position": [-2.65, 1.1, 6.6] }
+  ],
+  "keyframes": [
+    { "time": 0, "position": [-0.9, 1.65, 9], "yaw": 2.82, "pitch": -0.025, "label": "Quay" },
+    { "time": 2, "position": [0.7, 1.65, 6.7], "yaw": 2.77, "pitch": -0.025, "label": "Along the quay" },
+    { "time": 4, "position": [0.9, 1.65, 3.2], "yaw": 2.31, "pitch": -0.015, "label": "Shop approach" },
+    { "time": 5.5, "position": [1.3, 1.65, 1], "yaw": 1.5707963267948966, "pitch": -0.015, "label": "Doorway" },
+    { "time": 7, "position": [3.05, 1.65, 1], "yaw": 1.5707963267948966, "pitch": -0.02, "label": "Threshold" },
+    { "time": 9, "position": [6.7, 1.65, 1], "yaw": 1.5707963267948966, "pitch": -0.04, "label": "Inside" },
+    { "time": 10, "position": [6.7, 1.65, 1], "yaw": 1.5707963267948966, "pitch": -0.04, "label": "Inside" },
+    { "time": 12.5, "position": [6.7, 1.65, 1], "yaw": 4.71238898038469, "pitch": -0.02, "label": "Looking back" },
+    { "time": 15, "position": [1.3, 1.65, 1], "yaw": 4.71238898038469, "pitch": -0.02, "label": "Outside" },
+    { "time": 16.2, "position": [0.9, 1.65, 3.2], "yaw": 6.0, "pitch": -0.025, "label": "Returning" },
+    { "time": 18.5, "position": [-0.9, 1.65, 9], "yaw": 6.0, "pitch": -0.025, "label": "Quay" },
+    { "time": 20, "position": [-0.9, 1.65, 9], "yaw": 9.103185307179586, "pitch": -0.025, "label": "Quay" }
+  ]
+}
