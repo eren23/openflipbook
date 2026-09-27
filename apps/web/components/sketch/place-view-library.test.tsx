@@ -33,7 +33,8 @@ it("opens the saved camera in illustration mode only after a successful save, re
   await screen.findByText("Lost save response");expect(open).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button",{name:"Retry saved view request"}));
   await waitFor(()=>expect(open).toHaveBeenCalledOnce());
-  expect(selected).toHaveBeenLastCalledWith("view");expect(capture).toHaveBeenCalledOnce();
+  // The selection update can land a tick after `open`; under a loaded run it did.
+  await waitFor(()=>expect(selected).toHaveBeenLastCalledWith("view"));expect(capture).toHaveBeenCalledOnce();
   expect(writes()[0]).toEqual(writes()[1]);expect(writes()).toHaveLength(2);
 });
 it("disables composition without a selection or with a dirty scene",()=>{

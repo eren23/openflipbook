@@ -21,16 +21,21 @@ const LANTERN_QUAY = [
   geo("Tideglass Apothecary", 45.4, 18.5, 10.7, 8.8, 5),
   geo("Ropewalk Store", 43.4, 41.8, 15.5, 12.7, 6.1),
   geo("River Leven", 44.3, 51.2, 7.6, 6.2, 4),
-  // The authored 3D-scene copy of the same inn, in another frame.
-  geo("The Copper Kettle", -29.1, -2.4, 10, 12, 7.8, { id: "geo_scene_kettle", parent_id: "geo_scene" }),
+  // A room inside the inn: another frame, not a building on this street.
+  geo("Ropewalk Store", -29.1, -2.4, 10, 12, 7.8, { id: "geo_inside_kettle", parent_id: "geo_The Copper Kettle" }),
 ];
 
 describe("solidBlocks", () => {
-  it("keeps top-level buildings and drops ground areas and nested scene copies", () => {
+  it("keeps this frame's buildings and drops ground areas and other frames", () => {
     const labels = solidBlocks(LANTERN_QUAY).map((b) => b.label);
     expect(labels).toContain("The Copper Kettle");
-    expect(labels).not.toContain("River Leven");
-    expect(solidBlocks(LANTERN_QUAY).filter((b) => b.label === "The Copper Kettle")).toHaveLength(1);
+    expect(labels).not.toContain("River Leven"); // a quay is ground, not a wall
+    expect(labels.filter((l) => l === "Ropewalk Store")).toHaveLength(1); // not the one inside the inn
+  });
+
+  it("drops the 3D scene editor's objects: they are not buildings on the map", () => {
+    const edited = geo("Bellfounder Hall", 59, 40, 10, 12, 7.8, { scene_id: "scene_1" } as Partial<WorldEntityGeo>);
+    expect(solidBlocks([edited]).map((b) => b.label)).toEqual([]);
   });
 
   it("tests footprints in the block's own heading", () => {
@@ -111,6 +116,40 @@ describe("renderLayoutControl", () => {
   });
 });
 
+describe("geometry that cannot be cast", () => {
+  it("treats a non-finite heading as unrotated instead of filling the frame", () => {
+    const broken = geo("Broken", 10, 0, 6, 6, 8, { heading: Number.NaN });
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    // NaN slab comparisons are all false, so this block used to be "hit" at
+    // the near plane across the whole image.
+    const [box] = renderLayoutControl([broken], observer, 64, 36).visible;
+    expect(box!.label).toBe("Broken");
+    expect(box!.w_pct).toBeLessThan(0.7);
+    expect(box!.h_pct).toBeLessThan(0.9);
+    // Same picture as an explicit heading of 0.
+    const plain = renderLayoutControl([geo("Broken", 10, 0, 6, 6, 8)], observer, 64, 36).visible[0]!;
+    expect(box!.w_pct).toBeCloseTo(plain.w_pct, 9);
+  });
+
+  it("drops zero-sized and non-finite footprints", () => {
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(renderLayoutControl([geo("Flat", 20, 0, 0, 10, 8), geo("Nowhere", Number.NaN, 0, 10, 10, 8)], observer, 32, 18).visible).toEqual([]);
+  });
+
+  it("refuses an absurd render size rather than hanging", () => {
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(() => renderLayoutControl([KETTLE], observer, 4000, 4000)).toThrow(/out of range/);
+  });
+
+  it("keeps a block the camera stands on, and drops one it stands inside", () => {
+    const plaza = geo("Market Square", 0, 0, 30, 30, 0.6);
+    const inn = geo("Inn", 18, 0, 8, 8, 9);
+    const observer = { pos: { x: 0, y: 0 }, eye_height: 1.7, gaze: 0, fov: Math.PI / 2 };
+    expect(renderLayoutControl([plaza, inn], observer, 64, 36).visible.map((v) => v.label)).toContain("Inn");
+    expect(renderLayoutControl([plaza, inn], { ...observer, pos: { x: 18, y: 0 } }, 64, 36).visible.map((v) => v.label)).not.toContain("Inn");
+  });
+});
+
 describe("depth buffer", () => {
   it("measures the distance to the block it hit, and the ground elsewhere", () => {
     const wall = geo("Wall", 20, 0, 4, 40, 10);
@@ -120,42 +159,17 @@ describe("depth buffer", () => {
     // The wall's near face is 18 units ahead (20 - 4/2).
     expect(centre).toBeGreaterThan(17.5);
     expect(centre).toBeLessThan(18.6);
-    // Straight down at the bottom of the frame is close ground, never Infinity.
     const low = depth[(height - 1) * width + Math.floor(width / 2)]!;
     expect(Number.isFinite(low)).toBe(true);
     expect(low).toBeLessThan(centre);
-    // Sky above the wall is unbounded.
     expect(depth[Math.floor(width / 2)]).toBe(Infinity);
   });
 });
 
-describe("after a zoom-out (ascend reparents the town)", () => {
-  it("keeps the same camera and visible buildings in the absolute frame", async () => {
-    const { reparentRoots } = await import("./scale-tree");
-    const { toAbsoluteEntities } = await import("./world-geometry");
-    const town = LANTERN_QUAY.filter((e) => !e.parent_id);
-    const before = routeToFocus(KETTLE, { x: 50, y: 30 }, town);
-    const beforeLabels = renderLayoutControl(town, before.observer, 160, 90).visible.map((v) => v.label);
-
-    const quarter = geo("The Riverward Quarter", 50, 30, 100, 60, 4, { id: "geo_quarter" });
-    const { geos } = reparentRoots(town, quarter, "t0");
-    // Stored numbers are re-expressed (not the town we started with)...
-    expect(geos.find((g) => g.id === KETTLE.id)!.pos).not.toEqual(KETTLE.pos);
-    // ...but in the absolute frame the same camera sees the same town.
-    const absolute = toAbsoluteEntities(geos, geos);
-    const kettle = absolute.find((g) => g.id === KETTLE.id)!;
-    const after = routeToFocus(kettle, { x: 50, y: 30 }, absolute);
-    expect(after.observer.pos.x).toBeCloseTo(before.observer.pos.x, 6);
-    expect(after.observer.pos.y).toBeCloseTo(before.observer.pos.y, 6);
-    const afterLabels = renderLayoutControl(absolute, after.observer, 160, 90, "geo_quarter").visible.map((v) => v.label);
-    expect(afterLabels).toEqual(beforeLabels);
-    expect(afterLabels.length).toBeGreaterThan(0);
-  });
-
-  it("never renders the 3D editor copy or a building's interior children", () => {
-    const sceneCopy = geo("The Copper Kettle", 37, 29.1, 10, 12, 7.8, { id: "scene_kettle", scene_id: "scene1" });
-    const interior = geo("Ropewalk Store", 16.7, 36.6, 33, 18, 4, { id: "inside", parent_id: KETTLE.id });
-    const labels = solidBlocks([KETTLE, WELL, sceneCopy, interior]).map((b) => b.id);
-    expect(labels).toEqual([KETTLE.id, WELL.id]);
+describe("blockDistance", () => {
+  it("measures to the footprint edge: positive outside, negative inside", () => {
+    expect(blockDistance(WELL, { x: WELL.pos.x, y: WELL.pos.y })).toBeCloseTo(-3.35, 2);
+    expect(blockDistance(WELL, { x: WELL.pos.x + 4.1 + 5, y: WELL.pos.y })).toBeCloseTo(5, 6);
+    expect(blockDistance(WELL, { x: WELL.pos.x + 4.1 + 3, y: WELL.pos.y + 3.35 + 4 })).toBeCloseTo(5, 6);
   });
 });

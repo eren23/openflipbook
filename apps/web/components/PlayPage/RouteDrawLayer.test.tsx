@@ -60,6 +60,18 @@ describe("RouteDrawLayer", () => {
     expect(screen.queryAllByRole("button", { name: /^Checkpoint/ })).toHaveLength(0);
   });
 
+  it("drops the stroke when the page moves to another map", () => {
+    // The layer stays mounted across a walk to the next page. A stroke is in
+    // the image's own coordinates, so carrying it over would silently redraw
+    // the old route on a map it was never drawn on.
+    const { rerender } = render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.getAllByRole("button", { name: /^Checkpoint/ }).length).toBeGreaterThanOrEqual(2);
+    rerender(<RouteDrawLayer entities={TOWN} frame={{ x: -65, y: -39.6, w: 231.3, h: 136.6 }} onClose={() => {}} />);
+    expect(screen.queryAllByRole("button", { name: /^Checkpoint/ })).toHaveLength(0);
+    expect(screen.getByTestId("route-summary").textContent).toMatch(/Drag across the map/);
+  });
+
   it("closes on Done", () => {
     const onClose = vi.fn();
     render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={onClose} />);
@@ -72,5 +84,145 @@ describe("RouteDrawLayer", () => {
     // Straight through the inn at (37, 29.1) on a 100x60 frame.
     drawLine([80, 116], [240, 116]);
     expect(screen.getByTestId("route-summary").textContent).toMatch(/\d+ cameras stepped aside/);
+  });
+
+  // Accept is the paid half: the layer renders the control image for every
+  // camera (the renderer is ours) and the backend only paints and links.
+  it("paints only the shots worth painting, and says what it spent", async () => {
+    const posted: { shots: { index: number; distance: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return { ok: true, json: async () => ({ clips: [{ video_url: "a.mp4" }, { video_url: "b.mp4" }], spent_usd: 0.41 }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // jsdom ships neither ImageData nor a canvas 2d context, and with a context
+    // stubbed the preview effect gets far enough to need the former.
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    // jsdom's canvas has no 2d context unless one is stubbed
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      putImageData: () => {}, clearRect: () => {}, drawImage: () => {},
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,AAA");
+
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    const accept = screen.getByTestId("route-accept");
+    expect(accept.textContent).toMatch(/^Paint \d+ shots?$/);
+    await act(async () => { fireEvent.click(accept); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/api/world/s1/walk");
+    const body = posted[0]!;
+    expect(body.shots.length).toBeGreaterThan(0);
+    // every shot carries its own control image, how far along it is, and what
+    // it sees -- as [label, share] pairs, the shape the backend's model takes
+    for (const s of body.shots) {
+      expect(s.control_data_url).toMatch(/^data:image\/png/);
+      expect(typeof s.distance).toBe("number");
+      for (const seen of s.sees) {
+        expect(typeof seen[0]).toBe("string");
+        expect(typeof seen[1]).toBe("number");
+      }
+    }
+    expect(screen.getByTestId("route-walk-status").textContent).toMatch(/2 clips · \$0\.41/);
+    vi.unstubAllGlobals();
+  // Ray-casts a control image per camera: ~4s locally, 8.5s on CI under
+  // coverage. vitest 2 never enforced the 5s default on it; vitest 3 does.
+  }, 30_000);
+
+  it("crops a reopened page's map from its own bytes, not the R2 <img>", async () => {
+    // Live 2026-09-24: the page showed its R2 url, drawing that <img> tainted
+    // the canvas, toDataURL threw, and the walk failed before it was sent.
+    const posted: { shots: { surroundings_data_url?: string }[] }[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return { ok: true, json: async () => ({ clips: [], spent_usd: 0 }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    const tainted = new WeakSet<HTMLCanvasElement>();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+      return {
+        putImageData: () => {}, clearRect: () => {},
+        drawImage: (img: HTMLImageElement) => { if (new URL(img.src).origin !== location.origin) tainted.add(this); },
+      } as unknown as CanvasRenderingContext2D;
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(function (this: HTMLCanvasElement) {
+      if (tainted.has(this)) throw new DOMException("Tainted canvases may not be exported.", "SecurityError");
+      return "data:image/png;base64,AAA";
+    });
+    const decoded: string[] = [];
+    vi.spyOn(HTMLImageElement.prototype, "decode").mockImplementation(function (this: HTMLImageElement) {
+      decoded.push(this.src);
+      return Promise.resolve();
+    });
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(1376);
+    vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(768);
+    const shown = document.createElement("img");
+    shown.src = "https://pub.r2.dev/s/map.png";
+
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} sessionId="s1" nodeId="n1" imgRef={{ current: shown }} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    await act(async () => { fireEvent.click(screen.getByTestId("route-accept")); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(decoded[0]!).pathname).toBe("/api/image/n1");
+    expect(posted[0]!.shots.every((s) => s.surroundings_data_url === "data:image/png;base64,AAA")).toBe(true);
+    vi.unstubAllGlobals();
+  }, 30_000);
+
+  it("offers nothing to paint without a session to bill", () => {
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    render(<RouteDrawLayer entities={TOWN} frame={FRAME} onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.queryByTestId("route-accept")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a walk already painted on this page, before anything is drawn", () => {
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [{ from_shot: 0, to_shot: 2, video_url: "a.mp4", model: "m", seconds: 5 }],
+          shots: [{ index: 0, distance: 0, sees: [{ label: "The Copper Kettle", share: 0.3 }] }],
+          spent_usd: 0.19,
+          created_at: "2026-09-20T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    // no stroke drawn, and the paid walk is still there
+    expect(screen.getByTestId("route-walk-status").textContent).toMatch(/1 clip · \$0\.19/);
+  });
+
+  it("plays a painted walk's clips one after another", () => {
+    // Live 2026-09-24: a finished walk said "2 clips · $0.69" and nothing
+    // could play it, so a paid walk was never seen.
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [
+            { from_shot: 0, to_shot: 1, video_url: "https://v/a.mp4", model: "m", seconds: 5 },
+            { from_shot: 1, to_shot: 2, video_url: "https://v/b.mp4", model: "m", seconds: 5 },
+          ],
+          shots: [],
+          spent_usd: 0.69,
+          created_at: "2026-09-24T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    const player = screen.getByTestId("route-walk-player") as HTMLVideoElement;
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4");
+    fireEvent.ended(player);
+    expect(player.getAttribute("src")).toBe("https://v/b.mp4");
+    fireEvent.ended(player);
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4"); // loops the walk
   });
 });

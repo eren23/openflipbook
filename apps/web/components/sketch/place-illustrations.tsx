@@ -22,7 +22,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
 }) {
   const [library, setLibrary] = useState<Library | null>(null), [prompt, setPrompt] = useState("");
   const [consent, setConsent] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const [selected, setSelected] = useState(""), [comparison, setComparison] = useState<"illustration" | "source" | "previous" | "overlay">("illustration"), [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState(""), [comparison, setComparison] = useState<"illustration" | "source" | "previous" | "overlay">("illustration"), [loadedKey, setLoadedKey] = useState("");
   const [sourceOpacity, setSourceOpacity] = useState(50);
   const [editingRegion, setEditingRegion] = useState(false), [regionIds, setRegionIds] = useState<string[]>([]), [maskReady, setMaskReady] = useState(false);
   const [strokes, setStrokes] = useState<IllustrationBrushStroke[] | undefined>();
@@ -54,7 +54,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
     timer = setTimeout(() => void poll(), 3000);
     return () => { stopped = true; clearTimeout(timer); };
   }, [polling, busy, reload]);
-  useEffect(() => { setLoaded(false); setEditingRegion(false); setRegionIds([]); setStrokes(undefined); setMaskReady(false); setComparison("illustration"); setSourceOpacity(50); }, [selected, view.id]);
+  useEffect(() => { setEditingRegion(false); setRegionIds([]); setStrokes(undefined); setMaskReady(false); setComparison("illustration"); setSourceOpacity(50); }, [selected, view.id]);
   const editQuote = JSON.stringify(library?.region_capabilities);
   useEffect(() => { if (!maskedPending.current) setEditConsent(false); }, [editQuote, library?.accepted_id, regionIds, regionMode, strokes]);
   async function action(body: Record<string, unknown>, retained?: "generation" | "region" | "masked") {
@@ -88,8 +88,12 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
     ? `/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(asset.geometry_refresh.base_view.view_id)}/render` : renderUrl;
   const retryRefresh = regionPending.current?.action === "compose_refresh";
   const selectRegions = (ids: string[]) => { setRegionIds(ids); if (ids.length) onSelectObject?.(ids.at(-1)!); };
-  const imageLoaded = () => setLoaded(true);
-  const imageFailed = () => { setLoaded(false); setError("Saved illustration image unavailable."); };
+  // Keyed to the shown image, not reset by an effect: next/image fires onLoad
+  // during commit for an image that is already complete (a cached one), which
+  // is before a reset effect would run, and never fires again for that src.
+  const shownKey = `${view.id}:${selected}`, loaded = loadedKey === shownKey;
+  const imageLoaded = () => setLoadedKey(shownKey);
+  const imageFailed = () => { setLoadedKey(""); setError("Saved illustration image unavailable."); };
   return <div className={s.illustrationGenerator} aria-label="Camera illustrations">
     <div className={s.sectionHeading}><h3>Illustrations</h3><button title="Refresh illustrations" aria-label="Refresh illustrations" disabled={busy} onClick={() => void reload().catch(e => setError(e.message))}><RefreshCw size={16}/></button></div>
     {!editingRegion && <><label>Appearance<textarea aria-label="Illustration appearance" value={prompt} maxLength={1024} disabled={frozen} onChange={e => setPrompt(e.target.value)} placeholder="Hand-inked stonework, mossy roofs, warm window light"/></label>

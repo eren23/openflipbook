@@ -49,6 +49,9 @@ beforeEach(() => {
     ({ width, height, left: 0, top: 0, right: width, bottom: height } as DOMRect));
   vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(1200);
   vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(600);
+  // happy-dom 20 never fetches a remote image yet reports it complete; a
+  // browser says false until it loads. Tests that want a cached image say so.
+  vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
   vi.stubGlobal("ResizeObserver", class {
     constructor(cb: () => void) { resize = cb; }
     observe() {}

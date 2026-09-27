@@ -114,7 +114,7 @@ async def judge_layout_fidelity(
         model=model,
         messages=messages,
         temperature=0.0,
-        max_tokens=500,
+        max_tokens=llm.REASONING_HEADROOM + 500,
         **llm._maybe_response_format(model),
     )
     raw = resp.choices[0].message.content or "{}"

@@ -6,6 +6,10 @@ const nextConfig = {
   outputFileTracingRoot: new URL("../..", import.meta.url).pathname,
   outputFileTracingIncludes: { "/api/export/session/*": ["./public/demos/ankh-morpork/material-atlas.png"] },
   reactStrictMode: true,
+  // Nothing renders next/image, but /_next/image still answered and ran
+  // sharp (libvips CVEs; the unauthenticated RCE fixed in #277 lived here).
+  // Unoptimized, the route is a 404 before sharp loads.
+  images: { unoptimized: true },
   transpilePackages: ["@openflipbook/config"],
   typedRoutes: true,
   async headers() {

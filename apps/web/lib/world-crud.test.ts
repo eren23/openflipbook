@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Entity } from "@openflipbook/config";
+import type { Entity, WorldEntityGeo } from "@openflipbook/config";
 
 // In-memory `world_state` collection so the optimistic mutate() wrappers and
 // the read slices run for real without MongoDB (same stand-in shape as the
@@ -47,6 +47,7 @@ import {
   pinEntity,
   renameEntity,
   resolveEntitiesForPrompt,
+  restoreDeletedEntity,
   setEntityAppearance,
   undoDeleteEntity,
 } from "./world";
@@ -143,6 +144,30 @@ describe("user-override CRUD (optimistic mutate path)", () => {
       "Alice",
       "Bob",
     ]);
+  });
+
+  // An undone delete came back to the codex with no footprint, because the
+  // geometry was removed from the map and nothing kept it. The tombstone now
+  // carries it, hands it back exactly once, and never shows it to a reader.
+  it("a delete keeps its geometry for the undo, and the undo hands it back once", async () => {
+    seed("s1", [doc("Alice"), doc("Bob")]);
+    const kept = [{ id: "geo_Bob", parent_id: null, label: "Bob" }] as unknown as WorldEntityGeo[];
+    await deleteEntity("s1", "Bob", kept);
+    // a tombstoned entity is not read, geometry and all
+    expect(JSON.stringify(await getWorldState("s1"))).not.toContain("deleted_geos");
+
+    const first = await restoreDeletedEntity("s1", "Bob");
+    expect(first.geos).toEqual(kept);
+    expect(first.snapshot.entities.map((e) => e.name).sort()).toEqual(["Alice", "Bob"]);
+    // restored and live now, the entity carries no stash to leak or replay
+    expect(JSON.stringify(first.snapshot)).not.toContain("deleted_geos\":[");
+    expect((await restoreDeletedEntity("s1", "Bob")).geos).toEqual([]);
+  });
+
+  it("a delete with nothing on the map keeps nothing", async () => {
+    seed("s1", [doc("Bob")]);
+    await deleteEntity("s1", "Bob");
+    expect((await restoreDeletedEntity("s1", "Bob")).geos).toEqual([]);
   });
 
   it("setEntityAppearance trims + stores the reference image; empty rejects", async () => {

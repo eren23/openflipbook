@@ -138,10 +138,10 @@ import { focusOnMap } from "@/lib/click-route";
 import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { buildOutwardContext } from "@/lib/outward-context";
-import { shouldAutoDescend } from "@/lib/descent-clip";
+import { saveDescentClip, shouldAutoDescend } from "@/lib/descent-clip";
 import { parseAzgaarExport } from "@/lib/azgaar-import";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
-import { childrenOf, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
+import { childrenOf, frameForView, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
 import { viewNeutralAppearance } from "@/lib/appearance";
 // The in-session page graph node — lives in lib/session-pages.ts so the
 // ?continue= hydration mapper (nodeToPage) is a testable pure function.
@@ -175,8 +175,8 @@ const STRICT_WORLD_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUB
 // Enters from the map send a camera-view block render of the world map as the
 // "layout" reference, with exact per-place boxes (default off).
 const WORLD_LAYOUT_CONTROL_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_LAYOUT_CONTROL ?? "").toLowerCase());
-// Draw a camera route on the map (Phase 3). Free: the preview is the same
-// block render the enter path uses; nothing is generated until asked.
+// Draw a camera route on the map. Free: the preview is the same block render
+// the map already knows how to draw; nothing is generated until asked.
 const WORLD_ROUTE_DRAW_ENABLED = ["1", "true", "yes"].includes((process.env.NEXT_PUBLIC_WORLD_ROUTE_DRAW ?? "").toLowerCase());
 
 function layoutControlDataUrl(control: LayoutControl): string | null {
@@ -820,6 +820,8 @@ export default function PlayPage() {
   const streamRef = useRef<StreamClient | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus | "off">("off");
   const [fallbackVideoUrl, setFallbackVideoUrl] = useState<string | null>(null);
+  // What the clip should show. Empty = the page title, as before.
+  const [clipPrompt, setClipPrompt] = useState("");
   // After Stop, we keep `fallbackVideoUrl` around so the user can flip back
   // to the already-generated clip without re-paying for animation. `showVideo`
   // gates whether the figure renders the video or the still image.
@@ -831,6 +833,7 @@ export default function PlayPage() {
     // when the user navigates so "Replay clip" never resurfaces a stale clip.
     setFallbackVideoUrl(null);
     setShowVideo(false);
+    setClipPrompt("");
   }, [page?.imageDataUrl]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -1058,7 +1061,13 @@ export default function PlayPage() {
                   : `Drawing image…${proNote}`
               );
             } else if (evt.stage === "draft") {
-              setStatusMsg("Draft preview — the full render is refining…");
+              // Strict and spatial-transition pages drop the draft frames
+              // (the progress branch below), so there is no preview to name.
+              setStatusMsg(
+                strict || SPATIAL_TRANSITIONS_ENABLED
+                  ? "Finishing the full render…"
+                  : "Draft preview — the full render is refining…"
+              );
             }
           } else if (evt.type === "progress") {
             if (strict || SPATIAL_TRANSITIONS_ENABLED) continue;
@@ -1899,7 +1908,7 @@ export default function PlayPage() {
     if (currentNodeRef.current !== page.nodeId) return;
     const bbox = worldState.entities.find(e => e.id === place.entity_id)?.appearance_bboxes[page.nodeId];
     const frame = page.sceneView?.map_crop ?? MAP_IMAGE_FRAME;
-    // The map frame is absolute; a place under a zoomed-out parent stores local numbers.
+    // The map frame is absolute; a place inside another frame stores local numbers.
     const pos = toAbsoluteEntities([place], geoMap.entities)[0]?.pos ?? place.pos;
     placeIntentRef.current = { id: place.id, newView, note, ...(override ? { override } : {}) };
     dispatchTapAt(bbox ? bbox.x_pct + bbox.w_pct / 2 : Math.max(0, Math.min(1, (pos.x-frame.x)/frame.w)), bbox ? bbox.y_pct + bbox.h_pct / 2 : Math.max(0, Math.min(1, (pos.y-frame.y)/frame.h)));
@@ -2082,22 +2091,28 @@ export default function PlayPage() {
               } | null;
               window.alert(j?.error ?? "publish failed");
             }
-          });
+          }).catch(() => window.alert("publish failed — check your connection"));
         },
       });
       items.push({
         label: "Unpublish session",
         onClick: () => {
           close();
+          // Said nothing either way, so a failed unpublish left the session
+          // public while the owner believed it was gone.
           void fetch(
             `/api/gallery/publish?session_id=${encodeURIComponent(publishSessionId)}`,
             { method: "DELETE" },
-          );
+          ).then(async (r) => {
+            if (r.ok) return;
+            const j = (await r.json().catch(() => null)) as { error?: string } | null;
+            window.alert(j?.error ?? "unpublish failed — the session is still public");
+          }).catch(() => window.alert("unpublish failed — the session is still public"));
         },
       });
     }
     return items;
-  }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity]);
+  }, [contextMenu, phase, page, dispatchTapAt, runEdit, geoMap.entities.length, mutateWorldEntity, worldState.overrideEnabled]);
 
   const canGoBack = history.trailIdx > 0;
   const canGoForward = history.trailIdx < history.trail.length - 1;
@@ -2821,7 +2836,8 @@ export default function PlayPage() {
         annotated = await annotateClickPoint(
           currentImage,
           click.x_pct,
-          click.y_pct
+          click.y_pct,
+          page.nodeId,
         );
       } catch {
         // Fall back to the raw image + numeric coords if canvas taint or
@@ -2969,6 +2985,7 @@ export default function PlayPage() {
             : null;
         condition = await buildConditionRefs({
           parentDataUrl: currentImage,
+          parentNodeId: page.nodeId,
           styleDataUrl: styleRefUrl !== currentImage ? styleRefUrl : null,
           click: { xPct: click.x_pct, yPct: click.y_pct },
           ...(regionSpec && "box" in regionSpec
@@ -3410,7 +3427,7 @@ export default function PlayPage() {
       hudEmit("morph:start", { ox: px, oy: py, t: nowMs() });
       let annotated = currentImage;
       try {
-        annotated = await annotateStroke(currentImage, summary);
+        annotated = await annotateStroke(currentImage, summary, page.nodeId);
       } catch {
         // Fall back to the raw image; VLM still gets numeric coords.
       }
@@ -3585,7 +3602,7 @@ export default function PlayPage() {
   }, [requestClip, videoTier]);
 
   // Descent clip: first frame = the parent map, last frame = this page — the
-  // tap hard-cut replayed as a real camera move (fal ltx-2.3 first+last mode).
+  // tap hard-cut replayed as a real camera move (fal H3 first+last mode).
   // A node with a STORED clip (DESCENT_AUTO or an earlier generate) replays
   // instantly instead of re-billing fal.
   const descentParentImage = page?.parentId
@@ -3601,11 +3618,7 @@ export default function PlayPage() {
         p.nodeId === nodeId ? { ...p, descentVideoUrl: url } : p,
       ),
     }));
-    void fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ descent_video_url: url }),
-    }).catch(() => {});
+    void saveDescentClip(nodeId, url);
   }, []);
   const descendClip = useCallback(() => {
     if (page?.descentVideoUrl) {
@@ -3621,10 +3634,11 @@ export default function PlayPage() {
       end_image_data_url: page.imageDataUrl,
       prompt: page.title,
       video_tier: videoTier,
+      session_id: sessionId,
     }).then((url) => {
       if (url && forNode) rememberDescentClip(forNode, url);
     });
-  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip]);
+  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip, sessionId]);
 
   // DESCENT_AUTO (default off): generate the arrival clip in the BACKGROUND
   // as soon as an entered page settles, so the replay is instant and the
@@ -3655,6 +3669,7 @@ export default function PlayPage() {
         end_image_data_url: page!.imageDataUrl,
         prompt: page!.title,
         video_tier: videoTier,
+        session_id: sessionId,
       }),
     })
       .then(async (res) => {
@@ -3668,6 +3683,7 @@ export default function PlayPage() {
     descentParentImage,
     videoTier,
     rememberDescentClip,
+    sessionId,
   ]);
 
   const connectStream = useCallback(async () => {
@@ -3683,7 +3699,7 @@ export default function PlayPage() {
       streamRef.current = startLTXStream({
         wsUrl,
         video: videoRef.current,
-        prompt: page.title,
+        prompt: clipPrompt.trim() || page.title,
         startImageDataUrl: page.imageDataUrl,
         onStatus: setStreamStatus,
         onError: (msg) => setError(msg),
@@ -3694,15 +3710,16 @@ export default function PlayPage() {
       setStreamStatus("connecting");
       return;
     }
-    // Cheap fallback via fal. fal LTX video gen typically takes 30-90s; cap
+    // Cheap fallback via fal. fal H3 video gen typically takes 30-90s; cap
     // the wait at 3 minutes so a stuck request surfaces rather than hanging
     // the UI silently.
     await requestClip({
       image_data_url: page.imageDataUrl,
-      prompt: page.title,
+      prompt: clipPrompt.trim() || page.title,
       video_tier: videoTier,
+      session_id: sessionId,
     });
-  }, [page, videoTier, requestClip]);
+  }, [page, videoTier, requestClip, sessionId, clipPrompt]);
 
   return (
     <main
@@ -4191,12 +4208,21 @@ export default function PlayPage() {
                 )}
               {WORLD_ROUTE_DRAW_ENABLED && routeDrawOn && worldEnabled && page?.imageDataUrl && (!page.sceneView || page.sceneView.level === "map") && (
                 <RouteDrawLayer
+                  // A stroke belongs to the image it was drawn on.
+                  key={page.nodeId ?? "unsaved"}
                   entities={geoMap.entities}
                   frame={page.sceneView?.map_crop ?? MAP_IMAGE_FRAME}
-                  // After a zoom-out the places sit under this page's own
-                  // container geo; on a seeded map they are top level.
-                  frameParentId={geoMap.entities.some(e => e.id === `geo_${page.nodeId}`) ? `geo_${page.nodeId}` : null}
+                  // Whichever frame's places actually stand in this view --
+                  // not this node's own frame, which only the node that made
+                  // it ever has, leaving every other view routing against the
+                  // root's region-scale boxes or against nothing.
+                  frameParentId={frameForView(geoMap.entities, page.sceneView?.map_crop ?? MAP_IMAGE_FRAME)}
                   imgRef={imgRef}
+                  sessionId={sessionId}
+                  // This page's own art is the medium a painted shot keeps.
+                  styleRefUrl={page.imageDataUrl ?? null}
+                  nodeId={page.nodeId ?? null}
+                  savedWalk={page.walk ?? null}
                   onClose={() => setRouteDrawOn(false)}
                 />
               )}
@@ -4343,8 +4369,11 @@ export default function PlayPage() {
               <TapHint text={t.tapHint} />
             )}
           </div>
-            {/* On phones, wrapped controls must not cover the tappable map. */}
-            <div role="toolbar" aria-label="Image tools" className="relative z-10 flex flex-wrap items-center gap-2 border-t border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 sm:absolute sm:right-3 sm:top-3 sm:max-w-[calc(100%-1.5rem)] sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:pointer-events-none [&>button]:pointer-events-auto [&>div]:pointer-events-auto">
+            {/* On phones, wrapped controls must not cover the tappable map.
+                With the World pill in the top-left corner, stop short of it:
+                full width, the first row ran under the pill and hid half its
+                label (1200px viewport, Wander over it by 40px). */}
+            <div role="toolbar" aria-label="Image tools" className={`relative z-10 flex flex-wrap items-center gap-2 border-t border-[var(--color-edge)] bg-[var(--color-canvas)] p-3 sm:absolute sm:right-3 sm:top-3 ${worldEnabled ? "sm:max-w-[calc(100%-14rem)]" : "sm:max-w-[calc(100%-1.5rem)]"} sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:pointer-events-none [&>button]:pointer-events-auto [&>div]:pointer-events-auto`}>
               {wanderNote && (
                 <span className="flex items-center rounded-full bg-black/70 px-2.5 py-1 text-xs text-white/95">
                   {wanderNote}
@@ -4451,7 +4480,7 @@ export default function PlayPage() {
                   role="group"
                   aria-label="Video quality tier"
                   className="flex items-center overflow-hidden rounded-full border border-white/30 bg-black/60 text-[10px] text-white"
-                  title="Video quality tier — fast (LTX), balanced (Wan 2.2), pro (LTX-2)"
+                  title="Video quality tier — fast (H3 turbo), balanced (H3), pro (H3 1080p)"
                 >
                   <span className="px-2 py-1 opacity-70">video</span>
                   {(["fast", "balanced", "pro"] as const).map((tier) => (
@@ -4472,6 +4501,19 @@ export default function PlayPage() {
                   ))}
                 </div>
               )}
+              {streamStatus === "off" && (
+                <input
+                  type="text"
+                  value={clipPrompt}
+                  maxLength={400}
+                  aria-label={t.animatePrompt}
+                  placeholder={t.animatePrompt}
+                  // A new prompt means a new clip: drop the old one so the
+                  // button makes a clip instead of replaying the last.
+                  onChange={(e) => { setClipPrompt(e.target.value); setFallbackVideoUrl(null); setShowVideo(false); }}
+                  className="w-44 rounded-full border border-white/30 bg-black/60 px-3 py-1 text-xs text-white placeholder:text-white/60"
+                />
+              )}
               <button
                 type="button"
                 onClick={
@@ -4487,7 +4529,7 @@ export default function PlayPage() {
                     ? "Replay the clip you already generated for this page (no new fal call)"
                     : process.env.NEXT_PUBLIC_LTX_WS_URL
                       ? "Stream an animated clip from Modal LTX"
-                      : "Generate a 5-second clip via fal-ai/ltx-video (not streaming — full MP4)"
+                      : "Generate a 5-second clip via fal MiniMax H3 (not streaming — full MP4)"
                 }
               >
                 {streamStatus === "off"
@@ -4519,7 +4561,7 @@ export default function PlayPage() {
                     className="rounded-full bg-black/60 px-3 py-1 text-xs text-white"
                     title={SPATIAL_TRANSITIONS_ENABLED
                       ? page.descentVideoUrl ? "Play saved generated clip" : "Generate an AI clip that travels from the parent page into this one (first→last-frame video, saved on this page)"
-                      : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal ltx-2.3)"}
+                      : "Replay your arrival as a camera move: the parent map dives down into this page (first→last-frame clip via fal MiniMax H3)"}
                   >
                     {SPATIAL_TRANSITIONS_ENABLED
                       ? <span className="flex items-center gap-1"><Film size={14} /> {page.descentVideoUrl ? "Generated clip" : "Make travel clip"}</span>

@@ -4,7 +4,7 @@ import type { ClientSession, Db } from "mongodb";
 import type { WorldEntityGeo } from "@openflipbook/config";
 import { CreatorError } from "./creator-error";
 import type { SceneDoc } from "./place-scene-store";
-import type { MeshAssetDoc } from "./mesh-execution";
+import type { MeshAssetDoc } from "./mesh-docs";
 import { readConnectionGraph } from "./place-connection-graph";
 import { networkView, placeNetwork } from "./place-connections";
 import { materialAssetIds } from "./surface-material";

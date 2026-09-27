@@ -1,6 +1,7 @@
 import type { MapCrop, ObserverPose, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
-import { blockDistance, solidBlocks, type LayoutBlock } from "./layout-control";
+import { carveLanes } from "./lane-carve";
+import { blockDistance, pointInBlock, renderLayoutControl, solidBlocks, type LayoutBlock } from "./layout-control";
 
 // A route the user DRAWS on the map: the stroke becomes world positions, the
 // camera looks along it, and checkpoints mark where a new keyframe image is
@@ -8,6 +9,16 @@ import { blockDistance, solidBlocks, type LayoutBlock } from "./layout-control";
 
 export const EYE_HEIGHT = 1.7;
 export const DEFAULT_FOV = Math.PI / 2;
+
+/** How wide a lane the ROUTE needs, as opposed to a person.
+ *
+ *  `LANE_GAP` is a pedestrian gap -- room to squeeze between two walls. A
+ *  camera also needs standoff, or it is pressed against a seven-metre face and
+ *  sees only stone. Walking a live town at the pedestrian gap left every
+ *  camera a median 4 units from the line the user drew and the worst 8.5; at
+ *  this gap the median is 1.0 and the worst 4.5, so the walk follows the
+ *  stroke instead of scattering to whatever spots happened to be open. */
+export const ROUTE_LANE_GAP = 8;
 
 export interface RouteOptions {
   /** A turn this large since the last checkpoint forces a new one. */
@@ -18,6 +29,9 @@ export interface RouteOptions {
   lookAt?: WorldVec2 | null;
   /** The frame the drawn places live in (null = the root map). */
   frameParentId?: string | null;
+  /** Daylight to open between overlapping footprints before routing, in world
+   *  units; 0 walks the town exactly as it was extracted. */
+  laneGap?: number;
   eyeHeight?: number;
   fov?: number;
 }
@@ -85,16 +99,11 @@ const WEIGHT_INSIDE = 20; // per unit actually inside a building
 // Squared, so the walk ramps sideways over several steps instead of dog-legging.
 const WEIGHT_BEND = 0.25;
 const WEIGHT_AWAY = 0.1;
+// The route is recomputed while the pointer moves, so the work per stroke has
+// to be bounded: samples x offsets squared, with 57 offsets.
+const MAX_SAMPLES = 240;
 
 const standoff = (b: LayoutBlock) => Math.min(STANDOFF_MAX, Math.max(STANDOFF_MIN, b.height * STANDOFF_FRACTION));
-
-/** How much room a camera has here: 0 or more means every building is at least
- *  its standoff away; below 0 is how far short the closest one falls. */
-function room(pos: WorldVec2, walls: readonly LayoutBlock[]): number {
-  let worst = Infinity;
-  for (const b of walls) worst = Math.min(worst, blockDistance(b, pos) - standoff(b));
-  return worst;
-}
 
 /** What one camera position costs: being too close to a building. Standing IN
  *  one is not a position at all (Infinity), so the walk goes around. */
@@ -187,11 +196,28 @@ export function routeFromStroke(
   const maxStep = options.maxStepUnits ?? 18;
   const eye = options.eyeHeight ?? EYE_HEIGHT;
   const fov = options.fov ?? DEFAULT_FOV;
-  const walls = solidBlocks(entities, options.frameParentId ?? null);
-  // Sample fine enough to see corners, whatever the distance limit is.
+  // Extracted footprints overlap: on the live map every point inside the town
+  // is inside a building, so a route could only ever hug the outside. Narrow
+  // them about their centres first, and the town has lanes to walk.
+  // A quarter or district -- the container an ascend synthesizes -- is a frame
+  // OTHER places are nested inside, and it spans everything they span. Left
+  // solid it makes the whole map one building: a live route stepped all 53 of
+  // its cameras aside and looped outside the town it was drawn in. Both halves
+  // are needed: only a frame qualifies, so a hall drawn straight through still
+  // reports blocked, and only when the whole line is inside it, so a frame the
+  // route merely passes still has walls.
+  const frames = new Set(entities.map((e) => e.parent_id).filter((id): id is string => !!id));
+  const container = (b: LayoutBlock) => frames.has(b.id) && world.every((p) => pointInBlock(b, p));
+  const walls = carveLanes(
+    solidBlocks(entities, options.frameParentId ?? null).filter((b) => !container(b)),
+    options.laneGap ?? ROUTE_LANE_GAP,
+  );
+  // Sample fine enough to see corners, whatever the distance limit is — but
+  // the sideways walk costs samples x offsets squared, and a stroke across a
+  // zoomed-out map is arbitrarily long in world units, so cap the count.
   let raw = 0;
   for (let i = 1; i < world.length; i++) raw += dist(world[i - 1]!, world[i]!);
-  const sampleStep = Math.max(0.25, Math.min(maxStep / 12, raw / 48));
+  const sampleStep = Math.max(0.25, raw / MAX_SAMPLES, Math.min(maxStep / 12, raw / 48));
   const points = resample(world, sampleStep);
   if (points.length < 2) return { path: points.map((p) => p), checkpoints: [], length: 0 };
 
@@ -282,4 +308,68 @@ function merge(checkpoints: RouteCheckpoint[]): RouteCheckpoint[] {
     out.push(c);
   }
   return out;
+}
+
+/** How wide the block render used to judge a shot is. Small on purpose: this
+ *  answers "what does this camera see", not "what will it look like". */
+const SHOT_W = 160;
+const SHOT_H = 96;
+/** A camera seeing less built surface than this is looking at nothing -- open
+ *  ground, or the inside of a wall. The receipt for the first walk recorded
+ *  the gap: "nothing stops it putting a camera against a wall, or facing open
+ *  ground where this town has no boxes". */
+export const SHOT_MIN_BUILT = 0.04;
+
+export interface RouteShot {
+  index: number;
+  observer: ObserverPose;
+  /** Distance from the start of the route, world units. */
+  distance: number;
+  reason: RouteCheckpoint["reason"];
+  /** The places in frame, largest share first -- what this shot is OF. */
+  sees: { label: string; share: number }[];
+  /** Share of the frame that is a building rather than sky or ground. */
+  built: number;
+  /** Worth painting: it sees enough, and it is not standing in a wall. */
+  worth: boolean;
+}
+
+/** Turn a drawn route into the shots that would be painted along it.
+ *
+ *  A checkpoint is a camera; a shot is that camera plus what it can see from
+ *  there. The block render already knows: it returns the places in frame and
+ *  how much of the frame each one covers, so a shot can say what it is OF
+ *  before anything is generated. That is also the only way to tell a camera
+ *  worth painting from one facing open ground or pressed into a wall. */
+export function routeShots(
+  route: Route,
+  entities: readonly WorldEntityGeo[] = [],
+  options: RouteOptions = {},
+): RouteShot[] {
+  return route.checkpoints.map((c, index) => {
+    const control = renderLayoutControl(
+      entities,
+      c.observer,
+      SHOT_W,
+      SHOT_H,
+      options.frameParentId ?? null,
+      options.laneGap ?? ROUTE_LANE_GAP,
+      true,
+    );
+    const total = SHOT_W * SHOT_H;
+    const sees = control.visible
+      .map((v) => ({ label: v.label, share: v.pixels / total }))
+      .filter((v) => v.share > 0.002)
+      .sort((a, b) => b.share - a.share);
+    const built = sees.reduce((s, v) => s + v.share, 0);
+    return {
+      index,
+      observer: c.observer,
+      distance: c.distance,
+      reason: c.reason,
+      sees,
+      built,
+      worth: !c.blocked && built >= SHOT_MIN_BUILT,
+    };
+  });
 }

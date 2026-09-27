@@ -14,7 +14,7 @@ import { motionComparisonPlan, parseMotionReview, evaluateMotionReview } from ".
 import { inspectMotionArchiveVideos } from "./motion-video";
 import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionFile, MotionReviewDoc } from "./motion-job";
-import type { WorldImportPlan } from "./world-import-content";
+import type { WorldImportPlan } from "./world-import-plan";
 
 const id = (v: unknown): string => isSafeId(v) ? v : invalidArchive("Invalid motion archive identity");
 const text = (v: unknown, cap: number): string => typeof v === "string" && v.length <= cap ? v : invalidArchive("Invalid motion archive text");

@@ -140,7 +140,7 @@ async def estimate_view(image_bytes: bytes, caption: str = "") -> ViewEstimate:
             model=model,
             messages=messages,
             temperature=0.0,
-            max_tokens=300,
+            max_tokens=llm.REASONING_HEADROOM + 300,
             **llm._maybe_response_format(model),
         )
     except Exception as exc:

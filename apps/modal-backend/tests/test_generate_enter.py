@@ -29,6 +29,13 @@ from providers.image import GeneratedImage  # noqa: E402
 from providers.llm import PagePlan  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _one_step_in_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Map zooms sample step-in 3 times in production; these tests script one
+    # verdict per attempt. The sampling tests unset this.
+    monkeypatch.setenv("TAP_ZOOM_MAP_SAMPLES", "1")
+
+
 async def _collect(agen: Any) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     async for chunk in agen:
@@ -422,6 +429,55 @@ async def test_classic_cold_tap_classified_scene_zoom_continues(
     gen.assert_not_awaited()
 
 
+async def test_submap_without_region_role_does_not_zoom_the_whole_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Live 2026-09-23: the region crop failed (R2 sends no CORS header), so
+    # the request carried roles ["parent", "style"]. The fallback took refs[0],
+    # the WHOLE parent, as the region: the zoom re-drew the whole map and the
+    # step-in judge rejected both paid attempts. With roles, no "region" role
+    # means there is no region.
+    monkeypatch.setenv("PROGRESSIVE_DRAFT", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/flux-pro/kontext", "r3")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    gen = _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_tap_body(
+        render_mode="place_submap",
+        condition_image_urls=["data:p", "data:s"],
+        condition_roles=["parent", "style"],
+    ), "t1"))
+
+    cont.assert_not_awaited()
+    edit.assert_not_awaited()
+    gen.assert_awaited_once()
+
+
+async def test_submap_legacy_refs_without_roles_still_zoom_the_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A client that sends no roles orders the region first: keep using it.
+    _mock_plan(monkeypatch)
+    cont = AsyncMock(
+        return_value=GeneratedImage(b"jpeg", "image/jpeg", "fal-ai/flux-pro/kontext", "r3")
+    )
+    monkeypatch.setattr(image_edit_mod, "continue_image", cont)
+    _mock_fresh(monkeypatch)
+
+    await _collect(_event_stream(_tap_body(
+        render_mode="place_submap",
+        condition_image_urls=["data:r", "data:p"],
+        condition_roles=None,
+    ), "t1"))
+
+    cont.assert_awaited_once()
+    assert cont.await_args.args[0] == "data:r"
+
+
 async def test_classic_zoom_without_region_stays_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -508,6 +564,107 @@ async def test_zoom_judge_pass_is_single_attempt(
     cont.assert_awaited_once()
     step.assert_awaited_once()
     assert step.await_args.args[0] == b"region-crop"  # judged vs the REGION
+
+
+async def test_map_zoom_at_the_same_framing_passes_first_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A map zoom's target is the tapped crop's own framing, which step-in
+    # scores 5 ("the same place at the same framing"). At the shared 6.0
+    # floor no map zoom passed, and every map tap rendered twice.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [5.0, 5.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+
+
+async def test_map_zoom_takes_the_median_of_three_step_in_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A correct map zoom sits on the judge's 4/5 boundary. One low draw must
+    # not fail it: 4, 5, 5 -> median 5 -> accepted on the first render.
+    monkeypatch.delenv("TAP_ZOOM_MAP_SAMPLES")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [4.0, 5.0, 5.0])
+
+    events = await _collect(
+        _event_stream(
+            _classic_body(
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    cont.assert_awaited_once()
+    assert step.await_count == 3
+    final = next(e for e in events if e["type"] == "final")
+    assert final["view_verdict"]["same_place"] == 5.0
+
+
+async def test_close_up_zoom_still_asks_step_in_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TAP_ZOOM_MAP_SAMPLES")
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    step = _mock_step_in(monkeypatch, [9.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                prefetched_enter_as="scene",  # -> place_closeup, the view register
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    step.assert_awaited_once()
+
+
+async def test_view_zoom_at_the_same_framing_still_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A close-up has to come closer: the same framing is not a close-up.
+    _mock_plan(monkeypatch)
+    _mock_edit(monkeypatch)
+    cont = _mock_continue(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _mock_step_in(monkeypatch, [5.0, 5.0])
+
+    await _collect(
+        _event_stream(
+            _classic_body(
+                prefetched_enter_as="scene",  # -> place_closeup, the view register
+                condition_image_urls=[_region_data_url(), "data:p"],
+                condition_roles=["region", "parent"],
+            ),
+            "t1",
+        )
+    )
+
+    assert cont.await_count == 2
 
 
 async def test_zoom_judge_fail_retries_with_rationale_and_keeps_best(
@@ -924,7 +1081,7 @@ async def test_world_submap_redraw_rides_edit_seam_with_loose_refs_model(
     gen.assert_not_awaited()
     edit.assert_not_awaited()
     assert cont.await_args.args[0] == "data:r"  # the region crop is the source
-    assert "MORE DETAILED map" in cont.await_args.args[1]
+    assert "EXACTLY the same framing" in cont.await_args.args[1]
     assert (
         cont.await_args.kwargs["model_override"] == "fal-ai/nano-banana-pro/edit"
     )
@@ -1023,14 +1180,14 @@ async def test_redraw_prompt_carries_clauses_and_style(
     events = await _collect(_event_stream(_world_submap_body(), "t1"))
 
     prompt = cont.await_args.args[1]
-    assert 'Draw a closer, richer, MORE DETAILED map of "The Stone Castle"' in prompt
-    assert "individual buildings, lanes, courtyards" in prompt
-    assert "The Inner Bailey" in prompt  # the planner's facts ride in
+    assert 'sharper, more detailed map of "The Stone Castle"' in prompt
+    assert "EXACTLY the same framing" in prompt
+    assert "The Inner Bailey" not in prompt  # facts pulled the render off the crop
     assert "hand-drawn engraving, sepia ink" in prompt  # the medium lock
     assert "garbled" in prompt  # the lettering guard
     assert "FLAT TOP-DOWN" in prompt  # the map lever rides the redraw
     final = next(e for e in events if e["type"] == "final")
-    assert "MORE DETAILED map" in final["final_prompt"]
+    assert "EXACTLY the same framing" in final["final_prompt"]
 
 
 # ---------- the zoom legibility gate (TAP_ZOOM_DETAIL, default ON) -------------
@@ -1263,7 +1420,7 @@ async def test_zoom_detail_gates_the_redraw_op_too(
     gen.assert_not_awaited()
     retry_prompt = cont.await_args_list[1].args[1]
     assert "smeared mush" in retry_prompt
-    assert "MORE DETAILED map" in retry_prompt  # still the redraw instruction
+    assert "EXACTLY the same framing" in retry_prompt  # still the redraw instruction
     assert [c.kwargs["model_override"] for c in cont.await_args_list] == [
         "fal-ai/nano-banana-pro/edit",
         "fal-ai/nano-banana-pro/edit",
@@ -1319,7 +1476,7 @@ async def test_zoom_receipt_keep_best_reports_not_accepted(
         image_edit_mod, "continue_image", AsyncMock(side_effect=[first, second])
     )
     _mock_fresh(monkeypatch)
-    _mock_step_in(monkeypatch, [4.0, 5.5])  # both below the 6.0 floor
+    _mock_step_in(monkeypatch, [4.0, 4.5])  # both below the map floor (5.0)
 
     events = await _collect(
         _event_stream(
@@ -1333,7 +1490,7 @@ async def test_zoom_receipt_keep_best_reports_not_accepted(
     final = next(e for e in events if e["type"] == "final")
     v = final["view_verdict"]
     assert v["accepted"] is False and v["attempts"] == 2
-    assert v["same_place"] == 5.5  # the kept (better) attempt's score
+    assert v["same_place"] == 4.5  # the kept (better) attempt's score
 
 
 async def test_unjudged_enter_carries_no_receipt(

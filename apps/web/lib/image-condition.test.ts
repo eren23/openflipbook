@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { cropBox, diveOriginPx, orderedRefs, REGION_FRAC, regionUpscale } from "./image-condition";
 
@@ -83,6 +83,34 @@ describe("buildConditionRefs regionWhole (transition tap)", () => {
     });
     expect(refs.roles).toEqual(["region", "style"]);
     expect(refs.urls[0]).toBe("data:image/jpeg;base64,UEFSRU5U");
+  });
+});
+
+describe("buildConditionRefs region crop source", () => {
+  // Live 2026-09-23: a reopened session's parent is an R2 url, R2 sends no
+  // CORS header, and the crop failed on every tap -- the renderer never got
+  // the region around the tap. Crop the node's same-origin bytes instead.
+  async function cropSource(parentDataUrl: string, parentNodeId: string | null = null) {
+    const loaded: string[] = [];
+    const decode = vi.spyOn(HTMLImageElement.prototype, "decode").mockImplementation(function (this: HTMLImageElement) {
+      loaded.push(this.src);
+      return Promise.reject(new Error("stop before the canvas"));
+    });
+    const { buildConditionRefs } = await import("./image-condition");
+    const refs = await buildConditionRefs({ parentDataUrl, parentNodeId, click: { xPct: 0.5, yPct: 0.5 } });
+    decode.mockRestore();
+    return { loaded, refs };
+  }
+
+  it("crops a stored render through /api/image, and still sends its url as the parent", async () => {
+    const { loaded, refs } = await cropSource("https://pub.r2.dev/s/a.jpg", "n1");
+    expect(new URL(loaded[0]!).pathname).toBe("/api/image/n1");
+    expect(refs.urls).toEqual(["https://pub.r2.dev/s/a.jpg"]);
+  });
+
+  it("crops a data url in place, and a url with no node as it is", async () => {
+    expect((await cropSource("data:image/jpeg;base64,QQ==", "n1")).loaded[0]).toBe("data:image/jpeg;base64,QQ==");
+    expect((await cropSource("https://pub.r2.dev/s/a.jpg")).loaded[0]).toBe("https://pub.r2.dev/s/a.jpg");
   });
 });
 

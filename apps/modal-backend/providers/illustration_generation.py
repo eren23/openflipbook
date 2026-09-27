@@ -4,7 +4,7 @@ import io
 import json
 import math
 import os
-from typing import Literal
+from typing import Any, Literal, cast
 
 import fal_client
 import httpx
@@ -127,7 +127,7 @@ async def submit(body: IllustrationInput) -> dict[str, object]:
     config = configuration(region)
     if not config["enabled"]:
         raise HTTPException(503, "Illustration generation is not configured")
-    legacy_parameters = {**config["parameters"], "prompt_version": "registered-object-inpaint-depth-v1" if region else "saved-camera-depth-v1"}
+    legacy_parameters = {**cast(dict[str, Any], config["parameters"]), "prompt_version": "registered-object-inpaint-depth-v1" if region else "saved-camera-depth-v1"}
     legacy = body.parameters == legacy_parameters
     if body.model != config["model"] or body.reservation != config["reservation"] or not (body.parameters == config["parameters"] or legacy):
         raise HTTPException(409, "Illustration generation configuration changed")
@@ -155,7 +155,7 @@ async def submit(body: IllustrationInput) -> dict[str, object]:
               "Change surface appearance and artistic treatment, not architecture. "
               f"Appearance: {body.prompt.strip()}")
     if region:
-        arguments["controlnets"] = [{**EDIT_PARAMETERS["depth_controlnet"],
+        arguments["controlnets"] = [{**cast(dict[str, Any], EDIT_PARAMETERS["depth_controlnet"]),
                                      "control_image_url": inputs.pop("control_lora_image_url")}]
         prompt = ("Edit only the white masked surfaces of the supplied accepted artwork. "
                   "Use the supplied depth control to preserve the saved camera and architecture: "

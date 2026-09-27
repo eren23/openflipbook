@@ -346,6 +346,25 @@ export interface EditVerdict {
   accepted: boolean; // false = best-effort keep-best, gates not all met
 }
 
+// One typed decision's receipt. A site names a judgment the pipeline makes
+// (ship this render, ask or assume); `verdict` is what the decision model
+// answered per question, `incumbent` what the current rule decided, and
+// `applied` whether the model's answer actually replaced it (live sites
+// only). Present on `final` only when the layer ran (DECISION_MODE).
+export interface DecisionReceipt {
+  id: string;
+  site: string;
+  mode: string; // "shadow" | "advise" | "live"
+  verdict: Record<string, string | null>;
+  incumbent: Record<string, string | null>;
+  agree: boolean | null; // null when the backend failed or nothing to compare
+  p: Record<string, number>; // top probability per question
+  applied: boolean;
+  latency_ms: number;
+  cost_usd: number;
+  error: string | null;
+}
+
 // The render receipt (view_verdict): what the judged render-loop / zoom
 // critics saw on the KEPT attempt. Present on `final` only when a judged
 // path ran; axes the path didn't wire are null (never fabricated zeros).
@@ -400,6 +419,9 @@ export interface GenerateFinalEvent {
   // docs/COSTS.md prices (providers/spend.py). Additive; absent on older
   // backends.
   session_spend_estimate?: number;
+  // Typed decisions taken during this generate, with what the incumbent rule
+  // decided beside them. Additive; absent unless the decision layer ran.
+  decisions?: DecisionReceipt[];
   trace_id?: string;
 }
 
@@ -689,8 +711,6 @@ export interface WorldEntityGeo {
   // Derived from scene-owned furnishing placement; edited through that scene.
   floor_id?: string;
   room_id?: string;
-  // Owned local-scene geometry can only change through the scene commit service.
-  scene_id?: string;
   identity_anchor?: PlaceIdentityAnchor | null;
   identity_locked?: boolean;
   id: string;
@@ -727,6 +747,11 @@ export interface WorldEntityGeo {
   // (a confirmed detection), or "derived" (back-projected from a bbox — a guess).
   source: "extracted" | "user" | "derived";
   updated_at: string;
+  // Set on objects the 3D scene editor authored. They describe its own scene,
+  // not the map image, so map geometry (route walls, block renders, the frame
+  // a view reads) leaves them out. Such owned geometry changes only through
+  // the scene commit service.
+  scene_id?: string | null;
   // Segmented or scene-authored border polygon, in the SAME frame as `pos`
   // (the parent's local frame). 3..24 vertices; absent = only the rectangular
   // footprint is known. Segmentation writes require WORLD_SEGMENT_BORDERS;
@@ -756,6 +781,34 @@ export interface MapCrop {
   y: number;
   w: number;
   h: number;
+}
+
+/** A painted walk, kept so it survives the page that made it.
+ *
+ *  The keyframes are deliberately NOT here. They come back as data URIs, and
+ *  a node row is read on every visit -- storing them would make every read
+ *  carry megabytes of base64 for pictures already baked into the clips. The
+ *  clips are what anyone watches; the shots are what they are OF. */
+export interface WalkClipRow {
+  from_shot: number;
+  to_shot: number;
+  video_url: string;
+  model: string;
+  seconds: number;
+}
+
+export interface WalkShotRow {
+  index: number;
+  distance: number;
+  /** The places this camera saw, and their share of the frame. */
+  sees: { label: string; share: number }[];
+}
+
+export interface StoredWalk {
+  clips: WalkClipRow[];
+  shots: WalkShotRow[];
+  spent_usd: number;
+  created_at: string;
 }
 
 // What level a scene renders at — there is no single correct view.

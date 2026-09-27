@@ -167,6 +167,20 @@ function slugLabel(label: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+/** The geometry a removal changes: the removed places, and every direct child
+ *  `removeAndReroot` lifts out into the root frame. Kept on the tombstone so
+ *  an undo can put back exactly what was there -- the building AND its
+ *  interior nested inside it again, not just the codex entry. */
+export function geosTouchedByRemoval(
+  entities: readonly WorldEntityGeo[],
+  removedIds: Iterable<string>,
+): WorldEntityGeo[] {
+  const removed = new Set(removedIds);
+  return entities.filter(
+    (e) => removed.has(e.id) || (e.parent_id != null && removed.has(e.parent_id)),
+  );
+}
+
 /** Remove entries and re-express orphaned survivors in the absolute frame.
  *  Resolve against the original tree before deleting ancestors; position,
  *  footprint and child-frame scale must all survive a container rollback. */
@@ -502,15 +516,14 @@ export async function deriveGeoFromExtraction(
     };
   });
   if (geos.length === 0) return getWorldMap(sessionId);
+  const existing = (await getWorldMap(sessionId)).entities;
   // Seeding INTO a place's frame → LEARN that place's `scale` so its children
   // resolve INSIDE its footprint (a true absolute coordinate across the
   // universe), not summed flat into the city: scale = the parent's footprint
   // extent ÷ the interior's local extent. Best-effort + clamped so a bad extent
   // can't explode the map; the parent keeps its source authority (scale-only).
   if (parentId) {
-    const parent = (await getWorldMap(sessionId)).entities.find(
-      (e) => e.id === parentId,
-    );
+    const parent = existing.find((e) => e.id === parentId);
     if (parent) {
       const footprint = Math.max(parent.footprint.w, parent.footprint.d);
       const scale = Math.min(Math.max(footprint / localExtent(geos), 1e-3), 10);
@@ -531,7 +544,94 @@ export async function deriveGeoFromExtraction(
       if ((parent.scale ?? 1) !== scale) geos.push({ ...parent, scale });
     }
   }
-  return upsertEntityGeos(sessionId, geos);
+  const fresh = unmappedSeeds(existing, geos);
+  return fresh.length ? upsertEntityGeos(sessionId, fresh) : getWorldMap(sessionId);
+}
+
+/** Drop seeds for places the map already holds under another codex id.
+ *
+ *  One building can have two codex entries (a scene editor mints its own ids),
+ *  and an extraction may match either. Seeding by entity id then draws the
+ *  building twice: live, 2026-09-20, every building in a town got a second
+ *  box at the root beside its own in the district frame. Same kind and label,
+ *  and the seed's centre inside the standing place's footprint, both compared
+ *  in absolute coordinates, means the same place. A seed for an id already on
+ *  the map is an update and always passes. */
+export function unmappedSeeds(
+  existing: readonly WorldEntityGeo[],
+  seeds: WorldEntityGeo[],
+): WorldEntityGeo[] {
+  const seedIds = new Set(seeds.map((s) => s.id));
+  const all = [...existing.filter((e) => !seedIds.has(e.id)), ...seeds];
+  const abs = new Map(toAbsoluteEntities(all, all).map((e) => [e.id, e]));
+  const key = (s: string) => s.toLowerCase().trim();
+  const onMap = new Set(existing.map((e) => e.id));
+  const standing = all.filter((e) => !seedIds.has(e.id));
+  return seeds.filter((s) => {
+    if (onMap.has(s.id) || !key(s.label)) return true;
+    const p = abs.get(s.id)!.pos;
+    // ponytail: axis-aligned test, ignores heading; standing boxes are unrotated today.
+    return !standing.some((e) => {
+      if (e.kind !== s.kind || key(e.label) !== key(s.label)) return false;
+      const b = abs.get(e.id)!;
+      return Math.abs(p.x - b.pos.x) <= b.footprint.w / 2 && Math.abs(p.y - b.pos.y) <= b.footprint.d / 2;
+    });
+  });
+}
+
+/** Label-match two sets of places and return the position pairs to fit.
+ *
+ *  The painter RENAMES features (live case, 2026-07-05 fishing village: plan
+ *  "White Lighthouse" painted as "North Point Lighthouse", "Wooden Harbor" as
+ *  "Old Harbor Piers") -- exact/substring matching alone found 1 anchor out of
+ *  5 and the registration never fired. So the tiers are: exact > substring >
+ *  shared significant tokens (stop-worded, s-stemmed: "lighthouse"/"harbor"/
+ *  "pine" anchor; "north"/"old"/"white" don't), greedily assigned unique on
+ *  both sides. */
+function labelPairs(
+  from: readonly WorldEntityGeo[],
+  to: readonly WorldEntityGeo[],
+): [WorldVec2, WorldVec2][] {
+  const norm = (s: string) => s.toLowerCase().trim();
+  const GENERIC = new Set([
+    "the", "and", "old", "new", "big", "small", "great", "little",
+    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
+    "central", "grand", "dark", "white", "black", "red", "blue", "green",
+    "golden", "silver", "point", "side", "shore", "ridge", "district",
+  ]);
+  const sig = (s: string) =>
+    new Set(
+      norm(s)
+        .split(/[^a-z0-9]+/)
+        .map((t) => t.replace(/s$/, ""))
+        .filter((t) => t.length > 2 && !GENERIC.has(t)),
+    );
+  const candidates: { p: WorldEntityGeo; g: WorldEntityGeo; score: number }[] = [];
+  for (const p of from) {
+    const a = norm(p.label);
+    if (!a) continue;
+    const ta = sig(a);
+    for (const g of to) {
+      const b = norm(g.label);
+      if (!b) continue;
+      let score = 0;
+      if (a === b) score = Infinity;
+      else if (a.includes(b) || b.includes(a)) score = 100;
+      else for (const t of ta) if (sig(b).has(t)) score++;
+      if (score > 0) candidates.push({ p, g, score });
+    }
+  }
+  candidates.sort((x, y) => y.score - x.score);
+  const usedP = new Set<string>();
+  const usedG = new Set<string>();
+  const pairs: [WorldVec2, WorldVec2][] = [];
+  for (const c of candidates) {
+    if (usedP.has(c.p.id) || usedG.has(c.g.id)) continue;
+    usedP.add(c.p.id);
+    usedG.add(c.g.id);
+    pairs.push([c.p.pos, c.g.pos]);
+  }
+  return pairs;
 }
 
 // ── Plan→image register (AUDIT_BOX §4, the tractable half of metric pose) ────
@@ -563,53 +663,7 @@ export function registerPlanToImage(
       g.entity_id !== null,
   );
   if (images.length === 0) return null;
-  const norm = (s: string) => s.toLowerCase().trim();
-  // The painter RENAMES features (live case, 2026-07-05 fishing village:
-  // plan "White Lighthouse" painted as "North Point Lighthouse", "Wooden
-  // Harbor" as "Old Harbor Piers") — exact/substring matching alone found 1
-  // anchor out of 5 and the registration never fired. So the tiers are:
-  // exact > substring > shared significant tokens (stop-worded, s-stemmed:
-  // "lighthouse"/"harbor"/"pine" anchor; "north"/"old"/"white" don't),
-  // greedily assigned unique on both sides.
-  const GENERIC = new Set([
-    "the", "and", "old", "new", "big", "small", "great", "little",
-    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
-    "central", "grand", "dark", "white", "black", "red", "blue", "green",
-    "golden", "silver", "point", "side", "shore", "ridge", "district",
-  ]);
-  const sig = (s: string) =>
-    new Set(
-      norm(s)
-        .split(/[^a-z0-9]+/)
-        .map((t) => t.replace(/s$/, ""))
-        .filter((t) => t.length > 2 && !GENERIC.has(t)),
-    );
-  const candidates: { p: WorldEntityGeo; g: WorldEntityGeo; score: number }[] =
-    [];
-  for (const p of plans) {
-    const a = norm(p.label);
-    if (!a) continue;
-    const ta = sig(a);
-    for (const g of images) {
-      const b = norm(g.label);
-      if (!b) continue;
-      let score = 0;
-      if (a === b) score = Infinity;
-      else if (a.includes(b) || b.includes(a)) score = 100;
-      else for (const t of ta) if (sig(b).has(t)) score++;
-      if (score > 0) candidates.push({ p, g, score });
-    }
-  }
-  candidates.sort((x, y) => y.score - x.score);
-  const usedP = new Set<string>();
-  const usedG = new Set<string>();
-  const pairs: [WorldVec2, WorldVec2][] = [];
-  for (const c of candidates) {
-    if (usedP.has(c.p.id) || usedG.has(c.g.id)) continue;
-    usedP.add(c.p.id);
-    usedG.add(c.g.id);
-    pairs.push([c.p.pos, c.g.pos]);
-  }
+  const pairs = labelPairs(plans, images);
   // Gated runs fit down to REGISTER_MIN_SCALE (0.40) to rescue coherent deep
   // compressions the 0.5 clamp would reject; legacy keeps the 0.5 default.
   const fit = fitSimilarity(pairs, opts?.gate ? { minScale: REGISTER_MIN_SCALE } : undefined);
@@ -643,6 +697,58 @@ export function registerPlanToImage(
   return { updated, fit };
 }
 
+/** Move one frame's places onto another frame's, by label.
+ *
+ *  Redrawing a map -- an expand, a zoom, an edit -- makes a new IMAGE, and
+ *  extraction seeds what it finds into a frame of its own. Nothing reconciles
+ *  the two, so a world accumulates the same place twice in two frames and the
+ *  geometry a viewer sees never moves to match the picture it is drawn over.
+ *  A live world held The Copper Kettle in two frames at once, 14x11 in one and
+ *  10x12 in the other.
+ *
+ *  Fit a similarity from `from`'s places to their label-matched twins in `to`
+ *  and re-express `from` through it, so the older geometry tracks the newer
+ *  image instead of sitting where an earlier render put it. Same gate as the
+ *  plan register, for the same reason: an unhealthy fit re-expresses EVERY
+ *  place through a bad transform and doubles the error. */
+export function registerFrames(
+  geos: readonly WorldEntityGeo[],
+  fromFrame: string | null,
+  toFrame: string | null,
+  nowIso: string,
+  opts?: { gate?: boolean },
+): { updated: WorldEntityGeo[]; fit: SimilarityFit } | null {
+  if (fromFrame === toFrame) return null;
+  const inFrame = (f: string | null) =>
+    geos.filter((g) => (g.parent_id ?? null) === f && g.kind === "place");
+  const from = inFrame(fromFrame);
+  const to = inFrame(toFrame);
+  if (from.length === 0 || to.length === 0) return null;
+  const fit = fitSimilarity(
+    labelPairs(from, to),
+    opts?.gate ? { minScale: REGISTER_MIN_SCALE } : undefined,
+  );
+  if (fit === null) return null;
+  // Already in register: keep the write path idempotent.
+  if (
+    !fit.flipX &&
+    Math.abs(fit.scale - 1) < 0.02 &&
+    Math.abs(fit.tx) < 0.5 &&
+    Math.abs(fit.ty) < 0.5
+  ) {
+    return null;
+  }
+  if (opts?.gate && !isFitHealthy(fit)) return null;
+  const updated = from.map((g) => ({
+    ...g,
+    pos: applySimilarity(fit, g.pos),
+    footprint: { w: g.footprint.w * fit.scale, d: g.footprint.d * fit.scale },
+    height: g.height * fit.scale,
+    updated_at: nowIso,
+  }));
+  return { updated, fit };
+}
+
 /** Bulk entity counts for the gallery shelf — one projected read over the
  *  requested sessions (world_map is keyed by _id = session id). */
 export async function countMapEntities(
@@ -661,6 +767,7 @@ export async function countMapEntities(
 
 export const __test = {
   applyGeoUpsert,
+  removeAndReroot,
   recomputeBounds,
   applyEntityEdit,
   blastRadius,

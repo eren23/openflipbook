@@ -43,3 +43,28 @@ it("changes mesh-backed floor count without resizing the source asset envelope",
   const patch = change.mock.calls[0]![0]; expect(patch.height).toBe(object.height); expect(patch).not.toHaveProperty("width"); expect(patch).not.toHaveProperty("depth");
   expect(patch.structure.floors).toHaveLength(1); expect(patch.structure.roof_height).toBe(4);
 });
+it("edits walls, floor names, the doorway and windows as structure patches", () => {
+  const { object, definition } = fixture(), change = vi.fn(), error = vi.fn();
+  const props = { object, definition, onChange: change, onError: error, onFloorSelect: vi.fn() };
+  const view = render(<BuildingInspector {...props}/>);
+  const last = () => change.mock.calls.at(-1)![0].structure;
+  fireEvent.change(screen.getByLabelText("Wall thickness"), { target: { value: "0.3" } });
+  expect(last().wall_thickness).toBe(0.3);
+  fireEvent.change(screen.getByLabelText("Floor 2 name"), { target: { value: "Loft" } });
+  expect(last().floors[1]).toMatchObject({ id: "upper", label: "Loft" });
+  fireEvent.change(screen.getByLabelText("Doorway width"), { target: { value: "1.4" } });
+  expect(last().door.width).toBe(1.4);
+  fireEvent.change(screen.getByLabelText("Doorway wall"), { target: { value: "west" } });
+  expect(last().door.side).toBe("west");
+
+  fireEvent.click(screen.getByRole("button", { name: "Add window" }));
+  const withWindow = last();
+  expect(withWindow.windows).toHaveLength(object.structure!.windows.length + 1);
+  view.rerender(<BuildingInspector {...props} object={{ ...object, structure: withWindow }}/>);
+  const n = withWindow.windows.length;
+  fireEvent.change(screen.getByLabelText(`Window ${n} floor`), { target: { value: "1" } });
+  expect(last().windows[n - 1].floor).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: `Remove window ${n}` }));
+  expect(last().windows).toHaveLength(n - 1);
+  expect(error).not.toHaveBeenCalled();
+});

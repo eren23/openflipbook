@@ -33,8 +33,34 @@ _IMAGE_PRICES: tuple[tuple[str, float], ...] = (
     ("fal-ai/bria", 0.04),
     ("openrouter:sourceful/riverflow", 0.24),
     ("openai/gpt-image", 0.17),
+    # The edit model a walk paints its keyframes with -- research 34's one
+    # camera-holding pick. Unpriced it fell to the 0.15 default, which is more
+    # than four times what fal bills and trips a session cap four times early.
+    ("fal-ai/qwen-image-edit", 0.035),
 )
 _DEFAULT_IMAGE_PRICE = 0.15  # unknown slug: assume the balanced default
+
+# H3 bills per second, by resolution. fal's pricing API returns only the 480P
+# rate ($0.025/s for h3-max), which under-reserved 768P and 1080P. These are
+# the regular rates published on the model pages (read 2026-09-24). Launch
+# rates are half of these until 2026-09-30, so a reservation is conservative
+# until then and exact after. camera-controls publishes no price of its own:
+# priced as h3-max. Longest prefix wins, so turbo is not priced as h3-max.
+_H3_PER_SECOND: tuple[tuple[str, dict[str, float]], ...] = (
+    ("minimax/h3-max-turbo", {"480P": 0.025, "768P": 0.04, "1080P": 0.08}),
+    ("minimax/h3-max", {"480P": 0.05, "768P": 0.08, "1080P": 0.16}),
+)
+
+# Video: (slug prefix, dollars, per_second). Most slugs bill per CLIP. An
+# unknown slug falls back to the image default, which is the conservative
+# direction for a reservation.
+_VIDEO_PRICES: tuple[tuple[str, float, bool], ...] = (
+    ("fal-ai/ltx-2.3-quality", 0.12, False),
+    ("fal-ai/ltx-2.3", 0.04, False),
+    ("fal-ai/ltx-2", 0.06, False),
+    ("fal-ai/ltx-video", 0.02, False),
+    ("fal-ai/wan-i2v", 0.05, False),
+)
 VLM_STACK_FLAT = 0.02  # planner + judges + extraction, per generation
 
 VLM_CALL_FLAT = 0.005  # one standalone VLM/text-LLM call (extract/edit/plan/precompute)
@@ -55,6 +81,26 @@ def estimate_image(model: str | None) -> float:
         if slug.startswith(prefix) and len(prefix) > best_len:
             best, best_len = price, len(prefix)
     return best if best is not None else _DEFAULT_IMAGE_PRICE
+
+
+def estimate_video(model: str | None, duration_s: float = 5, resolution: str = "768P") -> float:
+    """What one clip from this model costs, longest matching prefix wins."""
+    slug = (model or "").strip().lower()
+    # A negative duration must not turn a reservation into a refund.
+    seconds = max(0.0, duration_s)
+    for prefix, rates in _H3_PER_SECOND:
+        if slug.startswith(prefix):
+            # An unknown resolution is priced at the dearest one.
+            return rates.get(resolution.upper(), max(rates.values())) * seconds
+    best: tuple[float, bool] | None = None
+    best_len = -1
+    for prefix, price, per_second in _VIDEO_PRICES:
+        if slug.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = (price, per_second), len(prefix)
+    if best is None:
+        return _DEFAULT_IMAGE_PRICE
+    price, per_second = best
+    return price * seconds if per_second else price
 
 
 def _today() -> str:

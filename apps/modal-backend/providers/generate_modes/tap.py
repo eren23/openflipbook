@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from _env import env_flag
 from obs import log
+from providers import decisions, llm, model_router, spend
 from providers import image as image_provider
 from providers import image_edit as image_edit_provider
-from providers import llm, model_router, spend
+from providers.decisions.sites import click_incumbent, click_state
 from providers.generate_modes._events import GenerateFinalEvent, ViewVerdict
 from providers.generate_modes._frames import progress_frame
 
@@ -276,6 +277,15 @@ async def stream_tap(
                 # call, so the in-band resolve only needs the classification.
                 autonomy="auto",
             )
+            await decisions.decide(
+                "click.classify",
+                state=click_state(
+                    resolution, body.parent_title or body.query, body.parent_query or body.query,
+                    cleaned_user_hint, effective_world_mode,
+                ),
+                incumbent=click_incumbent(resolution, "auto"),
+                session_id=body.session_id,
+            )
             # In world mode, let the classifier's read pick the framing
             # unless the request already pinned one.
             if effective_world_mode and not render_mode:
@@ -380,10 +390,12 @@ async def stream_tap(
             await _abort_if_disconnected("pre-reference")
             yield _sse({"type": "status", "stage": "planning"}, trace_id)
             try:
+                ref = body.place_reference
+                if ref is None:
+                    raise ValueError("An exterior arrival needs a place reference")
                 physical = await asyncio.wait_for(resolve_physical_reference(
-                    body.place_reference.image_data_url, body.place_reference.bbox,
-                    body.place_reference.label, body.place_reference.visual,
-                    curated=(body.place_reference.provenance or {}).get("kind") == "curated",
+                    ref.image_data_url, ref.bbox, ref.label, ref.visual,
+                    curated=(ref.provenance or {}).get("kind") == "curated",
                 ), timeout=60)
                 physical_reference_receipt = physical.receipt
                 canonical_bytes = physical.crop
@@ -506,7 +518,11 @@ async def stream_tap(
             if i < len(roles) and roles[i] == "region":
                 region_ref = url
                 break
-        if region_ref is None:
+        # A client that sends no roles orders the region first. With roles,
+        # no "region" role means no region: refs[0] is then the WHOLE parent,
+        # and zooming it re-drew the whole map (live 2026-09-23, when the
+        # crop failed on a reopened session).
+        if region_ref is None and not roles:
             region_ref = body.condition_image_urls[0]
     if canonical_bytes is not None:
         region_ref = image_provider.encode_data_url(canonical_bytes, "image/png")
@@ -795,7 +811,7 @@ async def stream_tap(
         from providers.place_identity import verify_and_render
         from providers.render_budget import RenderBudget
 
-        if not (use_continuation or use_enter_edit) or canonical_bytes is None or not body.image or not body.place_reference or layout_suppressed or not view_spec:
+        if not (use_continuation or use_enter_edit) or canonical_bytes is None or region_ref is None or not body.image or not body.place_reference or layout_suppressed or not view_spec:
             yield _sse({"type": "error", "message": "This view cannot be verified. Your world is unchanged."}, trace_id)
             return
         model = (body.image_model or model_router.resolve_model("submap_redraw")) if use_continuation else enter_model_slug
@@ -898,10 +914,18 @@ async def stream_tap(
             region_bytes = render_loop.data_url_bytes(region_ref)
             if region_bytes is None:
                 return first
+            # score_step_in gives "the same place at the same framing" 5 and
+            # "closer" more. A MAP zoom's target is the tapped crop's own
+            # framing drawn in more detail, so a correct one tops out at 5:
+            # at the shared 6.0 floor no map zoom passed and every map tap
+            # paid for a second render (measured 2026-09-24).
+            floor_env, floor_default = (
+                ("TAP_ZOOM_MAP_ACCEPT", 5.0) if zoom_register == "map" else ("TAP_ZOOM_ACCEPT", 6.0)
+            )
             try:
-                accept = float(os.environ.get("TAP_ZOOM_ACCEPT", "6.0"))
+                accept = float(os.environ.get(floor_env, str(floor_default)))
             except ValueError:
-                accept = 6.0
+                accept = floor_default
             try:
                 detail_accept = float(
                     os.environ.get("TAP_ZOOM_DETAIL_ACCEPT", "6.0")
@@ -913,19 +937,64 @@ async def stream_tap(
                 "TAP_ZOOM_DETAIL", "true"
             )
 
+            # A correct map zoom sits on the judge's 4/5 boundary: one live
+            # render with the right framing scored 4 twice, while the bench
+            # gave the same kind of render 5 on all 18 samples. Take the
+            # median of a few calls there; close-ups keep one.
+            try:
+                samples = max(1, int(os.environ.get("TAP_ZOOM_MAP_SAMPLES", "3")))
+            except ValueError:
+                samples = 3
+            if zoom_register != "map":
+                samples = 1
+
+            async def _step_in(candidate: bytes) -> JudgeResult:
+                runs = await _asyncio.gather(
+                    *(step_in(region_bytes, candidate) for _ in range(samples))
+                )
+                return sorted(runs, key=lambda r: r.score)[len(runs) // 2]
+
             async def _verdicts(
                 img: GeneratedImage,
             ) -> tuple[JudgeResult, JudgeResult | None]:
                 if not detail_on:
-                    return await step_in(region_bytes, img.jpeg_bytes), None
+                    return await _step_in(img.jpeg_bytes), None
                 got = await _asyncio.gather(
-                    step_in(region_bytes, img.jpeg_bytes),
+                    _step_in(img.jpeg_bytes),
                     judge.score_map_legibility(img.jpeg_bytes),
                 )
                 return got[0], got[1]
 
             def _accepted(v: JudgeResult, d: JudgeResult | None) -> bool:
                 return v.score >= accept and (d is None or d.score >= detail_accept)
+
+            async def _decide_zoom(
+                n: int, v: JudgeResult, d: JudgeResult | None, retryable: bool
+            ) -> None:
+                """Put the zoom's verdict to the decision layer, shadow-side.
+                The floors stay out of the state: the scores and the
+                reviewers' sentences are what there is to read."""
+                await decisions.decide(
+                    "zoom.accept",
+                    state={
+                        "attempt": n,
+                        "max_attempts": 2,
+                        "register": zoom_register,
+                        "axes": {
+                            "step_in": {"score": v.score, "rationale": (v.rationale or "")[:400]},
+                            **(
+                                {"legibility": {"score": d.score, "rationale": (d.rationale or "")[:400]}}
+                                if d is not None
+                                else {}
+                            ),
+                        },
+                    },
+                    incumbent={
+                        "accept": "yes" if _accepted(v, d) else "no",
+                        "retry_worth_it": "yes" if retryable else "no",
+                    },
+                    session_id=body.session_id,
+                )
 
             def _total(v: JudgeResult, d: JudgeResult | None) -> float:
                 # Keep-best = the attempt whose WORST axis is best (min-floor).
@@ -954,12 +1023,13 @@ async def stream_tap(
                 legibility=detail.score if detail is not None else None,
                 accepted=_accepted(verdict, detail),
             )
-            if _accepted(verdict, detail):
-                view_verdict = _zoom_receipt(verdict, detail, 1, True)
-                return first
             # One deadline-aware retry (same margin discipline as the render
             # loop: never start an attempt the ingress window can't fit).
             remaining = ingress_timeout_s - 120.0 - (_time.perf_counter() - started)
+            await _decide_zoom(1, verdict, detail, not _accepted(verdict, detail) and remaining >= 45.0)
+            if _accepted(verdict, detail):
+                view_verdict = _zoom_receipt(verdict, detail, 1, True)
+                return first
             if remaining < 45.0:
                 view_verdict = _zoom_receipt(verdict, detail, 1, False)
                 return first
@@ -999,6 +1069,7 @@ async def stream_tap(
                 legibility=detail2.score if detail2 is not None else None,
                 accepted=_accepted(verdict2, detail2),
             )
+            await _decide_zoom(2, verdict2, detail2, False)
             if _total(verdict2, detail2) >= _total(verdict, detail):
                 view_verdict = _zoom_receipt(
                     verdict2, detail2, 2, _accepted(verdict2, detail2)
@@ -1370,6 +1441,11 @@ async def stream_tap(
         # bins were projected for a different camera register — the debug
         # HUD counts these so suppression frequency is finally observable.
         final_payload["layout_suppressed"] = True
+    receipts = await decisions.drain()
+    if receipts:
+        # What the decision layer was asked during this generate, and what
+        # the rules decided beside it. Additive; absent when the layer is off.
+        final_payload["decisions"] = receipts
     yield _sse(final_payload, trace_id)
     log(
         "info",

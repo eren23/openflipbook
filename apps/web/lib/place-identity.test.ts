@@ -70,6 +70,8 @@ describe("place-aware navigation", () => {
     expect(placeCandidates([quarter, inn, scene, copy], [], "root", null, { x_pct: .37, y_pct: .485 }).map(e => e.id)).toEqual(["inn"]);
   });
   it("a detection box covering most of the image does not claim every tap", () => {
+    // Live: "River Leven" was drawn over a whole lake (92%x50% of the image),
+    // so every tap in the top half resolved to the river.
     const lake = { ...geo("river", 90), entity_id: "river" };
     const inn = { ...geo("inn"), entity_id: "inn" };
     const entities = [
@@ -77,6 +79,11 @@ describe("place-aware navigation", () => {
       { id: "inn", appearance_bboxes: { root: { x_pct: 0.45, y_pct: 0.4, w_pct: 0.1, h_pct: 0.2 } } },
     ] as never;
     expect(placeCandidates([lake, inn], entities, "root", null, { x_pct: 0.5, y_pct: 0.45 }).map(e => e.id)).toEqual(["inn"]);
+  });
+  it("keeps a frame-filling box in a perspective view, where it is the only signal", () => {
+    const river = { ...geo("river"), entity_id: "river", parent_id: "tower" };
+    const entities = [{ id: "river", appearance_bboxes: { inside: { x_pct: 0, y_pct: 0, w_pct: 0.92, h_pct: 0.5 } } }] as never;
+    expect(placeCandidates([river], entities, "inside", view("tower"), { x_pct: 0.5, y_pct: 0.2 }).map(e => e.id)).toEqual(["river"]);
   });
   it("does not treat world coordinates as perspective-image detections", () => {
     expect(placeCandidates([{ ...geo("child"), parent_id: "tower" }], [], "inside", view("tower"), { x_pct: .5, y_pct: .5 })).toEqual([]);

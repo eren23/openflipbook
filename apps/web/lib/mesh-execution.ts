@@ -4,34 +4,21 @@ import { withDbTransaction } from "./db";
 import { modalAuthHeaders, modalUrl } from "./modal";
 import { getStoredBytes, uploadJpeg } from "./r2";
 import { isSafeId } from "./ids";
-import { meshDownloadUrl, MESH_IMAGE_MODEL, type MeshJob, type MeshImportProvenance } from "./mesh-asset";
-import { prepareMeshInput, type MeshSourceDoc } from "./mesh-source";
+import { meshDownloadUrl, MESH_IMAGE_MODEL, type MeshJob } from "./mesh-asset";
+import { prepareMeshInput } from "./mesh-source";
 import { assetPipeline, validateAssetBytes, type AssetKind } from "./asset-pipeline";
-import type { MeshDimensions } from "./mesh-dimensions";
 import type { SceneDoc } from "./place-scene-store";
 import type { BuildDoc } from "./place-build-execution";
 import { CreatorError } from "./creator-error";
-import { illustrationEditSource, illustrationSource, prepareIllustrationInput, type ViewDependency } from "./illustration-input";
+import { illustrationEditSource, illustrationSource, prepareIllustrationInput } from "./illustration-input";
+import type { MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
+export type { MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
 import { fenceViewSources } from "./place-view-store";
-import type { IllustrationRegionEdit, IllustrationEditInput, IllustrationGeometryRefresh } from "./place-view";
 import { ILLUSTRATION_EDIT_MODEL } from "./asset-pipeline";
 import { registeredPixels } from "./illustration-region";
 import { buildConnectionsCurrent } from "./place-build-connections";
 import { usesIllustrationIdentity } from "./illustration-identity";
 
-export interface MeshJobDoc extends MeshJob {
-  _id: string; session_id: string; created_at: Date;
-  request_id?: string; parameters?: Record<string, unknown>; ledger_ids?: string[];
-  submission_token?: string; submission_deadline?: Date; submission_started_at?: Date;
-  work_token?: string; work_until?: Date; next_check?: Date;
-  provider_result?: { status: "ready"; model_glb?: { url: string }; image?: { url: string }; seed?: number }; refresh_result?: boolean;
-  download?: { key: string; sha256: string; bytes: number };
-  view_dependency?: ViewDependency;
-  edit_input?: IllustrationEditInput;
-  image_input?: MeshSourceDoc;
-  dependency?: { kind?: AssetKind; place_id: string; revision: number; input_sha256: string; build_key: string; result_sha256: string; plan_sha256: string; connections_sha256?: string };
-}
-export interface MeshAssetDoc { _id: string; id: string; session_id: string; key: string; sha256: string; bytes: number; model: string; prompt: string; request_id?: string; imported?: MeshImportProvenance; created_at: Date; content_type?: "image/jpeg" | "image/png"; region_edit?: IllustrationRegionEdit; edit_input?: IllustrationEditInput; geometry_refresh?: IllustrationGeometryRefresh; image_input?: MeshSourceDoc; parameters?: Record<string, unknown>; dependency?: MeshJobDoc["dependency"]; view_dependency?: ViewDependency; illustration?: { width: number; height: number; color_space: "srgb" }; geometry?: { sha256: string; size: MeshDimensions }; image?: { width: number; height: number; channel: "base_color"; color_space: "srgb"; tiling: "unverified" } }
 const statusPath = (job: MeshJobDoc) => `requests/${encodeURIComponent(job.request_id!)}${[ILLUSTRATION_EDIT_MODEL, MESH_IMAGE_MODEL].includes(job.model) ? `?model=${encodeURIComponent(job.model)}` : ""}`;
 export const wireMesh = (job: MeshJobDoc): MeshJob => ({ id: job.id, prompt: job.prompt, model: job.model, status: job.status, reservation: job.reservation,
   ...(job.asset_id ? { asset_id: job.asset_id } : {}), ...(job.source_id ? { source_id: job.source_id } : {}), ...(job.error ? { error: job.error } : {}) });

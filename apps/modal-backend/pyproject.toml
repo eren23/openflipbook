@@ -40,21 +40,25 @@ addopts = "-q --strict-markers"
 # Geometric-world eval gates. Free deterministic gates run always; `paid` gates
 # spend fal/openrouter and self-skip unless their *_BENCH_RUN flag is set, so
 # CI selects them out with `-m "not paid"`.
+# Only markers that a test actually carries. `layout` and `grounding` were
+# declared for gates that turned out to be Makefile runners, not pytest tests
+# (`make eval-layout`, `make eval-grounding`) — so `pytest -m layout` selected
+# nothing while reading as if it covered the gate. Same for `paid`: no test
+# carries it, so `-m "not paid"` excluded nothing and the real protection is
+# each runner's own *_BENCH_RUN env gate. Re-declare one when a test wears it;
+# strict-markers will say so loudly.
 markers = [
     "geometry: free deterministic 2.5D projection gate (P1)",
-    "layout: paid VLM layout-fidelity gate (P3)",
-    "grounding: paid open-vocab detector grounding gate (P4)",
     "repair: verify->repair loop — free control-flow + paid convergence (P4)",
     "edit: entity NL-edit parse gate (P5)",
-    "paid: spends fal/openrouter; skipped unless its *_BENCH_RUN flag is set",
 ]
 
-# The RATCHET: floor pinned just under the measured baseline (2026-07-19:
-# 85.72% over providers/ + generate.py). CI's pytest runs with --cov so a
+# The RATCHET: floor pinned just under the measured baseline (2026-09-23:
+# 88.55% over providers/ + generate.py). CI's pytest runs with --cov so a
 # PR that drops the total below this FAILS; a PR that raises coverage bumps
 # the floor. Never lower it to make a PR pass — that defeats the ratchet.
 [tool.coverage.report]
-fail_under = 87
+fail_under = 88
 
 [tool.mypy]
 python_version = "3.12"

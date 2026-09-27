@@ -121,14 +121,23 @@ export function summarizeStroke(points: NormalizedClick[]): NormalizedStroke | n
  * visual reference to the click point — numeric "x=0.47,y=0.62" text
  * hints are wildly imprecise for current open-weights VLMs.
  */
+/** Where a canvas can read `src` from. A stored render is an R2 url, and R2
+ *  sends no CORS header, so drawing it taints the canvas and `toDataURL`
+ *  throws: on a reopened session every tap lost its crosshair and its region
+ *  crop, silently. The node's own bytes are served same-origin. */
+export function canvasSource(src: string, nodeId?: string | null): string {
+  return nodeId && /^https?:/.test(src) ? `/api/image/${encodeURIComponent(nodeId)}` : src;
+}
+
 export async function annotateClickPoint(
   dataUrl: string,
   xPct: number,
-  yPct: number
+  yPct: number,
+  nodeId?: string | null,
 ): Promise<string> {
   const img = new Image();
   img.decoding = "async";
-  img.src = dataUrl;
+  img.src = canvasSource(dataUrl, nodeId);
   await img.decode();
 
   const canvas = document.createElement("canvas");
@@ -193,12 +202,13 @@ export async function annotateClickPoint(
  */
 export async function annotateStroke(
   dataUrl: string,
-  stroke: NormalizedStroke
+  stroke: NormalizedStroke,
+  nodeId?: string | null,
 ): Promise<string> {
   if (!stroke || stroke.points.length < 2) return dataUrl;
   const img = new Image();
   img.decoding = "async";
-  img.src = dataUrl;
+  img.src = canvasSource(dataUrl, nodeId);
   await img.decode();
 
   const canvas = document.createElement("canvas");

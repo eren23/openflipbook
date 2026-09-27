@@ -1,5 +1,7 @@
 import type { ObserverPose, ProjectedEntity, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
+import { carveLanes } from "./lane-carve";
+import { type RoofKind, roofEntry, roofFor } from "./roof";
 import { hPos, sizeBin, vPos } from "./world-geometry";
 
 // A camera-view block render of the world map: every solid place extruded to
@@ -14,23 +16,40 @@ export type LayoutBlock = Pick<WorldEntityGeo, "id" | "label" | "pos" | "footpri
 const GROUND_LABEL = /\b(river|quay|stream|canal|lake|harbou?r|road|street|avenue|lane|way|square|plaza|bridge|district)\b/i;
 
 /** Solid places in one frame: the siblings under `frameParentId` (null = the
- *  root map). Other frames hold interiors or a second copy of the town (the
- *  3D editor scene, tagged scene_id) and would duplicate buildings. Pass
- *  ABSOLUTE entities (toAbsoluteEntities): a zoom-out re-expresses the town's
- *  local numbers under the new parent, but absolute positions stay put. */
+ *  root map). Other frames hold interiors, which would put a room's furniture
+ *  on the street. Pass ABSOLUTE entities (toAbsoluteEntities): a zoom-out
+ *  re-expresses the town's local numbers under the new parent, but absolute
+ *  positions stay put. */
 export function solidBlocks<T extends LayoutBlock>(entities: readonly T[], frameParentId: string | null = null): T[] {
   return entities.filter(
     (e) =>
       (e.parent_id ?? null) === frameParentId &&
-      !e.scene_id &&
       e.kind === "place" &&
+      // The 3D scene editor's copy of a town stands where the map shows none.
+      !e.scene_id &&
       e.height > 0.5 &&
-      !GROUND_LABEL.test(e.label ?? ""),
+      !GROUND_LABEL.test(e.label ?? "") &&
+      // One place with a non-finite number poisons every distance taken against
+      // it, and a NaN cost loses every comparison silently: the caller ends up
+      // with a whole route of NaN, not one bad block. Drop it here, once, for
+      // every consumer of this geometry.
+      castable(e),
   );
 }
 
+/** A heading that is not a number would make every slab test pass. */
+const headingOf = (b: LayoutBlock) => (Number.isFinite(b.heading) ? b.heading! : 0);
+
+/** Geometry we can actually measure or cast a ray against. */
+function castable(b: LayoutBlock): boolean {
+  return Number.isFinite(b.pos?.x) && Number.isFinite(b.pos?.y)
+    && Number.isFinite(b.footprint?.w) && Number.isFinite(b.footprint?.d)
+    && b.footprint.w > 0 && b.footprint.d > 0
+    && Number.isFinite(b.height) && Number.isFinite(b.elevation ?? 0);
+}
+
 export function pointInBlock(b: LayoutBlock, p: WorldVec2, margin = 0): boolean {
-  const h = b.heading ?? 0;
+  const h = headingOf(b);
   const dx = p.x - b.pos.x;
   const dy = p.y - b.pos.y;
   const lx = dx * Math.cos(h) + dy * Math.sin(h);
@@ -41,7 +60,7 @@ export function pointInBlock(b: LayoutBlock, p: WorldVec2, margin = 0): boolean 
 /** Signed distance from `p` to the block's footprint edge in world units:
  *  positive outside, negative (or 0) inside. Used to keep a camera off walls. */
 export function blockDistance(b: LayoutBlock, p: WorldVec2): number {
-  const h = b.heading ?? 0;
+  const h = headingOf(b);
   const dx = p.x - b.pos.x;
   const dy = p.y - b.pos.y;
   const lx = Math.abs(dx * Math.cos(h) + dy * Math.sin(h)) - b.footprint.w / 2;
@@ -77,6 +96,11 @@ export interface LayoutControl {
    *  Infinity where the ray hit sky. Lets one keyframe be warped into the
    *  next camera (research 34) without a 3D scene. */
   depth: Float32Array;
+  /** Which entry of `visible` owns each pixel, or -1 for none -- sky, ground,
+   *  or a block too small to be named. The renderer already computes this to
+   *  draw the boxes; returning it is what lets a caller measure a painted
+   *  building against the footprint the map actually stores. */
+  ids: Int32Array;
 }
 
 export function renderLayoutControl(
@@ -85,9 +109,23 @@ export function renderLayoutControl(
   width: number,
   height: number,
   frameParentId: string | null = null,
+  // Daylight to open between overlapping footprints before drawing. Off for
+  // the enter path, which must keep the sizes the map states; a walk through
+  // the town needs it, or there is nothing to walk between.
+  laneGap: number = 0,
+  // Give each footprint a pitched roof instead of a flat lid. A depth render
+  // of shoeboxes conditions a model into drawing shoeboxes (research 35);
+  // the roof is what makes "follow the depth exactly" and "looks like a town"
+  // stop being opposed. Off by default: it changes every depth map.
+  roofs: boolean = false,
 ): LayoutControl {
-  // A footprint the camera stands on (a plaza well's square) is ground here.
-  const blocks = solidBlocks(entities, frameParentId).filter((b) => !pointInBlock(b, observer.pos));
+  if (width < 1 || height < 1 || width * height > 4_000_000) throw new Error("Layout render size is out of range");
+  // A footprint the camera stands ON (a plaza, a well's square) is ground; a
+  // block whose VOLUME contains the camera cannot be drawn from inside, so it
+  // is dropped too. Everything else keeps blocking, however low it is.
+  const selected = solidBlocks(entities, frameParentId);
+  const blocks = (laneGap > 0 ? carveLanes(selected, laneGap) : selected)
+    .filter((b) => !(pointInBlock(b, observer.pos) && observer.eye_height < (b.elevation ?? 0) + b.height));
   const g = observer.gaze;
   const p = observer.pitch ?? 0;
   const ox = observer.pos.x;
@@ -99,12 +137,15 @@ export function renderLayoutControl(
   const r = [-Math.sin(g), Math.cos(g), 0];
   const u = [-Math.cos(g) * Math.sin(p), -Math.sin(g) * Math.sin(p), Math.cos(p)];
   const local = blocks.map((b) => {
-    const h = b.heading ?? 0;
+    const h = headingOf(b);
     const c = Math.cos(h);
     const s = Math.sin(h);
     const dx = ox - b.pos.x;
     const dy = oy - b.pos.y;
-    return { c, s, lx: dx * c + dy * s, ly: -dx * s + dy * c, hw: b.footprint.w / 2, hd: b.footprint.d / 2, z0: b.elevation ?? 0, z1: (b.elevation ?? 0) + b.height };
+    const roof = roofs ? roofFor(b.footprint.w, b.footprint.d, b.height) : { kind: "flat" as RoofKind, rise: 0, ridgeAlongX: true };
+    return { c, s, lx: dx * c + dy * s, ly: -dx * s + dy * c, hw: b.footprint.w / 2, hd: b.footprint.d / 2,
+             z0: b.elevation ?? 0, z1: (b.elevation ?? 0) + b.height,
+             roofKind: roof.kind, rise: roof.rise, ridgeAlongX: roof.ridgeAlongX };
   });
   const hitId = new Int32Array(width * height).fill(-1);
   const shade = new Float32Array(width * height);
@@ -124,17 +165,17 @@ export function renderLayoutControl(
         const b = local[k]!;
         const ldx = dx * b.c + dy * b.s;
         const ldy = -dx * b.s + dy * b.c;
-        // Slab test on x, y, z; `face` = axis of the entry plane (0 x, 1 y, 2 z).
+        // Slab test on x, y, z, unrolled: an array here allocates per pixel
+        // per block. `face` = axis of the entry plane (0 x, 1 y, 2 z).
         let tMin = 0.05;
         let tMax = best;
         let face = 0;
-        const ax = [b.lx, ldx, -b.hw, b.hw, b.ly, ldy, -b.hd, b.hd, oz, dz, b.z0, b.z1];
         let miss = false;
         for (let a = 0; a < 3 && !miss; a++) {
-          const o = ax[a * 4]!;
-          const d = ax[a * 4 + 1]!;
-          const lo = ax[a * 4 + 2]!;
-          const hi = ax[a * 4 + 3]!;
+          const o = a === 0 ? b.lx : a === 1 ? b.ly : oz;
+          const d = a === 0 ? ldx : a === 1 ? ldy : dz;
+          const lo = a === 0 ? -b.hw : a === 1 ? -b.hd : b.z0;
+          const hi = a === 0 ? b.hw : a === 1 ? b.hd : b.z1;
           if (Math.abs(d) < 1e-12) {
             miss = o < lo || o > hi;
             continue;
@@ -153,13 +194,26 @@ export function renderLayoutControl(
           bestK = k;
           bestFace = face;
         }
+        // The roof sits above the wall top as its own convex volume, so a ray
+        // that clears the walls can still land on the pitch.
+        if (b.rise > 0) {
+          const tRoof = roofEntry(
+            b.roofKind, b.rise, b.ridgeAlongX, b.hw, b.hd, b.z1,
+            b.lx, b.ly, oz, ldx, ldy, dz, 0.05, best,
+          );
+          if (tRoof < best) {
+            best = tRoof;
+            bestK = k;
+            bestFace = 3; // its own face: a pitch catches the light differently
+          }
+        }
       }
       const idx = j * width + i;
       const rayLength = Math.hypot(dx, dy, dz);
       let color: readonly [number, number, number];
       if (bestK >= 0) {
         hitId[idx] = bestK;
-        shade[idx] = bestFace === 2 ? 1 : bestFace === 0 ? 0.82 : 0.66;
+        shade[idx] = bestFace === 2 ? 1 : bestFace === 3 ? 0.91 : bestFace === 0 ? 0.82 : 0.66;
         depth[idx] = best * rayLength;
         color = OTHER;
       } else if (dz < 0) {
@@ -235,5 +289,14 @@ export function renderLayoutControl(
       pixels: st.pixels,
     };
   });
-  return { width, height, rgba, visible, depth };
+  // Re-key the id buffer from block index to `visible` index, so a caller can
+  // say "the pixels of visible[k]" without knowing the renderer's ordering.
+  const visibleIndex = new Map<number, number>();
+  order.forEach((k, n) => visibleIndex.set(k, n));
+  const ids = new Int32Array(width * height);
+  for (let idx = 0; idx < hitId.length; idx++) {
+    const k = hitId[idx]!;
+    ids[idx] = k >= 0 ? visibleIndex.get(k) ?? -1 : -1;
+  }
+  return { width, height, rgba, visible, depth, ids };
 }

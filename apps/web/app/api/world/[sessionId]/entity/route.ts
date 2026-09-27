@@ -4,11 +4,12 @@ import {
   mergeEntities,
   pinEntity,
   renameEntity,
+  restoreDeletedEntity,
   setEntityAppearance,
-  undoDeleteEntity,
   getWorldState,
 } from "@/lib/world";
-import { getWorldMap, removeEntityGeos } from "@/lib/world-map";
+import { geosTouchedByRemoval, getWorldMap, removeEntityGeos, upsertEntityGeos } from "@/lib/world-map";
+import { recordError } from "@/lib/db";
 import { PlaceError, updatePlace } from "@/lib/places";
 import { parsePlaceUpdate } from "@/lib/place-identity";
 import { requireOwner } from "@/lib/session-owner";
@@ -92,16 +93,36 @@ export async function POST(req: Request, { params }: Params) {
         return NextResponse.json(snapshot);
       }
       case "delete": {
-        const snapshot = await deleteEntity(sessionId, mutation.id);
+        const geoId = `geo_${mutation.id}`;
+        // Keep what the removal is about to change -- the place AND the
+        // interior it lifts into the root frame -- on the tombstone, so an
+        // Undo can put the geometry back and not just the codex entry.
+        const touched = geosTouchedByRemoval((await getWorldMap(sessionId)).entities, [geoId]);
+        const snapshot = await deleteEntity(sessionId, mutation.id, touched);
         // Keep the geo map in step with the codex: drop the deleted entity's
         // `geo_<id>` (and re-root any children) so it doesn't linger in the
         // overlay + world bounds. Best-effort — the codex delete is the source
         // of truth; a later re-sighting re-seeds geometry.
-        await removeEntityGeos(sessionId, [`geo_${mutation.id}`]).catch(() => {});
+        await removeEntityGeos(sessionId, [geoId]).catch(() => {});
         return NextResponse.json(snapshot);
       }
       case "undo_delete": {
-        const snapshot = await undoDeleteEntity(sessionId, mutation.id);
+        const { snapshot, geos } = await restoreDeletedEntity(sessionId, mutation.id);
+        // Undo used to clear the tombstone and nothing else, so a restored
+        // place came back to the codex with no footprint: gone from the
+        // overlay and the bounds, and walked straight through by a route.
+        if (geos.length) {
+          await upsertEntityGeos(sessionId, geos).catch((err: unknown) =>
+            recordError({
+              trace_id: null,
+              kind: "world-map.undo_restore",
+              message: `undo left ${mutation.id} without its geometry: ${String(err)}`,
+              stack: null,
+              body_excerpt: `session=${sessionId}`,
+              source: "backend",
+            }).catch(() => {}),
+          );
+        }
         return NextResponse.json(snapshot);
       }
       case "pin": {

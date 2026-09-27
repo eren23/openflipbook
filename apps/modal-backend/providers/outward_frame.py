@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, ImageStat
 
 WORK_WIDTH = 192
 # Live Lantern Quay: true zoom-out 0.74, an unrelated street view 0.42.
@@ -30,6 +30,18 @@ MAX_PIXELS = 40_000_000
 CORE = 0.6
 # The ascend prompts keep the source at the centre.
 MAX_SHIFT = 0.12
+# composite_source puts back only this central share of the source, in an
+# oval: its edges hold the title cartouche, compass and scale bar, and pasting
+# those made a map inside the map with a pale parchment rectangle round it
+# (live Lantern Quay, 2026-09-24). The redraw keeps its own version of them.
+PASTE_CORE = 0.8
+# The oval's edge fades into the redraw over this share of its shorter side.
+FEATHER = 0.15
+# composite_source only puts the source back when it is a real sub-region.
+# A hop that barely zoomed out redraws the map at about the same size (live
+# Lantern Quay 2026-09-24: located at 0.98 of the width, judged alignment
+# 2/10); pasting the source there would make the "wider" map the source.
+MAX_COMPOSITE_SHARE = 0.8
 
 
 def _grey(img: Image.Image, w: int, h: int) -> Image.Image:
@@ -127,3 +139,51 @@ def locate_source(source: bytes, wide: bytes) -> dict[str, float] | None:
         return None
     th = template(tw)[1]
     return {"x_pct": x / W, "y_pct": y / H, "w_pct": tw / W, "h_pct": th / H, "score": round(score, 3)}
+
+
+def _open_full(data: bytes) -> Image.Image | None:
+    """Full-colour, full-size decode (unlike _open, which drafts a small grey copy)."""
+    if len(data) > MAX_BYTES:
+        return None
+    try:
+        img = Image.open(BytesIO(data))
+        if img.width * img.height > MAX_PIXELS or img.width < 8 or img.height < 8:
+            return None
+        return img.convert("RGB")
+    except Exception:
+        return None
+
+
+def composite_source(source: bytes, wide: bytes, rect: dict[str, float]) -> bytes | None:
+    """`wide` with the source's REAL pixels put back where it was located.
+
+    The ascend edit redraws the source smaller near the centre, and a redraw
+    re-invents it: the right medium and layout, but a different city (#252).
+    `rect` (from locate_source) says where that redraw landed, so the source's
+    own pixels replace the middle of it (see PASTE_CORE), in an oval that
+    fades into the redraw.
+    Returns JPEG bytes, or None when an image will not decode, the rect is
+    too small to place, or it is no real sub-region (see MAX_COMPOSITE_SHARE)."""
+    if max(rect["w_pct"], rect["h_pct"]) > MAX_COMPOSITE_SHARE:
+        return None
+    src, big = _open_full(source), _open_full(wide)
+    if src is None or big is None:
+        return None
+    w_img, h_img = big.size
+    x0 = max(0, min(w_img - 1, round(rect["x_pct"] * w_img)))
+    y0 = max(0, min(h_img - 1, round(rect["y_pct"] * h_img)))
+    w = min(w_img - x0, round(rect["w_pct"] * w_img))
+    h = min(h_img - y0, round(rect["h_pct"] * h_img))
+    if w < 16 or h < 16:
+        return None
+    placed = src.resize((w, h), Image.Resampling.LANCZOS)
+    cw, ch = round(w * PASTE_CORE), round(h * PASTE_CORE)
+    ox, oy = (w - cw) // 2, (h - ch) // 2
+    band = max(1, round(min(cw, ch) * FEATHER))
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).ellipse((ox + band, oy + band, ox + cw - band, oy + ch - band), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(band / 2))
+    big.paste(placed, (x0, y0), mask)
+    buf = BytesIO()
+    big.save(buf, "JPEG", quality=92)
+    return buf.getvalue()

@@ -963,6 +963,12 @@ def _friendly_error(exc: BaseException) -> tuple[str, str]:
             "The image model declined this one — hit retry or tap somewhere else.",
             detail,
         )
+    if "exhausted balance" in s or "top up your balance" in s:
+        # Retrying cannot help until the provider account is topped up.
+        return (
+            "The image service is out of credit — top up the provider balance, then retry.",
+            detail,
+        )
     if isinstance(exc, TimeoutError) or "timed out" in s or "timeout" in name.lower():
         return ("That page took too long to draw — hit retry.", detail)
     if getattr(exc, "status_code", None) == 429 or "rate limit" in s:
@@ -983,9 +989,10 @@ async def _event_stream(
     import time as _time
 
     from obs import bind_trace, log, record_error
-    from providers import spend
+    from providers import decisions, spend
 
     bind_trace(trace_id)
+    decisions.begin()  # this request's shadow decisions, drained at `final`
     started = _time.perf_counter()
     log("info", "sse.generate.start", mode=body.mode, locale=body.output_locale)
 
@@ -1212,6 +1219,95 @@ async def sse_generate(req: Request) -> Response:
     )
 
 
+class WalkShotBody(BaseModel):
+    index: int
+    control_data_url: str
+    # (label, share of frame) for the places this camera sees, biggest first.
+    sees: list[tuple[str, float]] = []
+    # The map around this camera. Its presence paints the shot through the
+    # enter path, so the walk shows the town the map draws rather than a
+    # competent generic street with the right geometry.
+    surroundings_data_url: str | None = None
+
+
+class WalkBody(BaseModel):
+    session_id: str
+    shots: list[WalkShotBody]
+    style_ref_url: str | None = None
+    medium: str | None = None
+    clip_seconds: int = 5
+    trace_id: str | None = None
+    # Ask what it would cost without painting anything.
+    estimate_only: bool = False
+
+
+@fastapi_app.post("/walk")
+async def walk(req: Request, body: WalkBody) -> JSONResponse:
+    """Paint a drawn route: a keyframe per shot, a clip between neighbours.
+
+    The client owns the geometry -- it renders each camera's block control and
+    says what that camera sees -- because the renderer is the web app's. This
+    end spends: one edit call per shot, one video call per gap.
+    """
+    from obs import TRACE_HEADER, bind_trace, log, record_error
+    from providers import walk as walk_provider
+
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
+
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
+    grounded = any(s.surroundings_data_url for s in body.shots)
+    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded)
+    if body.estimate_only:
+        return JSONResponse(
+            {"shots": len(body.shots), "estimate_usd": estimate, "grounded": grounded},
+            headers={"X-Trace-Id": trace_id},
+        )
+    log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate, grounded=grounded)
+    try:
+        result = await walk_provider.paint(
+            session_id=body.session_id,
+            shots=[
+                walk_provider.WalkShot(
+                    index=s.index,
+                    control_data_url=s.control_data_url,
+                    sees=[(label, share) for label, share in s.sees],
+                    surroundings_data_url=s.surroundings_data_url,
+                )
+                for s in body.shots
+            ],
+            style_ref_url=body.style_ref_url,
+            medium=body.medium,
+            clip_seconds=body.clip_seconds,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400, headers={"X-Trace-Id": trace_id})
+    except Exception as exc:
+        record_error("walk", exc, shots=len(body.shots))
+        return JSONResponse(
+            {"error": str(exc)}, status_code=502, headers={"X-Trace-Id": trace_id}
+        )
+    return JSONResponse(
+        {
+            "keyframes": result.keyframes,
+            "clips": [
+                {
+                    "from_shot": c.from_shot,
+                    "to_shot": c.to_shot,
+                    "video_url": c.video_url,
+                    "model": c.model,
+                    "seconds": c.seconds,
+                }
+                for c in result.clips
+            ],
+            "spent_usd": result.spent_usd,
+            "estimate_usd": estimate,
+        },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
 class AnimateFocus(BaseModel):
     x_pct: float = Field(ge=0.0, le=1.0)
     y_pct: float = Field(ge=0.0, le=1.0)
@@ -1225,6 +1321,8 @@ class AnimateBody(BaseModel):
     duration: int = 5
     video_tier: str | None = None
     trace_id: str | None = None
+    # Whose spend caps the clip counts against. Older clients omit it.
+    session_id: str | None = None
     # Descent transition: when set, image_data_url is the PARENT map (first
     # frame) and this is the entered page (last frame) — the clip is the
     # camera move between them, not an ambient animation.
@@ -1236,7 +1334,7 @@ class AnimateBody(BaseModel):
 
 @fastapi_app.post("/animate")
 async def animate(req: Request, body: AnimateBody) -> JSONResponse:
-    """Cheap-fallback animation: delegate to fal-ai/ltx-video.
+    """Animate one page with fal (MiniMax H3 by default, see providers/video.py).
 
     Wraps fal errors into a JSON 502 with the original exception message so
     the frontend can surface the real cause (rate limit, payload too large,
@@ -1244,6 +1342,7 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
     """
     from obs import TRACE_HEADER, bind_trace, log, record_error
     from providers import llm as llm_provider
+    from providers import spend
     from providers import video as video_provider
 
     limited = _rate_limited(req)
@@ -1252,6 +1351,14 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     img_size_kb = len(body.image_data_url) // 1024
+    # A descent request keeps its own brief even if a focus rides along.
+    focus = None if body.end_image_data_url else body.focus
+    estimate = video_provider.estimate_usd(
+        body.duration,
+        body.video_tier,
+        descent=bool(body.end_image_data_url),
+        action=focus is not None,
+    )
     log(
         "info",
         "animate.request",
@@ -1259,9 +1366,19 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
         image_kb=img_size_kb,
         duration=body.duration,
         descent=bool(body.end_image_data_url),
-        focus=bool(body.focus),
+        focus=focus is not None,
+        estimate_usd=estimate,
     )
-    focus = None if body.end_image_data_url else body.focus
+    # Reserve BEFORE submitting, as /walk does: the caps apply, and a timeout
+    # cannot prove that fal did not bill.
+    try:
+        spend.reserve(body.session_id or "_anon", estimate)
+    except RuntimeError as exc:
+        return JSONResponse(
+            {"error": str(exc), "trace_id": trace_id},
+            status_code=502,
+            headers={"X-Trace-Id": trace_id},
+        )
     if focus is not None:
         # The tapped object carries its own brief — the page-level rewriter
         # would pull attention back to the whole scene.
@@ -1348,7 +1465,9 @@ async def resolve_click(req: Request, body: ResolveClickBody) -> JSONResponse:
     (c) suppress page generation when ``groundable`` is false.
     """
     from obs import TRACE_HEADER, bind_trace, record_error
+    from providers import decisions
     from providers import llm as llm_provider
+    from providers.decisions.sites import click_incumbent, click_state
 
     limited = _rate_limited(req)
     if limited is not None:
@@ -1374,6 +1493,15 @@ async def resolve_click(req: Request, body: ResolveClickBody) -> JSONResponse:
             status_code=502,
             headers={"X-Trace-Id": trace_id},
         )
+    # The hover prefetch is where the classifier's reading is cheapest to
+    # question: nothing has been rendered yet. Shadow only -- the answer is
+    # logged beside the classifier's own, and changes nothing.
+    await decisions.decide(
+        "click.classify",
+        state=click_state(resolution, body.parent_title or "", body.parent_query or "",
+                          None, _world_mode_on(body.world_mode)),
+        incumbent=click_incumbent(resolution, body.autonomy or "auto"),
+    )
     return JSONResponse(
         {
             "subject": resolution.subject,

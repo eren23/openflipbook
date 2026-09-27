@@ -2,7 +2,7 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
 import { blockDistance } from "./layout-control";
-import { resample, routeFromStroke, strokeToWorld } from "./route-line";
+import { resample, routeFromStroke, routeShots, strokeToWorld } from "./route-line";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -116,13 +116,29 @@ describe("routeFromStroke", () => {
     }
   });
 
-  it("says when the line crosses a place with no standable gap", () => {
-    // Two rows whose boxes nearly touch: the extracted Mapmaker House and
-    // Bellfounder Hall do exactly this on the live map.
+  it("says when the line is drawn straight through a building", () => {
+    // Nothing to carve against here: one hall, no neighbour, and the stroke
+    // goes through the middle of it. Every camera would stand inside a wall,
+    // and the route says so rather than pretending otherwise.
+    const hall = geo("Great Hall", 40, 30, 44, 40, 9);
+    const route = routeFromStroke(line([20, 30], [60, 30]), [hall], { maxStepUnits: 10 });
+    expect(route.checkpoints.some((c) => c.blocked)).toBe(true);
+  });
+
+  it("walks between two rows that were extracted overlapping", () => {
+    // The live map has pairs like this: boxes drawn into each other, with no
+    // gap at all. Narrowing them about their centres opens the lane, and the
+    // walk goes down it instead of reporting the whole town impassable.
     const north = geo("north", 40, 20, 30, 20, 7);
     const south = geo("south", 40, 40.4, 30, 20, 7);
     const route = routeFromStroke(line([20, 30], [60, 30]), [north, south], { maxStepUnits: 10 });
-    expect(route.checkpoints.some((c) => c.blocked)).toBe(true);
+    expect(route.checkpoints.every((c) => !c.blocked)).toBe(true);
+    // ...and down the middle of it, not hugging either row.
+    for (const c of route.checkpoints) expect(Math.abs(c.observer.pos.y - 30.2)).toBeLessThan(2.5);
+
+    // With carving switched off, the same line has nowhere to stand.
+    const raw = routeFromStroke(line([20, 30], [60, 30]), [north, south], { maxStepUnits: 10, laneGap: 0 });
+    expect(raw.checkpoints.some((c) => c.blocked)).toBe(true);
   });
 
   it("an open lane keeps the drawn walk and few keyframes", () => {
@@ -147,13 +163,107 @@ describe("routeFromStroke", () => {
     }
   });
 
-  it("ignores the 3D editor's scene copies as walls", () => {
-    const copy = geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2, { scene_id: "s1", parent_id: "scene" });
+  it("ignores a copy that hangs under another frame", () => {
+    const copy = geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2, { parent_id: "scene" });
     const route = routeFromStroke(line([30, 29.1], [45, 29.1]), [copy], { maxStepUnits: 100 });
     expect(route.checkpoints.every((c) => !c.moved)).toBe(true);
   });
 
+  it("keeps the whole route finite when one place carries a broken number", () => {
+    // A VLM has put NaN in a coordinate before. Every distance taken against
+    // that block is NaN, and a NaN cost loses every comparison in the walk, so
+    // without a guard the ENTIRE route comes back NaN, not just this corner.
+    const broken = geo("Nowhere", NaN, 29.1, 16.2, 13.3, 7.2);
+    const route = routeFromStroke(line([10, 29.1], [60, 29.1]), [broken], { maxStepUnits: 15 });
+    expect(route.path.length).toBeGreaterThan(1);
+    expect(route.path.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+    expect(route.checkpoints.every((c) => Number.isFinite(c.observer.gaze))).toBe(true);
+    expect(Number.isFinite(route.length)).toBe(true);
+  });
+
+  it("caps the work a long stroke can ask for", () => {
+    // The sideways walk costs samples x offsets squared, and it reruns on every
+    // pointer move: a stroke across a zoomed-out map must not grow unbounded.
+    const long = routeFromStroke(line([0, 0], [4000, 0]), [], { maxStepUnits: 18 });
+    expect(long.path.length).toBeLessThanOrEqual(241);
+    expect(long.length).toBeCloseTo(4000, 0);
+  });
+
   it("a single tap is not a route", () => {
     expect(routeFromStroke([{ x: 5, y: 5 }]).checkpoints).toEqual([]);
+  });
+
+  // Live town, 2026-09-20: the drawn stroke came back scattered, cameras piled
+  // on whatever spots were open. Extracted footprints cover 79% of that town
+  // and interpenetrate by 5.3 units, so a camera is pushed a long way to find
+  // clear ground -- a median 4 units off the line at the pedestrian gap. What
+  // matters is not how many cameras move but how far they end up from what the
+  // user drew.
+  it("keeps the walk near the line the user drew", () => {
+    const town = [
+      geo("The Copper Kettle", 37, 29.1, 16.2, 13.3, 7.2),
+      geo("Tideglass Apothecary", 45.4, 18.5, 10.7, 8.8, 5),
+      geo("Candleworks", 34.7, 19, 10.8, 7.8, 5),
+      geo("Mapmaker House", 58.9, 19, 13.8, 11.3, 5.7),
+      geo("Bellfounder Hall", 68.6, 32.6, 19.8, 16.3, 7.5),
+      geo("Blue Shutter Bakery", 71.9, 21.3, 13.4, 11, 5.6),
+    ];
+    const stroke = line([40, 12], [58, 42], 40);
+    const strayOf = (opts: object) =>
+      routeFromStroke(stroke, town, { maxStepUnits: 4, ...opts }).checkpoints
+        .map((c) => Math.min(...stroke.map((q) => Math.hypot(q.x - c.observer.pos.x, q.y - c.observer.pos.y))))
+        .sort((a, b) => a - b);
+    const carved = strayOf({});
+    const raw = strayOf({ laneGap: 0 });
+    expect(raw[raw.length - 1]).toBeGreaterThan(10);
+    expect(carved[carved.length - 1]).toBeLessThan(6);
+    expect(carved[Math.floor(carved.length / 2)]!).toBeLessThan(2);
+  });
+
+  // Live world, 2026-09-20: the district map's root frame holds one entity,
+  // "The Riverward Quarter" -- 231 x 137 on a 100 x 86 world, the frame the
+  // town's places are nested in. Walked as a wall it swallowed the map: all
+  // 53 cameras stepped aside and the route looped outside the town.
+  it("walks inside the quarter its places are nested in", () => {
+    const quarter = geo("The Riverward Quarter", 50.6, 28.7, 231.3, 136.6, 4, { id: "geo_quarter" });
+    const inn = geo("The Copper Kettle", 37, 29.1, 10, 12, 7.2, { parent_id: "geo_quarter" });
+    const stroke = line([25, 20], [75, 45], 40);
+    const r = routeFromStroke(stroke, [quarter, inn], { maxStepUnits: 4 });
+    const stray = r.checkpoints.map((c) =>
+      Math.min(...stroke.map((q) => Math.hypot(q.x - c.observer.pos.x, q.y - c.observer.pos.y))));
+    expect(Math.max(...stray)).toBeLessThan(3);
+    expect(r.checkpoints.some((c) => c.blocked)).toBe(false);
+  });
+
+  // A route can walk somewhere worth nothing -- the first walk's receipt named
+  // it: "nothing stops it putting a camera against a wall, or facing open
+  // ground where this town has no boxes". A shot knows what it is OF before
+  // anything is painted, so the worthless ones can be dropped for free.
+  it("says what each shot sees, and drops the ones that see nothing", () => {
+    const town = [
+      geo("The Copper Kettle", 40, 30, 10, 12, 8),
+      geo("Bellfounder Hall", 40, 46, 10, 12, 8),
+    ];
+    // walks up the gap between them, then out into empty ground
+    const shots = routeShots(
+      routeFromStroke(line([40, 8], [40, 120], 40), town, { maxStepUnits: 12 }),
+      town,
+      { maxStepUnits: 12 },
+    );
+    expect(shots.length).toBeGreaterThan(2);
+    const seeing = shots.filter((s) => s.worth);
+    expect(seeing.length).toBeGreaterThan(0);
+    expect(seeing.length).toBeLessThan(shots.length);
+    // the shots that see something name it
+    const labels = new Set(seeing.flatMap((s) => s.sees.map((v) => v.label)));
+    expect(labels.has("The Copper Kettle") || labels.has("Bellfounder Hall")).toBe(true);
+    // shares are a fraction of the frame, biggest first
+    for (const s of seeing) {
+      expect(s.built).toBeGreaterThan(0);
+      expect(s.built).toBeLessThanOrEqual(1);
+      for (let k = 1; k < s.sees.length; k++) expect(s.sees[k - 1]!.share).toBeGreaterThanOrEqual(s.sees[k]!.share);
+    }
+    // the far end of the walk is past the town, looking at nothing
+    expect(shots[shots.length - 1]!.worth).toBe(false);
   });
 });

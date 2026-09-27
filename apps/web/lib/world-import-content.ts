@@ -22,6 +22,8 @@ import { remapTransition } from "./transition-context";
 import { parseWalkPose } from "./walk-position";
 import { validateImportedMapArtwork } from "./world-import-map";
 import { importWorldMotion } from "./world-import-motion";
+import type { WorldImportPlan } from "./world-import-plan";
+export type { WorldImportPlan } from "./world-import-plan";
 
 const id = (value: unknown): string => isSafeId(value) ? value : invalidArchive("Invalid archive identity");
 const string = (v: unknown, cap = 20000): string => typeof v === "string" && v.length <= cap ? v : invalidArchive("Invalid archive text");
@@ -29,13 +31,6 @@ const date = (v: unknown): Date => { const d = new Date(string(v, 40)); if (!Num
 const integer = (v: unknown): number => Number.isSafeInteger(v) && Number(v) >= 1 ? Number(v) : invalidArchive("Invalid archive revision");
 const finite = (v: unknown, cap = 1e8): boolean => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= cap;
 const rows = (archive: WorldArchive, name: string, cap = 5000) => archiveList(archive.json(name), cap).map(archiveObject);
-export interface WorldImportPlan {
-  session_id: string;
-  title: string;
-  records: Record<string, Document[]>;
-  uploads: { key: string; bytes: Buffer; contentType: string }[];
-  preview: { title: string; pages: number; places: number; objects: number; meshes: number; materials: number; views: number; illustrations: number; motion_studies: number; clips: number; source_session_id: string };
-}
 
 export async function prepareWorldImport(archive: WorldArchive, sid: string): Promise<WorldImportPlan> {
   id(sid); const sourceSid = id(archive.manifest.session_id);

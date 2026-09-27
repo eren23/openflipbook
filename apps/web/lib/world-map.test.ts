@@ -47,14 +47,16 @@ import {
   applyEntityEdits,
   deriveGeoFromExtraction,
   extractionSeedTarget,
+  geosTouchedByRemoval,
   getWorldMap,
   ladderDisagreement,
   registerPlanToImage,
   removeEntityGeos,
   upsertEntityGeos,
+  registerFrames,
 } from "./world-map";
 
-const { applyGeoUpsert, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
+const { applyGeoUpsert, removeAndReroot, recomputeBounds, applyEntityEdit, blastRadius, buildGeoReferences } =
   __test;
 
 function geo(
@@ -679,6 +681,31 @@ describe("deriveGeoFromExtraction (extraction → derived map geometry)", () => 
     expect(String(mongo.errors[0]!.message)).toMatch(/OUTWARD/);
   });
 
+  it("does not seed a place that already stands there under another codex id", async () => {
+    // Live, 2026-09-20: a scene editor minted a second codex entry per building,
+    // a re-extraction of the town map matched those, and every building got a
+    // second box at the root beside the one in the district frame.
+    await upsertEntityGeos("s12", [
+      { ...geo("geo_district", "user", 50, 30), scale: 0.005 },
+      { ...geo("geo_bell", "user", 3600, 771), parent_id: "geo_district",
+        label: "Bellfounder Hall", footprint: { w: 3960, d: 3253 } },
+    ]);
+    const bbox = { x_pct: 0.58, y_pct: 0.38, w_pct: 0.2, h_pct: 0.2 };
+    const snap = await deriveGeoFromExtraction("s12", mapView(), 16 / 9, [
+      item("gen_9", { label: "bellfounder hall ", bbox }),
+      item("inn", { label: "The Inn", bbox }),
+      item("far", { label: "Bellfounder Hall", bbox: { ...bbox, x_pct: 0.01 } }),
+    ]);
+    // Same place -> skipped; a different name there, or the same name
+    // elsewhere, is a different place and still seeds.
+    expect(snap.entities.map((e) => e.id).sort()).toEqual(["geo_bell", "geo_district", "geo_far", "geo_inn"]);
+    // Re-seeding a place's OWN geo is an update, never a duplicate.
+    const again = await deriveGeoFromExtraction("s12", mapView(), 16 / 9, [
+      item("inn", { label: "The Inn", bbox }),
+    ]);
+    expect(again.entities.filter((e) => e.id === "geo_inn")).toHaveLength(1);
+  });
+
   it("a missing parent id seeds children without learning any scale", async () => {
     const snap = await deriveGeoFromExtraction(
       "s8",
@@ -725,7 +752,6 @@ describe("deriveGeoFromExtraction (extraction → derived map geometry)", () => 
   });
 });
 
-
 describe("extractionSeedTarget (where a page's detections seed geometry)", () => {
   const view = (over: Partial<SceneView>): SceneView =>
     ({ node_id: "n", level: "street", observer: null, map_crop: null, focus_id: "geo_kettle", ...over }) as SceneView;
@@ -746,5 +772,100 @@ describe("extractionSeedTarget (where a page's detections seed geometry)", () =>
 
   it("seeds nothing when an unviewed page reads as a perspective scene", () => {
     expect(extractionSeedTarget(null, "street")).toBeNull();
+  });
+});
+
+// Deleting a place removed its geometry for good, while the codex's Undo only
+// cleared the tombstone -- so an undone delete came back in the list with no
+// footprint: gone from the overlay and the bounds, and walked straight through
+// by a route. Its interior, lifted into the root frame by the removal, stayed
+// there. What a removal touches is now kept so an undo can put it all back.
+describe("undoing a removal", () => {
+  const geo = (id: string, parent: string | null, x: number, y: number, extra: Partial<WorldEntityGeo> = {}): WorldEntityGeo =>
+    ({ id, entity_id: id.replace(/^geo_/, ""), parent_id: parent, kind: "place", label: id, pos: { x, y },
+       height: 6, footprint: { w: 8, d: 6 }, visual: "", state: {}, confidence: 1, source: "extracted",
+       updated_at: "2026-09-01T00:00:00Z", ...extra }) as WorldEntityGeo;
+  // an inn in the city, with two rooms nested in its own local frame
+  const world = [
+    geo("geo_inn", null, 30, 20, { scale: 0.5 }),
+    geo("geo_bar", "geo_inn", 4, 2, { footprint: { w: 3, d: 2 } }),
+    geo("geo_kitchen", "geo_inn", -4, 2, { footprint: { w: 2, d: 2 } }),
+    geo("geo_well", null, 60, 40),
+  ];
+
+  it("keeps the removed place and every child the removal lifts out", () => {
+    const touched = geosTouchedByRemoval(world, ["geo_inn"]).map((e) => e.id).sort();
+    expect(touched).toEqual(["geo_bar", "geo_inn", "geo_kitchen"]);
+  });
+
+  it("puts back exactly what was there: the place, and its interior nested again", () => {
+    const touched = geosTouchedByRemoval(world, ["geo_inn"]);
+    const removed = removeAndReroot(world, ["geo_inn"]);
+    // the removal really does lift the rooms out and drop the inn
+    expect(removed.find((e) => e.id === "geo_inn")).toBeUndefined();
+    expect(removed.find((e) => e.id === "geo_bar")!.parent_id).toBeNull();
+
+    const restored = applyGeoUpsert(removed, touched, "2026-09-23T00:00:00Z");
+    const byId = new Map(restored.map((e) => [e.id, e]));
+    for (const before of world) {
+      const after = byId.get(before.id)!;
+      expect(after, before.id).toBeDefined();
+      expect(after.parent_id, before.id).toBe(before.parent_id);
+      expect(after.pos, before.id).toEqual(before.pos);
+      expect(after.footprint, before.id).toEqual(before.footprint);
+      expect(after.scale, before.id).toBe(before.scale);
+    }
+    expect(restored).toHaveLength(world.length);
+  });
+
+  it("touches nothing when the place is not there", () => {
+    expect(geosTouchedByRemoval(world, ["geo_missing"])).toEqual([]);
+  });
+});
+
+// A redrawn map seeds its places into a frame of its own and nothing folds
+// the two together, so a live world held The Copper Kettle twice -- 14x11 in
+// the quarter's frame and 10x12 in the scene's -- and the geometry a viewer
+// saw never moved to match the picture under it.
+describe("registerFrames", () => {
+  const g = (id: string, parent: string | null, label: string, x: number, y: number, w = 10): WorldEntityGeo =>
+    ({ id, entity_id: id, parent_id: parent, kind: "place", label, pos: { x, y },
+       footprint: { w, d: w }, height: 6, visual: "", state: {}, confidence: 1,
+       source: "extracted", updated_at: "" }) as unknown as WorldEntityGeo;
+  // the same four places, the second frame drawn at half scale and shifted
+  const world = [
+    g("a1", "old", "The Copper Kettle", 20, 20),
+    g("a2", "old", "Bellfounder Hall", 40, 20),
+    g("a3", "old", "Ropewalk Store", 20, 40),
+    g("a4", "old", "Lantern Watch", 40, 40),
+    g("b1", "new", "The Copper Kettle", 10, 10, 5),
+    g("b2", "new", "Bellfounder Hall", 20, 10, 5),
+    g("b3", "new", "Ropewalk Store", 10, 20, 5),
+    g("b4", "new", "Lantern Watch", 20, 20, 5),
+  ];
+
+  it("moves the older frame onto the newer image", () => {
+    const r = registerFrames(world, "old", "new", "2026-09-20T00:00:00Z", { gate: true });
+    expect(r).not.toBeNull();
+    expect(r!.fit.scale).toBeCloseTo(0.5, 2);
+    expect(r!.updated).toHaveLength(4);
+    const kettle = r!.updated.find((e) => e.label === "The Copper Kettle")!;
+    expect(kettle.pos.x).toBeCloseTo(10, 1);
+    expect(kettle.pos.y).toBeCloseTo(10, 1);
+    // footprint and height ride the same scale, or the place changes size
+    expect(kettle.footprint.w).toBeCloseTo(5, 2);
+    expect(kettle.height).toBeCloseTo(3, 2);
+  });
+
+  it("does nothing when the frames already agree", () => {
+    const same = world.filter((e) => e.parent_id === "old")
+      .map((e) => ({ ...e, id: `c${e.id}`, parent_id: "new" }));
+    expect(registerFrames([...world.filter((e) => e.parent_id === "old"), ...same],
+      "old", "new", "2026-09-20T00:00:00Z", { gate: true })).toBeNull();
+  });
+
+  it("refuses a frame it cannot match, and itself", () => {
+    expect(registerFrames(world, "old", "missing", "x", { gate: true })).toBeNull();
+    expect(registerFrames(world, "old", "old", "x", { gate: true })).toBeNull();
   });
 });

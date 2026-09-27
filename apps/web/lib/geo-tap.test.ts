@@ -572,7 +572,7 @@ describe("geoTapForEntity (W2: enter the place the lettering names)", () => {
 
   it("carries the focus's frame-mates as surroundings", () => {
     const tower = geo("tower", "Tower of Art", 60, 30, { height: 18 });
-    // Beyond the tower, in front of the camera that frames it from the west.
+    // Beyond the tower, in front of the camera that now frames it from the west.
     const bridge = geo("bridge", "Brass Bridge", 80, 32, {
       visual: "an iron bridge with hippo statues",
     });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { GroundingSummary, ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
+import type { ScaleTier, SceneView, ViewVerdict } from "@openflipbook/config";
 import { getNode, insertNode, type NodeRow } from "@/lib/db";
 import { bindTransitionContext } from "@/lib/transition-context";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
@@ -30,7 +30,7 @@ interface CreateBody {
   scale_tier?: ScaleTier | null;
   scene_view?: SceneView | null;
   view_verdict?: ViewVerdict | null;
-  grounding?: GroundingSummary | null;
+  grounding?: unknown;
 }
 
 export async function POST(req: Request) {

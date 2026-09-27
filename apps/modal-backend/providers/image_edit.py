@@ -5,8 +5,11 @@ Mirrors the tier shape in `image.py`. Edit models on fal expect an
 data URL to fal storage first — fal's queue endpoints get unhappy with
 multi-MB inline data URLs.
 
-The balanced slot uses nano-banana-pro/edit. Its text-to-image sibling does
-not declare image reference inputs, so legacy edit pins are normalized here.
+Every tier must name an endpoint that takes the source image. The balanced
+slot named `fal-ai/nano-banana-pro`, the text-to-image endpoint: its input
+has no `image_urls` (fal's schema, read 2026-09-24), so each balanced edit
+was painted from the text alone and never saw its source.
+Legacy balanced pins that name the text-to-image slug are normalized here.
 """
 
 from __future__ import annotations
@@ -117,10 +120,13 @@ async def edit_image(
     if (identity_ref_url or context_ref_url) and not supports_identity_reference(model):
         raise ValueError("This edit model cannot honor the place reference")
     image_url = await to_fal_url(image_data_url)
-    # The style exemplar only helps the nano models (they accept a 2nd ref);
-    # Kontext is singular-ref, so it leans on the instruction's medium clause.
+    # Kontext is singular-ref and leans on the instruction's medium clause;
+    # every other edit model here takes `image_urls` and can hold a second
+    # exemplar. Gating this on "nano-banana" dropped it for qwen-image-edit --
+    # the one model research 34 measured as holding the camera, and the one a
+    # walk paints its keyframes with, which then lost the world's art medium.
     style_fal: str | None = None
-    if style_ref_url and "nano-banana" in model:
+    if style_ref_url and "kontext" not in model:
         style_fal = await to_fal_url(style_ref_url)
     args = _edit_args_for(model, instruction, image_url, style_fal)
     if aspect_ratio is not None:

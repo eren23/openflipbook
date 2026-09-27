@@ -66,7 +66,7 @@ function buildRows(env: ReturnType<typeof readServerEnv>): Row[] {
       key: "NEXT_PUBLIC_LTX_WS_URL",
       required: false,
       ok: Boolean(process.env.NEXT_PUBLIC_LTX_WS_URL),
-      hint: "Optional: WS URL from `modal deploy ltx_stream.py` for the self-hosted streaming path. If unset, /play falls back to the cheap fal-ai/ltx-video clip.",
+      hint: "Optional: WS URL from `modal deploy ltx_stream.py` for the self-hosted streaming path. If unset, /play falls back to a fal MiniMax H3 clip.",
     },
   ];
 }

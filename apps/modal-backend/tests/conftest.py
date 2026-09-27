@@ -20,6 +20,12 @@ if str(ROOT) not in sys.path:
 
 _SCRUB = (
     "FAL_KEY",
+    # The decision layer: off unless a test turns it on.
+    "DECISION_MODE",
+    "DECISION_LIVE",
+    "DECISION_BACKEND",
+    "DECISION_TIMEOUT_MS",
+    "DECISIONS_CANARY",
     "OPENROUTER_API_KEY",
     "OPENROUTER_VLM_MODEL",
     "OPENROUTER_TEXT_MODEL",
@@ -134,6 +140,7 @@ _SCRUB = (
     "FAL_VIDEO_TIER_FAST",
     "FAL_VIDEO_TIER_BALANCED",
     "FAL_VIDEO_TIER_PRO",
+    "FAL_DESCENT_MODEL",
     "LTX_PRO_RESOLUTION",
     "WAN_RESOLUTION",
     # Map-pan expand (outpaint the world outward).

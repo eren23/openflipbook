@@ -161,7 +161,7 @@ async def _ask_judge(
             model=_judge_model(),
             messages=messages,
             temperature=0.0,
-            max_tokens=400,
+            max_tokens=llm.REASONING_HEADROOM + 400,
         )
         raw = response.choices[0].message.content or ""
         result = _parse_judgement(raw)

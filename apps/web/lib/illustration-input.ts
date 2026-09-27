@@ -5,12 +5,12 @@ import { getStoredBytes } from "./r2";
 import { assertCurrentView, viewHash, type PlaceViewDoc } from "./place-view-store";
 import { VIEW_PASSES } from "./place-view";
 import type { IllustrationEditInput } from "./place-view";
-import type { MeshAssetDoc } from "./mesh-execution";
+import type { MeshAssetDoc, ViewDependency } from "./mesh-docs";
+export type { ViewDependency } from "./mesh-docs";
 import { registeredObjectMask, registeredPixels } from "./illustration-region";
 import sharp from "sharp";
 import { illustrationIdentity } from "./illustration-identity";
 
-export interface ViewDependency { view_id: string; input_sha256: string; width: number; height: number }
 // Exclude ownership, storage locations and mutable review state so immutable
 // provenance remains valid after an owner fork.
 export function illustrationDependency(view: PlaceViewDoc): ViewDependency {

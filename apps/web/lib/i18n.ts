@@ -14,6 +14,7 @@ export type LocaleStrings = {
   go: string;
   generating: string;
   animateClip: string;
+  animatePrompt: string;
   descendClip: string;
   animateStream: string;
   animateStop: string;
@@ -36,6 +37,7 @@ const en: LocaleStrings = {
   go: "Go",
   generating: "…",
   animateClip: "Animate (5s clip)",
+  animatePrompt: "What should move? (optional)",
   descendClip: "Descend (5s clip)",
   animateStream: "Animate (stream)",
   animateStop: "Stop",

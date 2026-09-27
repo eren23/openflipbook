@@ -18,6 +18,7 @@ const PUB: PublishedSessionRow = {
 function node(id: string, session: string): NodeRow {
   return {
     id,
+    walk: null,
     parent_id: null,
     session_id: session,
     query: "q",

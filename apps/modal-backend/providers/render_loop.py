@@ -30,6 +30,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from providers import decisions
+
+# The one env-float parser lives with the decision registry, beside the
+# numbers it reads; the edit loop imports it from here unchanged.
+from providers.decisions.registry import env_float as _env_float
 from providers.judge import JudgeResult
 from providers.prompt_library.feedback import retry_feedback_clause
 
@@ -63,15 +68,6 @@ class LoopConfig:
 # the env default (the Fast preset's one-shot) or a couple more (Quality),
 # never an unbounded spend.
 MAX_ATTEMPTS_CAP = 4
-
-
-def _env_float(name: str, default: float) -> float:
-    """Parse an env var as a float; fall back to `default` if unset/garbage.
-    Shared by the render and edit loop config readers."""
-    try:
-        return float(os.environ.get(name, ""))
-    except ValueError:
-        return default
 
 
 def loop_config_from_env(max_attempts: int | None = None) -> LoopConfig:
@@ -285,6 +281,35 @@ async def iter_attempts[ImageT: Rendered](
             return
 
         accepted = _is_accepted(conformance, same_place, detail, medium, interior, config)
+        # The decision layer sees the scores and the sentences, never the
+        # floors. Shadow returns at once; live may only lower `accepted`
+        # (a re-roll), never raise it: a reject stays a reject.
+        # `clock` is an injected seam -- do not call it here: the loop's own
+        # calls are its budget, and an extra tick changes the deadline maths.
+        would_retry = (
+            not accepted
+            and index + 1 < config.max_attempts
+            and not (config.retry_budget_s > 0 and latency > config.retry_budget_s)
+        )
+        decided = await decisions.decide(
+            "render.accept",
+            state={
+                "projection": projection,
+                "attempt": index + 1,
+                "max_attempts": config.max_attempts,
+                "elapsed_s": round(latency, 1),
+                "axes": {
+                    name: {"score": j.score, "rationale": (j.rationale or "")[:400]}
+                    for name, j in (
+                        ("conformance", conformance), ("same_place", same_place), ("detail", detail),
+                        ("medium", medium), ("interior", interior),
+                    )
+                    if j is not None
+                },
+            },
+            incumbent={"accept": "yes" if accepted else "no", "retry_worth_it": "yes" if would_retry else "no"},
+        )
+        accepted = accepted and decided.yes("accept", accepted)
         log(
             "info",
             "view.loop",

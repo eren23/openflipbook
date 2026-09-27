@@ -1,4 +1,4 @@
-import type { Citation, NodeRelation, SceneView, TransitionContextV1 } from "@openflipbook/config";
+import type { Citation, NodeRelation, SceneView, TransitionContextV1, StoredWalk } from "@openflipbook/config";
 
 /** The in-session page graph node (play page state + history + map views). */
 export interface Page {
@@ -31,6 +31,8 @@ export interface Page {
   // The persisted arrival clip (DESCENT_AUTO) — replaying the descent is
   // instant when set; absent = the Descend button generates on demand.
   descentVideoUrl?: string | null;
+  /** A walk painted on this page, kept because it was paid for. */
+  walk?: StoredWalk | null;
   // How this page hangs off its parent ("expand" = bloomed neighbour,
   // "edit" = revision, "ascend" = OUTWARD container). Absent = descend (a
   // tap-in / fresh page) — same default the server applies on the wire, so
@@ -55,6 +57,8 @@ export interface SessionNodeWire {
   geo_extracted?: boolean;
   // DESCENT_AUTO's stored arrival clip; absent on legacy servers/rows.
   descent_video_url?: string | null;
+  /** A walk painted on this page, kept because it was paid for. */
+  walk?: StoredWalk | null;
   // Optional for back-compat with servers that predate the field; the node
   // rows always carry it in Mongo (defaulted "descend" by toRow).
   relation?: NodeRelation;
@@ -107,6 +111,7 @@ export function nodeToPage(n: SessionNodeWire): Page {
     ...(n.scene_outdated ? { sceneOutdated: true } : {}),
     geoExtracted: n.geo_extracted ?? false,
     ...(n.descent_video_url ? { descentVideoUrl: n.descent_video_url } : {}),
+    ...(n.walk ? { walk: n.walk } : {}),
     // Explicit "descend" rides through too (not collapsed to absent) — the
     // atlas gets the same concrete value off NodeRow, and world-layout keys
     // its zoom-in nesting shrink on the explicit form.
