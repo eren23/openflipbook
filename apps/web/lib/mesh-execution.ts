@@ -10,34 +10,37 @@ import { assetPipeline, validateAssetBytes, type AssetKind } from "./asset-pipel
 import type { SceneDoc } from "./place-scene-store";
 import type { BuildDoc } from "./place-build-execution";
 import { CreatorError } from "./creator-error";
-import { illustrationEditSource, illustrationSource, prepareIllustrationInput } from "./illustration-input";
-import type { MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
+import { illustrationEditSource, illustrationSource, keyframeChainSource, keyframeJobPasses, prepareIllustrationInput, prepareKeyframeViewInput } from "./illustration-input";
+import type { KeyframeGateDoc, MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
 export type { MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
 import { fenceViewSources } from "./place-view-store";
-import { ILLUSTRATION_EDIT_MODEL } from "./asset-pipeline";
+import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL } from "./asset-pipeline";
 import { registeredPixels } from "./illustration-region";
 import { buildConnectionsCurrent } from "./place-build-connections";
 import { usesIllustrationIdentity } from "./illustration-identity";
+import { finishKeyframe, keyframeGateBody, type KeyframePasses } from "./illustration-keyframe-server";
+import type { IllustrationKeyframe } from "./place-view";
 
-const statusPath = (job: MeshJobDoc) => `requests/${encodeURIComponent(job.request_id!)}${[ILLUSTRATION_EDIT_MODEL, MESH_IMAGE_MODEL].includes(job.model) ? `?model=${encodeURIComponent(job.model)}` : ""}`;
+const statusPath = (job: MeshJobDoc) => `requests/${encodeURIComponent(job.request_id!)}${[ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL, MESH_IMAGE_MODEL].includes(job.model) ? `?model=${encodeURIComponent(job.model)}` : ""}`;
 export const wireMesh = (job: MeshJobDoc): MeshJob => ({ id: job.id, prompt: job.prompt, model: job.model, status: job.status, reservation: job.reservation,
   ...(job.asset_id ? { asset_id: job.asset_id } : {}), ...(job.source_id ? { source_id: job.source_id } : {}), ...(job.error ? { error: job.error } : {}) });
-export async function assetBackend(kind: AssetKind | "motion", path: string, body?: unknown) {
+export async function assetBackend(kind: AssetKind | "motion", path: string, body?: unknown, timeout = 90_000, limit = 100_000) {
   if (!process.env.MODAL_API_URL) throw new Error("3D backend is not configured");
   const response = await fetch(modalUrl(process.env.MODAL_API_URL, `/${kind}/${path}`), { method: body ? "POST" : "GET", redirect: "error",
     headers: { "Content-Type": "application/json", ...modalAuthHeaders() }, ...(body ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(90_000), cache: "no-store" });
+    signal: AbortSignal.timeout(timeout), cache: "no-store" });
   if (!response.ok) throw new Error(`3D provider returned ${response.status}`);
-  const text = await response.text(); if (text.length > 100_000) throw new Error("3D response too large");
+  const text = await response.text(); if (text.length > limit) throw new Error("3D response too large");
   return JSON.parse(text);
 }
-export async function assetWorkerAvailable(db: Db, kind: AssetKind, region = false, image = false, brush = false, identity = false) {
+export async function assetWorkerAvailable(db: Db, kind: AssetKind, region = false, image = false, brush = false, identity = false, keyframe = false) {
   // Older workers share this queue and cannot prepare image inputs. Require a
   // completed worker rollout before exposing the new paid capability.
   if (image && await db.collection("generation_workers").findOne({ kind: "place-layout", mesh: true, mesh_image: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
   if (brush && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_brush: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
   if (identity && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_identity: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
-  return !!await db.collection("generation_workers").findOne({ kind: "place-layout", [kind]: true, ...(region ? { illustration_region: true } : {}), ...(image ? { mesh_image: true } : {}), ...(brush ? { illustration_brush: true } : {}), ...(identity ? { illustration_identity: true } : {}), last_seen: { $gt: new Date(Date.now() - 30_000) } });
+  if (keyframe && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_keyframe: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
+  return !!await db.collection("generation_workers").findOne({ kind: "place-layout", [kind]: true, ...(region ? { illustration_region: true } : {}), ...(image ? { mesh_image: true } : {}), ...(brush ? { illustration_brush: true } : {}), ...(identity ? { illustration_identity: true } : {}), ...(keyframe ? { illustration_keyframe: true } : {}), last_seen: { $gt: new Date(Date.now() - 30_000) } });
 }
 export async function expireAssetSubmissions(db: Db, kind: AssetKind, session_id?: string) {
   const scope = session_id ? { session_id } : {};
@@ -51,7 +54,7 @@ export async function expireAssetSubmissions(db: Db, kind: AssetKind, session_id
 
 async function submitScheduledAsset(db: Db, kind: AssetKind) {
   const col = db.collection<MeshJobDoc>(`${kind}_jobs`), token = randomUUID();
-  let prepared: Awaited<ReturnType<typeof prepareIllustrationInput>> | undefined;
+  let prepared: Record<string, unknown> | undefined;
   let imageInput: string | undefined;
   let candidate: MeshJobDoc | null = null;
   let invalidInput = false;
@@ -68,7 +71,9 @@ async function submitScheduledAsset(db: Db, kind: AssetKind) {
       } else {
         if (!candidate.view_dependency) throw new CreatorError("Illustration has no saved view dependency", 409);
         if ((candidate.model === ILLUSTRATION_EDIT_MODEL) !== !!candidate.edit_input) throw new CreatorError("Illustration edit input is missing or incompatible", 409);
-        prepared = await prepareIllustrationInput(db, candidate.session_id, candidate.view_dependency, candidate.edit_input, usesIllustrationIdentity(candidate.parameters));
+        if ((candidate.model === KEYFRAME_MODEL) !== !!candidate.keyframe_input) throw new CreatorError("Keyframe input is missing or incompatible", 409);
+        prepared = candidate.keyframe_input ? (await prepareKeyframeViewInput(db, candidate.session_id, candidate.view_dependency, candidate.keyframe_input)).inputs
+          : await prepareIllustrationInput(db, candidate.session_id, candidate.view_dependency, candidate.edit_input, usesIllustrationIdentity(candidate.parameters));
       }
     } catch (error) {
       if (error instanceof CreatorError && error.status === 409) invalidInput = true;
@@ -95,6 +100,7 @@ async function submitScheduledAsset(db: Db, kind: AssetKind) {
         if (invalidInput || !pending.view_dependency) throw new CreatorError("Illustration source changed", 409);
         const view = await illustrationSource(db, pending.session_id, pending.view_dependency, session);
         if (pending.edit_input) await illustrationEditSource(db, pending.session_id, view, pending.edit_input, session);
+        if (pending.keyframe_input?.chain_from) await keyframeChainSource(db, pending.session_id, pending.keyframe_input.chain_from, true, session);
         await fenceViewSources(db, view, session);
       } catch (error) {
         if (!(error instanceof CreatorError) || error.status !== 409) throw error;
@@ -146,11 +152,42 @@ async function downloadAsset(kind: AssetKind, url: unknown) {
   return Buffer.concat(chunks);
 }
 
+// The gate runs at most once per job. "started" is saved before the call and
+// the result (or an outage) before any download, so a crash or a storage
+// retry never segments the same candidates again.
+async function gateKeyframe(db: Db, job: MeshJobDoc, token: string, passes: KeyframePasses, urls: string[]): Promise<KeyframeGateDoc> {
+  const col = db.collection<MeshJobDoc>("illustration_jobs"), lease = { _id: job._id, status: "storing" as const, work_token: token };
+  if (job.keyframe_gate && job.keyframe_gate.status !== "started") return job.keyframe_gate;
+  let gate: KeyframeGateDoc = { status: "outage" };
+  if (!job.keyframe_gate) {
+    if (!await col.findOneAndUpdate({ ...lease, keyframe_gate: { $exists: false } }, { $set: { keyframe_gate: { status: "started" } } })) throw new Error("Keyframe gate lease lost");
+    const body = await keyframeGateBody(passes, job.keyframe_input!.gate_object_id, urls);
+    if (!body) gate = { status: "no_building" };
+    else try {
+      // SAM-3 may take 180 s for two candidates; each mask is a small PNG.
+      const masks = (await assetBackend("illustration", "gate", body, 200_000, 2_000_000))?.masks;
+      if (Array.isArray(masks) && masks.length === urls.length && masks.every(m => m && (m.mask_png === null || typeof m.mask_png === "string"))) gate = { status: "measured", masks: masks.map(m => m.mask_png) };
+    } catch { /* An outage keeps candidate 0, unmeasured. */ }
+  }
+  if (!await col.findOneAndUpdate(lease, { $set: { keyframe_gate: gate } })) throw new Error("Keyframe gate lease lost");
+  return gate;
+}
+async function finishKeyframeJob(db: Db, job: MeshJobDoc, token: string, response: NonNullable<MeshJobDoc["provider_result"]>): Promise<{ bytes: Buffer; keyframe: IllustrationKeyframe }> {
+  const input = job.keyframe_input!, urls = (response.images ?? [response.image]).map(image => meshDownloadUrl(image?.url));
+  const { passes, chain } = await keyframeJobPasses(db, job.session_id, job.view_dependency!, input);
+  const gate = await gateKeyframe(db, job, token, passes, urls);
+  const candidates: Buffer[] = [];
+  for (const url of urls) candidates.push(await downloadAsset("illustration", url));
+  const { bytes, chain: warp, ...result } = await finishKeyframe(passes, input.gate_object_id, candidates, gate.status === "measured" ? gate.masks : null, chain);
+  const { chain_from, gate_object_id, ...request } = input;
+  return { bytes, keyframe: { version: 1, ...request, ...(chain_from && warp ? { chain_from: { ...chain_from, angle: warp.angle, hole_share: warp.hole_share } } : {}), object_id: gate_object_id, ...result } };
+}
+
 async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: string) {
   const col = db.collection<MeshJobDoc>(`${kind}_jobs`), spec = assetPipeline(kind);
   try {
     if (!job.request_id || !job.provider_result) throw new Error("Saved provider result is missing");
-    let bytes: Buffer | undefined, alreadyStored = false;
+    let bytes: Buffer | undefined, alreadyStored = false, keyframe = job.keyframe_result;
     if (job.download) {
       const saved = await getStoredBytes(job.download.key, AbortSignal.timeout(30_000));
       if (saved && saved.bytes.length === job.download.bytes && createHash("sha256").update(saved.bytes).digest("hex") === job.download.sha256) {
@@ -165,7 +202,8 @@ async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: strin
         response = fresh;
         await col.updateOne({ _id: job._id, status: "storing", work_token: token }, { $set: { provider_result: fresh }, $unset: { refresh_result: "" } });
       }
-      bytes = await downloadAsset(kind, kind === "mesh" ? response.model_glb?.url : response.image?.url);
+      if (job.keyframe_input) ({ bytes, keyframe } = await finishKeyframeJob(db, job, token, response));
+      else bytes = await downloadAsset(kind, kind === "mesh" ? response.model_glb?.url : response.image?.url);
     }
     const metadata = validateAssetBytes(kind, bytes);
     if (kind === "illustration" && (!job.view_dependency || metadata.illustration?.width !== job.view_dependency.width || metadata.illustration?.height !== job.view_dependency.height)) throw new Error("Generated illustration dimensions differ from the saved camera");
@@ -173,11 +211,11 @@ async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: strin
     const hash = createHash("sha256").update(bytes).digest("hex"), assetId = `${kind}_${job.id}`;
     if (job.download && (job.download.sha256 !== hash || job.download.bytes !== bytes.length)) throw new Error("Provider changed the saved asset bytes");
     const download = job.download ?? { key: `${job.session_id}/${kind === "mesh" ? "meshes" : kind === "material" ? "materials" : "illustrations"}/${assetId}/${hash}.${spec.extension}`, sha256: hash, bytes: bytes.length };
-    const current = await col.findOneAndUpdate({ _id: job._id, status: "storing", work_token: token }, { $set: { download } }, { returnDocument: "after" });
+    const current = await col.findOneAndUpdate({ _id: job._id, status: "storing", work_token: token }, { $set: { download, ...(keyframe ? { keyframe_result: keyframe } : {}) } }, { returnDocument: "after" });
     if (!current) return;
     if (!alreadyStored) await uploadJpeg(download.key, bytes, spec.contentType, AbortSignal.timeout(90_000));
     const asset: MeshAssetDoc = { _id: `${job.session_id}:${assetId}`, id: assetId, session_id: job.session_id, ...download, ...metadata,
-      model: job.model, prompt: job.prompt, request_id: job.request_id, created_at: new Date(), ...(job.parameters ? { parameters: job.parameters } : {}), ...(job.dependency ? { dependency: job.dependency } : {}), ...(job.view_dependency ? { view_dependency: job.view_dependency } : {}), ...(job.edit_input ? { edit_input: job.edit_input } : {}), ...(job.image_input ? { image_input: job.image_input } : {}) };
+      model: job.model, prompt: job.prompt, request_id: job.request_id, created_at: new Date(), ...(job.parameters ? { parameters: job.parameters } : {}), ...(job.dependency ? { dependency: job.dependency } : {}), ...(job.view_dependency ? { view_dependency: job.view_dependency } : {}), ...(job.edit_input ? { edit_input: job.edit_input } : {}), ...(keyframe ? { keyframe } : {}), ...(job.image_input ? { image_input: job.image_input } : {}) };
     // Asset publication and job completion are one transaction. A cancelled job
     // can leave an unreferenced blob, but cannot expose it in the asset library.
     await withDbTransaction(async (db, session) => {
