@@ -795,6 +795,9 @@ export interface WalkClipRow {
   video_url: string;
   model: string;
   seconds: number;
+  // Seconds into the clip where its motion ends; the frozen tail after it is
+  // skipped on playback. Absent = play to the end.
+  play_until?: number;
 }
 
 export interface WalkShotRow {

@@ -1,4 +1,5 @@
-import type { PlaceSceneDefinition } from "@openflipbook/config";
+import type { ObserverPose, PlaceSceneDefinition, WorldVec2 } from "@openflipbook/config";
+import type { WalkWaypoint } from "./walk-route";
 import {storeyHeight} from "./building-structure";
 import {roomAt} from "./room-layout";
 import {footprintContainsPoint} from "./building-footprint";
@@ -60,3 +61,33 @@ export function parseWalkWrite(value: unknown): WalkPositionWrite | null {
 }
 
 export const wrapYaw = (yaw: number) => Math.atan2(Math.sin(yaw),Math.cos(yaw));
+
+// The one conversion between /play and the 3D walk. /play stands in map units
+// with gaze 0 = +x; the walk is in metres and moves along (-sin yaw, -cos yaw)
+// in (x, z). A scene's map geo puts scene x on map x and scene z on map y.
+// `place` is the scene geo's absolute centre and its map units per metre.
+interface MapPlace { pos: WorldVec2; unit: number }
+export interface WalkPoint { x: number; z: number; yaw: number; pitch: number }
+export function observerToWalk(o: Pick<ObserverPose,"pos"|"gaze"|"pitch">, place: MapPlace): WalkPoint {
+  return { x:(o.pos.x-place.pos.x)/place.unit, z:(o.pos.y-place.pos.y)/place.unit,
+    yaw:wrapYaw(-o.gaze-Math.PI/2), pitch:Math.max(-1.1,Math.min(1.1,o.pitch??0)) };
+}
+export function walkToObserver(w: WalkPoint, place: MapPlace) {
+  return { pos:{x:place.pos.x+w.x*place.unit,y:place.pos.y+w.z*place.unit}, gaze:wrapYaw(-w.yaw-Math.PI/2), pitch:w.pitch };
+}
+
+// The `route` query a /play walk hands to the editor: "x,z,yaw;..." in metres
+// from the scene centre. Parsing turns it into place-local waypoints.
+export const routeQuery = (points: readonly WalkPoint[]) => points.map(p => [p.x,p.z,p.yaw].map(v => v.toFixed(2)).join(",")).join(";");
+export function routeParam(value: string, definition: Pick<PlaceSceneDefinition,"width"|"depth">): WalkWaypoint[] {
+  const points: WalkWaypoint[] = [];
+  for (const part of value.split(";")) {
+    const v = part.split(",").map(n => n.trim() ? Number(n) : NaN);
+    if (v.length !== 3 || !v.every(Number.isFinite)) continue;
+    const x = v[0]!+definition.width/2, z = v[1]!+definition.depth/2;
+    if (x < 0 || x > definition.width || z < 0 || z > definition.depth) continue;
+    points.push({x,z,yaw:wrapYaw(v[2]!)});
+    if (points.length === 32) break;
+  }
+  return points;
+}

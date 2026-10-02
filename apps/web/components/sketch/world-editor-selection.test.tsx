@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { emptyPlaceScene, newComponent } from "@/lib/place-scene";
 
-vi.mock("next/dynamic",()=>({default:()=>function Viewport({selected,mode,floorId,focusKey}:{selected:string|null;mode:string;floorId?:string;focusKey?:number}){
+const viewport=vi.hoisted(()=>({props:{} as {route?:unknown;getWalkPose?:()=>unknown}}));
+vi.mock("next/dynamic",()=>({default:()=>function Viewport(props:{selected:string|null;mode:string;floorId?:string;focusKey?:number;route?:unknown;getWalkPose?:()=>unknown}){
+  const {selected,mode,floorId,focusKey}=props;viewport.props=props;
   return <div data-testid="viewport" data-selected={selected??""} data-mode={mode} data-floor={floorId??""} data-focus={focusKey}/>;
 }}));
 vi.mock("@/hooks/useWalkPosition",()=>({useWalkPosition:()=>({ready:true,getPose:()=>null,record:()=>{},flush:()=>{},state:{status:"idle"},retry:()=>{}})}));
@@ -69,4 +71,14 @@ it("discards stale object IDs and refuses a restored walk mode when connection l
   window.history.replaceState(null,"","/sketch/world?world=world&place=place&object=deleted&view=walk");connectionError=true;
   render(<WorldEditor/>);await ready();expect(selected()).toBe("");expect(screen.getByTestId("viewport").getAttribute("data-mode")).toBe("plan");
   expect(new URLSearchParams(location.search).has("object")).toBe(false);
+});
+it("walks a route handed over from /play, starting once at its first point",async()=>{
+  window.history.replaceState(null,"","/sketch/world?world=world&place=place&view=walk&route=-2.00,1.00,0.50%3B3.00,1.00,-1.57%3Bnan,0,0");
+  render(<WorldEditor/>);await ready();expect(screen.getByTestId("viewport").getAttribute("data-mode")).toBe("walk");
+  const w=definition.width/2,d=definition.depth/2;
+  expect(viewport.props.route).toEqual([{x:w-2,z:d+1,yaw:0.5},{x:w+3,z:d+1,yaw:-1.57}]);
+  expect(viewport.props.getWalkPose!()).toEqual({version:1,place_id:"place",scene_revision:1,position:{x:w-2,y:0.82,z:d+1},yaw:0.5,pitch:0});
+  expect(viewport.props.getWalkPose!()).toBeNull();
+  // Consumed: a later reload (save, fork) must not teleport back to the start.
+  expect(new URLSearchParams(location.search).has("route")).toBe(false);
 });
