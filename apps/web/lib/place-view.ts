@@ -65,6 +65,8 @@ export interface IllustrationKeyframeInput {
 export interface IllustrationKeyframeCandidate {
   iou: number | null; centre_dx: number | null; centre_dy: number | null; area_ratio: number | null;
   painted: number | null; passed: boolean;
+  // Chains only: mean RGB difference (0-255) from A's warp where A was trusted; lower wins among equals.
+  agreement?: number | null;
 }
 export interface IllustrationKeyframe extends Omit<IllustrationKeyframeInput, "chain_from" | "gate_object_id"> {
   version: 1;

@@ -9,7 +9,7 @@ import { CreatorError } from "./creator-error";
 import type { IllustrationKeyframe, ViewCapture, ViewSource } from "./place-view";
 import { registeredPixels } from "./illustration-region";
 import { illustrationIdentity } from "./illustration-identity";
-import { compositeChain, gateTruth, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
+import { compositeChain, gateTruth, KEYFRAME_GATE, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
 
 /** One capture. Pass bytes are the saved PNGs, already checked by the caller. */
 export interface KeyframePasses {
@@ -82,7 +82,8 @@ async function maskPixels(mask: string | null, view: KeyframeView) {
  * warped painting and sky wherever B sees what A saw, and takes the
  * candidate (B's own painting) only in the holes, so nothing drifts from
  * camera to camera. The masks measure the raw candidates: the gate checks
- * that B's painting is registered before its holes are used.
+ * that B's painting is registered before its holes are used. Among chain
+ * candidates, the one closest to A's warp where A was trusted wins the tie.
  */
 export async function finishKeyframe(passes: KeyframePasses, objectId: string | null, candidates: Buffer[], masks: (string | null)[] | null, chain?: KeyframeChain):
   Promise<Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { bytes: Buffer; chain?: { angle: number; hole_share: number; composite_share: number } }> {
@@ -96,12 +97,16 @@ export async function finishKeyframe(passes: KeyframePasses, objectId: string | 
   // First keyframe: every geometry pixel came from the render. Chain: only the holes did.
   const renderMask = warped?.warp.hole ?? (await decode(passes.depth, view)).filter((_, i) => i % 4 === 0).map(v => (v ? 1 : 0));
   const painted = images.map(image => paintedDelta(render, image, renderMask));
+  // Chain: how far each raw candidate strays from A's warp where A was trusted (not a hole, not sky).
+  const trusted = warped?.warp.hole.map((h, t) => (h || warped.warp.sky[t] ? 0 : 1));
+  const agreement = warped && trusted && decoded.map(image => paintedDelta(warped.warp.rgba, image, trusted));
   const truth = masks && objectId ? await truthFor(passes, objectId) : null;
-  const pick = truth && masks ? pickCandidate(truth.mask, await Promise.all(masks.map(m => maskPixels(m, view))), painted, view.width, view.height) : null;
+  const pick = truth && masks ? pickCandidate(truth.mask, await Promise.all(masks.map(m => maskPixels(m, view))), painted, view.width, view.height, KEYFRAME_GATE, agreement) : null;
   const chosen = pick?.index ?? 0;
   const metrics = painted.map((delta, i) => {
     const match = pick?.metrics[i]?.match ?? null;
-    return { iou: match?.iou ?? null, centre_dx: match?.centreDx ?? null, centre_dy: match?.centreDy ?? null, area_ratio: match?.areaRatio ?? null, painted: delta, passed: pick?.metrics[i]?.passed ?? false };
+    return { iou: match?.iou ?? null, centre_dx: match?.centreDx ?? null, centre_dy: match?.centreDy ?? null, area_ratio: match?.areaRatio ?? null, painted: delta, passed: pick?.metrics[i]?.passed ?? false,
+      ...(agreement ? { agreement: agreement[i] ?? null } : {}) };
   });
   const bytes = composites ? await sharp(composites[chosen]!.rgba, { raw: { width: view.width, height: view.height, channels: 4 } }).jpeg({ quality: 92 }).toBuffer() : candidates[chosen]!;
   return { bytes, gate: pick ? (pick.passed ? "passed" : "failed") : "unmeasured", candidates: metrics, chosen, passed: pick?.passed ?? false, sky_pinned: warped?.warp.sky.some(v => v) ?? false,

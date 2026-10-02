@@ -16,6 +16,8 @@ import { registeredPixels, selectedObjectIds } from "./illustration-region";
 import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL } from "./asset-pipeline";
 import { checkGeometryRefreshBase, composeIllustrationRefresh } from "./illustration-refresh-server";
 import { usesIllustrationIdentity } from "./illustration-identity";
+import { eyeAngle } from "./illustration-keyframe";
+import type { SceneDoc } from "./place-scene-store";
 
 async function access(sid: string, viewId: string) {
   if (!isSafeId(viewId)) throw new CreatorError("Invalid camera view", 400);
@@ -47,9 +49,18 @@ export async function illustrationLibrary(sid: string, viewId: string) {
     if (keyframeCapabilities.model !== KEYFRAME_MODEL || !Number.isFinite(keyframeCapabilities.reservation) || keyframeCapabilities.reservation <= 0) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "Keyframe painting is not configured." };
     if (keyframeCapabilities.enabled && !await assetWorkerAvailable(db, "illustration", false, false, false, false, true)) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "A compatible keyframe worker is unavailable." };
   } catch { keyframeCapabilities = { enabled: false, model: KEYFRAME_MODEL, reservation: 0, parameters: {}, reason: "Keyframe backend unavailable." }; }
-  // Cameras of the same place whose accepted artwork a keyframe can continue from.
+  // Cameras of the same place whose accepted artwork a keyframe can continue from, nearest first.
+  // The angle is the warp's eye angle, taken about the place's ground centre instead of
+  // A's painted geometry, so the library reads no image bytes. Each eye is measured in
+  // its own view's frame, which is the same as moving A into B's frame.
+  // ponytail: eye positions only, so two cameras at one spot that face apart read as near.
+  const place = (await db.collection<SceneDoc>("place_scenes").findOne({ _id: `${sid}:${view.root_place_id}`, session_id: sid }))?.definition;
+  const eye = (v: PlaceViewDoc) => {
+    const root = v.sources.find(s => s.place_id === v.root_place_id)!, m = v.camera.world_matrix;
+    return [m[12]! - root.x - (place?.width ?? 0) / 2, m[13]!, m[14]! - root.z - (place?.depth ?? 0) / 2];
+  };
   const chainSources = (await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: view.root_place_id, accepted_illustration_id: { $exists: true } }).sort({ created_at: -1 }).limit(50).toArray())
-    .filter(v => v.id !== viewId && chainShift(v, view)).map(v => ({ view_id: v.id, label: v.label }));
+    .filter(v => v.id !== viewId && chainShift(v, view)).map(v => ({ view_id: v.id, label: v.label, angle: eyeAngle(eye(v), eye(view)) })).sort((a, b) => a.angle - b.angle);
   const jobs = await db.collection<MeshJobDoc>("illustration_jobs").find({ session_id: sid, "view_dependency.view_id": viewId }).sort({ created_at: -1 }).limit(50).toArray();
   const assets = await db.collection<MeshAssetDoc>("illustration_assets").find({ session_id: sid, "view_dependency.view_id": viewId }).sort({ created_at: -1 }).limit(50).toArray();
   let historical = false, reason: string | undefined;

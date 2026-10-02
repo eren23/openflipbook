@@ -933,6 +933,7 @@ it("paints a first keyframe from the world's art, gates once before download and
   expect(asset.keyframe).toMatchObject({ version: 1, stage: "first", art: "art", reference: { key: "art" }, object_id: "kettle", gate: "passed", chosen: 0, passed: true, sky_pinned: false });
   expect(asset.keyframe.candidates).toEqual([expect.objectContaining({ iou: 1, centre_dx: 0, area_ratio: 1, passed: true }), expect.objectContaining({ iou: null, passed: false })]);
   expect(asset.keyframe.candidates[0].painted).toBeGreaterThan(12);
+  expect(asset.keyframe.candidates[0]).not.toHaveProperty("agreement"); // chains only
   expect(blobs.get(asset.key)).toEqual(state.candidates[0]);
   expect((await illustrationLibrary("world", "view")).assets[0]!.keyframe).toMatchObject({ gate: "passed", chosen: 0 });
 });
@@ -971,7 +972,8 @@ it("chains from a walk camera of a connected place into an orbit camera by compo
   store("place_views").set(from._id, from); blobs.set("prev", previous);
   store("illustration_assets").set("world:illustration_prev", { _id: "world:illustration_prev", id: "illustration_prev", session_id: "world", key: "prev", sha256: sha(previous), bytes: previous.length,
     model: KEYFRAME_MODEL, prompt: "Inked", created_at: new Date(), view_dependency: illustrationDependency(from) });
-  expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([{ view_id: "front", label: "Front" }]);
+  // Eyes about the place's ground centre (10, 0, 10), each in its own frame: A (-11, 0, -10), B (-10, 0, -10).
+  expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([{ view_id: "front", label: "Front", angle: expect.closeTo(2.73, 1) }]);
   await submitIllustration("world", "view", { ...keyframeRequest, chain_from: "front" });
   expect(illustrationJob().keyframe_input).toEqual({ stage: "chain", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) },
     chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle" });
@@ -987,6 +989,8 @@ it("chains from a walk camera of a connected place into an orbit camera by compo
   expect(asset.keyframe.chain_from.angle).toBeCloseTo(4.9, 0); // atan(1 m / 11.6 m), measured in B's frame
   expect(asset.keyframe.chain_from.hole_share).toBeGreaterThan(0.05); expect(asset.keyframe.chain_from.hole_share).toBeLessThan(0.15);
   expect(asset.keyframe.chain_from.composite_share).toBeGreaterThan(0.05); expect(asset.keyframe.chain_from.composite_share).toBeLessThan(0.2);
+  // Agreement: the raw blue candidate against A's orange where A was trusted, (170 + 100 + 180) / 3.
+  expect(Math.abs(asset.keyframe.candidates[0].agreement - 150)).toBeLessThan(10);
   // The stored picture is the composite: A's orange where B sees what A saw (sky included), the blue candidate in the holes.
   const stored = await registeredPixels(blobs.get(asset.key)!, 256, 256);
   const near = (p: number, rgb: number[]) => expect(rgb.reduce((sum, c, i) => sum + Math.abs(stored[p * 4 + i]! - c), 0)).toBeLessThan(15);
@@ -999,6 +1003,18 @@ it("chains from a walk camera of a connected place into an orbit camera by compo
   const refused = await submitIllustration("world", "view", { ...keyframeRequest, id: "run2", chain_from: "front" }).catch(e => e);
   expect(refused).toMatchObject({ status: 409 }); expect(refused.message).toMatch(/lined up/);
   expect(store("spend_ledger").size).toBe(ledger); expect(store("illustration_jobs").has("world:run2")).toBe(false);
+});
+it("lists the place's accepted cameras nearest first, by the eye angle about the place's centre", async () => {
+  const { view } = await enableKeyframes();
+  // This camera stands at (0, 0, 0), south-west of the 20 x 20 place's centre (10, 0, 10). The nearest is the oldest.
+  const at = (id: string, x: number, z: number, created: number) => {
+    const v = { ...structuredClone(view), _id: `world:${id}`, id, label: id, accepted_illustration_id: `art_${id}`, created_at: new Date(created).toISOString() };
+    v.camera.world_matrix[12] = x; v.camera.world_matrix[14] = z; store("place_views").set(v._id, v);
+  };
+  at("opposite", 20, 20, 3); at("side", 0, 20, 2); at("near", 10, 0, 1);
+  const { chain_sources } = await illustrationLibrary("world", "view");
+  expect(chain_sources.map(v => v.view_id)).toEqual(["near", "side", "opposite"]);
+  expect(chain_sources.map(v => Math.round(v.angle))).toEqual([45, 90, 180]);
 });
 it("extends the work lease when the keyframe gate starts, so a slow gate is never reclaimed as an outage", async () => {
   const { state, ready } = await enableKeyframes();
