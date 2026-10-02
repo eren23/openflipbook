@@ -28,3 +28,7 @@ it("encodes canonical world, place, object, floor, view and camera without retai
   expect(url.pathname).toBe("/sketch/world/map");expect(Object.fromEntries(url.searchParams)).toEqual({world:"world",place:"place",object:"inn",floor:"room",view:"split",camera:"camera"});
   expect(worldEditorHref({session_id:"world",place_id:"place"},{object_id:null,floor_id:null})).toBe("/sketch/world?world=world&place=place");
 });
+it("carries a /play walk route for the walk view", () => {
+  const url = new URL(worldEditorHref({session_id:"world",place_id:"place"},{object_id:null,floor_id:null},{view:"walk",route:"1.00,-2.50,0.30;0.00,0.00,1.57"}),"http://localhost");
+  expect(Object.fromEntries(url.searchParams)).toEqual({world:"world",place:"place",view:"walk",route:"1.00,-2.50,0.30;0.00,0.00,1.57"});
+});

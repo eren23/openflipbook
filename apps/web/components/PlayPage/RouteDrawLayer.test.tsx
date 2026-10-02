@@ -89,7 +89,7 @@ describe("RouteDrawLayer", () => {
   // Accept is the paid half: the layer renders the control image for every
   // camera (the renderer is ours) and the backend only paints and links.
   it("paints only the shots worth painting, and says what it spent", async () => {
-    const posted: { shots: { index: number; distance: number; control_data_url: string; sees: [string, number][] }[] }[] = [];
+    const posted: { shots: { index: number; distance: number; control_data_url: string; sees: [string, number][]; observer: { pos: { x: number; y: number }; gaze: number } }[] }[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       posted.push(JSON.parse(String(init?.body)));
       return { ok: true, json: async () => ({ clips: [{ video_url: "a.mp4" }, { video_url: "b.mp4" }], spent_usd: 0.41 }) } as Response;
@@ -119,6 +119,8 @@ describe("RouteDrawLayer", () => {
     for (const s of body.shots) {
       expect(s.control_data_url).toMatch(/^data:image\/png/);
       expect(typeof s.distance).toBe("number");
+      // and the camera it stands at, so the backend can say where it faces
+      expect(Number.isFinite(s.observer.pos.x) && Number.isFinite(s.observer.pos.y) && Number.isFinite(s.observer.gaze)).toBe(true);
       for (const seen of s.sees) {
         expect(typeof seen[0]).toBe("string");
         expect(typeof seen[1]).toBe("number");
@@ -224,5 +226,73 @@ describe("RouteDrawLayer", () => {
     expect(player.getAttribute("src")).toBe("https://v/b.mp4");
     fireEvent.ended(player);
     expect(player.getAttribute("src")).toBe("https://v/a.mp4"); // loops the walk
+  });
+
+  it("cuts to the next clip where a clip stops moving", () => {
+    // About 42% of an H3 clip is a frozen tail; play_until marks where its
+    // motion ends, so the walk does not stall on it.
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [
+            { from_shot: 0, to_shot: 1, video_url: "https://v/a.mp4", model: "m", seconds: 5, play_until: 2.9 },
+            { from_shot: 1, to_shot: 2, video_url: "https://v/b.mp4", model: "m", seconds: 5 },
+          ],
+          shots: [],
+          spent_usd: 0.69,
+          created_at: "2026-10-02T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    const player = screen.getByTestId("route-walk-player") as HTMLVideoElement;
+    const at = (t: number) => { Object.defineProperty(player, "currentTime", { value: t, configurable: true }); fireEvent.timeUpdate(player); };
+    at(2.5);
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4");
+    at(2.95);
+    expect(player.getAttribute("src")).toBe("https://v/b.mp4");
+    // a clip without play_until still waits for its end
+    at(4.9);
+    expect(player.getAttribute("src")).toBe("https://v/b.mp4");
+    fireEvent.ended(player);
+    expect(player.getAttribute("src")).toBe("https://v/a.mp4");
+  });
+
+  it("hands a route that starts in a 3D place to the editor instead of painting it", () => {
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    // A 3D scene's map geo: 32 x 20 metres drawn at 0.5 map units per metre.
+    const garden = geo("Garden", 12, 30, 16, 10, 0, { scene_id: "scene_1", scale: 0.5 });
+    // An object of the same scene under the start is not the place to open.
+    const inside = geo("Bench", -4, 0, 2, 2, 0.5, { scene_id: "scene_1", parent_id: "geo_Garden" });
+    render(<RouteDrawLayer entities={[...TOWN, inside, garden]} frame={FRAME} sessionId="s1" onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.queryByTestId("route-accept")).toBeNull();
+    const link = screen.getByTestId("route-open-3d");
+    expect(link.textContent).toBe("Walk it in 3D");
+    const url = new URL(link.getAttribute("href")!, "http://localhost");
+    expect(url.pathname).toBe("/sketch/world");
+    expect(url.searchParams.get("world")).toBe("s1");
+    expect(url.searchParams.get("place")).toBe("geo_Garden");
+    expect(url.searchParams.get("view")).toBe("walk");
+    // the stroke starts at map (10, 30): 4 m along -x from the garden's
+    // centre, heading +x, which the walk calls yaw -pi/2
+    const [x, z, yaw] = url.searchParams.get("route")!.split(";")[0]!.split(",").map(Number);
+    expect(x).toBeCloseTo(-4, 0);
+    expect(z).toBeCloseTo(0, 0);
+    expect(yaw).toBeCloseTo(-Math.PI / 2, 1);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps Paint when the route starts outside any 3D place", () => {
+    vi.stubGlobal("ImageData", class { constructor(public data: unknown, public width: number, public height: number) {} });
+    const garden = geo("Garden", 80, 50, 16, 10, 0, { scene_id: "scene_1", scale: 0.5 });
+    render(<RouteDrawLayer entities={[...TOWN, garden]} frame={FRAME} sessionId="s1" onClose={() => {}} />);
+    drawLine([40, 120], [360, 120]);
+    expect(screen.queryByTestId("route-open-3d")).toBeNull();
+    expect(screen.getByTestId("route-accept")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });
