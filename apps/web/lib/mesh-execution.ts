@@ -152,6 +152,7 @@ async function downloadAsset(kind: AssetKind, url: unknown) {
   return Buffer.concat(chunks);
 }
 
+const WORK_LEASE_MS = 360_000;
 // The gate runs at most once per job. "started" is saved before the call and
 // the result (or an outage) before any download, so a crash or a storage
 // retry never segments the same candidates again.
@@ -160,7 +161,8 @@ async function gateKeyframe(db: Db, job: MeshJobDoc, token: string, passes: Keyf
   if (job.keyframe_gate && job.keyframe_gate.status !== "started") return job.keyframe_gate;
   let gate: KeyframeGateDoc = { status: "outage" };
   if (!job.keyframe_gate) {
-    if (!await col.findOneAndUpdate({ ...lease, keyframe_gate: { $exists: false } }, { $set: { keyframe_gate: { status: "started" } } })) throw new Error("Keyframe gate lease lost");
+    // A fresh lease covers the gate call, whatever the reads before it took.
+    if (!await col.findOneAndUpdate({ ...lease, keyframe_gate: { $exists: false } }, { $set: { keyframe_gate: { status: "started" }, work_until: new Date(Date.now() + WORK_LEASE_MS) } })) throw new Error("Keyframe gate lease lost");
     const body = await keyframeGateBody(passes, job.keyframe_input!.gate_object_id, urls);
     if (!body) gate = { status: "no_building" };
     else try {
@@ -241,7 +243,7 @@ async function pollOrStoreAsset(db: Db, kind: AssetKind) {
     ] };
   // Read/download leases may expire and be reclaimed; the saved request ID
   // makes recovery a non-generative operation. Tokens fence late writers.
-  const job = await col.findOneAndUpdate(claim, { $set: { work_token: token, work_until: new Date(Date.now() + 360_000) } },
+  const job = await col.findOneAndUpdate(claim, { $set: { work_token: token, work_until: new Date(Date.now() + WORK_LEASE_MS) } },
     { sort: { next_check: 1, created_at: 1, _id: 1 }, returnDocument: "after" });
   if (!job) return false;
   if (job.provider_result) {

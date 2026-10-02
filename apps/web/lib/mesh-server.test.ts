@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { ClientSession, Db, Document } from "mongodb";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, Document>>(), owner: true, tail: Promise.resolve(), failPublication: false, failQueueAfterId: false }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
@@ -58,7 +58,8 @@ import { MESH_MODEL, MESH_IMAGE_MODEL } from "./mesh-asset";
 import { saveMeshSource, meshSources, meshSourceBytes, readMeshSource } from "./mesh-source";
 import { uploadJpeg, getStoredBytes } from "./r2";
 import { buildInputHash } from "./place-build-execution";
-import { newComponent } from "./place-scene";
+import { emptyPlaceScene, newComponent, sceneGeos } from "./place-scene";
+import { adjacentPlacement } from "./place-connections";
 const provider = vi.fn(), parameters = { enable_pbr: true, face_count: 40000, generate_type: "LowPoly", polygon_type: "triangle" };
 const config = { enabled: true, model: MESH_MODEL, reservation: 2, parameters };
 const input = { id: "run1", prompt: "A stone bakery", confirmed: true, reservation: 2, model: MESH_MODEL, parameters };
@@ -405,7 +406,7 @@ it("keeps ambiguous image submission terminal and never automatically resubmits"
 });
 import { ILLUSTRATION_MODEL, ILLUSTRATION_EDIT_MODEL } from "./asset-pipeline";
 import { submitIllustration, illustrationLibrary, illustrationAction } from "./illustration-server";
-import { bindings, type PlaceViewDoc } from "./place-view-store";
+import { bindings, currentSources, type PlaceViewDoc } from "./place-view-store";
 import { illustrationDependency } from "./illustration-input";
 import { VIEW_PASSES } from "./place-view";
 import { createHash } from "node:crypto";
@@ -878,18 +879,18 @@ async function enableKeyframes() {
   const { view, blobs } = await enableIllustrations();
   store("generation_workers").get("worker")!.illustration_keyframe = true;
   const scene = store("place_scenes").get("world:place")!;
-  scene.definition.objects = [{ ...newComponent("building", 10, 10), id: "kettle", label: "Copper Kettle" }];
+  scene.definition = { ...emptyPlaceScene(), width: 20, depth: 20, objects: [{ ...newComponent("building", 10, 10), id: "kettle", label: "Copper Kettle" }] };
   scene.source_image_key = "art"; blobs.set("art", await solid(200, 40, 40));
   Object.assign(view, await bindings(db, "world", [{ scene_id: "scene", place_id: "place", revision: 1, definition: scene.definition, x: 0, z: 0 }] as never));
   const f = 1 / Math.tan(25 * Math.PI / 180);
   view.camera = { projection: "perspective", world_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], projection_matrix: [f, 0, 0, 0, 0, f, 0, 0, 0, 0, -100.1 / 99.9, -1, 0, 0, -20 / 99.9, 0], near: 0.1, far: 100 };
   view.depth = { encoding: "linear_view_z_8bit_near_white", near: 1, far: 50 }; view.label = "Front";
   view.objects = [{ object_id: "kettle", rgb: [100, 120, 140] }]; view.floor_id = null;
-  const objects = Buffer.alloc(256 * 256 * 4), depth = await registeredPixels(blobs.get("depth")!, 256, 256);
+  const objects = Buffer.alloc(256 * 256 * 4), depth = Buffer.alloc(256 * 256 * 4);
   for (let p = 0; p < 256 * 256; p++) {
     const x = p % 256, y = Math.floor(p / 256), inside = x >= 78 && x < 178 && y >= 78 && y < 178;
     objects.set(inside ? [100, 120, 140, 255] : [0, 0, 0, 255], p * 4);
-    if (y < 20) depth.set([0, 0, 0, 255], p * 4); // a band of sky
+    depth.set(y < 20 ? [0, 0, 0, 255] : [200, 200, 200, 255], p * 4); // a band of sky over a wall 11.6 m away
   }
   for (const [pass, raw] of [["objects", objects], ["depth", depth]] as const) {
     const png = await sharp(raw, { raw: { width: 256, height: 256, channels: 4 } }).png().toBuffer();
@@ -955,9 +956,18 @@ it("refuses to continue from a camera without accepted artwork before any reserv
   await expect(submitIllustration("world", "view", { ...keyframeRequest, action: "generate" })).rejects.toMatchObject({ status: 400 });
   expect(store("spend_ledger").size).toBe(0); expect(store("illustration_jobs").size).toBe(0);
 });
-it("chains from accepted artwork through the depth warp and pins the warped sky", async () => {
+it("chains from a walk camera of a connected place into an orbit camera through the depth warp and pins the warped sky", async () => {
   const { view, blobs, ready } = await enableKeyframes();
-  const previous = await solid(200, 40, 40), from = { ...structuredClone(view), _id: "world:front", id: "front", accepted_illustration_id: "illustration_prev" };
+  // A place to the west: walk views draw the root place at its chunk offset, orbit views at the origin.
+  const place = store("place_scenes").get("world:place")!, next = { ...structuredClone(place), _id: "world:next", id: "scene_next", place_id: "next", source_image_key: null, definition: { ...place.definition, objects: [] } };
+  const geos = sceneGeos(place as never, []); geos.push(adjacentPlacement(place as never, next as never, "west", geos));
+  store("place_scenes").set(next._id, next); store("world_map").set("world", { _id: "world", entities: geos });
+  store("place_connections").set("world:link", { _id: "world:link", session_id: "world", id: "link", version: 1, kind: "boundary", a: { place_id: "place", side: "west", offset: 10 }, b: { place_id: "next", side: "east", offset: 10 }, width: 3, created_at: new Date(0).toISOString() });
+  const sources = await currentSources(db, "world", "place", "walk"), root = sources.find(s => s.place_id === "place")!;
+  expect(root.x).toBe(20);
+  // Camera A stands 1 m left of camera B in the place's own frame, so B sees 24 px A never saw on the right.
+  const previous = await solid(200, 40, 40), from = { ...structuredClone(view), _id: "world:front", id: "front", mode: "walk" as const, accepted_illustration_id: "illustration_prev", ...await bindings(db, "world", sources) };
+  from.camera.world_matrix[12] = root.x - 1; from.camera.world_matrix[14] = root.z;
   store("place_views").set(from._id, from); blobs.set("prev", previous);
   store("illustration_assets").set("world:illustration_prev", { _id: "world:illustration_prev", id: "illustration_prev", session_id: "world", key: "prev", sha256: sha(previous), bytes: previous.length,
     model: KEYFRAME_MODEL, prompt: "Inked", created_at: new Date(), view_dependency: illustrationDependency(from) });
@@ -967,14 +977,39 @@ it("chains from accepted artwork through the depth warp and pins the warped sky"
   await processNextAssetJob(db, "illustration");
   const { inputs } = JSON.parse(submitted()[0]![1].body);
   expect(inputs.keyframe_stage).toBe("chain"); expect(inputs.reference_url).toMatch(/^data:image\/jpeg;base64,/);
-  // Same camera: the warp carries the accepted red artwork, not the render.
+  // The warp carries the accepted red artwork where A saw the wall, and B's render where it did not.
   const warped = await registeredPixels(Buffer.from(inputs.image_url.split(",")[1], "base64"), 256, 256, true);
-  for (const p of [40 * 256 + 40, 128 * 256 + 128]) expect(Math.abs(warped[p * 4]! - 200) + Math.abs(warped[p * 4 + 2]! - 40)).toBeLessThan(20);
+  const render = await registeredPixels(blobs.get("render")!, 256, 256);
+  for (const p of [40 * 256 + 40, 128 * 256 + 128, 128 * 256 + 220]) expect(Math.abs(warped[p * 4]! - 200) + Math.abs(warped[p * 4 + 2]! - 40)).toBeLessThan(20);
+  expect([...warped.subarray((128 * 256 + 250) * 4, (128 * 256 + 251) * 4)]).toEqual([...render.subarray((128 * 256 + 250) * 4, (128 * 256 + 251) * 4)]);
   ready(); await processNextAssetJob(db, "illustration");
   const asset = store("illustration_assets").get("world:illustration_run1")!;
-  expect(asset.keyframe).toMatchObject({ stage: "chain", gate: "passed", chosen: 0, sky_pinned: true, chain_from: { view_id: "front", illustration_id: "illustration_prev", angle: 0, hole_share: 0 } });
+  expect(asset.keyframe).toMatchObject({ stage: "chain", gate: "passed", chosen: 0, sky_pinned: true, chain_from: { view_id: "front", illustration_id: "illustration_prev" } });
+  expect(asset.keyframe.chain_from.angle).toBeCloseTo(4.9, 0); // atan(1 m / 11.6 m), measured in B's frame
+  expect(asset.keyframe.chain_from.hole_share).toBeGreaterThan(0.05); expect(asset.keyframe.chain_from.hole_share).toBeLessThan(0.15);
   expect(asset.keyframe.art).toBeUndefined();
   const stored = await registeredPixels(blobs.get(asset.key)!, 256, 256);
   expect(stored[(5 * 256 + 128) * 4]).toBeGreaterThan(170); // sky pinned to the earlier red
   expect(stored[(128 * 256 + 128) * 4 + 2]).toBeGreaterThan(170); // the painted blue candidate
+  // A camera without the root place's offset cannot be lined up: not listed, and refused before any spend.
+  store("place_views").get("world:front")!.sources = from.sources.filter(s => s.place_id !== "place");
+  const ledger = store("spend_ledger").size;
+  expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([]);
+  const refused = await submitIllustration("world", "view", { ...keyframeRequest, id: "run2", chain_from: "front" }).catch(e => e);
+  expect(refused).toMatchObject({ status: 409 }); expect(refused.message).toMatch(/lined up/);
+  expect(store("spend_ledger").size).toBe(ledger); expect(store("illustration_jobs").has("world:run2")).toBe(false);
+});
+it("extends the work lease when the keyframe gate starts, so a slow gate is never reclaimed as an outage", async () => {
+  const { state, ready } = await enableKeyframes();
+  await submitIllustration("world", "view", keyframeRequest); await processNextAssetJob(db, "illustration");
+  ready(); vi.useFakeTimers({ toFake: ["Date"] }); onTestFinished(() => { vi.useRealTimers(); });
+  // 200 s of status and storage reads after the claim, then a 200 s gate: past the claim's 360 s lease.
+  const impl = provider.getMockImplementation()!, measured = state.gate;
+  provider.mockImplementation(async (url: string, init?: RequestInit) => { if (url.includes("/requests/")) vi.setSystemTime(Date.now() + 200_000); return impl(url, init); });
+  let reclaimed: boolean | undefined;
+  state.gate = async () => { vi.setSystemTime(Date.now() + 200_000); reclaimed = await processNextAssetJob(db, "illustration"); return measured(); };
+  await processNextAssetJob(db, "illustration");
+  expect(reclaimed).toBe(false);
+  expect(illustrationJob()).toMatchObject({ status: "ready", keyframe_gate: { status: "measured" } });
+  expect(store("illustration_assets").get("world:illustration_run1")!.keyframe).toMatchObject({ gate: "passed", chosen: 0 });
 });
