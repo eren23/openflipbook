@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ankhStreetScene, DRUM_APPROACH } from "./ankh-scene";
+import { ankhStreetScene, DRUM_APPROACH, routeWords } from "./ankh-scene";
 import { parsePlaceScene, sceneGeos } from "./place-scene";
 import { buildPlaceScene, disposePlace } from "../components/sketch/place-scene-renderer";
 import { angleDifference, routeMovement } from "./walk-route";
@@ -58,5 +58,13 @@ describe("collision-driven guided route", () => {
     expect(done).toBe(true); expect(x).toBeCloseTo(12.6, 1); expect(z).toBeCloseTo(12, 1); expect(yaw).toBe(-Math.PI / 2);
     expect(angleDifference(-Math.PI + 0.1, Math.PI - 0.1)).toBeCloseTo(0.2);
     expect(routeMovement([], state, { x, z }, yaw, 0.02).done).toBe(true);
+  });
+});
+
+describe("tour status words", () => {
+  it("names the Drum only on the Drum approach", () => {
+    // Recording scripts wait for the Drum words; a /play hand-off is any route.
+    expect(routeWords(DRUM_APPROACH)).toEqual({ walking: "Walking to the Drum", end: "At the Mended Drum" });
+    expect(routeWords([...DRUM_APPROACH])).toEqual({ walking: "Walking the route", end: "Route end" });
   });
 });

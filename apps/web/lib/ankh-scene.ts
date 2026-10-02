@@ -15,6 +15,11 @@ export const DRUM_APPROACH: readonly WalkWaypoint[] = [
   { x: 12.6, z: 12, yaw: 0, hold: 1.5 },
   { x: 12.6, z: 12, yaw: -Math.PI / 2, hold: 1.5 },
 ];
+// The tour status line. Only the Drum approach names the Drum: recording
+// scripts wait for that text, and a /play hand-off can be any route.
+export const routeWords = (route: readonly WalkWaypoint[]) => route === DRUM_APPROACH
+  ? { walking: "Walking to the Drum", end: "At the Mended Drum" }
+  : { walking: "Walking the route", end: "Route end" };
 
 export function ankhStreetScene(): PlaceSceneDefinition {
   const objects: PlaceSceneObject[] = [];

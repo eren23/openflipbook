@@ -8,7 +8,7 @@ import { useContainRect } from "@/hooks/useContainRect";
 import { canvasSource } from "@/lib/image-click";
 import { pointInBlock, renderLayoutControl } from "@/lib/layout-control";
 import { placeScenesEnabled } from "@/lib/place-scene-enabled";
-import { ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
+import { paintableShots, ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
 import { observerToWalk, routeQuery } from "@/lib/walk-position";
 import { worldEditorHref } from "@/lib/world-editor-selection";
 import { resolveAbsoluteFrame, toAbsoluteEntities } from "@/lib/world-geometry";
@@ -95,7 +95,9 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
     () => (route ? routeShots(route, absolute, routeOpts) : []),
     [route, absolute, routeOpts],
   );
-  const worth = useMemo(() => shots.filter((s) => s.worth), [shots]);
+  // Only shots a clip can reach: the backend links index n to n+1 alone.
+  const worth = useMemo(() => paintableShots(shots), [shots]);
+  const seeing = shots.filter((s) => s.worth).length;
 
   // A route that starts inside a place built in 3D is walked there instead:
   // the editor has the real geometry, the map only has boxes. The place is the
@@ -280,7 +282,8 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
                 route.checkpoints.some((c) => c.blocked) ? `${route.checkpoints.filter((c) => c.blocked).length} have no clear spot — redraw around the buildings` : null,
                 // A camera facing open ground is not worth a generation, so
                 // say how many of them would actually be painted.
-                shots.length > worth.length ? `${shots.length - worth.length} see nothing — skipped` : null,
+                shots.length > seeing ? `${shots.length - seeing} see nothing — skipped` : null,
+                seeing > worth.length ? `${seeing - worth.length} have no neighbour to walk to — skipped` : null,
               ].filter(Boolean).join(" · ")
             : "Drag across the map to draw where the camera walks."}
         </span>
@@ -305,11 +308,13 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
             controls
             // Cut where the clip stops moving (play_until), not after its
             // frozen tail; a clip without it plays to its end.
+            // Both can fire for one clip (play_until at its very end), so step
+            // only from the clip this render shows: one advance per clip.
             onTimeUpdate={(e) => {
               const until = walk.clips[clip % walk.clips.length]!.play_until;
-              if (until !== undefined && e.currentTarget.currentTime >= until) setClip((i) => (i + 1) % walk.clips.length);
+              if (until !== undefined && e.currentTarget.currentTime >= until) setClip((i) => (i === clip ? (i + 1) % walk.clips.length : i));
             }}
-            onEnded={() => setClip((i) => (i + 1) % walk.clips.length)}
+            onEnded={() => setClip((i) => (i === clip ? (i + 1) % walk.clips.length : i))}
             className="h-[180px] w-[320px] rounded border border-[var(--color-edge)] bg-black"
           />
         )}

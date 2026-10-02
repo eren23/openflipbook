@@ -108,12 +108,17 @@ describe("RouteDrawLayer", () => {
     drawLine([40, 120], [360, 120]);
     const accept = screen.getByTestId("route-accept");
     expect(accept.textContent).toMatch(/^Paint \d+ shots?$/);
+    const label = accept.textContent;
     await act(async () => { fireEvent.click(accept); });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toBe("/api/world/s1/walk");
     const body = posted[0]!;
     expect(body.shots.length).toBeGreaterThan(0);
+    // the button counts what is sent, and every sent shot has a neighbour to walk to
+    const sent = body.shots.map((s) => s.index);
+    expect(label).toBe(`Paint ${sent.length} shot${sent.length === 1 ? "" : "s"}`);
+    if (sent.length > 1) for (const i of sent) expect(sent.includes(i - 1) || sent.includes(i + 1)).toBe(true);
     // every shot carries its own control image, how far along it is, and what
     // it sees -- as [label, share] pairs, the shape the backend's model takes
     for (const s of body.shots) {
@@ -259,6 +264,33 @@ describe("RouteDrawLayer", () => {
     expect(player.getAttribute("src")).toBe("https://v/b.mp4");
     fireEvent.ended(player);
     expect(player.getAttribute("src")).toBe("https://v/a.mp4");
+  });
+
+  it("advances once when a clip's play_until is at its very end", () => {
+    // play_until >= duration: the last timeupdate and ended fire in one task,
+    // and both used to advance, so the next clip was skipped.
+    render(
+      <RouteDrawLayer
+        entities={TOWN}
+        frame={FRAME}
+        sessionId="s1"
+        savedWalk={{
+          clips: [
+            { from_shot: 0, to_shot: 1, video_url: "https://v/a.mp4", model: "m", seconds: 5, play_until: 5 },
+            { from_shot: 1, to_shot: 2, video_url: "https://v/b.mp4", model: "m", seconds: 5 },
+            { from_shot: 2, to_shot: 3, video_url: "https://v/c.mp4", model: "m", seconds: 5 },
+          ],
+          shots: [],
+          spent_usd: 0.69,
+          created_at: "2026-10-02T00:00:00Z",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    const player = screen.getByTestId("route-walk-player") as HTMLVideoElement;
+    Object.defineProperty(player, "currentTime", { value: 5, configurable: true });
+    act(() => { fireEvent.timeUpdate(player); fireEvent.timeUpdate(player); fireEvent.ended(player); });
+    expect(player.getAttribute("src")).toBe("https://v/b.mp4");
   });
 
   it("hands a route that starts in a 3D place to the editor instead of painting it", () => {
