@@ -155,8 +155,13 @@ export function warpKeyframe(
 
   const cx = px / points, cy = py / points, cz = pz / points;
   const ea = [Ma[12]! - cx, Ma[13]! - cy, Ma[14]! - cz], eb = [Mb[12]! - cx, Mb[13]! - cy, Mb[14]! - cz];
+  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: eyeAngle(ea, eb) };
+}
+
+/** Angle in degrees between two eyes, each given relative to the same centre. */
+export function eyeAngle(ea: readonly number[], eb: readonly number[]) {
   const cos = (ea[0]! * eb[0]! + ea[1]! * eb[1]! + ea[2]! * eb[2]!) / (Math.hypot(...ea) * Math.hypot(...eb));
-  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: Math.acos(Math.min(1, Math.max(-1, cos))) * 180 / Math.PI };
+  return Math.acos(Math.min(1, Math.max(-1, cos))) * 180 / Math.PI;
 }
 
 export interface GateTruth {

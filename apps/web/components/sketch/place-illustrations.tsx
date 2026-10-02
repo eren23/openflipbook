@@ -13,7 +13,7 @@ interface Library {
   jobs: MeshJob[]; assets: SavedIllustration[]; historical: boolean; accepted_id: string | null;
   capabilities: { enabled: boolean; model: string; reservation: number; parameters: Record<string, unknown>; reason?: string; brush_enabled?: boolean };
   region_capabilities?: Library["capabilities"];
-  keyframe_capabilities?: Library["capabilities"]; chain_sources?: { view_id: string; label: string }[];
+  keyframe_capabilities?: Library["capabilities"]; chain_sources?: { view_id: string; label: string; angle: number }[];
 }
 const active = (job: MeshJob) => ["scheduled", "submitting", "queued", "running", "storing"].includes(job.status);
 const signed = (n: number) => `${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}%`;
@@ -33,7 +33,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const [sourceOpacity, setSourceOpacity] = useState(50);
   const [editingRegion, setEditingRegion] = useState(false), [regionIds, setRegionIds] = useState<string[]>([]), [maskReady, setMaskReady] = useState(false);
   const [strokes, setStrokes] = useState<IllustrationBrushStroke[] | undefined>();
-  const [chainFrom, setChainFrom] = useState("");
+  const [chainFrom, setChainFrom] = useState<string | null>(null);
   const regionPending = useRef<Record<string, unknown> | null>(null);
   const maskedPending = useRef<Record<string, unknown> | null>(null);
   const [regionMode, setRegionMode] = useState<"proposal" | "generate">("proposal"), [changePrompt, setChangePrompt] = useState(""), [editConsent, setEditConsent] = useState(false);
@@ -91,7 +91,10 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const editConfig = library?.region_capabilities;
   // When keyframes are on they replace the full-view flux generation; flux jobs and region edits stay.
   const keyframeConfig = library?.keyframe_capabilities, keyframes = !!keyframeConfig?.enabled, quote = keyframes ? keyframeConfig : config;
-  const chain = library?.chain_sources?.some(v => v.view_id === chainFrom) ? chainFrom : "";
+  // Chained keyframes keep the building's identity, so the nearest accepted camera is the
+  // default (the library sorts nearest first). "" paints a first keyframe from the render.
+  const sources = library?.chain_sources ?? [];
+  const chain = chainFrom === null ? sources[0]?.view_id ?? "" : sources.some(v => v.view_id === chainFrom) ? chainFrom : "";
   const paint = (text: string, extra: Record<string, unknown>) => void action({ action: "generate_keyframe", id: crypto.randomUUID(), prompt: text, confirmed: true, model: keyframeConfig?.model, parameters: keyframeConfig?.parameters, reservation: keyframeConfig?.reservation, ...extra }, "generation");
   // The retry ladder: a first keyframe painted from art retries from words; a chain retries once.
   const kf = asset?.keyframe, rung = kf?.gate !== "failed" ? null : kf.stage === "first" ? kf.art === "art" ? { label: "Retry with words only", extra: { art: false } } : null
@@ -112,7 +115,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   return <div className={s.illustrationGenerator} aria-label="Camera illustrations">
     <div className={s.sectionHeading}><h3>Illustrations</h3><button title="Refresh illustrations" aria-label="Refresh illustrations" disabled={busy} onClick={() => void reload().catch(e => setError(e.message))}><RefreshCw size={16}/></button></div>
     {!editingRegion && <><label>Appearance<textarea aria-label="Illustration appearance" value={prompt} maxLength={1024} disabled={frozen} onChange={e => setPrompt(e.target.value)} placeholder="Hand-inked stonework, mossy roofs, warm window light"/></label>
-    {keyframes && !!library?.chain_sources?.length && <label>Continue from<select aria-label="Continue from camera" value={chain} disabled={frozen} onChange={e => setChainFrom(e.target.value)}><option value="">3D render (first keyframe)</option>{library.chain_sources.map(v => <option key={v.view_id} value={v.view_id}>{v.label}</option>)}</select></label>}
+    {keyframes && !!library?.chain_sources?.length && <label>Continue from<select aria-label="Continue from camera" value={chain} disabled={frozen} onChange={e => setChainFrom(e.target.value)}><option value="">3D render (first keyframe)</option>{library.chain_sources.map(v => <option key={v.view_id} value={v.view_id}>{v.label} ({Math.round(v.angle)}°)</option>)}</select></label>}
     {quote?.enabled && <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || !!pending.current} onChange={e => setConsent(e.target.checked)}/>Reserve {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(quote.reservation)} for this {keyframes ? "keyframe" : "illustration"}</label>}
     {quote && !quote.enabled && <p role="status">{quote.reason}</p>}
     {keyframes ? <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !consent || prompt.trim().length < 3))} onClick={() => paint(prompt, chain ? { chain_from: chain } : {})}><Sparkles size={16}/>{pending.current ? "Retry keyframe request" : "Paint keyframe"}</button>
