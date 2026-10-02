@@ -51,6 +51,30 @@ export interface SavedIllustration {
   region_edit?: IllustrationRegionEdit;
   edit_input?: IllustrationEditInput;
   geometry_refresh?: IllustrationGeometryRefresh;
+  keyframe?: IllustrationKeyframe;
+}
+// A keyframe request: the exact render, painted from the art or words. A chain
+// also composites an accepted keyframe at another camera over it, warped by
+// depth. The gate measures one building.
+export interface IllustrationKeyframeInput {
+  stage: "first" | "chain"; art?: "art" | "words";
+  reference?: { key: string; sha256: string };
+  chain_from?: { view_id: string; illustration_id: string; sha256: string };
+  gate_object_id: string | null;
+}
+export interface IllustrationKeyframeCandidate {
+  iou: number | null; centre_dx: number | null; centre_dy: number | null; area_ratio: number | null;
+  painted: number | null; passed: boolean;
+  // Chains only: mean RGB difference (0-255) from A's warp where A was trusted; lower wins among equals.
+  agreement?: number | null;
+}
+export interface IllustrationKeyframe extends Omit<IllustrationKeyframeInput, "chain_from" | "gate_object_id"> {
+  version: 1;
+  // composite_share: the fraction of the stored picture that came from the candidate (absent on older chains).
+  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number };
+  object_id: string | null;
+  gate: "passed" | "failed" | "unmeasured";
+  candidates: IllustrationKeyframeCandidate[]; chosen: number; passed: boolean; sky_pinned: boolean;
 }
 export interface IllustrationGeometryRefresh {
   version: 1; method: "registered_render_delta_rgba_v1"; padding_px: 2;

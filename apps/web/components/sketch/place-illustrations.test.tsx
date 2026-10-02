@@ -230,3 +230,36 @@ it("clears consent on a brush edit and freezes strokes across a lost generation 
   fireEvent.click(screen.getByRole("button", { name: "Retry masked request" })); await waitFor(() => expect(writes()).toHaveLength(2));
   expect(writes()[1]).toBe(writes()[0]); expect(JSON.parse(writes()[0]).brush_strokes).toEqual([{ operation: "paint", radius: 3, points: [[10, 10]] }]);
 });
+it("paints keyframes in place of flux, continues from an accepted camera, shows the gate and offers the next rung", async () => {
+  Object.assign(library, { keyframe_capabilities: { enabled: true, model: "qwen", reservation: 0.12, parameters: { num_images: 2 } }, chain_sources: [{ view_id: "front", label: "Front door", angle: 12.4 }],
+    assets: [{ id: "kf", prompt: "Inked stone", accepted: false, historical: false, keyframe: { version: 1, stage: "first", art: "art", gate: "failed", object_id: "inn", chosen: 0, passed: false, sky_pinned: false,
+      candidates: [{ iou: 0.71, centre_dx: 0.052, centre_dy: -0.01, area_ratio: 1.31, painted: 40, passed: false }] } }] });
+  draw(); await screen.findByText("Reserve $0.12 for this keyframe");
+  expect(screen.queryByRole("button", { name: "Generate illustration" })).toBeNull();
+  expect(screen.getByRole("status", { name: "Keyframe gate" }).textContent).toBe("Keyframe from art / gate failed / IoU 0.710 / centre +5.2%, -1.0% / area 1.31");
+  fireEvent.change(screen.getByLabelText("Illustration appearance"), { target: { value: "Warm lamplight" } }); fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.change(screen.getByLabelText("Continue from camera"), { target: { value: "front" } });
+  fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(JSON.parse(writes()[0])).toMatchObject({ action: "generate_keyframe", chain_from: "front", model: "qwen", reservation: 0.12, parameters: { num_images: 2 }, prompt: "Warm lamplight", confirmed: true });
+  const rung = screen.getByRole("button", { name: "Retry with words only" });
+  await waitFor(() => expect(rung).toHaveProperty("disabled", true)); fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(rung);
+  await waitFor(() => expect(writes()).toHaveLength(2));
+  const words = JSON.parse(writes()[1]);
+  expect(words).toMatchObject({ action: "generate_keyframe", art: false, prompt: "Inked stone" }); expect(words.chain_from).toBeUndefined();
+});
+it("continues from the nearest accepted camera by default and still paints a first keyframe on request", async () => {
+  Object.assign(library, { keyframe_capabilities: { enabled: true, model: "qwen", reservation: 0.12, parameters: {} },
+    chain_sources: [{ view_id: "front", label: "Front door", angle: 12.4 }, { view_id: "yard", label: "Back yard", angle: 171 }] });
+  draw(); await screen.findByText("Reserve $0.12 for this keyframe");
+  const select = screen.getByLabelText<HTMLSelectElement>("Continue from camera");
+  expect(select.value).toBe("front");
+  expect([...select.options].map(o => o.textContent)).toEqual(["3D render (first keyframe)", "Front door (12°)", "Back yard (171°)"]);
+  fireEvent.change(screen.getByLabelText("Illustration appearance"), { target: { value: "Warm lamplight" } });
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
+  await waitFor(() => expect(writes()).toHaveLength(1)); expect(JSON.parse(writes()[0]).chain_from).toBe("front");
+  fireEvent.change(select, { target: { value: "" } }); expect(select.value).toBe("");
+  await waitFor(() => expect(screen.getByRole("checkbox")).toHaveProperty("disabled", false));
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
+  await waitFor(() => expect(writes()).toHaveLength(2)); expect(JSON.parse(writes()[1]).chain_from).toBeUndefined();
+});

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Check, RefreshCw, Sparkles, SquareDashedMousePointer, X } from "lucide-react";
 import type { MeshJob } from "@/lib/mesh-asset";
-import type { SavedIllustration, SavedPlaceView } from "@/lib/place-view";
+import type { IllustrationKeyframe, SavedIllustration, SavedPlaceView } from "@/lib/place-view";
 import s from "./world-editor.module.css";
 import IllustrationRegionPicker from "./illustration-region-picker";
 import type { IllustrationBrushStroke } from "@/lib/illustration-brush";
@@ -13,8 +13,15 @@ interface Library {
   jobs: MeshJob[]; assets: SavedIllustration[]; historical: boolean; accepted_id: string | null;
   capabilities: { enabled: boolean; model: string; reservation: number; parameters: Record<string, unknown>; reason?: string; brush_enabled?: boolean };
   region_capabilities?: Library["capabilities"];
+  keyframe_capabilities?: Library["capabilities"]; chain_sources?: { view_id: string; label: string; angle: number }[];
 }
 const active = (job: MeshJob) => ["scheduled", "submitting", "queued", "running", "storing"].includes(job.status);
+const signed = (n: number) => `${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}%`;
+function gateSummary(k: IllustrationKeyframe) {
+  const m = k.candidates[k.chosen], kind = k.stage === "chain" ? "Chained keyframe" : k.art === "words" ? "Keyframe from words" : "Keyframe from art";
+  const gate = `${kind} / gate ${k.gate}`;
+  return m?.iou == null || m.centre_dx == null || m.centre_dy == null || m.area_ratio == null ? gate : `${gate} / IoU ${m.iou.toFixed(3)} / centre ${signed(m.centre_dx)}, ${signed(m.centre_dy)} / area ${m.area_ratio.toFixed(2)}`;
+}
 export default function PlaceIllustrations({ sessionId, view, previousView, disabled, surfaceTarget, selectedObject, onSelectObject, onPendingChange }: {
   sessionId: string; view: SavedPlaceView; previousView?: SavedPlaceView | undefined; disabled: boolean;
   surfaceTarget?: HTMLElement | null | undefined; selectedObject?: string | null | undefined;
@@ -26,6 +33,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const [sourceOpacity, setSourceOpacity] = useState(50);
   const [editingRegion, setEditingRegion] = useState(false), [regionIds, setRegionIds] = useState<string[]>([]), [maskReady, setMaskReady] = useState(false);
   const [strokes, setStrokes] = useState<IllustrationBrushStroke[] | undefined>();
+  const [chainFrom, setChainFrom] = useState<string | null>(null);
   const regionPending = useRef<Record<string, unknown> | null>(null);
   const maskedPending = useRef<Record<string, unknown> | null>(null);
   const [regionMode, setRegionMode] = useState<"proposal" | "generate">("proposal"), [changePrompt, setChangePrompt] = useState(""), [editConsent, setEditConsent] = useState(false);
@@ -37,7 +45,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
     if (!mounted.current || read !== epoch.current.value) return;
     if (!response.ok) throw new Error(data.error || "Illustrations unavailable");
     if (!Array.isArray(data.jobs) || !Array.isArray(data.assets) || !data.capabilities) throw new Error("Invalid illustration library response");
-    const quote = JSON.stringify(data.capabilities);
+    const quote = JSON.stringify([data.capabilities, data.keyframe_capabilities]);
     if (quotation.current !== quote && !pending.current) setConsent(false);
     quotation.current = quote;
     setLibrary(data); setSelected(old => data.assets.some((a: SavedIllustration) => a.id === old) ? old : data.accepted_id ?? data.assets[0]?.id ?? "");
@@ -81,6 +89,16 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const frozen = busy || !!pending.current || !!regionPending.current || !!maskedPending.current;
   useEffect(() => { onPendingChange?.(frozen); }, [frozen, onPendingChange]);
   const editConfig = library?.region_capabilities;
+  // When keyframes are on they replace the full-view flux generation; flux jobs and region edits stay.
+  const keyframeConfig = library?.keyframe_capabilities, keyframes = !!keyframeConfig?.enabled, quote = keyframes ? keyframeConfig : config;
+  // Chained keyframes keep the building's identity, so the nearest accepted camera is the
+  // default (the library sorts nearest first). "" paints a first keyframe from the render.
+  const sources = library?.chain_sources ?? [];
+  const chain = chainFrom === null ? sources[0]?.view_id ?? "" : sources.some(v => v.view_id === chainFrom) ? chainFrom : "";
+  const paint = (text: string, extra: Record<string, unknown>) => void action({ action: "generate_keyframe", id: crypto.randomUUID(), prompt: text, confirmed: true, model: keyframeConfig?.model, parameters: keyframeConfig?.parameters, reservation: keyframeConfig?.reservation, ...extra }, "generation");
+  // The retry ladder: a first keyframe painted from art retries from words; a chain retries once.
+  const kf = asset?.keyframe, rung = kf?.gate !== "failed" ? null : kf.stage === "first" ? kf.art === "art" ? { label: "Retry with words only", extra: { art: false } } : null
+    : kf.chain_from && (library?.assets.filter(a => a.keyframe?.chain_from?.illustration_id === kf.chain_from!.illustration_id).length ?? 0) < 2 ? { label: "Retry chain once", extra: { chain_from: kf.chain_from.view_id } } : null;
   const imageUrl = (id: string) => `/api/world/${encodeURIComponent(sessionId)}/illustrations/${encodeURIComponent(id)}`;
   const renderUrl = `/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(view.id)}/render`;
   const previous = asset?.geometry_refresh ?? asset?.region_edit;
@@ -97,9 +115,11 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   return <div className={s.illustrationGenerator} aria-label="Camera illustrations">
     <div className={s.sectionHeading}><h3>Illustrations</h3><button title="Refresh illustrations" aria-label="Refresh illustrations" disabled={busy} onClick={() => void reload().catch(e => setError(e.message))}><RefreshCw size={16}/></button></div>
     {!editingRegion && <><label>Appearance<textarea aria-label="Illustration appearance" value={prompt} maxLength={1024} disabled={frozen} onChange={e => setPrompt(e.target.value)} placeholder="Hand-inked stonework, mossy roofs, warm window light"/></label>
-    {config?.enabled && <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || !!pending.current} onChange={e => setConsent(e.target.checked)}/>Reserve {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(config.reservation)} for this illustration</label>}
-    {config && !config.enabled && <p role="status">{config.reason}</p>}
-    <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !config?.enabled || !consent || prompt.trim().length < 3))} onClick={() => void action({ action: "generate", id: crypto.randomUUID(), prompt, confirmed: true, model: config?.model, parameters: config?.parameters, reservation: config?.reservation }, "generation")}><Sparkles size={16}/>{pending.current ? "Retry illustration request" : "Generate illustration"}</button></>}
+    {keyframes && !!library?.chain_sources?.length && <label>Continue from<select aria-label="Continue from camera" value={chain} disabled={frozen} onChange={e => setChainFrom(e.target.value)}><option value="">3D render (first keyframe)</option>{library.chain_sources.map(v => <option key={v.view_id} value={v.view_id}>{v.label} ({Math.round(v.angle)}°)</option>)}</select></label>}
+    {quote?.enabled && <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || !!pending.current} onChange={e => setConsent(e.target.checked)}/>Reserve {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(quote.reservation)} for this {keyframes ? "keyframe" : "illustration"}</label>}
+    {quote && !quote.enabled && <p role="status">{quote.reason}</p>}
+    {keyframes ? <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !consent || prompt.trim().length < 3))} onClick={() => paint(prompt, chain ? { chain_from: chain } : {})}><Sparkles size={16}/>{pending.current ? "Retry keyframe request" : "Paint keyframe"}</button>
+    : <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !config?.enabled || !consent || prompt.trim().length < 3))} onClick={() => void action({ action: "generate", id: crypto.randomUUID(), prompt, confirmed: true, model: config?.model, parameters: config?.parameters, reservation: config?.reservation }, "generation")}><Sparkles size={16}/>{pending.current ? "Retry illustration request" : "Generate illustration"}</button>}</>}
     {library?.jobs.map(job => <div key={job.id} className={s.illustrationJob}>
       <span>{job.prompt}</span><span role="status">{job.status.replaceAll("_", " ")}</span>
       {job.error && <p>{job.error}</p>}
@@ -107,7 +127,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
       {job.status === "storage_failed" && <button disabled={busy} onClick={() => void action({ action: "refresh", id: job.id })}><RefreshCw size={14}/>Retry storage</button>}
       {!["ready", "failed", "cancelled"].includes(job.status) && <button disabled={busy} title="Cancel illustration" aria-label={`Cancel illustration ${job.id}`} onClick={() => void action({ action: "cancel", id: job.id })}><X size={14}/></button>}
     </div>)}
-    {!!library?.assets.length && <label>Illustration<select aria-label="Saved illustration" value={selected} disabled={frozen} onChange={e => { setSelected(e.target.value); setComparison("illustration"); }}>{library.assets.map(a => <option key={a.id} value={a.id}>{a.geometry_refresh ? " / protected refresh" : a.region_edit ? " / selected edit" : a.edit_input ? " / masked proposal" : ""}{a.accepted ? " / accepted" : " / draft"}{a.historical ? " / historical" : ""}</option>)}</select></label>}
+    {!!library?.assets.length && <label>Illustration<select aria-label="Saved illustration" value={selected} disabled={frozen} onChange={e => { setSelected(e.target.value); setComparison("illustration"); }}>{library.assets.map(a => <option key={a.id} value={a.id}>{a.geometry_refresh ? " / protected refresh" : a.region_edit ? " / selected edit" : a.edit_input ? " / masked proposal" : a.keyframe ? " / keyframe" : ""}{a.accepted ? " / accepted" : " / draft"}{a.historical ? " / historical" : ""}</option>)}</select></label>}
     {asset && <>
       {!editingRegion && <div className={s.viewPasses} role="group" aria-label="Illustration comparison"><button aria-pressed={comparison === "illustration"} onClick={() => setComparison("illustration")}>Illustration</button><button aria-pressed={comparison === "source"} onClick={() => setComparison("source")}>Source render</button><button aria-pressed={comparison === "overlay"} onClick={() => setComparison("overlay")}>Overlay</button>{previous && <button aria-pressed={comparison === "previous"} onClick={() => setComparison("previous")}>Previous artwork</button>}</div>}
       {!editingRegion && comparison === "overlay" && <label className={s.comparisonOpacity}>Source opacity <output>{sourceOpacity}%</output><input type="range" aria-label="Source render opacity" aria-valuetext={`${sourceOpacity}% source render`} min={0} max={100} step={5} value={sourceOpacity} onChange={e => setSourceOpacity(Number(e.target.value))}/></label>}
@@ -118,6 +138,8 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
         {comparison === "previous" && previous && <Image unoptimized src={previousUrl} alt="Region edit previous artwork" fill sizes={surfaceTarget ? "100vw" : "320px"} style={{ objectFit: "contain" }}/>}
       </IllustrationSurface>}
       {!editingRegion && asset.region_edit && <p>{asset.region_edit.object_ids.length} objects / {asset.region_edit.protected_pixels.toLocaleString()} protected pixels</p>}
+      {!editingRegion && kf && <p role="status" aria-label="Keyframe gate">{gateSummary(kf)}</p>}
+      {!editingRegion && rung && <button disabled={frozen || disabled || historical || !keyframes || !consent} onClick={() => paint(asset.prompt, rung.extra)}><Sparkles size={16}/>{rung.label}</button>}
       {!editingRegion && asset.geometry_refresh && <p>{asset.geometry_refresh.changed_pixels.toLocaleString()} refreshed pixels / {asset.geometry_refresh.protected_pixels.toLocaleString()} protected pixels</p>}
       {!editingRegion && previousView && previousView.id === view.refreshed_from && !asset.edit_input && !asset.region_edit && !asset.geometry_refresh && <button disabled={busy || (!retryRefresh && (frozen || disabled || historical || !loaded))} onClick={() => void action({ action: "compose_refresh", id: crypto.randomUUID(), proposal_id: asset.id, base_id: previousView.accepted_illustration_id ?? null, previous_id: library?.accepted_id ?? null }, "region")}><RefreshCw size={16}/>{retryRefresh ? "Retry artwork refresh" : "Preview protected refresh"}</button>}
       {!editingRegion && (asset.edit_input ? <button disabled={busy || (!regionPending.current && (frozen || disabled || historical || !loaded))} onClick={() => void action({ action: "compose", id: crypto.randomUUID(), proposal_id: asset.id, base_id: asset.edit_input!.base_id, object_ids: asset.edit_input!.object_ids, ...(asset.edit_input!.brush_strokes ? { brush_strokes: asset.edit_input!.brush_strokes } : {}) }, "region")}><SquareDashedMousePointer size={16}/>{regionPending.current ? "Retry selected edit" : "Preview protected result"}</button> : <button disabled={frozen || disabled || historical || asset.accepted || !loaded} onClick={() => void action({ action: "accept", id: asset.id, previous_id: library?.accepted_id ?? null })}><Check size={16}/>{asset.accepted ? "Accepted illustration" : "Accept illustration"}</button>)}
