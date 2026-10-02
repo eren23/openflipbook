@@ -98,6 +98,8 @@ _SCRUB = (
     "VIEW_LOOP_ACCEPT_MEDIUM",
     "VIEW_LOOP_RETRY_BUDGET_S",
     "ENTER_RETRY_MODEL_SWAP",
+    # The observer's gaze as the enter's facing (default ON).
+    "ENTER_OBSERVER_FACING",
     "FAL_ENTER_RETRY_MODEL",
     "FAL_EDIT_TIER",
     "FAL_EDIT_MODEL_FAST",
