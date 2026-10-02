@@ -221,6 +221,82 @@ describe("warpKeyframe", () => {
   });
 });
 
+describe("warpKeyframe with B's objects", () => {
+  // The box is object 0; the wall is ground (-1). A's picture is the inverted render, so A's pixels are traceable.
+  const onBox = (hit: Vector3 | null) => !!hit && hit.z > -9;
+  const run = (camA: PerspectiveCamera, camB: PerspectiveCamera, object = onBox) => {
+    const a = capture(camA), b = capture(camB), image = a.render.map((c, i) => (i % 4 === 3 ? c : 255 - c));
+    const objects = Int32Array.from(b.hits, hit => (object(hit) ? 0 : -1)), box = b.hits.flatMap((hit, p) => (object(hit) ? [p] : []));
+    const args = [{ view: a.view, image, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth }] as const;
+    const plain = warpKeyframe(...args), out = warpKeyframe(args[0], { ...args[1], objects });
+    const candidate = new Uint8Array(W * H * 4).map((_, i) => [30, 60, 220, 255][i & 3]!);
+    return { b, box, plain, out, candidate, composite: compositeChain(out, candidate, W, H).rgba, capped: (m: number) => warpKeyframe(...args, m) };
+  };
+  const kept = (warp: { hole: Uint8Array }, box: number[]) => box.filter(p => !warp.hole[p]).length / box.length;
+  // On the silhouette of `pixels`: a 4-neighbour lies outside it.
+  const edge = (p: number, pixels: number[]) => [p - 1, p + 1, p - W, p + W].some(q => !pixels.includes(q));
+
+  it("takes an object A saw at 2x magnification wholly from A", () => {
+    // B stands 2 m from the box's front face, A 4 m: the face is magnified 2x, over the 1.6 limit.
+    const { box, plain, out, candidate, composite } = run(camera(0), camera(0, 0, 0, 0, -2));
+    expect(box.length).toBeGreaterThan(W * H * 0.4);
+    expect(kept(plain, box)).toBeLessThan(0.05);
+    expect(out.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
+    for (const p of box) {
+      // Only the 1 px silhouette, where A's nearest pixel is the wall, is unseen; it is the candidate's alone.
+      if (out.hole[p]) { expect(edge(p, box)).toBe(true); expect(rgbEqual(composite, candidate, p)).toBe(true); continue; }
+      expect(out.pure![p]).toBe(1);
+      expect(rgbEqual(composite, out.rgba, p)).toBe(true);
+      expect(rgbEqual(composite, candidate, p)).toBe(false);
+    }
+  });
+
+  it("takes an object A mostly did not see wholly from the candidate, and leaves the ground as it was", () => {
+    // A looks 45 degrees left: it saw only the box's right edge.
+    const { b, box, plain, out, candidate, composite } = run(camera(0, 45), camera(0));
+    expect(kept(plain, box)).toBeGreaterThan(0.1);
+    expect(kept(plain, box)).toBeLessThan(0.6);
+    expect(out.objects).toEqual({ a: 0, candidate: 1, ground: 0 });
+    for (const p of box) expect(rgbEqual(composite, candidate, p)).toBe(true);
+    b.hits.forEach((hit, p) => {
+      if (onBox(hit)) return;
+      expect([out.hole[p], out.pure![p], rgbEqual(out.rgba, plain.rgba, p)]).toEqual([plain.hole[p], 0, true]);
+    });
+  });
+
+  it("mixes sources inside an A-sourced object only where A did not see it", () => {
+    // B, 1.5 m right and 2 m nearer, sees the box's right face, which A never saw.
+    const { b, box, out, candidate, composite } = run(camera(0), camera(1.5, 0, 0, 0, -2));
+    const side = box.filter(p => Math.abs(b.hits[p]!.x - 1) < 1e-6);
+    expect(side.length).toBeGreaterThan(20);
+    expect(out.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
+    for (const p of side) expect(rgbEqual(composite, candidate, p)).toBe(true);
+    for (const p of box) expect(rgbEqual(composite, out.hole[p] ? candidate : out.rgba, p)).toBe(true);
+    const front = box.filter(p => !side.includes(p));
+    expect(front.filter(p => out.hole[p] && !edge(p, front))).toEqual([]);
+  });
+
+  it("still leaves to the candidate the face of an A-sourced object that A saw almost edge-on", () => {
+    // A stands 0.3 m outside the plane of the box's right face; B looks at that face from 2 m right of it.
+    const { b, box, out, candidate, composite, capped } = run(camera(1.3), camera(3, 20, 0, 0, -2));
+    expect(out.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
+    const side = box.filter(p => Math.abs(b.hits[p]!.x - 1) < 1e-6), front = box.filter(p => Math.abs(b.hits[p]!.z + 4) < 1e-6);
+    expect(side.filter(p => !capped(Infinity).hole[p]).length).toBeGreaterThan(side.length / 2); // A did see most of it
+    for (const p of side) expect(rgbEqual(composite, candidate, p)).toBe(true);
+    expect(front.filter(p => out.pure![p] && !out.hole[p]).length).toBeGreaterThan(front.length * 0.95);
+  });
+
+  it("keeps the per-pixel rule for a flat object", () => {
+    // Both eyes above the box: its top is flat, so it counts as ground.
+    const top = (hit: Vector3 | null) => !!hit && Math.abs(hit.y - 1) < 1e-6;
+    const { box, plain, out } = run(camera(0, 0, 3, -20), camera(0.5, 0, 2.5, -15), top);
+    expect(box.length).toBeGreaterThan(50);
+    expect(out.objects).toEqual({ a: 0, candidate: 0, ground: 1 });
+    expect(out.pure!.every(v => !v)).toBe(true);
+    expect([out.hole, out.rgba]).toEqual([plain.hole, plain.rgba]);
+  });
+});
+
 describe("gateTruth", () => {
   const table = [{ object_id: "inn", rgb: [1, 2, 3] as [number, number, number] },
     { object_id: "tree", rgb: [4, 5, 6] as [number, number, number] },
@@ -290,6 +366,17 @@ describe("pickCandidate", () => {
 });
 
 describe("paintedDelta", () => {
+  it("judges each object that takes 5% of the frame on its own", () => {
+    const render = new Uint8Array(W * H * 4).fill(100), mask = new Uint8Array(W * H).fill(1);
+    // Object 0 (10% of the frame) and object 1 (3%) keep the render; everything else is repainted by 60.
+    const objects = Int32Array.from({ length: W * H }, (_, p) => (p < W * H * 0.1 ? 0 : p < W * H * 0.13 ? 1 : -1));
+    const candidate = render.map((c, i) => (objects[i >> 2]! >= 0 || i % 4 === 3 ? c : c + 60));
+    expect(paintedDelta(render, candidate, mask)).toBeGreaterThan(50);
+    expect(paintedDelta(render, candidate, mask, objects)).toBe(0);
+    objects.fill(-1, 0, W * H * 0.1);
+    expect(paintedDelta(render, candidate, mask, objects)).toBeGreaterThan(50); // 3% alone is not judged
+  });
+
   const render = new Uint8Array(W * H * 4).map((_, i) => (i % 4 === 3 ? 255 : (i * 7) % 200));
   const all = new Uint8Array(W * H).fill(1);
 
@@ -311,7 +398,7 @@ describe("paintedDelta", () => {
 });
 
 describe("compositeChain", () => {
-  it("keeps A's painting and sky where A saw, B's painting in the holes, and blends only 2 px each side of the hole edge", () => {
+  it("keeps A's painting and sky where A saw, B's painting in the holes, and blends only 2 px on A's side of the hole edge", () => {
     // Columns 0-19 are holes; the rest is A's paint (red), with A's sky (cyan) in the top 10 rows.
     const hole = new Uint8Array(W * H).map((_, p) => (p % W < 20 ? 1 : 0));
     const rgba = new Uint8Array(W * H * 4).map((_, i) => {
@@ -322,11 +409,14 @@ describe("compositeChain", () => {
     const { rgba: out, share } = compositeChain({ rgba, hole }, candidate, W, H);
     for (let p = 0; p < W * H; p++) {
       const x = p % W, px = [...out.subarray(p * 4, p * 4 + 4)];
-      if (x <= 17) expect(px).toEqual([30, 60, 220, 255]);
+      if (x < 20) expect(px).toEqual([30, 60, 220, 255]); // B's render (99) never shows
       else if (x >= 22) expect(px).toEqual(Math.floor(p / W) < 10 ? [0, 220, 220, 255] : [200, 40, 40, 255]);
-      else expect(px[2]).toBe(Math.round(rgba[p * 4 + 2]! * (x - 17) / 5 + 220 * (22 - x) / 5)); // a linear ramp across the edge
+      else expect(px[2]).toBe(Math.round(rgba[p * 4 + 2]! * (x - 17) / 5 + 220 * (22 - x) / 5)); // a linear ramp into A's side
     }
-    expect(share).toBeCloseTo(20 / W, 10);
+    expect(share).toBeCloseTo((20 + 0.6) / W, 10);
+    // A pure pixel is A's alone, next to a hole or not.
+    const pure = new Uint8Array(W * H).map((_, p) => (p % W === 20 ? 1 : 0));
+    expect(compositeChain({ rgba, hole, pure }, candidate, W, H).rgba.subarray(20 * 4, 20 * 4 + 4)).toEqual(rgba.subarray(20 * 4, 20 * 4 + 4));
     expect(rgba[0]).toBe(99); // the inputs are not modified
   });
 });

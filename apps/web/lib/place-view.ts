@@ -75,7 +75,8 @@ export interface IllustrationKeyframeCandidate {
 export interface IllustrationKeyframe extends Omit<IllustrationKeyframeInput, "chain_from" | "gate_object_id"> {
   version: 1;
   // composite_share: the fraction of the stored picture that came from the candidate (absent on older chains).
-  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number };
+  // objects: how many visible objects came whole from A, from the candidate, or count as ground (absent on older chains).
+  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number; objects?: { a: number; candidate: number; ground: number } };
   object_id: string | null;
   gate: "passed" | "failed" | "unmeasured";
   candidates: IllustrationKeyframeCandidate[]; chosen: number; passed: boolean; sky_pinned: boolean;

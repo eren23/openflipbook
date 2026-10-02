@@ -23,8 +23,12 @@ export interface KeyframeView {
 export interface KeyframeWarp {
   /** B-sized RGBA: A's picture where B sees what A saw, B's render in the holes, A's sky gradient in B's sky. */
   rgba: Uint8Array;
-  /** 1 where A gave no evidence and the pixel shows B's render. */
+  /** 1 where the pixel shows B's render: A gave no evidence, or (with B's objects) B paints the whole object. */
   hole: Uint8Array;
+  /** With B's objects: 1 on object pixels the composite takes from one source, unblended. */
+  pure?: Uint8Array;
+  /** With B's objects: how many visible objects come from A, from B's paint, or count as ground. */
+  objects?: { a: number; candidate: number; ground: number };
   /** 1 on B's sky (depth 0) painted with A's sky row means. */
   sky: Uint8Array;
   /** Share of B's geometry pixels that are holes. */
@@ -66,6 +70,18 @@ const unproject = (p: number[], nx: number, ny: number, z: number) => {
 export const WARP_MAX_MAGNIFICATION = 1.6;
 // Secant and smoothing runs, in B pixels: a long run averages out 8-bit depth stairs.
 const DEPTH_RUN = 8;
+// ponytail: tunable (research 37). Inside one object, pixels from A next to
+// B's paint show two outlines, so each object has one source: A, when A saw at
+// least this share of its visible pixels at a median magnification up to this
+// (soft beats ghosted); else B's paint, whole. An object from A still takes
+// B's paint where A's is stretched more than this: a face A saw almost
+// edge-on is a smear (the research 34 inn: front and roof under 1.6, gable
+// and back roof 12-20; a cap of 6 or 10 left the back roof striped).
+export const OBJECT_FROM_A_SHARE = 0.6;
+export const OBJECT_MAX_MAGNIFICATION = 3;
+// An object whose visible surface spans less height than this (5th to 95th
+// percentile, metres) is ground, like a path or a pond: it keeps the per-pixel rule.
+export const OBJECT_FLAT_M = 0.3;
 
 /** Sum of `mask` over the (2r+1)^2 window at each pixel, clipped to the frame. */
 function boxSum(mask: Uint8Array, width: number, height: number, r: number) {
@@ -115,11 +131,14 @@ function smoothDepth(z: Float64Array, width: number, height: number, step: numbe
  * trusted only when it lands inside A's frame, A's depth there (nearest pixel)
  * agrees within 0.35 m + 2% (otherwise A saw another surface), and one A pixel there covers at most
  * `maxMagnification` B pixels (see WARP_MAX_MAGNIFICATION). B's sky takes A's
- * sky as a vertical gradient.
+ * sky as a vertical gradient. With B's `objects` (the object index of each
+ * pixel, -1 for none; see objectIds), that per-pixel rule holds for ground and
+ * flat objects only: any other object comes from A where A saw it, up to
+ * OBJECT_MAX_MAGNIFICATION, or from B's paint whole (OBJECT_FROM_A_SHARE).
  */
 export function warpKeyframe(
   a: { view: KeyframeView; image: Uint8Array; depth: Uint8Array },
-  b: { view: KeyframeView; render: Uint8Array; depth: Uint8Array },
+  b: { view: KeyframeView; render: Uint8Array; depth: Uint8Array; objects?: Int32Array },
   maxMagnification = WARP_MAX_MAGNIFICATION,
 ): KeyframeWarp {
   const { width: wa, height: ha } = a.view, { width: w, height: h } = b.view, n = w * h;
@@ -141,13 +160,14 @@ export function warpKeyframe(
   // inside A's frame, with A's depth there (nearest pixel) on the same surface.
   const zB = new Float64Array(n).fill(NaN);
   for (let t = 0; t < n; t++) if (b.depth[t * 4]) zB[t] = distance(b.view, b.depth[t * 4]!);
-  const smooth = smoothDepth(zB, w, h, (b.view.depth.far - b.view.depth.near) / 255), fx = new Float64Array(n).fill(NaN), fy = new Float64Array(n).fill(NaN), seen = new Uint8Array(n), dA = new Float64Array(n);
+  const smooth = smoothDepth(zB, w, h, (b.view.depth.far - b.view.depth.near) / 255), fx = new Float64Array(n).fill(NaN), fy = new Float64Array(n).fill(NaN), seen = new Uint8Array(n), dA = new Float64Array(n), up = new Float64Array(n);
   const sameSurface = (byte: number, d: number) => byte > 0 && Math.abs(distance(a.view, byte) - d) <= 0.35 + 0.02 * d;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const t = y * w + x, z = -smooth[t]!;
     if (Number.isNaN(z)) continue;
     const [cx, cy] = unproject(Pb, (x + 0.5) / w * 2 - 1, 1 - (y + 0.5) / h * 2, z);
-    const [ax, ay, az] = toCamera(Ma, ...toWorld(Mb, cx, cy, z)), d = dA[t] = -az;
+    const world = toWorld(Mb, cx, cy, z), [ax, ay, az] = toCamera(Ma, ...world), d = dA[t] = -az;
+    up[t] = world[1];
     if (d <= a.view.camera.near) continue;
     const [nx, ny] = project(Pa, ax, ay, az), u = fx[t] = (nx + 1) / 2 * wa, v = fy[t] = (1 - ny) / 2 * ha;
     if (!(u >= 0 && v >= 0 && u < wa && v < ha)) continue;
@@ -191,9 +211,9 @@ export function warpKeyframe(
   const mag = new Float64Array(n), over = new Uint8Array(n);
   for (let t = 0; t < n; t++) if (seen[t]) { mag[t] = magnification(t); over[t] = mag[t]! > maxMagnification ? 1 : 0; }
   const overs = boxSum(over, w, h, 4), seens = boxSum(seen, w, h, 4);
-  const out = new Uint8Array(n * 4), valid = new Uint8Array(n), sum = new Float64Array(4);
+  const out = new Uint8Array(n * 4), sampled = new Uint8Array(n), sum = new Float64Array(4);
   for (let t = 0; t < n; t++) {
-    if (!seen[t] || (Math.abs(mag[t]! / maxMagnification - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t])) continue;
+    if (!seen[t]) continue;
     const u = fx[t]!, v = fy[t]!, sx = Math.min(Math.max(u - 0.5, 0), wa - 1), sy = Math.min(Math.max(v - 0.5, 0), ha - 1);
     const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = Math.min(x0 + 1, wa - 1), y1 = Math.min(y0 + 1, ha - 1), gx = sx - x0, gy = sy - y0;
     // A tap on another surface (a thin pole's edge against the wall behind it)
@@ -207,7 +227,34 @@ export function warpKeyframe(
     }
     if (!total) continue;
     for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(sum[c]! / total);
-    valid[t] = 1;
+    sampled[t] = 1;
+  }
+
+  // One source per object: A's samples or B's paint, by A's share and
+  // median magnification over the object's visible pixels.
+  const objects = b.objects, groups = new Map<number, { pixels: number; mags: number[]; heights: number[] }>();
+  if (objects) for (let t = 0; t < n; t++) {
+    const k = objects[t]!;
+    if (k < 0 || Number.isNaN(zB[t]!)) continue;
+    let g = groups.get(k);
+    if (!g) groups.set(k, g = { pixels: 0, mags: [], heights: [] });
+    g.pixels++; g.heights.push(up[t]!);
+    if (sampled[t]) g.mags.push(mag[t]!);
+  }
+  const source = new Map<number, "a" | "candidate" | "ground">(), summary = { a: 0, candidate: 0, ground: 0 };
+  const at = (sorted: Float64Array, q: number) => sorted[Math.floor(q * (sorted.length - 1))]!;
+  for (const [k, g] of groups) {
+    const heights = Float64Array.from(g.heights).sort(), mags = Float64Array.from(g.mags).sort();
+    const s = at(heights, 0.95) - at(heights, 0.05) < OBJECT_FLAT_M ? "ground"
+      : mags.length >= OBJECT_FROM_A_SHARE * g.pixels && at(mags, 0.5) <= OBJECT_MAX_MAGNIFICATION ? "a" : "candidate";
+    source.set(k, s); summary[s]++;
+  }
+  const valid = new Uint8Array(n), pure = objects && new Uint8Array(n);
+  for (let t = 0; t < n; t++) {
+    const s = objects && source.get(objects[t]!);
+    if (s === "a") valid[t] = pure![t] = sampled[t] && mag[t]! <= OBJECT_MAX_MAGNIFICATION ? 1 : 0;
+    else if (s === "candidate") pure![t] = 1;
+    else if (sampled[t] && !(Math.abs(mag[t]! / maxMagnification - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t])) valid[t] = 1;
   }
 
   // Sky: every B sky pixel takes the mean of A's sky in the proportional row
@@ -245,7 +292,7 @@ export function warpKeyframe(
 
   const cx = px / points, cy = py / points, cz = pz / points;
   const ea = [Ma[12]! - cx, Ma[13]! - cy, Ma[14]! - cz], eb = [Mb[12]! - cx, Mb[13]! - cy, Mb[14]! - cz];
-  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: eyeAngle(ea, eb) };
+  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: eyeAngle(ea, eb), ...(pure ? { pure, objects: summary } : {}) };
 }
 
 /** Angle in degrees between two eyes, each given relative to the same centre. */
@@ -265,6 +312,13 @@ export interface GateTruth {
 const BUILDING_KINDS = new Set<PlaceSceneObject["kind"]>(["building", "tavern", "house"]);
 const isBuilding = (o: Pick<PlaceSceneObject, "kind" | "mesh_role">) => BUILDING_KINDS.has(o.kind) || (o.kind === "mesh" && o.mesh_role === "exterior");
 
+/** Each object-pass pixel's index in the view's ID colour `table`; -1 where no object (ground, sky). */
+export function objectIds(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"]) {
+  rgba(objects, width, height, "Object pass");
+  const index = new Map(table.map((o, i) => [o.rgb[0] * 65536 + o.rgb[1] * 256 + o.rgb[2], i]));
+  return Int32Array.from({ length: width * height }, (_, p) => index.get(objects[p * 4]! * 65536 + objects[p * 4 + 1]! * 256 + objects[p * 4 + 2]!) ?? -1);
+}
+
 /**
  * The gate's ground truth: the largest visible building in the object pass,
  * if it covers at least 1% of the frame. `table` is the view's ID colour
@@ -272,16 +326,10 @@ const isBuilding = (o: Pick<PlaceSceneObject, "kind" | "mesh_role">) => BUILDING
  */
 export function gateTruth(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"],
   scene: readonly Pick<PlaceSceneObject, "id" | "kind" | "mesh_role">[]): GateTruth | null {
-  rgba(objects, width, height, "Object pass");
-  const buildings = new Set(scene.filter(isBuilding).map(o => o.id)), rows = table.filter(o => buildings.has(o.object_id));
-  const index = new Map(rows.map((o, i) => [o.rgb[0] * 65536 + o.rgb[1] * 256 + o.rgb[2], i]));
-  const ids = new Int32Array(width * height).fill(-1), counts = new Int32Array(rows.length);
-  for (let p = 0; p < ids.length; p++) {
-    const i = index.get(objects[p * 4]! * 65536 + objects[p * 4 + 1]! * 256 + objects[p * 4 + 2]!);
-    if (i !== undefined) { ids[p] = i; counts[i]!++; }
-  }
+  const ids = objectIds(objects, width, height, table), buildings = new Set(scene.filter(isBuilding).map(o => o.id)), counts = new Int32Array(table.length);
+  for (const i of ids) if (i >= 0) counts[i]!++;
   let best = -1;
-  for (let i = 0; i < counts.length; i++) if (best < 0 || counts[i]! > counts[best]!) best = i;
+  for (let i = 0; i < counts.length; i++) if (buildings.has(table[i]!.object_id) && (best < 0 || counts[i]! > counts[best]!)) best = i;
   if (best < 0 || counts[best]! < 0.01 * ids.length) return null;
   const mask = maskForVisible(ids, best);
   let x0 = width, y0 = height, x1 = 0, y1 = 0;
@@ -289,7 +337,7 @@ export function gateTruth(objects: Uint8Array, width: number, height: number, ta
     const x = p % width, y = (p - x) / width;
     x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + 1); y1 = Math.max(y1, y + 1);
   }
-  return { object_id: rows[best]!.object_id, mask, box: [x0 / width, y0 / height, x1 / width, y1 / height] };
+  return { object_id: table[best]!.object_id, mask, box: [x0 / width, y0 / height, x1 / width, y1 / height] };
 }
 
 export interface KeyframeGate {
@@ -331,31 +379,45 @@ export function pickCandidate(truth: Uint8Array, candidates: Uint8Array[], paint
   return { index, passed: metrics[index]!.passed, metrics };
 }
 
-/** Mean absolute RGB change (0-255) over the render-derived pixels; null when there are none. */
-export function paintedDelta(render: Uint8Array, candidate: Uint8Array, renderMask: Uint8Array): number | null {
+/**
+ * Mean absolute RGB change (0-255) over the render-derived pixels; null when
+ * there are none. With `objects` (object index per pixel, -1 for none), each
+ * object with at least `objectShare` of the frame in the mask must be painted
+ * on its own too, so the weakest of these means is returned: a large grey
+ * object does not hide behind well-painted ground.
+ */
+export function paintedDelta(render: Uint8Array, candidate: Uint8Array, renderMask: Uint8Array, objects?: Int32Array, objectShare = 0.05): number | null {
   if (render.length !== renderMask.length * 4 || candidate.length !== render.length) throw new Error("Render, candidate and mask sizes differ");
   let sum = 0, pixels = 0;
+  const each = new Map<number, [number, number]>();
   for (let p = 0; p < renderMask.length; p++) {
     if (!renderMask[p]) continue;
-    pixels++;
-    for (let c = 0; c < 3; c++) sum += Math.abs(render[p * 4 + c]! - candidate[p * 4 + c]!);
+    let d = 0;
+    for (let c = 0; c < 3; c++) d += Math.abs(render[p * 4 + c]! - candidate[p * 4 + c]!);
+    sum += d; pixels++;
+    const k = objects?.[p] ?? -1;
+    if (k >= 0) { const e = each.get(k) ?? [0, 0]; e[0] += d; e[1]++; each.set(k, e); }
   }
-  return pixels ? sum / (pixels * 3) : null;
+  let delta = pixels ? sum / (pixels * 3) : null;
+  for (const [s, count] of each.values()) if (count >= objectShare * renderMask.length) delta = Math.min(delta!, s / (count * 3));
+  return delta;
 }
 
 /**
  * A chained keyframe: A's warped painting where B sees what A saw, A's sky
- * gradient over all of B's sky, and B's own painting in the holes. The hole edge is blended
- * linearly over 2 px each side, so warp jaggies do not show. `share` is the
+ * gradient over all of B's sky, and B's own painting in the holes. A's side
+ * of the hole edge blends toward B's painting over 2 px, so warp jaggies do
+ * not show; a hole pixel is B's painting alone (blending it would mix in B's
+ * render, a grey rim), and a `pure` pixel is A's alone. `share` is the
  * fraction of the picture that came from the candidate.
  */
-export function compositeChain(warp: Pick<KeyframeWarp, "rgba" | "hole">, candidate: Uint8Array, width: number, height: number) {
+export function compositeChain(warp: Pick<KeyframeWarp, "rgba" | "hole" | "pure">, candidate: Uint8Array, width: number, height: number) {
   rgba(warp.rgba, width, height, "Keyframe warp"); rgba(candidate, width, height, "Keyframe candidate");
   const holes = boxSum(warp.hole, width, height, 2), window = boxSum(new Uint8Array(width * height).fill(1), width, height, 2);
   const out = new Uint8Array(candidate.length);
   let share = 0;
   for (let t = 0; t < holes.length; t++) {
-    const a = holes[t]! / window[t]!;
+    const a = warp.hole[t] ? 1 : warp.pure?.[t] ? 0 : holes[t]! / window[t]!;
     share += a;
     for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(warp.rgba[t * 4 + c]! * (1 - a) + candidate[t * 4 + c]! * a);
   }
