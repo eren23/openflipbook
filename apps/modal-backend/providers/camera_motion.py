@@ -20,9 +20,20 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from _env import env_flag
 
+from .video import H3_MAX_MODEL, h3_arguments, move_prompt
+
 router = APIRouter(prefix="/motion")
 MODEL = "minimax/h3-max/camera-controls"
-ADAPTER = "h3-source-relative-v1-hypothesis"
+# A first/last-frame leg between two keyframes.
+LEG_MODEL = H3_MAX_MODEL
+STATUS_MODELS = {"camera": MODEL, "leg": LEG_MODEL}
+ADAPTER = "h3-source-relative-v2-measured"
+# Studies frozen before the 2026-09-27 calibration keep validating.
+ADAPTER_V1 = "h3-source-relative-v1-hypothesis"
+# v2 limits, measured 2026-09-27: past them H3 under-delivers the move.
+V2_MAX_AZIMUTH = 30
+V2_MAX_ELEVATION = 15
+V2_MIN_DISTANCE = 0.2
 MIN_RATE = Decimal("0.08")  # Non-promotional 768P rate verified 2026-09-14.
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
 
@@ -117,6 +128,34 @@ class MotionInput(StrictInput):
     parameters: MotionParameters
     source: SourceImage
 
+    @model_validator(mode="after")
+    def validate_v2_limits(self) -> Self:
+        if self.adapter == ADAPTER and any(
+            abs(p.azimuth) > V2_MAX_AZIMUTH
+            or abs(p.elevation) > V2_MAX_ELEVATION
+            or p.distance < V2_MIN_DISTANCE
+            for p in self.parameters.camera_trajectory
+        ):
+            raise ValueError("Camera path exceeds the measured v2 limits")
+        return self
+
+
+class LegMove(StrictInput):
+    orbit_deg: float = Field(0, ge=-180, le=180)
+    turn_deg: float = Field(0, ge=-180, le=180)
+    rise_m: float = Field(0, ge=-500, le=500)
+    # Absent means no forward move; null asks for a walk of unknown length.
+    forward_m: float | None = Field(0, ge=-500, le=500)
+    subject: str | None = Field(None, max_length=120)
+
+
+class LegInput(StrictInput):
+    reservation: float = Field(gt=0, le=10)
+    duration: int = Field(ge=5, le=15)
+    move: LegMove
+    start: SourceImage
+    end: SourceImage
+
 
 def validate_source(source: SourceImage) -> None:
     try:
@@ -151,24 +190,29 @@ def valid_request_id(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", value) is not None
 
 
-@router.post("/submit")
-async def submit(body: MotionInput) -> dict[str, object]:
+def check_reservation(reservation: float, duration: int) -> None:
+    """Refuse unless enabled and the caller reserved exactly rate x duration."""
     config = configuration()
     if not config["enabled"]:
         raise HTTPException(503, "Camera motion calibration is not configured")
-    expected = Decimal(str(config["reservation_usd_per_second"])) * body.parameters.duration
-    if body.model != MODEL or body.adapter != ADAPTER or Decimal(str(body.reservation)) != expected:
+    expected = Decimal(str(config["reservation_usd_per_second"])) * duration
+    if Decimal(str(reservation)) != expected:
         raise HTTPException(409, "Camera motion configuration or reservation changed")
-    validate_source(body.source)
-    # The caller must durably claim its job before this single POST. Ambiguous
-    # network failures propagate; neither transport nor provider may retry it.
+
+
+async def post_once(model: str, arguments: dict) -> str:
+    """One queue POST, never retried; returns the request id.
+
+    The caller must durably claim its job before this. Ambiguous network
+    failures propagate; neither transport nor provider may retry it.
+    """
     async with httpx.AsyncClient(
         timeout=60, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0)
     ) as client:
         response = await client.post(
-            f"https://queue.fal.run/{MODEL}",
+            f"https://queue.fal.run/{model}",
             headers={"Authorization": f"Key {os.environ['FAL_KEY']}", "X-Fal-No-Retry": "1"},
-            json={**body.parameters.model_dump(), "image_url": body.source.url},
+            json=arguments,
         )
         response.raise_for_status()
     if len(response.content) > 100_000:
@@ -176,13 +220,40 @@ async def submit(body: MotionInput) -> dict[str, object]:
     result = response.json()
     if not isinstance(result, dict) or not valid_request_id(result.get("request_id")):
         raise HTTPException(502, "Motion request identity unavailable; request may be billable")
-    return {"request_id": result["request_id"], "model": MODEL}
+    return str(result["request_id"])
+
+
+@router.post("/submit")
+async def submit(body: MotionInput) -> dict[str, object]:
+    check_reservation(body.reservation, body.parameters.duration)
+    if body.model != MODEL or body.adapter not in (ADAPTER, ADAPTER_V1):
+        raise HTTPException(409, "Camera motion configuration or reservation changed")
+    validate_source(body.source)
+    arguments = {**body.parameters.model_dump(), "image_url": body.source.url}
+    return {"request_id": await post_once(MODEL, arguments), "model": MODEL}
+
+
+@router.post("/leg")
+async def leg(body: LegInput) -> dict[str, object]:
+    """One first/last-frame clip between two keyframes, worded as the move."""
+    check_reservation(body.reservation, body.duration)
+    validate_source(body.start)
+    validate_source(body.end)
+    prompt = move_prompt(**body.move.model_dump())
+    arguments = h3_arguments(
+        LEG_MODEL, body.start.url, prompt, body.duration, end_image_url=body.end.url
+    )
+    return {"request_id": await post_once(LEG_MODEL, arguments), "model": LEG_MODEL, "prompt": prompt}
 
 
 @router.get("/requests/{request_id}")
-async def status(request_id: str) -> dict[str, object]:
+async def status(request_id: str, model: str = "camera") -> dict[str, object]:
     if not valid_request_id(request_id):
         raise HTTPException(400, "Invalid motion request id")
+    # Only our own slugs: the id is polled on whatever model is named here.
+    slug = STATUS_MODELS.get(model)
+    if slug is None:
+        raise HTTPException(400, "Unknown motion model")
     # Turning off new generation must not strand an already-paid request.
     if (
         not os.environ.get("SHARED_TOKEN")
@@ -190,7 +261,7 @@ async def status(request_id: str) -> dict[str, object]:
         or env_flag("MOCK_PROVIDERS")
     ):
         raise HTTPException(503, "Camera motion provider unavailable")
-    state = await fal_client.status_async(MODEL, request_id)
+    state = await fal_client.status_async(slug, request_id)
     if isinstance(state, fal_client.Queued):
         return {"status": "queued"}
     if isinstance(state, fal_client.InProgress):
@@ -200,7 +271,7 @@ async def status(request_id: str) -> dict[str, object]:
     if state.error:
         return {"status": "failed"}
     try:
-        result = await fal_client.result_async(MODEL, request_id)
+        result = await fal_client.result_async(slug, request_id)
     except FalClientHTTPError as error:
         if error.status_code == 422:
             return {"status": "failed"}

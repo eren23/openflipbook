@@ -1228,6 +1228,9 @@ class WalkShotBody(BaseModel):
     # enter path, so the walk shows the town the map draws rather than a
     # competent generic street with the right geometry.
     surroundings_data_url: str | None = None
+    # Where this camera stands and looks. The gaze words the clip's turn and
+    # the walker's place on the map crop.
+    observer: ObserverPose | None = None
 
 
 class WalkBody(BaseModel):
@@ -1258,7 +1261,8 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
     grounded = any(s.surroundings_data_url for s in body.shots)
-    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded)
+    links = len(walk_provider.linked([s.index for s in body.shots]))
+    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded, links)
     if body.estimate_only:
         return JSONResponse(
             {"shots": len(body.shots), "estimate_usd": estimate, "grounded": grounded},
@@ -1274,6 +1278,7 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
                     control_data_url=s.control_data_url,
                     sees=[(label, share) for label, share in s.sees],
                     surroundings_data_url=s.surroundings_data_url,
+                    gaze=s.observer.gaze if s.observer else None,
                 )
                 for s in body.shots
             ],

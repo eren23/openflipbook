@@ -434,3 +434,36 @@ def test_animate_endpoint_routes_focus_to_the_object_slot(monkeypatch):
     kwargs = animate.await_args.kwargs
     assert kwargs["object_action"] is False
     assert kwargs["prompt"].startswith("Smooth cinematic camera descent")
+
+
+# ── the shared camera-move prompt and leg length ────────────────────────────
+
+
+def test_move_prompt_words_each_component_with_its_sign() -> None:
+    text = video.move_prompt(orbit_deg=20, turn_deg=-15, rise_m=3, forward_m=4, subject="the inn")
+    assert "forward about 4 metres" in text
+    assert "circles about 20 degrees to its right around the inn" in text
+    assert "turns about 15 degrees to the left" in text
+    assert "rises about 3 metres" in text
+    left = video.move_prompt(orbit_deg=-20, rise_m=-2, forward_m=-1.5)
+    assert "to its left" in left and "sinks about 2 metres" in left and "back about 1.5" in left
+
+
+def test_move_prompt_omits_zero_parts_and_keeps_the_fixed_tail() -> None:
+    text = video.move_prompt(turn_deg=30, forward_m=0)
+    assert "circles" not in text and "rises" not in text and "forward" not in text
+    assert "turns about 30 degrees to the right" in text
+    assert text.endswith(
+        "Only the camera moves; every building, window, roof and the ground keep their exact "
+        "appearance. One unbroken shot, no cuts, no people, no lettering."
+    )
+    # No metres known: the walk is qualitative, never a made-up distance.
+    walk = video.move_prompt(subject="the well")
+    assert "walks forward toward the well" in walk and "metres" not in walk
+
+
+@pytest.mark.parametrize(
+    ("planned", "expected"), [(1, 5), (4, 5), (4.8, 6), (8, 10), (12, 15), (40, 15)]
+)
+def test_leg_seconds_pads_for_the_frozen_tail_within_h3_limits(planned, expected) -> None:
+    assert video.leg_seconds(planned) == expected
