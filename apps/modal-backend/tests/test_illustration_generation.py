@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from PIL import Image
+from pydantic import ValidationError
 
 from providers import illustration_generation as illustration
 
@@ -261,3 +262,231 @@ async def test_recovers_masked_job_with_its_original_model_after_opt_out(monkeyp
     fal_client.result_async.assert_awaited_once_with(illustration.EDIT_MODEL, "saved-edit")
     with pytest.raises(HTTPException):
         await illustration.status("saved-edit", "unapproved-model")
+
+
+# --- qwen keyframe option + SAM-3 gate --------------------------------------
+
+
+def jpeg(size=(40, 40), color=(180, 90, 60)):
+    output = io.BytesIO()
+    Image.new("RGB", size, color).save(output, format="JPEG")
+    return "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode()
+
+
+def keyframe_body(stage="first", reference=True, **changes):
+    request = body(**{"model": illustration.KEYFRAME_MODEL, "parameters": illustration.KEYFRAME_PARAMETERS, **changes})
+    request.inputs.control_lora_image_url = None
+    request.inputs.keyframe_stage = stage
+    request.inputs.reference_url = jpeg() if reference else None
+    return request
+
+
+@pytest.fixture
+def keyframes_enabled(monkeypatch, enabled):
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_GENERATION_ENABLED", "1")
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.1")
+
+
+@pytest.fixture
+def uploads(monkeypatch):
+    seen = []
+    async def upload(url):
+        seen.append(url)
+        return f"https://v3.fal.media/files/{len(seen)}.png"
+    monkeypatch.setattr(illustration, "to_fal_url", upload)
+    return seen
+
+
+def provider(monkeypatch, handler):
+    monkeypatch.setattr(illustration.httpx, "AsyncClient",
+                        lambda **kwargs: HTTPClient(transport=httpx.MockTransport(handler), follow_redirects=False))
+
+
+async def test_keyframe_option_is_separate_floored_and_off_under_mock(monkeypatch, enabled):
+    assert (await illustration.keyframe_capabilities())["enabled"] is False  # depth flag alone is not enough
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_GENERATION_ENABLED", "1")
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.1")
+    config = await illustration.keyframe_capabilities()
+    assert config["enabled"] and config["model"] == illustration.KEYFRAME_MODEL and config["reservation"] == 0.1
+    assert config["parameters"]["num_images"] == 2
+    assert config["parameters"]["prompt_version"] == "saved-camera-qwen-keyframe-v1"
+    assert illustration.configuration()["model"] == illustration.MODEL
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.05")  # below two images plus the gate
+    assert illustration.configuration(keyframe=True)["enabled"] is False
+    monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.1")
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    assert illustration.configuration(keyframe=True)["enabled"] is False
+    with pytest.raises(HTTPException) as error:
+        await illustration.submit(keyframe_body())
+    assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("code", [200, 500, None])
+async def test_keyframe_uploads_inputs_then_posts_once(monkeypatch, keyframes_enabled, uploads, code):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        assert str(request.url) == f"https://queue.fal.run/{illustration.KEYFRAME_MODEL}"
+        assert request.headers["X-Fal-No-Retry"] == "1"
+        payload = json.loads(request.content)
+        assert payload["image_urls"] == ["https://v3.fal.media/files/1.png", "https://v3.fal.media/files/2.png"]
+        assert payload["image_size"] == {"width": 64, "height": 32}
+        assert payload["num_images"] == 2 and payload["enable_safety_checker"] is True
+        assert not {"gate", "prompt_version", "image_url", "control_lora_image_url", "reference_url",
+                    "keyframe_stage", "scene_identity"} & set(payload)
+        assert "Image 2" in payload["prompt"] and "Copper Kettle" in payload["prompt"]
+        assert "Hand inked stonework" in payload["prompt"]
+        if code is None:
+            raise httpx.ReadTimeout("Lost response", request=request)
+        return httpx.Response(code, json={"request_id": "kf-id"})
+    provider(monkeypatch, handler)
+    if code == 200:
+        assert await illustration.submit(keyframe_body()) == {"request_id": "kf-id", "model": illustration.KEYFRAME_MODEL}
+    else:
+        with pytest.raises((httpx.HTTPStatusError, httpx.ReadTimeout)):
+            await illustration.submit(keyframe_body())
+    assert uploads == [png(), jpeg()]  # the render is image 1, the art is image 2
+    assert len(calls) == 1
+
+
+async def test_keyframe_prompt_follows_the_stage(monkeypatch, keyframes_enabled, uploads):
+    sent = []
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"request_id": "kf-id"})
+    provider(monkeypatch, handler)
+    await illustration.submit(keyframe_body(reference=False))
+    await illustration.submit(keyframe_body("chain"))
+    words, chain = sent
+    assert len(words["image_urls"]) == 1 and "Image 2" not in words["prompt"]
+    assert "Hand inked stonework" in words["prompt"] and "Copper Kettle" in words["prompt"]
+    assert len(chain["image_urls"]) == 2 and "partly finished" in chain["prompt"] and "Copper Kettle" in chain["prompt"]
+
+
+@pytest.mark.parametrize("change", ["no_stage", "chain_without_reference", "mask", "no_identity",
+                                    "remote_reference", "garbage_reference", "jpeg_render"])
+async def test_invalid_keyframe_requests_never_reach_the_provider(monkeypatch, keyframes_enabled, uploads, change):
+    request = keyframe_body("chain", reference=False) if change == "chain_without_reference" else keyframe_body()
+    if change == "no_stage":
+        request.inputs.keyframe_stage = None
+    elif change == "mask":
+        request.inputs.mask_url = mask_url()
+    elif change == "no_identity":
+        request.inputs.scene_identity = None
+    elif change == "remote_reference":
+        request.inputs.reference_url = "https://foreign.test/art.png"
+    elif change == "garbage_reference":
+        request.inputs.reference_url = "data:image/png;base64,garbage"
+    elif change == "jpeg_render":
+        request.inputs.image_url = jpeg((64, 32))
+    provider(monkeypatch, lambda request: pytest.fail("provider called"))
+    with pytest.raises(HTTPException) as error:
+        await illustration.submit(request)
+    assert error.value.status_code == 400
+    assert uploads == []
+
+
+@pytest.mark.parametrize("changes", [{"reservation": 0.2}, {"parameters": illustration.PARAMETERS}])
+async def test_keyframe_rejects_changed_configuration(keyframes_enabled, uploads, changes):
+    with pytest.raises(HTTPException) as error:
+        await illustration.submit(keyframe_body(**changes))
+    assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("field,value", [("control_lora_image_url", None), ("keyframe_stage", "first"), ("reference_url", jpeg())])
+async def test_depth_route_needs_depth_and_refuses_keyframe_inputs(enabled, field, value):
+    request = body()
+    setattr(request.inputs, field, value)
+    with pytest.raises(HTTPException) as error:
+        await illustration.submit(request)
+    assert error.value.status_code == 400
+
+
+async def test_keyframe_status_returns_every_safe_candidate(monkeypatch, keyframes_enabled):
+    monkeypatch.setattr(fal_client, "status_async", AsyncMock(return_value=fal_client.Completed(logs=None, metrics={})))
+    monkeypatch.setattr(fal_client, "result_async", AsyncMock(return_value={
+        "images": [{"url": "https://fal.media/a.jpg"}, {"url": "https://fal.media/b.jpg"}],
+        "has_nsfw_concepts": [True, False], "seed": 3}))
+    safe = {"url": "https://fal.media/b.jpg"}
+    assert await illustration.status("kf-id", illustration.KEYFRAME_MODEL) == {
+        "status": "ready", "image": safe, "images": [safe], "seed": 3}
+    fal_client.result_async.return_value = {"images": [{"url": "https://fal.media/a.jpg"}], "has_nsfw_concepts": [True]}
+    assert (await illustration.status("kf-id", illustration.KEYFRAME_MODEL))["status"] == "failed"
+
+
+def fal_url(n):
+    return f"https://v3.fal.media/files/candidate-{n}.jpg"
+
+
+def gate_body(**changes):
+    return illustration.GateInput(**{"image_urls": [fal_url(0), fal_url(1)], "box": [8, 4, 40, 28],
+                                     "width": 64, "height": 32, "label": "building", **changes})
+
+
+def image_bytes(color):
+    output = io.BytesIO()
+    Image.new("RGB", (64, 32), color).save(output, format="JPEG")
+    return output.getvalue()
+
+
+@pytest.fixture
+def candidates(monkeypatch):
+    fetched = []
+    async def fetch(url):
+        fetched.append(url)
+        return image_bytes((0, 0, 0) if url == fal_url(0) else (255, 255, 255)), "image/jpeg"
+    monkeypatch.setattr("providers.image._fetch_url_bytes", fetch)
+    return fetched
+
+
+async def test_gate_never_runs_under_mock(monkeypatch, enabled, candidates):
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    with pytest.raises(HTTPException) as error:
+        await illustration.gate(gate_body())
+    assert error.value.status_code == 503
+    assert candidates == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"image_urls": ["http://v3.fal.media/files/a.jpg"]}, {"image_urls": ["https://fal.media.evil.test/a.jpg"]},
+    {"image_urls": ["https://user@v3.fal.media/files/a.jpg"]}, {"image_urls": ["https://v3.fal.media:8443/files/a.jpg"]},
+    {"image_urls": ["data:image/png;base64,AAAA"]}, {"box": [40, 4, 8, 28]}, {"box": [8, 4, 65, 28]}, {"box": [-1, 4, 40, 28]},
+])
+async def test_gate_rejects_foreign_images_and_bad_boxes(monkeypatch, enabled, candidates, changes):
+    monkeypatch.setattr(illustration.segmenter, "sam3_box_mask", AsyncMock(side_effect=AssertionError("segmenter called")))
+    with pytest.raises(HTTPException) as error:
+        await illustration.gate(gate_body(**changes))
+    assert error.value.status_code == 400
+    assert candidates == []
+
+
+def test_gate_accepts_at_most_four_images():
+    with pytest.raises(ValidationError):
+        gate_body(image_urls=[fal_url(n) for n in range(5)])
+
+
+async def test_gate_returns_full_frame_one_bit_masks(monkeypatch, enabled, candidates):
+    calls = []
+    async def sam(image, box, label, size):
+        calls.append((tuple(box), label, size))
+        if image != image_bytes((0, 0, 0)):
+            return {"mask": None, "request_id": "sam-2", "score": None, "crop": (0, 0, 64, 32)}
+        mask = Image.new("1", size, 0)
+        mask.paste(255, (8, 4, 40, 28))
+        return {"mask": mask, "request_id": "sam-1", "score": 0.9, "crop": (0, 0, 64, 32)}
+    monkeypatch.setattr(illustration.segmenter, "sam3_box_mask", sam)
+    first, second = (await illustration.gate(gate_body()))["masks"]
+    assert second == {"mask_png": None, "request_id": "sam-2", "score": None}
+    assert first["request_id"] == "sam-1" and first["score"] == 0.9
+    with Image.open(io.BytesIO(base64.b64decode(first["mask_png"]))) as mask:
+        assert mask.format == "PNG" and mask.mode == "1" and mask.size == (64, 32)
+        assert mask.getbbox() == (8, 4, 40, 28)
+    assert candidates == [fal_url(0), fal_url(1)]
+    assert calls[0] == ((8, 4, 40, 28), "building", (64, 32))
+
+
+async def test_gate_outage_is_an_error_not_an_empty_mask(monkeypatch, enabled, candidates):
+    monkeypatch.setattr(illustration.segmenter, "sam3_box_mask", AsyncMock(side_effect=httpx.ReadTimeout("lost")))
+    with pytest.raises(HTTPException) as error:
+        await illustration.gate(gate_body())
+    assert error.value.status_code == 502
