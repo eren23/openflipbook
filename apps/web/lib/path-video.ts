@@ -27,7 +27,7 @@ import { cutLeg, grayFrame, joinLegs, landCheck, legMotion, motionEnd } from "./
 import { uploadJpeg } from "./r2";
 import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionFile } from "./motion-job";
-import type { KeyframeGateDoc } from "./mesh-docs";
+import type { KeyframeGateDoc, MeshAssetDoc } from "./mesh-docs";
 import type { IllustrationKeyframe } from "./place-view";
 
 export const PATH_VIDEO_CAP_USD = 10;
@@ -110,8 +110,12 @@ async function pathVideoQuote(db: Db, study: MotionStudyDoc, plan: ReturnType<ty
   const micros = (n: number) => Math.round(n * 1_000_000), paid = plan.keyframes.filter(k => k.stage !== "source").length;
   const reservation = (paid * micros(config.reservation) + plan.legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
   if (reservation > PATH_VIDEO_CAP_USD) throw new CreatorError(`This path video needs $${reservation.toFixed(2)}, over the $${PATH_VIDEO_CAP_USD} cap. Shorten the path.`, 409);
-  // Only a first paint reads appearance words; chain keyframes take the style from the image before.
-  return { reservation, paid_keyframes: paid, appearance: plan.keyframes[0]!.stage === "first", keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
+  // Every keyframe is painted like a first one. When keyframe 0 is accepted
+  // artwork, its own prompt is the appearance; otherwise the user words it.
+  const source = plan.keyframes[0]!.stage === "source" ? (await db.collection<MeshAssetDoc>("illustration_assets")
+    .findOne({ _id: `${study.session_id}:${study.source.image.asset_id}`, session_id: study.session_id }))?.prompt.trim() ?? "" : "";
+  const sourcePrompt = source.length >= 3 && source.length <= 1024 ? source : null;
+  return { reservation, paid_keyframes: paid, appearance: !sourcePrompt, source_prompt: sourcePrompt, keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
     legs: plan.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, reservation: costs.get(leg.duration)! })) };
 }
 
@@ -335,11 +339,11 @@ export async function pathVideoLibrary(sid: string, studyId: string) {
   const study = await db.collection<MotionStudyDoc>("motion_studies").findOne({ _id: `${sid}:${studyId}`, session_id: sid });
   if (!study) throw new CreatorError("Motion study not found", 404);
   const jobs = await db.collection<PathVideoDoc>("path_videos").find({ session_id: sid, study_id: studyId }).sort({ created_at: -1 }).limit(20).toArray();
-  let checkpoints = 0, quote: Omit<Awaited<ReturnType<typeof pathVideoQuote>>, "keyframe_parameters"> | null = null, reason = "";
+  let checkpoints = 0, quote: Omit<Awaited<ReturnType<typeof pathVideoQuote>>, "keyframe_parameters" | "source_prompt"> | null = null, reason = "";
   try {
     await currentMotionStudy(db, sid, studyId);
     const plan = pathVideoPlan(study); checkpoints = plan.keyframes.length;
-    const { keyframe_parameters: _parameters, ...priced } = await pathVideoQuote(db, study, plan); quote = priced;
+    const { keyframe_parameters: _parameters, source_prompt: _prompt, ...priced } = await pathVideoQuote(db, study, plan); quote = priced;
   } catch (e) { reason = e instanceof CreatorError ? e.message : "Path video backend unavailable"; }
   return { study_sha256: viewHash(study), checkpoints, quote, reason, jobs: jobs.map(wire) };
 }
@@ -357,10 +361,10 @@ async function submitPathVideo(sid: string, studyId: string, input: Record<strin
   const { study } = await currentMotionStudy(db, sid, studyId, sha);
   const plan = pathVideoPlan(study), quote = await pathVideoQuote(db, study, plan);
   if (input.reservation !== quote.reservation) throw new CreatorError("Path video price changed. Review the reservation.", 409);
-  // The chain prompt ignores words, but the backend still needs three characters.
-  const prompt = !quote.appearance ? "Match the accepted artwork" : typeof input.prompt === "string" ? input.prompt.trim() : "";
+  const prompt = quote.source_prompt ?? (typeof input.prompt === "string" ? input.prompt.trim() : "");
   if (prompt.length < 3 || prompt.length > 1024) throw new CreatorError("An appearance prompt is required", 400);
-  const art = plan.keyframes[0]!.stage === "first" ? await keyframeArt(db, sid, study.source.view.root_place_id) : null;
+  // Chains send the world's art too (words only for a world without art), so their holes are painted, not restyled.
+  const art = await keyframeArt(db, sid, study.source.view.root_place_id);
   return withDbTransaction(async (db, session) => {
     const options = { session }, jobs = db.collection<PathVideoDoc>("path_videos");
     const old = await jobs.findOne({ _id: key }, options); if (old) return same(old);

@@ -83,6 +83,7 @@ import { motionStudyFixture } from "../tests/fixtures/motion-study";
 import { cutLeg, joinLegs } from "./motion-video";
 import sharp from "sharp";
 import { finishKeyframe, prepareKeyframeInput } from "./illustration-keyframe-server";
+import { keyframeArt } from "./illustration-input";
 import { legMove, legSeconds, pathVideoAction, pathVideoBytes, pathVideoLibrary, processNextPathVideo } from "./path-video";
 
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -121,6 +122,7 @@ beforeEach(() => {
   vi.stubEnv("MODAL_API_URL", "https://backend.test"); vi.stubEnv("NEXT_PUBLIC_WORLD_SCENES", "1"); vi.stubEnv("PATH_VIDEO_ENABLED", "1");
   vi.stubEnv("MAX_DAILY_SPEND", "0"); vi.stubEnv("MAX_SESSION_SPEND", "0"); vi.stubEnv("MOTION_DAILY_CAP_USD", "3");
   store("motion_studies").set("world:study", pathStudy());
+  store("illustration_assets").set("world:illustration_a", { _id: "world:illustration_a", id: "illustration_a", session_id: "world", prompt: "Inked stone, warm light" });
   store("generation_workers").set("worker", { _id: "worker", kind: "place-layout", motion_v1: true, motion_review_v1: true, path_video_v1: true, last_seen: new Date() });
   let painted = 0, legs = 0;
   provider.mockImplementation(async (url: string) => {
@@ -159,9 +161,11 @@ it("paints chained keyframes, makes one POST per step, joins the legs and releas
   await drain();
   expect(job()).toMatchObject({ status: "ready", reservation: 1, committed: 1 }); expect(totals()).toEqual([1, 1, 1]);
   expect(calls("/illustration/submit")).toHaveLength(2); expect(calls("/illustration/gate")).toHaveLength(2); expect(calls("/motion/leg")).toHaveLength(2);
-  // Every paid keyframe chains from the accepted artwork, so no appearance words are asked or used.
-  expect(library.quote).toMatchObject({ appearance: false }); expect(job().prompt).toBe("Match the accepted artwork");
-  expect(body("/illustration/submit")).toMatchObject({ prompt: "Match the accepted artwork", model: KEYFRAME_MODEL, reservation: .1, parameters: { num_images: 2 }, inputs: { keyframe_stage: "chain" } });
+  // Keyframe 0 is accepted artwork: chains paint with its own prompt, so no words are asked. A world without art paints from words.
+  expect(library.quote).toMatchObject({ appearance: false }); expect(library.quote).not.toHaveProperty("source_prompt");
+  expect(job()).toMatchObject({ prompt: "Inked stone, warm light", art: null });
+  expect(body("/illustration/submit")).toMatchObject({ prompt: "Inked stone, warm light", model: KEYFRAME_MODEL, reservation: .1, parameters: { num_images: 2 }, inputs: { keyframe_stage: "chain" } });
+  expect(vi.mocked(prepareKeyframeInput).mock.calls.map(call => call[2])).toEqual([null, null]);
   // Keyframe 0 is the accepted study source; keyframe 2 chains from painted keyframe 1 at its own camera and depth range.
   const chain = vi.mocked(prepareKeyframeInput).mock.calls[1]![3]!;
   expect(chain.image.toString()).toBe("kf-1"); expect(chain.depth.toString()).toBe("depth-2"); expect(chain.view.depth).toMatchObject({ near: 2.5, far: 90 });
@@ -177,6 +181,17 @@ it("paints chained keyframes, makes one POST per step, joins the legs and releas
   expect(vi.mocked(joinLegs)).toHaveBeenCalledTimes(1);
   expect((await pathVideoBytes("world", "study", "walk")).toString()).toBe(`cut-${(97 / 24).toFixed(3)}-${(72 / 97).toFixed(3)}`.repeat(2));
   expect((await pathVideoLibrary("world", "study")).jobs[0]).toMatchObject({ status: "ready", legs: [{ landed: true, attempts: [{ ok: true }] }, { landed: true }] });
+});
+
+it("paints chain keyframes with the world's art and the accepted artwork's own prompt", async () => {
+  const art = put("art", "art-bytes");
+  vi.mocked(keyframeArt).mockResolvedValueOnce({ key: art.key, sha256: art.sha256 });
+  await pathVideoAction("world", "study", await input({ prompt: "Ignored words" }));
+  expect(job()).toMatchObject({ prompt: "Inked stone, warm light", art: { key: "art", sha256: art.sha256 } });
+  await drain();
+  expect(job().status).toBe("ready");
+  expect(vi.mocked(prepareKeyframeInput).mock.calls.map(call => String(call[2]))).toEqual(["art-bytes", "art-bytes"]);
+  expect([0, 1].map(n => body("/illustration/submit", n).prompt)).toEqual(["Inked stone, warm light", "Inked stone, warm light"]);
 });
 
 it("claims once under concurrent workers", async () => {
@@ -329,6 +344,9 @@ it("asks for appearance words only when keyframe 0 is painted from words", async
   await expect(pathVideoAction("world", "study", await input())).rejects.toMatchObject({ status: 400 });
   await pathVideoAction("world", "study", await input({ prompt: " Warm watercolour inn " }));
   expect(job().prompt).toBe("Warm watercolour inn");
+  // Accepted artwork without a usable prompt of its own asks for words too.
+  store("motion_studies").get("world:study")!.source.image.asset_id = "illustration_a"; store("illustration_assets").get("world:illustration_a")!.prompt = "ok";
+  expect((await pathVideoLibrary("world", "study")).quote).toMatchObject({ appearance: true, paid_keyframes: 2 });
 });
 
 it("releases a refused step's cost even when a cancel lands between its claim and the refusal", async () => {
