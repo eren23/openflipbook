@@ -309,7 +309,7 @@ async def test_keyframe_option_is_separate_floored_and_off_under_mock(monkeypatc
     config = await illustration.keyframe_capabilities()
     assert config["enabled"] and config["model"] == illustration.KEYFRAME_MODEL and config["reservation"] == 0.1
     assert config["parameters"]["num_images"] == 2
-    assert config["parameters"]["prompt_version"] == "saved-camera-qwen-keyframe-v1"
+    assert config["parameters"]["prompt_version"] == "saved-camera-qwen-keyframe-v2"
     assert illustration.configuration()["model"] == illustration.MODEL
     monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.05")  # below two images plus the gate
     assert illustration.configuration(keyframe=True)["enabled"] is False
@@ -349,24 +349,23 @@ async def test_keyframe_uploads_inputs_then_posts_once(monkeypatch, keyframes_en
     assert len(calls) == 1
 
 
-async def test_keyframe_prompt_follows_the_stage(monkeypatch, keyframes_enabled, uploads):
+async def test_keyframe_without_art_describes_the_style_in_words(monkeypatch, keyframes_enabled, uploads):
     sent = []
     def handler(request):
         sent.append(json.loads(request.content))
         return httpx.Response(200, json={"request_id": "kf-id"})
     provider(monkeypatch, handler)
     await illustration.submit(keyframe_body(reference=False))
-    await illustration.submit(keyframe_body("chain"))
-    words, chain = sent
+    words, = sent
     assert len(words["image_urls"]) == 1 and "Image 2" not in words["prompt"]
     assert "Hand inked stonework" in words["prompt"] and "Copper Kettle" in words["prompt"]
-    assert len(chain["image_urls"]) == 2 and "partly finished" in chain["prompt"] and "Copper Kettle" in chain["prompt"]
 
 
-@pytest.mark.parametrize("change", ["no_stage", "chain_without_reference", "mask", "no_identity",
+# "chain" is the v1 warp input; the web now composites chains and sends "first".
+@pytest.mark.parametrize("change", ["no_stage", "chain", "mask", "no_identity",
                                     "remote_reference", "garbage_reference", "jpeg_render"])
 async def test_invalid_keyframe_requests_never_reach_the_provider(monkeypatch, keyframes_enabled, uploads, change):
-    request = keyframe_body("chain", reference=False) if change == "chain_without_reference" else keyframe_body()
+    request = keyframe_body("chain") if change == "chain" else keyframe_body()
     if change == "no_stage":
         request.inputs.keyframe_stage = None
     elif change == "mask":
@@ -386,7 +385,8 @@ async def test_invalid_keyframe_requests_never_reach_the_provider(monkeypatch, k
     assert uploads == []
 
 
-@pytest.mark.parametrize("changes", [{"reservation": 0.2}, {"parameters": illustration.PARAMETERS}])
+@pytest.mark.parametrize("changes", [{"reservation": 0.2}, {"parameters": illustration.PARAMETERS}, {"parameters": {
+    **illustration.KEYFRAME_PARAMETERS, "prompt_version": "saved-camera-qwen-keyframe-v1"}}])
 async def test_keyframe_rejects_changed_configuration(keyframes_enabled, uploads, changes):
     with pytest.raises(HTTPException) as error:
         await illustration.submit(keyframe_body(**changes))

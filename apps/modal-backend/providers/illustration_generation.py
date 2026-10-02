@@ -42,7 +42,7 @@ EDIT_PARAMETERS = {"num_images": 1, "num_inference_steps": 28, "guidance_scale":
 # `gate` is the web gate's contract (SAM-3 on the largest building vs the
 # object pass). It is frozen into the job for provenance and never sent to fal.
 KEYFRAME_PARAMETERS = {"num_images": 2, "output_format": "jpeg", "enable_safety_checker": True,
-                       "sync_mode": False, "prompt_version": "saved-camera-qwen-keyframe-v1",
+                       "sync_mode": False, "prompt_version": "saved-camera-qwen-keyframe-v2",
                        "gate": {"crop_pad": segmenter.CROP_PAD, "centre_tolerance": 0.03, "area_ratio": [0.8, 1.2]}}
 
 
@@ -114,9 +114,9 @@ class ViewInputs(BaseModel):
     image_size: ImageSize
     mask_url: str | None = Field(default=None, max_length=6 * 1024 * 1024)
     scene_identity: SceneIdentity | None = None
-    # qwen keyframes only. "first": image_url is the render, reference_url the
-    # world's art (absent = style in words). "chain": image_url is the warp of
-    # the previous keyframe, reference_url that keyframe.
+    # qwen keyframes only: image_url is the render, reference_url the world's
+    # art (absent = style in words). The web composites chains itself, so
+    # "chain" (the v1 warp input) is refused.
     reference_url: str | None = Field(default=None, max_length=6 * 1024 * 1024)
     keyframe_stage: Literal["first", "chain"] | None = None
 
@@ -184,29 +184,21 @@ async def queue_post(model: str, payload: dict[str, object]) -> str:
 
 
 KEYFRAME_KEEP = ("Keep image 1's camera, framing and composition exactly: the same building outline, roof line "
-                 "and ridge, wall corners, the windows and door where image 1 has them, {kept}. Do not move, "
-                 "resize, add or remove any building mass. No text or lettering.")
+                 "and ridge, wall corners, the windows and door where image 1 has them, the ground, the shadow "
+                 "and the sky. Do not move, resize, add or remove any building mass. No text or lettering.")
 
 
-def keyframe_prompt(stage: str, appearance: str, names: list[str], reference: bool) -> str:
-    """Research-34 prompts (p1-keyframes jobs A_qwen2511 and B_c_warp) with the
-    inn's name and style replaced by the saved identities and the user's words.
-    The chain prompt stays as measured: its style comes from image 2."""
+def keyframe_prompt(appearance: str, names: list[str], reference: bool) -> str:
+    """Research-34 prompt (p1-keyframes job A_qwen2511) with the inn's name and
+    style replaced by the saved identities and the user's words."""
     named = f" ({', '.join(names)})" if names else ""
     style = appearance.strip().rstrip(".") + "."
-    if stage == "chain":
-        return ("Image 1 is a partly finished artwork: the painted parts are final, and the flat grey 3D-render "
-                f"surfaces still need painting. Image 2 is the finished artwork of the same place{named} from a "
-                "nearby camera. Finish image 1: paint the grey render surfaces to match the painted parts and "
-                "image 2 (same stone, roof tiles, window and door design, drawing style), and clean up seams. "
-                + KEYFRAME_KEEP.format(kept="the ground and the shadow"))
-    keep = KEYFRAME_KEEP.format(kept="the ground, the shadow and the sky")
     if reference:
         return ("Image 1 is a 3D render of a building from an exact camera. Image 2 shows the same "
-                f"place{named} as finished artwork. Redraw image 1 in the exact art style of image 2: {style} {keep}")
+                f"place{named} as finished artwork. Redraw image 1 in the exact art style of image 2: {style} {KEYFRAME_KEEP}")
     # Words only: no image 2, the style is described instead.
     return (f"Image 1 is a 3D render of a building{named} from an exact camera. "
-            f"Redraw image 1 as finished artwork in this art style: {style} {keep}")
+            f"Redraw image 1 as finished artwork in this art style: {style} {KEYFRAME_KEEP}")
 
 
 async def submit_keyframe(body: IllustrationInput) -> dict[str, object]:
@@ -221,8 +213,8 @@ async def submit_keyframe(body: IllustrationInput) -> dict[str, object]:
     if (inputs.keyframe_stage is None or inputs.scene_identity is None
             or inputs.mask_url is not None or inputs.control_lora_image_url is not None):
         raise HTTPException(400, "A keyframe needs a stage and saved identities, and takes no mask or depth image")
-    if inputs.keyframe_stage == "chain" and inputs.reference_url is None:
-        raise HTTPException(400, "A chained keyframe needs the previous keyframe as its reference")
+    if inputs.keyframe_stage == "chain":
+        raise HTTPException(400, "Chained keyframes are composited by the web now; send the render as a first keyframe")
     validate_identity(body)
     validate_inputs(inputs)
     names = list(dict.fromkeys(obj.label.strip() for obj in inputs.scene_identity.objects[:4] if obj.label.strip()))
@@ -231,7 +223,7 @@ async def submit_keyframe(body: IllustrationInput) -> dict[str, object]:
     if inputs.reference_url is not None:
         image_urls.append(await to_fal_url(inputs.reference_url))
     arguments = {k: v for k, v in body.parameters.items() if k not in {"prompt_version", "gate"}}
-    prompt = keyframe_prompt(inputs.keyframe_stage, body.prompt, names, inputs.reference_url is not None)
+    prompt = keyframe_prompt(body.prompt, names, inputs.reference_url is not None)
     request_id = await queue_post(body.model, {"prompt": prompt, "image_urls": image_urls,
                                                "image_size": inputs.image_size.model_dump(), **arguments})
     return {"request_id": request_id, "model": body.model}

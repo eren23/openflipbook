@@ -63,20 +63,20 @@ export async function illustrationLibrary(sid: string, viewId: string) {
     accepted_id: view.accepted_illustration_id ?? null,
     region_capabilities: usable(regionCapabilities), capabilities: usable(capabilities), keyframe_capabilities: usable(keyframeCapabilities), chain_sources: chainSources };
 }
-// "Continue from" names another camera of the same place, and its accepted
-// artwork is pinned now. Otherwise image 2 is the world's art, or words.
+// Image 2 is the world's art, or words. "Continue from" names another camera
+// of the same place, and its accepted artwork is pinned now: B is painted like
+// a first keyframe, then that artwork's warp is composited over it.
 async function keyframeRequest(db: Db, sid: string, view: PlaceViewDoc, chainFrom: string | undefined, art: boolean): Promise<Omit<IllustrationKeyframeInput, "gate_object_id">> {
-  if (chainFrom === undefined) {
-    const reference = art ? await keyframeArt(db, sid, view.root_place_id) : null;
-    return reference ? { stage: "first", art: "art", reference } : { stage: "first", art: "words" };
-  }
+  const reference = art ? await keyframeArt(db, sid, view.root_place_id) : null;
+  const style = reference ? { art: "art" as const, reference } : { art: "words" as const };
+  if (chainFrom === undefined) return { stage: "first", ...style };
   const from = await db.collection<PlaceViewDoc>("place_views").findOne({ _id: `${sid}:${chainFrom}`, session_id: sid });
   if (!from) throw new CreatorError("The camera to continue from was not found", 404);
   if (from.root_place_id !== view.root_place_id) throw new CreatorError("Continue from a camera of the same place", 409);
   if (!chainShift(from, view)) throw new CreatorError("The camera to continue from cannot be lined up with this one", 409);
   const asset = from.accepted_illustration_id ? await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${from.accepted_illustration_id}`, session_id: sid }) : null;
   if (!asset) throw new CreatorError("Accept an illustration at that camera before continuing from it", 409);
-  return { stage: "chain", chain_from: { view_id: from.id, illustration_id: asset.id, sha256: asset.sha256 } };
+  return { stage: "chain", ...style, chain_from: { view_id: from.id, illustration_id: asset.id, sha256: asset.sha256 } };
 }
 export async function submitIllustration(sid: string, viewId: string, input: Record<string, unknown>) {
   const { db, view } = await access(sid, viewId);
@@ -84,7 +84,7 @@ export async function submitIllustration(sid: string, viewId: string, input: Rec
   const id = input.id, prompt = input.prompt.trim(), key = `${sid}:${id}`;
   const region = input.action === "generate_region", keyframe = input.action === "generate_keyframe";
   if ((input.model === ILLUSTRATION_EDIT_MODEL) !== region) throw new CreatorError("Masked generation requires explicit region intent", 400);
-  // `art: false` paints from words only; a chained keyframe takes no art.
+  // `art: false` paints from words only; a chained keyframe uses the art when the world has it.
   if ((input.model === KEYFRAME_MODEL) !== keyframe || !keyframe && (input.chain_from !== undefined || input.art !== undefined)
     || input.chain_from !== undefined && !isSafeId(input.chain_from) || input.art !== undefined && (input.art !== false || input.chain_from !== undefined)) throw new CreatorError("Keyframe painting requires explicit keyframe intent", 400);
   const objectIds = region ? selectedObjectIds(input.object_ids, view.objects) : undefined;

@@ -863,7 +863,7 @@ it("does not reserve masked work for an older illustration worker", async () => 
 });
 
 import { KEYFRAME_MODEL } from "./asset-pipeline";
-const keyframeParameters = { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v1" };
+const keyframeParameters = { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v2" };
 const keyframeRequest = { id: "run1", action: "generate_keyframe", prompt: "Inked stone, warm light", confirmed: true, model: KEYFRAME_MODEL, reservation: 0.1, parameters: keyframeParameters };
 const fal = (n: number) => `https://v3.fal.media/files/candidate${n}.jpg`;
 const solid = (r: number, g: number, b: number) => sharp({ create: { width: 256, height: 256, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
@@ -956,7 +956,7 @@ it("refuses to continue from a camera without accepted artwork before any reserv
   await expect(submitIllustration("world", "view", { ...keyframeRequest, action: "generate" })).rejects.toMatchObject({ status: 400 });
   expect(store("spend_ledger").size).toBe(0); expect(store("illustration_jobs").size).toBe(0);
 });
-it("chains from a walk camera of a connected place into an orbit camera through the depth warp and pins the warped sky", async () => {
+it("chains from a walk camera of a connected place into an orbit camera by compositing A's warp over B's own painting", async () => {
   const { view, blobs, ready } = await enableKeyframes();
   // A place to the west: walk views draw the root place at its chunk offset, orbit views at the origin.
   const place = store("place_scenes").get("world:place")!, next = { ...structuredClone(place), _id: "world:next", id: "scene_next", place_id: "next", source_image_key: null, definition: { ...place.definition, objects: [] } };
@@ -966,31 +966,32 @@ it("chains from a walk camera of a connected place into an orbit camera through 
   const sources = await currentSources(db, "world", "place", "walk"), root = sources.find(s => s.place_id === "place")!;
   expect(root.x).toBe(20);
   // Camera A stands 1 m left of camera B in the place's own frame, so B sees 24 px A never saw on the right.
-  const previous = await solid(200, 40, 40), from = { ...structuredClone(view), _id: "world:front", id: "front", mode: "walk" as const, accepted_illustration_id: "illustration_prev", ...await bindings(db, "world", sources) };
+  const previous = await solid(200, 160, 40), from = { ...structuredClone(view), _id: "world:front", id: "front", mode: "walk" as const, accepted_illustration_id: "illustration_prev", ...await bindings(db, "world", sources) };
   from.camera.world_matrix[12] = root.x - 1; from.camera.world_matrix[14] = root.z;
   store("place_views").set(from._id, from); blobs.set("prev", previous);
   store("illustration_assets").set("world:illustration_prev", { _id: "world:illustration_prev", id: "illustration_prev", session_id: "world", key: "prev", sha256: sha(previous), bytes: previous.length,
     model: KEYFRAME_MODEL, prompt: "Inked", created_at: new Date(), view_dependency: illustrationDependency(from) });
   expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([{ view_id: "front", label: "Front" }]);
   await submitIllustration("world", "view", { ...keyframeRequest, chain_from: "front" });
-  expect(illustrationJob().keyframe_input).toEqual({ stage: "chain", chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle" });
+  expect(illustrationJob().keyframe_input).toEqual({ stage: "chain", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) },
+    chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle" });
   await processNextAssetJob(db, "illustration");
+  // The provider paints B like a first keyframe: B's exact render, with the world's (red) art as image 2.
   const { inputs } = JSON.parse(submitted()[0]![1].body);
-  expect(inputs.keyframe_stage).toBe("chain"); expect(inputs.reference_url).toMatch(/^data:image\/jpeg;base64,/);
-  // The warp carries the accepted red artwork where A saw the wall, and B's render where it did not.
-  const warped = await registeredPixels(Buffer.from(inputs.image_url.split(",")[1], "base64"), 256, 256, true);
-  const render = await registeredPixels(blobs.get("render")!, 256, 256);
-  for (const p of [40 * 256 + 40, 128 * 256 + 128, 128 * 256 + 220]) expect(Math.abs(warped[p * 4]! - 200) + Math.abs(warped[p * 4 + 2]! - 40)).toBeLessThan(20);
-  expect([...warped.subarray((128 * 256 + 250) * 4, (128 * 256 + 251) * 4)]).toEqual([...render.subarray((128 * 256 + 250) * 4, (128 * 256 + 251) * 4)]);
+  expect(inputs).toMatchObject({ keyframe_stage: "first", image_url: `data:image/png;base64,${blobs.get("render")!.toString("base64")}` });
+  const reference = await sharp(Buffer.from(inputs.reference_url.split(",")[1], "base64")).raw().toBuffer();
+  expect(Math.abs(reference[0]! - 200) + Math.abs(reference[1]! - 40)).toBeLessThan(20);
   ready(); await processNextAssetJob(db, "illustration");
   const asset = store("illustration_assets").get("world:illustration_run1")!;
-  expect(asset.keyframe).toMatchObject({ stage: "chain", gate: "passed", chosen: 0, sky_pinned: true, chain_from: { view_id: "front", illustration_id: "illustration_prev" } });
+  expect(asset.keyframe).toMatchObject({ stage: "chain", art: "art", gate: "passed", chosen: 0, sky_pinned: true, chain_from: { view_id: "front", illustration_id: "illustration_prev" } });
   expect(asset.keyframe.chain_from.angle).toBeCloseTo(4.9, 0); // atan(1 m / 11.6 m), measured in B's frame
   expect(asset.keyframe.chain_from.hole_share).toBeGreaterThan(0.05); expect(asset.keyframe.chain_from.hole_share).toBeLessThan(0.15);
-  expect(asset.keyframe.art).toBeUndefined();
+  expect(asset.keyframe.chain_from.composite_share).toBeGreaterThan(0.05); expect(asset.keyframe.chain_from.composite_share).toBeLessThan(0.2);
+  // The stored picture is the composite: A's orange where B sees what A saw (sky included), the blue candidate in the holes.
   const stored = await registeredPixels(blobs.get(asset.key)!, 256, 256);
-  expect(stored[(5 * 256 + 128) * 4]).toBeGreaterThan(170); // sky pinned to the earlier red
-  expect(stored[(128 * 256 + 128) * 4 + 2]).toBeGreaterThan(170); // the painted blue candidate
+  const near = (p: number, rgb: number[]) => expect(rgb.reduce((sum, c, i) => sum + Math.abs(stored[p * 4 + i]! - c), 0)).toBeLessThan(15);
+  for (const p of [5 * 256 + 128, 40 * 256 + 40, 128 * 256 + 128, 128 * 256 + 220]) near(p, [200, 160, 40]);
+  for (const p of [128 * 256 + 250, 200 * 256 + 245]) near(p, [30, 60, 220]);
   // A camera without the root place's offset cannot be lined up: not listed, and refused before any spend.
   store("place_views").get("world:front")!.sources = from.sources.filter(s => s.place_id !== "place");
   const ledger = store("spend_ledger").size;
