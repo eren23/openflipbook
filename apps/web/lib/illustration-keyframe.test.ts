@@ -8,9 +8,9 @@ const W = 64, H = 48, NEAR = 1, FAR = 30;
 const BOX = new Box3(new Vector3(-1, -1, -6), new Vector3(1, 1, -4));
 const WALL = new Plane(new Vector3(0, 0, 1), 10);
 
-function camera(x: number, yawDeg = 0, y = 0, pitchDeg = 0) {
+function camera(x: number, yawDeg = 0, y = 0, pitchDeg = 0, z = 0) {
   const cam = new PerspectiveCamera(60, W / H, 0.1, 100);
-  cam.position.set(x, y, 0);
+  cam.position.set(x, y, z);
   cam.rotation.set(pitchDeg * Math.PI / 180, yawDeg * Math.PI / 180, 0, "YXZ");
   cam.updateMatrixWorld();
   return cam;
@@ -27,7 +27,7 @@ function capture(cam: PerspectiveCamera) {
     if (hit) rgb = Math.abs(hit.x - 1) < 1e-6 ? [0, 200, 0] : Math.abs(hit.z + 4) < 1e-6 ? [220, 0, 0] : [90, 90, 90];
     else {
       hit = ray.intersectPlane(WALL, new Vector3());
-      if (hit && hit.y > 3) hit = null;
+      if (hit && (hit.y > 3 || -hit.clone().applyMatrix4(cam.matrixWorldInverse).z > FAR)) hit = null; // beyond the depth range reads as sky
       rgb = hit ? (Math.floor(hit.x / 4) & 1 ? [0, 0, 230] : [240, 220, 0]) : [100 + Math.round(dir.x * 100), 150, 255];
     }
     hits.push(hit);
@@ -43,24 +43,65 @@ function capture(cam: PerspectiveCamera) {
 
 const rgbEqual = (a: Uint8Array, b: Uint8Array, p: number) => a[p * 4] === b[p * 4] && a[p * 4 + 1] === b[p * 4 + 1] && a[p * 4 + 2] === b[p * 4 + 2];
 
+/** A's sky row means, from sky more than 1 px (1% of the frame) from A's geometry; rows without take the nearest row with some. */
+function skyRows(image: Uint8Array, hits: (Vector3 | null)[]) {
+  const means = Array.from({ length: H }, (_, y) => {
+    const px: number[][] = [];
+    for (let x = 0; x < W; x++)
+      if (![-1, 0, 1].some(j => [-1, 0, 1].some(i => y + j >= 0 && y + j < H && x + i >= 0 && x + i < W && hits[(y + j) * W + x + i])))
+        px.push([...image.subarray((y * W + x) * 4, (y * W + x) * 4 + 3)]);
+    return px.length ? [0, 1, 2].map(c => Math.round(px.reduce((sum, rgb) => sum + rgb[c]!, 0) / px.length)) : null;
+  });
+  return means.map((_, y) => {
+    for (let d = 0; d < H; d++) { const mean = means[y - d] ?? means[y + d]; if (mean) return [...mean, 255]; }
+    return null;
+  });
+}
+
 describe("warpKeyframe", () => {
-  it("leaves a view warped into itself unchanged, with no holes", () => {
+  it("leaves a view warped into itself unchanged, with no holes, and paints its sky with A's row means", () => {
     const a = capture(camera(0));
     const out = warpKeyframe({ view: a.view, image: a.render, depth: a.depth }, { view: a.view, render: a.render, depth: a.depth });
+    const rows = skyRows(a.render, a.hits);
     let geometry = 0, sky = 0;
     for (let p = 0; p < W * H; p++) {
-      expect(rgbEqual(out.rgba, a.render, p)).toBe(true);
-      if (a.hits[p]) { geometry++; expect(out.hole[p]).toBe(0); continue; }
+      if (a.hits[p]) { geometry++; expect(rgbEqual(out.rgba, a.render, p)).toBe(true); expect(out.hole[p]).toBe(0); continue; }
       sky++;
-      // Sky within 1% of the frame (1 px here) of A's geometry is not trusted.
-      const x = p % W, y = Math.floor(p / W);
-      const edge = [-1, 0, 1].some(j => [-1, 0, 1].some(i => x + i >= 0 && x + i < W && a.hits[(y + j) * W + x + i]));
-      expect([out.sky[p], out.hole[p]]).toEqual(edge ? [0, 1] : [1, 0]);
+      expect([out.sky[p], out.hole[p]]).toEqual([1, 0]);
+      expect([...out.rgba.subarray(p * 4, p * 4 + 4)]).toEqual(rows[Math.floor(p / W)]);
     }
     expect(geometry).toBeGreaterThan(0);
-    expect(sky).toBeGreaterThan(0); // the sky came back from A's sky, not from B's render
+    expect(sky).toBeGreaterThan(0);
     expect(out.holeShare).toBe(0);
     expect(out.angleDeg).toBeCloseTo(0, 6);
+  });
+
+  it("keeps (almost) every pixel of frontal surfaces through a small turn", () => {
+    const a = capture(camera(0)), b = capture(camera(2, 10));
+    const args = [{ view: a.view, image: a.render, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth }] as const;
+    const out = warpKeyframe(...args), unmasked = warpKeyframe(...args, Infinity);
+    const geometry = b.hits.filter(Boolean).length;
+    expect(b.hits.filter((hit, p) => hit && out.hole[p] && !unmasked.hole[p]).length).toBeLessThanOrEqual(geometry * 0.01);
+  });
+
+  it("drops a surface A saw at a grazing angle and B sees frontally", () => {
+    // A stands 1.5 m from the wall, looking 60 degrees along it; B faces it from 5 m.
+    const eyeA = new Vector3(0, 0, -8.5), a = capture(camera(0, -60, 0, 0, eyeA.z)), b = capture(camera(2, 0, 0, 0, -5));
+    const args = [{ view: a.view, image: a.render, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth }] as const;
+    const out = warpKeyframe(...args), unmasked = warpKeyframe(...args, Infinity);
+    // Classes by A's view of each wall point B sees: cos(incidence) = 1.5 m / distance.
+    const grazing: number[] = [], frontal: number[] = [];
+    b.hits.forEach((hit, p) => {
+      if (!hit || unmasked.hole[p]) return; // only pixels the plain warp carries from A
+      const cos = 1.5 / hit.distanceTo(eyeA);
+      if (cos < 0.3) grazing.push(p); else if (cos > 0.6) frontal.push(p);
+    });
+    expect(grazing.length).toBeGreaterThan(100);
+    expect(frontal.length).toBeGreaterThan(100);
+    expect(grazing.filter(p => out.hole[p]).length).toBeGreaterThan(grazing.length * 0.95);
+    expect(frontal.filter(p => out.hole[p]).length).toBeLessThan(frontal.length * 0.05);
+    for (const p of grazing) if (out.hole[p]) expect(rgbEqual(out.rgba, b.render, p)).toBe(true);
+    expect(out.holeShare).toBeGreaterThan(unmasked.holeShare);
   });
 
   // Raised and pitched down, B sees the box top A never saw; a y-flip in the
@@ -113,17 +154,20 @@ describe("warpKeyframe", () => {
     expect(out.angleDeg).toBeGreaterThan(5);
   });
 
-  it("reprojects A's sky into a turned camera by rotation", () => {
-    const a = capture(camera(0)), b = capture(camera(0, 10));
-    const out = warpKeyframe({ view: a.view, image: a.render, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth });
-    let skyPixels = 0, close = 0;
-    for (let p = 0; p < W * H; p++) {
-      if (!out.sky[p]) continue;
-      skyPixels++;
-      if (Math.abs(out.rgba[p * 4]! - b.render[p * 4]!) <= 4) close++; // the sky colour follows world direction
+  it("paints B's sky from A's row means, from the nearest row where A has none, and leaves it to B without A sky", () => {
+    const a = capture(camera(0)), b = capture(camera(0, 0, 0, 15)); // B looks up: its sky reaches rows where A sees wall
+    const bArgs = { view: b.view, render: b.render, depth: b.depth };
+    const out = warpKeyframe({ view: a.view, image: a.render, depth: a.depth }, bArgs);
+    const rows = skyRows(a.render, a.hits), skyA = new Set(a.hits.flatMap((hit, p) => (hit ? [] : [Math.floor(p / W)])));
+    const sky = b.hits.flatMap((hit, p) => (hit ? [] : [p]));
+    expect(sky.some(p => !skyA.has(Math.floor(p / W)))).toBe(true);
+    for (const p of sky) {
+      expect([out.sky[p], out.hole[p]]).toEqual([1, 0]);
+      expect([...out.rgba.subarray(p * 4, p * 4 + 4)]).toEqual(rows[Math.floor(p / W)]);
     }
-    expect(skyPixels).toBeGreaterThan(W * 4);
-    expect(close / skyPixels).toBeGreaterThan(0.95);
+    const blind = warpKeyframe({ view: a.view, image: a.render, depth: a.depth.map(v => v || 1) }, bArgs); // A without sky
+    for (const p of sky) { expect([blind.sky[p], blind.hole[p]]).toEqual([0, 1]); expect(rgbEqual(blind.rgba, b.render, p)).toBe(true); }
+    expect(blind.holeShare).toBe(out.holeShare); // sky holes are not geometry holes
   });
 });
 
@@ -179,6 +223,15 @@ describe("pickCandidate", () => {
     const alone = pickCandidate(truth, [empty], [40], W, H, gate);
     expect(alone).toMatchObject({ index: 0, passed: false });
     expect(alone.metrics[0]!.match).toBeNull();
+  });
+
+  it("breaks ties between chain candidates by agreement with the source, not overlap, and keeps the gate", () => {
+    // 0 overlaps best, 1 agrees best among the passes, 2 agrees best of all but is off-centre.
+    const masks = [rect(20, 12, 20, 20), rect(21, 12, 20, 20), rect(26, 12, 20, 20)];
+    expect(pickCandidate(truth, masks, [40, 40, 40], W, H, gate).index).toBe(0);
+    const chain = pickCandidate(truth, masks, [40, 40, 40], W, H, gate, [30, 8, 2]);
+    expect(chain).toMatchObject({ index: 1, passed: true });
+    expect(chain.metrics.map(m => m.passed)).toEqual([true, true, false]);
   });
 
   it("skips the paint check when nothing in the input was render", () => {
