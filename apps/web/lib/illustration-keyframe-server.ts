@@ -16,7 +16,7 @@ export interface KeyframePasses {
   view: KeyframeView & Pick<ViewCapture, "objects" | "floor_id" | "mode">;
   render: Buffer; depth: Buffer; objects: Buffer;
 }
-/** The accepted keyframe at camera A, with A's capture, for a chained keyframe. */
+/** The accepted keyframe at camera A, with A's capture, for a chained keyframe. A's camera must be in B's world frame. */
 export interface KeyframeChain { view: KeyframeView; depth: Buffer; image: Buffer }
 
 // SAM-3 is prompted with this word inside the gate box (the bench's choice).

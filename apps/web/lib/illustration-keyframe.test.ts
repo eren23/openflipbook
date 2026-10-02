@@ -8,10 +8,10 @@ const W = 64, H = 48, NEAR = 1, FAR = 30;
 const BOX = new Box3(new Vector3(-1, -1, -6), new Vector3(1, 1, -4));
 const WALL = new Plane(new Vector3(0, 0, 1), 10);
 
-function camera(x: number, yawDeg = 0) {
+function camera(x: number, yawDeg = 0, y = 0, pitchDeg = 0) {
   const cam = new PerspectiveCamera(60, W / H, 0.1, 100);
-  cam.position.set(x, 0, 0);
-  cam.rotation.y = yawDeg * Math.PI / 180;
+  cam.position.set(x, y, 0);
+  cam.rotation.set(pitchDeg * Math.PI / 180, yawDeg * Math.PI / 180, 0, "YXZ");
   cam.updateMatrixWorld();
   return cam;
 }
@@ -63,8 +63,15 @@ describe("warpKeyframe", () => {
     expect(out.angleDeg).toBeCloseTo(0, 6);
   });
 
-  it("opens holes behind a box and on its unseen side when the camera shifts", () => {
-    const camA = camera(0), a = capture(camA), b = capture(camera(5));
+  // Raised and pitched down, B sees the box top A never saw; a y-flip in the
+  // warp cancels for sideways moves but not here. From above, more of the
+  // unseen area lies along edges, where the 2x2 splat and crack filling bleed
+  // about 1 px (measured: 3 of 80 top-face px, 89% of unseen px are holes).
+  it.each([
+    ["shifts sideways", camera(5), (hit: Vector3) => Math.abs(hit.x - 1) < 1e-6, 0, 0.9],
+    ["rises and pitches down", camera(0, 0, 2.5, -15), (hit: Vector3) => Math.abs(hit.y - 1) < 1e-6, 0.1, 0.85],
+  ])("opens holes behind a box and on its unseen face when the camera %s", (_, camB, unseenFace, bleed, minUnseenHoles) => {
+    const camA = camera(0), a = capture(camA), b = capture(camB);
     // A painted copy that differs from B's render everywhere, so warped pixels are traceable.
     const painted = a.render.map((c, i) => (i % 4 === 3 ? c : 255 - c));
     const out = warpKeyframe({ view: a.view, image: painted, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth });
@@ -94,12 +101,12 @@ describe("warpKeyframe", () => {
       // A pixel either side absorbs sampling at stripe edges.
       else if (b.hits[p]) { warped++; if ([p - 1, p, p + 1].some(q => rgbEqual(out.rgba, expected, q))) warpedRight++; }
     }
-    // B sees the box's right side in front of wall A did see: B's depth must keep A's wall paint off it.
-    const side = b.hits.flatMap((hit, p) => (hit && Math.abs(hit.x - 1) < 1e-6 ? [p] : []));
+    // B sees a box face in front of wall A did see: B's depth must keep A's wall paint off it.
+    const side = b.hits.flatMap((hit, p) => (hit && unseenFace(hit) ? [p] : []));
     expect(side.length).toBeGreaterThan(20);
-    expect(side.filter(p => !out.hole[p])).toEqual([]);
+    expect(side.filter(p => !out.hole[p]).length).toBeLessThanOrEqual(side.length * bleed);
     expect(unseenCount).toBeGreaterThan(50);
-    expect(unseenHoles / unseenCount).toBeGreaterThan(0.9);
+    expect(unseenHoles / unseenCount).toBeGreaterThan(minUnseenHoles);
     expect(strayHoles).toBeLessThan(geometry * 0.01);
     expect(warpedRight / warped).toBeGreaterThan(0.95); // A's paint landed on the same surfaces in B
     expect(out.holeShare).toBeCloseTo(unseenCount / geometry, 1);

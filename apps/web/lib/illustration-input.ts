@@ -90,18 +90,32 @@ export async function keyframeChainSource(db: Db, sid: string, from: NonNullable
   if (!asset?.view_dependency || asset.view_dependency.view_id !== from.view_id || asset.sha256 !== from.sha256 || asset.edit_input) throw new CreatorError("The previous keyframe changed", 409);
   return { asset, view: current ? await illustrationSource(db, sid, asset.view_dependency, session) : await savedView(db, sid, asset.view_dependency, session) };
 }
-async function keyframeChain(db: Db, sid: string, from: NonNullable<IllustrationKeyframeInput["chain_from"]>, current: boolean): Promise<KeyframeChain> {
-  const { asset, view } = await keyframeChainSource(db, sid, from, current);
-  return { view, depth: await verifiedBytes(view.files.depth), image: await verifiedBytes(asset) };
+/**
+ * The shift from camera A's world frame to camera B's. Plan and orbit views
+ * draw the root place at the origin; walk views of a connected place draw it
+ * at its chunk offset. Null when either view lacks that offset.
+ */
+export function chainShift(a: Pick<PlaceViewDoc, "root_place_id" | "sources">, b: Pick<PlaceViewDoc, "root_place_id" | "sources">) {
+  const ra = a.sources.find(s => s.place_id === a.root_place_id), rb = b.sources.find(s => s.place_id === b.root_place_id);
+  const x = ra && rb ? rb.x - ra.x : NaN, z = ra && rb ? rb.z - ra.z : NaN;
+  return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
+}
+// Camera A moves into B's frame, so A's points, eye and parallax angle are all measured there.
+async function keyframeChain(db: Db, sid: string, from: NonNullable<IllustrationKeyframeInput["chain_from"]>, current: boolean, to: PlaceViewDoc): Promise<KeyframeChain> {
+  const { asset, view } = await keyframeChainSource(db, sid, from, current), shift = chainShift(view, to);
+  if (!shift) throw new CreatorError("The camera to continue from cannot be lined up with this one", 409);
+  const world_matrix = view.camera.world_matrix.map((v, i) => v + (i === 12 ? shift.x : i === 14 ? shift.z : 0));
+  return { view: { ...view, camera: { ...view.camera, world_matrix } }, depth: await verifiedBytes(view.files.depth), image: await verifiedBytes(asset) };
 }
 /** A keyframe job's captures for finishing; no current-geometry check. */
 export async function keyframeJobPasses(db: Db, sid: string, dependency: ViewDependency, input: IllustrationKeyframeInput) {
-  return { passes: await keyframeViewPasses(await savedView(db, sid, dependency)), chain: input.chain_from ? await keyframeChain(db, sid, input.chain_from, false) : undefined };
+  const view = await savedView(db, sid, dependency);
+  return { passes: await keyframeViewPasses(view), chain: input.chain_from ? await keyframeChain(db, sid, input.chain_from, false, view) : undefined };
 }
 /** Provider inputs for a saved view's keyframe, from current geometry and pinned bytes. */
 export async function prepareKeyframeViewInput(db: Db, sid: string, dependency: ViewDependency, input: IllustrationKeyframeInput) {
   const view = await illustrationSource(db, sid, dependency), sources = await assertCurrentView(db, view);
   const art = input.reference ? await verifiedBytes(input.reference) : null;
-  const chain = input.chain_from ? await keyframeChain(db, sid, input.chain_from, true) : undefined;
+  const chain = input.chain_from ? await keyframeChain(db, sid, input.chain_from, true, view) : undefined;
   return prepareKeyframeInput(await keyframeViewPasses(view), sources, art, chain);
 }
