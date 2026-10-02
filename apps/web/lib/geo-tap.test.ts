@@ -782,10 +782,74 @@ describe("describeVisibleSurroundings (the sightline cull)", () => {
     expect(r.visible.slice(iN, iS + 10)).toContain("right");
   });
 
+  it("a near side building whose footprint enters the frame is in sight", () => {
+    // Looking east from the origin. The house's centre sits at about -1.03 rad,
+    // past the half-FOV, but its south-east corner is at about -0.53 rad.
+    const east = { ...observer, pos: { x: 0, y: 0 }, gaze: 0 };
+    const house = geo("h", "Side House", 6, -10, { footprint: { w: 12, d: 6 } });
+    const back = geo("b", "Back Barn", -20, 0);
+    const r = describeVisibleSurroundings("lh", [lighthouse, house, back], east);
+    expect(r.visible).toContain("at the far left of frame close by, Side House");
+    expect(r.behind).not.toContain("Side House");
+    // A footprint wholly behind the camera stays behind.
+    expect(r.behind).toBe("Back Barn");
+    expect(r.visible).not.toContain("Back Barn");
+  });
+
+  it("keeps the nearest mates when it caps the list", () => {
+    const east = { ...observer, pos: { x: 0, y: 0 }, gaze: 0 };
+    const far = geo("f", "Far Spire", 80, -40);
+    const near = geo("n", "Near Shed", 20, 10);
+    const r = describeVisibleSurroundings("lh", [lighthouse, far, near], east, 1);
+    expect(r.visible).toContain("Near Shed");
+    expect(r.visible).not.toContain("Far Spire");
+  });
+
   it("unknown focus → empty", () => {
     expect(describeVisibleSurroundings("ghost", [lighthouse], observer)).toEqual({
       visible: "",
       behind: "",
     });
+  });
+
+  it("T1 Lantern Quay enter: the houses in the layout render are not behind", () => {
+    // Live receipt (2026-10-02, consistency t1): after a zoom-out the town sits
+    // under a synthesized quarter at scale 0.005, so the stored numbers are
+    // parent-local, while the enter camera stands in the absolute map frame.
+    const quarter = geo("q", "The Riverward Quarter", 50.60240963855421, 28.723404255319153, {
+      scale: 0.005,
+    });
+    const inQuarter = (id: string, label: string, x: number, y: number, w: number, d: number) =>
+      geo(id, label, x, y, { parent_id: "q", footprint: { w, d } });
+    const apothecary = inQuarter("ta", "Tideglass Apothecary", -1040.4819277108402, -2036.6808510638307, 2140, 1757.7827423645977);
+    const entities = [
+      quarter,
+      apothecary,
+      inQuarter("mh", "Mapmaker House", 1659.5180722891585, -1940.6808510638307, 2760, 2267.0469013674224),
+      inQuarter("cw", "Candleworks", -3180.4819277108422, -1946.6808510638302, 2160, 1567.0156230382072),
+      inQuarter("bs", "Blue Shutter Bakery", 4259.518072289157, -1484.6808510638311, 2680, 2201.3353969799646),
+    ];
+    const pose = {
+      pos: { x: 54.65723778301974, y: 6.746386731168661 },
+      eye_height: 1.7,
+      gaze: 2.2362844939406745,
+      pitch: 0,
+      fov: Math.PI / 2,
+    };
+    const map = { entities, bounds: CROP };
+    const taps = [
+      geoTapForEntity(map, "n", apothecary, 16 / 9, null, { observer: pose }),
+      // The receipt's click, on the apothecary's absolute footprint.
+      geoTapRequest(map, "n", { x_pct: 0.4494949494949495, y_pct: 0.3367003367003367 }, 16 / 9, { observer: pose }, null, { enterDirect: true }),
+    ];
+    for (const tap of taps) {
+      expect(tap?.kind).toBe("scene");
+      expect(tap?.surroundings_behind).not.toContain("Mapmaker House");
+      expect(tap?.surroundings_behind).not.toContain("Candleworks");
+      expect(tap?.surroundings).toContain("Mapmaker House");
+      expect(tap?.surroundings).toContain("Candleworks");
+      // Its whole footprint is out of the frustum.
+      expect(tap?.surroundings_behind).toBe("Blue Shutter Bakery");
+    }
   });
 });
