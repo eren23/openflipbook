@@ -6,6 +6,7 @@ export type AssetKind = BuildAssetKind | "illustration";
 export interface AssetQuote { model: string; reservation: number; parameters: Record<string, unknown> }
 export const ILLUSTRATION_MODEL = "fal-ai/flux-control-lora-depth/image-to-image";
 export const ILLUSTRATION_EDIT_MODEL = "fal-ai/flux-general/inpainting";
+export const KEYFRAME_MODEL = "fal-ai/qwen-image-edit-2511";
 export const MATERIAL_MODEL = "bytedance/seedream/v5/pro/text-to-image";
 export const MATERIAL_MAX_BYTES = 12 * 1024 * 1024;
 export const assetPipeline = (kind: AssetKind) => kind === "mesh"

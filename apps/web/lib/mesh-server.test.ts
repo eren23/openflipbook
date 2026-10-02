@@ -860,3 +860,121 @@ it("does not reserve masked work for an older illustration worker", async () => 
   await expect(illustrationAction("world", "view", request)).rejects.toMatchObject({ status: 503 });
   expect(store("illustration_jobs").size).toBe(1); expect((await illustrationLibrary("world", "view")).region_capabilities.enabled).toBe(false);
 });
+
+import { KEYFRAME_MODEL } from "./asset-pipeline";
+const keyframeParameters = { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v1" };
+const keyframeRequest = { id: "run1", action: "generate_keyframe", prompt: "Inked stone, warm light", confirmed: true, model: KEYFRAME_MODEL, reservation: 0.1, parameters: keyframeParameters };
+const fal = (n: number) => `https://v3.fal.media/files/candidate${n}.jpg`;
+const solid = (r: number, g: number, b: number) => sharp({ create: { width: 256, height: 256, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+const gateCalls = () => provider.mock.calls.filter(([url]) => url.endsWith("/illustration/gate"));
+// Mask PNG of the square [78, 178) that the object pass gives the building.
+async function squareMask() {
+  const pixels = Buffer.alloc(256 * 256);
+  for (let y = 78; y < 178; y++) pixels.fill(255, y * 256 + 78, y * 256 + 178);
+  return (await sharp(pixels, { raw: { width: 256, height: 256, channels: 1 } }).png().toBuffer()).toString("base64");
+}
+async function enableKeyframes() {
+  const { view, blobs } = await enableIllustrations();
+  store("generation_workers").get("worker")!.illustration_keyframe = true;
+  const scene = store("place_scenes").get("world:place")!;
+  scene.definition.objects = [{ ...newComponent("building", 10, 10), id: "kettle", label: "Copper Kettle" }];
+  scene.source_image_key = "art"; blobs.set("art", await solid(200, 40, 40));
+  Object.assign(view, await bindings(db, "world", [{ scene_id: "scene", place_id: "place", revision: 1, definition: scene.definition, x: 0, z: 0 }] as never));
+  const f = 1 / Math.tan(25 * Math.PI / 180);
+  view.camera = { projection: "perspective", world_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], projection_matrix: [f, 0, 0, 0, 0, f, 0, 0, 0, 0, -100.1 / 99.9, -1, 0, 0, -20 / 99.9, 0], near: 0.1, far: 100 };
+  view.depth = { encoding: "linear_view_z_8bit_near_white", near: 1, far: 50 }; view.label = "Front";
+  view.objects = [{ object_id: "kettle", rgb: [100, 120, 140] }]; view.floor_id = null;
+  const objects = Buffer.alloc(256 * 256 * 4), depth = await registeredPixels(blobs.get("depth")!, 256, 256);
+  for (let p = 0; p < 256 * 256; p++) {
+    const x = p % 256, y = Math.floor(p / 256), inside = x >= 78 && x < 178 && y >= 78 && y < 178;
+    objects.set(inside ? [100, 120, 140, 255] : [0, 0, 0, 255], p * 4);
+    if (y < 20) depth.set([0, 0, 0, 255], p * 4); // a band of sky
+  }
+  for (const [pass, raw] of [["objects", objects], ["depth", depth]] as const) {
+    const png = await sharp(raw, { raw: { width: 256, height: 256, channels: 4 } }).png().toBuffer();
+    blobs.set(pass, png); view.files[pass] = { key: pass, sha256: sha(png), bytes: png.length };
+  }
+  store("place_views").set(view._id, view);
+  const state = { status: { status: "running" } as object, gate: async () => Response.json({ masks: [{ mask_png: await squareMask(), request_id: "sam1", score: 0.9 }, { mask_png: null, request_id: "sam2", score: null }] }),
+    candidates: [await solid(30, 60, 220), await solid(40, 200, 60)], broken: false };
+  provider.mockImplementation(async (url: string) => {
+    if (url.endsWith("/keyframe-capabilities")) return Response.json({ enabled: true, model: KEYFRAME_MODEL, reservation: 0.1, parameters: keyframeParameters });
+    if (url.endsWith("capabilities")) return Response.json({ enabled: false, model: ILLUSTRATION_MODEL, reservation: 0.1, parameters: {} });
+    if (url.endsWith("/submit")) return Response.json({ request_id: "keyframe-request", model: KEYFRAME_MODEL });
+    if (url.includes("/requests/")) return Response.json(state.status);
+    if (url.endsWith("/illustration/gate")) return state.gate();
+    const n = [fal(0), fal(1)].indexOf(url);
+    return n < 0 || state.broken && n === 0 ? new Response(null, { status: 500 }) : new Response(new Uint8Array(state.candidates[n]!));
+  });
+  const ready = () => { state.status = { status: "ready", image: { url: fal(0) }, images: [{ url: fal(0) }, { url: fal(1) }] }; };
+  return { view, blobs, state, ready };
+}
+it("paints a first keyframe from the world's art, gates once before download and keeps the gate on storage retry", async () => {
+  const { blobs, state, ready } = await enableKeyframes();
+  await Promise.all([submitIllustration("world", "view", keyframeRequest), illustrationAction("world", "view", keyframeRequest)]);
+  expect(store("illustration_jobs").size).toBe(1); expect([...store("spend_ledger").values()].every(row => row.total === 0.1)).toBe(true);
+  await expect(submitIllustration("world", "view", { ...keyframeRequest, art: false })).rejects.toMatchObject({ status: 409 });
+  expect(illustrationJob().keyframe_input).toEqual({ stage: "first", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) }, gate_object_id: "kettle" });
+  await processNextAssetJob(db, "illustration");
+  const { inputs } = JSON.parse(submitted()[0]![1].body);
+  expect(inputs).toMatchObject({ keyframe_stage: "first", image_size: { width: 256, height: 256 }, image_url: `data:image/png;base64,${blobs.get("render")!.toString("base64")}` });
+  expect(inputs.reference_url).toMatch(/^data:image\/jpeg;base64,/); expect(inputs.control_lora_image_url).toBeUndefined();
+  expect(inputs.scene_identity.objects).toEqual([expect.objectContaining({ id: "kettle", label: "Copper Kettle" })]);
+  ready(); state.broken = true; await processNextAssetJob(db, "illustration");
+  expect(illustrationJob().status).toBe("storage_failed"); expect(illustrationJob().keyframe_gate).toMatchObject({ status: "measured" });
+  expect(gateCalls()).toHaveLength(1);
+  expect(JSON.parse(gateCalls()[0]![1].body)).toEqual({ image_urls: [fal(0), fal(1)], box: [78, 78, 178, 178], width: 256, height: 256, label: "building" });
+  expect(provider.mock.calls.some(([url]) => url.includes(`/requests/keyframe-request?model=${encodeURIComponent(KEYFRAME_MODEL)}`))).toBe(true);
+  state.broken = false; await illustrationAction("world", "view", { action: "refresh", id: "run1" }); await processNextAssetJob(db, "illustration");
+  expect(illustrationJob().status).toBe("ready"); expect(gateCalls()).toHaveLength(1); expect(submitted()).toHaveLength(1);
+  const asset = store("illustration_assets").get("world:illustration_run1")!;
+  expect(asset.keyframe).toMatchObject({ version: 1, stage: "first", art: "art", reference: { key: "art" }, object_id: "kettle", gate: "passed", chosen: 0, passed: true, sky_pinned: false });
+  expect(asset.keyframe.candidates).toEqual([expect.objectContaining({ iou: 1, centre_dx: 0, area_ratio: 1, passed: true }), expect.objectContaining({ iou: null, passed: false })]);
+  expect(asset.keyframe.candidates[0].painted).toBeGreaterThan(12);
+  expect(blobs.get(asset.key)).toEqual(state.candidates[0]);
+  expect((await illustrationLibrary("world", "view")).assets[0]!.keyframe).toMatchObject({ gate: "passed", chosen: 0 });
+});
+it.each(["outage", "interrupted"])("stores candidate 0 as unmeasured after a gate %s without segmenting again", async kind => {
+  const { state, ready } = await enableKeyframes();
+  state.gate = async () => new Response("Keyframe gate segmenter failed", { status: 502 });
+  await submitIllustration("world", "view", keyframeRequest); await processNextAssetJob(db, "illustration");
+  if (kind === "interrupted") illustrationJob().keyframe_gate = { status: "started" };
+  ready(); await processNextAssetJob(db, "illustration");
+  expect(illustrationJob()).toMatchObject({ status: "ready", keyframe_gate: { status: "outage" } });
+  expect(gateCalls()).toHaveLength(kind === "outage" ? 1 : 0);
+  expect(store("illustration_assets").get("world:illustration_run1")!.keyframe).toMatchObject({ gate: "unmeasured", chosen: 0, passed: false,
+    candidates: [expect.objectContaining({ iou: null, passed: false }), expect.objectContaining({ iou: null, passed: false })] });
+});
+it("refuses to continue from a camera without accepted artwork before any reservation", async () => {
+  const { view } = await enableKeyframes();
+  store("place_views").set("world:other", { ...structuredClone(view), _id: "world:other", id: "other" });
+  await expect(submitIllustration("world", "view", { ...keyframeRequest, chain_from: "other" })).rejects.toMatchObject({ status: 409 });
+  await expect(submitIllustration("world", "view", { ...keyframeRequest, chain_from: "missing" })).rejects.toMatchObject({ status: 404 });
+  await expect(submitIllustration("world", "view", { ...keyframeRequest, chain_from: "other", art: false })).rejects.toMatchObject({ status: 400 });
+  await expect(submitIllustration("world", "view", { ...keyframeRequest, action: "generate" })).rejects.toMatchObject({ status: 400 });
+  expect(store("spend_ledger").size).toBe(0); expect(store("illustration_jobs").size).toBe(0);
+});
+it("chains from accepted artwork through the depth warp and pins the warped sky", async () => {
+  const { view, blobs, ready } = await enableKeyframes();
+  const previous = await solid(200, 40, 40), from = { ...structuredClone(view), _id: "world:front", id: "front", accepted_illustration_id: "illustration_prev" };
+  store("place_views").set(from._id, from); blobs.set("prev", previous);
+  store("illustration_assets").set("world:illustration_prev", { _id: "world:illustration_prev", id: "illustration_prev", session_id: "world", key: "prev", sha256: sha(previous), bytes: previous.length,
+    model: KEYFRAME_MODEL, prompt: "Inked", created_at: new Date(), view_dependency: illustrationDependency(from) });
+  expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([{ view_id: "front", label: "Front" }]);
+  await submitIllustration("world", "view", { ...keyframeRequest, chain_from: "front" });
+  expect(illustrationJob().keyframe_input).toEqual({ stage: "chain", chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle" });
+  await processNextAssetJob(db, "illustration");
+  const { inputs } = JSON.parse(submitted()[0]![1].body);
+  expect(inputs.keyframe_stage).toBe("chain"); expect(inputs.reference_url).toMatch(/^data:image\/jpeg;base64,/);
+  // Same camera: the warp carries the accepted red artwork, not the render.
+  const warped = await registeredPixels(Buffer.from(inputs.image_url.split(",")[1], "base64"), 256, 256, true);
+  for (const p of [40 * 256 + 40, 128 * 256 + 128]) expect(Math.abs(warped[p * 4]! - 200) + Math.abs(warped[p * 4 + 2]! - 40)).toBeLessThan(20);
+  ready(); await processNextAssetJob(db, "illustration");
+  const asset = store("illustration_assets").get("world:illustration_run1")!;
+  expect(asset.keyframe).toMatchObject({ stage: "chain", gate: "passed", chosen: 0, sky_pinned: true, chain_from: { view_id: "front", illustration_id: "illustration_prev", angle: 0, hole_share: 0 } });
+  expect(asset.keyframe.art).toBeUndefined();
+  const stored = await registeredPixels(blobs.get(asset.key)!, 256, 256);
+  expect(stored[(5 * 256 + 128) * 4]).toBeGreaterThan(170); // sky pinned to the earlier red
+  expect(stored[(128 * 256 + 128) * 4 + 2]).toBeGreaterThan(170); // the painted blue candidate
+});
