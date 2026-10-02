@@ -863,7 +863,7 @@ it("does not reserve masked work for an older illustration worker", async () => 
 });
 
 import { KEYFRAME_MODEL } from "./asset-pipeline";
-const keyframeParameters = { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v2" };
+const keyframeParameters = { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v3" };
 const keyframeRequest = { id: "run1", action: "generate_keyframe", prompt: "Inked stone, warm light", confirmed: true, model: KEYFRAME_MODEL, reservation: 0.1, parameters: keyframeParameters };
 const fal = (n: number) => `https://v3.fal.media/files/candidate${n}.jpg`;
 const solid = (r: number, g: number, b: number) => sharp({ create: { width: 256, height: 256, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();

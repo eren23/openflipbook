@@ -32,4 +32,23 @@ describe("finishKeyframe", () => {
     expect(painted.candidates[0]!.painted).toBe(16);
     expect(painted).toMatchObject({ gate: "passed", passed: true });
   });
+
+  it("fails a chain candidate that leaves a large object it paints whole in the render's colours", async () => {
+    // A saw another surface right of column 44, so B (0.3 m right, 2 px) never saw its columns 42-63:
+    // the well there (a quarter of the frame) comes whole from the candidate.
+    const render = solid([100, 110, 120]), depth = await png(solid([208, 208, 208]));
+    const depthA = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : (i >> 2) % S >= 44 ? 100 : 208)));
+    const inWell = (p: number) => p % S >= 48;
+    const objects = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : inBuilding(i >> 2) ? [100, 120, 140][i % 4]! : inWell(i >> 2) ? [10, 20, 30][i % 4]! : 0)));
+    const passes: KeyframePasses = { view: { ...view(0.3), objects: [{ object_id: "kettle", rgb: [100, 120, 140] }, { object_id: "well", rgb: [10, 20, 30] }], floor_id: null, mode: "walk" },
+      render: await png(render), depth, objects };
+    const chain: KeyframeChain = { view: view(0), depth: depthA, image: await png(solid([200, 160, 40])) };
+    const mask = (await png(new Uint8Array(S * S).map((_, p) => (inBuilding(p) ? 255 : 0)), 1)).toString("base64");
+    // Candidate 0 repaints everything but the well (over all its holes it still differs by about 22); candidate 1 repaints all.
+    const greyWell = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : render[i]! + (inWell(i >> 2) ? 0 : 80))));
+    const done = await finishKeyframe(passes, "kettle", [greyWell, await png(solid([180, 190, 200]))], [mask, mask], chain);
+    expect(done.chain!.objects).toEqual({ a: 1, candidate: 1, ground: 0 });
+    expect(done.candidates.map(c => [c.painted, c.passed])).toEqual([[0, false], [80, true]]);
+    expect(done).toMatchObject({ chosen: 1, gate: "passed" });
+  });
 });
