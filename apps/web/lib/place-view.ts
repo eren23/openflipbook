@@ -53,8 +53,9 @@ export interface SavedIllustration {
   geometry_refresh?: IllustrationGeometryRefresh;
   keyframe?: IllustrationKeyframe;
 }
-// A keyframe request: the exact render (first) or the warp of an accepted
-// keyframe at another camera (chain). The gate measures one building.
+// A keyframe request: the exact render, painted from the art or words. A chain
+// also composites an accepted keyframe at another camera over it, warped by
+// depth. The gate measures one building.
 export interface IllustrationKeyframeInput {
   stage: "first" | "chain"; art?: "art" | "words";
   reference?: { key: string; sha256: string };
@@ -67,7 +68,8 @@ export interface IllustrationKeyframeCandidate {
 }
 export interface IllustrationKeyframe extends Omit<IllustrationKeyframeInput, "chain_from" | "gate_object_id"> {
   version: 1;
-  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number };
+  // composite_share: the fraction of the stored picture that came from the candidate (absent on older chains).
+  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number };
   object_id: string | null;
   gate: "passed" | "failed" | "unmeasured";
   candidates: IllustrationKeyframeCandidate[]; chosen: number; passed: boolean; sky_pinned: boolean;

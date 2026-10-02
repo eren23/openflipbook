@@ -1,7 +1,7 @@
 import { Box3, PerspectiveCamera, Plane, Ray, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
-import { gateTruth, paintedDelta, pickCandidate, pinSky, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
+import { compositeChain, gateTruth, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
 
 const W = 64, H = 48, NEAR = 1, FAR = 30;
 // A wall 10 m away that stops 3 m up (sky above), and a 2 m box in front of it.
@@ -207,15 +207,23 @@ describe("paintedDelta", () => {
   });
 });
 
-describe("pinSky", () => {
-  it("copies the warped sky back only inside the sky mask, 2 px in from its edge", () => {
-    const output = new Uint8Array(W * H * 4).fill(10), warped = new Uint8Array(W * H * 4).fill(200);
-    const sky = new Uint8Array(W * H).map((_, p) => (Math.floor(p / W) < 20 ? 1 : 0)); // top 20 rows
-    const out = pinSky(output, warped, sky, W, H);
+describe("compositeChain", () => {
+  it("keeps A's painting and sky where A saw, B's painting in the holes, and blends only 2 px each side of the hole edge", () => {
+    // Columns 0-19 are holes; the rest is A's paint (red), with A's sky (cyan) in the top 10 rows.
+    const hole = new Uint8Array(W * H).map((_, p) => (p % W < 20 ? 1 : 0));
+    const rgba = new Uint8Array(W * H * 4).map((_, i) => {
+      const p = i >> 2, c = i & 3;
+      return c === 3 ? 255 : hole[p] ? 99 : Math.floor(p / W) < 10 ? [0, 220, 220][c]! : [200, 40, 40][c]!;
+    });
+    const candidate = new Uint8Array(W * H * 4).map((_, i) => [30, 60, 220, 255][i & 3]!);
+    const { rgba: out, share } = compositeChain({ rgba, hole }, candidate, W, H);
     for (let p = 0; p < W * H; p++) {
-      const y = Math.floor(p / W);
-      expect(out[p * 4]).toBe(y < 18 ? 200 : 10); // rows 18-19 sit within 2 px of the ground
+      const x = p % W, px = [...out.subarray(p * 4, p * 4 + 4)];
+      if (x <= 17) expect(px).toEqual([30, 60, 220, 255]);
+      else if (x >= 22) expect(px).toEqual(Math.floor(p / W) < 10 ? [0, 220, 220, 255] : [200, 40, 40, 255]);
+      else expect(px[2]).toBe(Math.round(rgba[p * 4 + 2]! * (x - 17) / 5 + 220 * (22 - x) / 5)); // a linear ramp across the edge
     }
-    expect(output[0]).toBe(10); // the input is not modified
+    expect(share).toBeCloseTo(20 / W, 10);
+    expect(rgba[0]).toBe(99); // the inputs are not modified
   });
 });

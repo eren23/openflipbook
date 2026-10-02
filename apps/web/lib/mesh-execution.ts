@@ -182,7 +182,7 @@ async function finishKeyframeJob(db: Db, job: MeshJobDoc, token: string, respons
   for (const url of urls) candidates.push(await downloadAsset("illustration", url));
   const { bytes, chain: warp, ...result } = await finishKeyframe(passes, input.gate_object_id, candidates, gate.status === "measured" ? gate.masks : null, chain);
   const { chain_from, gate_object_id, ...request } = input;
-  return { bytes, keyframe: { version: 1, ...request, ...(chain_from && warp ? { chain_from: { ...chain_from, angle: warp.angle, hole_share: warp.hole_share } } : {}), object_id: gate_object_id, ...result } };
+  return { bytes, keyframe: { version: 1, ...request, ...(chain_from && warp ? { chain_from: { ...chain_from, ...warp } } : {}), object_id: gate_object_id, ...result } };
 }
 
 async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: string) {

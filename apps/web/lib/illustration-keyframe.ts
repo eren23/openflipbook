@@ -244,10 +244,21 @@ export function paintedDelta(render: Uint8Array, candidate: Uint8Array, renderMa
   return pixels ? sum / (pixels * 3) : null;
 }
 
-/** Copy the warped sky back over the output, 2 px in from the sky's edge so no outline bleeds. */
-export function pinSky(output: Uint8Array, warpedSky: Uint8Array, skyMask: Uint8Array, width: number, height: number): Uint8Array {
-  rgba(output, width, height, "Keyframe output"); rgba(warpedSky, width, height, "Warped sky");
-  const ground = boxSum(skyMask.map(v => (v ? 0 : 1)), width, height, 2), out = output.slice();
-  for (let t = 0; t < skyMask.length; t++) if (skyMask[t] && !ground[t]) out.set(warpedSky.subarray(t * 4, t * 4 + 4), t * 4);
-  return out;
+/**
+ * A chained keyframe: A's warped painting where B sees what A saw (A's sky
+ * included), and B's own painting in the holes. The hole edge is blended
+ * linearly over 2 px each side, so warp jaggies do not show. `share` is the
+ * fraction of the picture that came from the candidate.
+ */
+export function compositeChain(warp: Pick<KeyframeWarp, "rgba" | "hole">, candidate: Uint8Array, width: number, height: number) {
+  rgba(warp.rgba, width, height, "Keyframe warp"); rgba(candidate, width, height, "Keyframe candidate");
+  const holes = boxSum(warp.hole, width, height, 2), window = boxSum(new Uint8Array(width * height).fill(1), width, height, 2);
+  const out = new Uint8Array(candidate.length);
+  let share = 0;
+  for (let t = 0; t < holes.length; t++) {
+    const a = holes[t]! / window[t]!;
+    share += a;
+    for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(warp.rgba[t * 4 + c]! * (1 - a) + candidate[t * 4 + c]! * a);
+  }
+  return { rgba: out, share: share / holes.length };
 }
