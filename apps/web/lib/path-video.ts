@@ -77,7 +77,12 @@ export interface PathVideoKeyframe {
   frame: number; time: number; stage: "source" | "first" | "chain";
   attempt?: Attempt; gate_object_id?: string | null; gate?: KeyframeGateDoc; file?: MotionFile;
   result?: Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { chain?: { angle: number; hole_share: number } };
+  // A failed gate is painted once more: retry is "reserved" or why not. `other` keeps the try not used.
+  retry?: string; other?: KeyframeTry;
+  // The last keyframe still failing its gate is dropped: the video ends at the keyframe before it.
+  dropped?: true; drop_reason?: string;
 }
+type KeyframeTry = Pick<PathVideoKeyframe, "attempt" | "gate" | "result" | "file">;
 export interface LegAttempt extends Attempt {
   prompt?: string; original?: MotionFile; cut?: MotionFile;
   metrics?: { end: number; land: number; snap: number; ok: boolean; factor: number };
@@ -85,6 +90,8 @@ export interface LegAttempt extends Attempt {
 export interface PathVideoLeg {
   seconds: number; duration: number; cost: number; move: ReturnType<typeof legMove>;
   attempts: LegAttempt[]; retry?: string; chosen?: number; landed?: boolean;
+  // Its end keyframe was dropped: never made, its reservation released when the job settles.
+  dropped?: true;
 }
 export type PathVideoState = "scheduled" | "running" | "submission_unknown" | "ready" | "failed" | "cancelled";
 export interface PathVideoDoc {
@@ -283,6 +290,23 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     await col.updateOne(lease, { $set: arrays() });
     return 5000;
   };
+  // Exactly one retry of a step, reserved on its own, on the job's scheduling day,
+  // and recorded by `set` with the reservation. Returns why it was not reserved, or "".
+  const reserveRetry = async (cost: number, set: Partial<PathVideoDoc>) => {
+    try {
+      if (round(job.reservation + cost, 6) > PATH_VIDEO_CAP_USD) throw new CreatorError(`it would pass the $${PATH_VIDEO_CAP_USD} cap`, 409);
+      await withDbTransaction(async (db, session) => {
+        const options = { session }, jobs = db.collection<PathVideoDoc>("path_videos");
+        if (!await jobs.findOne(live, options)) throw new Error("Path video lease lost");
+        await reserveGenerationSpend(db, session, job.session_id, "motion", cost, "MOTION_DAILY_CAP_USD", job.created_at, "3");
+        await jobs.updateOne(live, { $set: set, $inc: { reservation: cost } }, options);
+      });
+      return "";
+    } catch (e) {
+      if (!(e instanceof CreatorError)) throw e;
+      return `Retry not reserved: ${e.message}`;
+    }
+  };
   const poll = async (attempt: Attempt, arrays: () => Partial<PathVideoDoc>, path: string, kind: "illustration" | "motion") => {
     const result = await assetBackend(kind, path);
     if (result?.status === "queued" || result?.status === "running") { attempt.status = result.status; await save(arrays()); return 5000; }
@@ -305,6 +329,21 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     // Keyframe i is chained from keyframe i-1 (its camera, depth pass and image).
     const captures = async () => ({ passes: await frames.passes(kf.frame),
       chain: prev ? { ...await frames.chain(prev.frame, kf.frame), image: await stored(prev.file) } as KeyframeChain : undefined });
+    // Use a try that passed, else the one nearest the gate (IoU); the other try stays as `other`.
+    // ponytail: IoU of the chosen candidate only; an unmeasured try counts as -1.
+    const iou = (t: KeyframeTry) => t.result!.candidates[t.result!.chosen]?.iou ?? -1;
+    const keep = async (tries: KeyframeTry[]) => {
+      const painted = tries.filter(t => t.file), best = painted.find(t => t.result!.passed) ?? painted.reduce((b, t) => iou(t) > iou(b) ? t : b);
+      const other = tries.find(t => t !== best);
+      Object.assign(kf, best, other ? { other } : {});
+      // A last keyframe that still fails would end the video on an invented
+      // picture: drop it and the leg into it.
+      if (k === job.keyframes.length - 1 && best.result!.gate === "failed") {
+        Object.assign(kf, { dropped: true, drop_reason: "The last keyframe failed its gate after one retry. The video ends at the keyframe before it." });
+        job.legs[k - 1]!.dropped = true;
+      }
+      await save(arrays()); return 0;
+    };
     if (!attempt) {
       const sources = await frames.sources(kf.frame).catch(e => { if (e instanceof CreatorError) return null; throw e; });
       if (!sources) return fail("The walk's geometry changed. Unspent reservation released.");
@@ -316,7 +355,11 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
         reservation: job.keyframe_reservation, parameters: job.keyframe_parameters, inputs: prepared.inputs }));
     }
     if (attempt.status === "submitting" || attempt.status === "submission_unknown") return halt(attempt, arrays);
-    if (attempt.status === "failed" || attempt.status === "refused") return fail("A keyframe was not painted. Unspent reservation released.");
+    if (attempt.status === "failed" || attempt.status === "refused") {
+      // A failed or refused retry leaves the first try to use.
+      if (!kf.other) return fail("A keyframe was not painted. Unspent reservation released.");
+      return keep([kf.other, { attempt }]);
+    }
     const result = await poll(attempt, arrays, `requests/${encodeURIComponent(attempt.request_id!)}?model=${encodeURIComponent(KEYFRAME_MODEL)}`, "illustration");
     if (typeof result === "number") return result;
     const urls = ((result.images ?? [result.image]) as { url?: unknown }[]).map(image => meshDownloadUrl(image?.url)), { passes, chain } = await captures();
@@ -337,11 +380,21 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     const { bytes, ...painted } = await finishKeyframe(passes, kf.gate_object_id ?? null, candidates, kf.gate.status === "measured" ? kf.gate.masks : null, chain);
     const saved = file(`keyframe${k}`, "jpg", bytes);
     await uploadJpeg(saved.key, bytes, "image/jpeg", AbortSignal.timeout(90_000));
-    // A passing gate is the acceptance; a failed gate keeps the best candidate, flagged.
-    attempt.status = "ready"; kf.result = painted; kf.file = saved; await save(arrays()); return 0;
+    // A passing gate is the acceptance. A failed gate is painted once more,
+    // reserved like a leg retry, with the first try waiting in `other`; then
+    // the better try is kept, flagged.
+    attempt.status = "ready";
+    const tried: KeyframeTry = { attempt, gate: kf.gate, result: painted, file: saved };
+    if (painted.gate === "failed" && !kf.retry) {
+      const { attempt: _attempt, gate: _gate, ...rest } = kf;
+      const why = await reserveRetry(job.keyframe_reservation, { keyframes: job.keyframes.map((item, i) => i === k ? { ...rest, other: tried, retry: "reserved" } : item) });
+      if (!why) return 0;
+      kf.retry = why;
+    }
+    return keep(kf.other ? [kf.other, tried] : [tried]);
   }
 
-  const l = job.legs.findIndex(leg => leg.chosen === undefined);
+  const l = job.legs.findIndex(leg => leg.chosen === undefined && !leg.dropped);
   if (l >= 0) {
     const leg = job.legs[l]!, arrays = () => ({ legs: job.legs }), from = job.keyframes[l]!, to = job.keyframes[l + 1]!;
     const { width, height } = frames.size, last = leg.attempts.at(-1);
@@ -375,20 +428,9 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       await save(arrays());
     }
     if (leg.attempts.length === 1 && !leg.retry && !last.metrics!.ok) {
-      // Exactly one retry, reserved on its own, on the job's scheduling day.
-      try {
-        if (round(job.reservation + leg.cost, 6) > PATH_VIDEO_CAP_USD) throw new CreatorError(`it would pass the $${PATH_VIDEO_CAP_USD} cap`, 409);
-        await withDbTransaction(async (db, session) => {
-          const options = { session }, jobs = db.collection<PathVideoDoc>("path_videos");
-          if (!await jobs.findOne(live, options)) throw new Error("Path video lease lost");
-          await reserveGenerationSpend(db, session, job.session_id, "motion", leg.cost, "MOTION_DAILY_CAP_USD", job.created_at, "3");
-          await jobs.updateOne(live, { $set: { legs: job.legs.map((item, i) => i === l ? { ...item, retry: "reserved" } : item) }, $inc: { reservation: leg.cost } }, options);
-        });
-        return 0;
-      } catch (e) {
-        if (!(e instanceof CreatorError)) throw e;
-        leg.retry = `Retry not reserved: ${e.message}`;
-      }
+      const why = await reserveRetry(leg.cost, { legs: job.legs.map((item, i) => i === l ? { ...item, retry: "reserved" } : item) });
+      if (!why) return 0;
+      leg.retry = why;
     }
     // A landed attempt wins; otherwise keep the one that came closest.
     const measured = leg.attempts.flatMap((a, i) => a.metrics ? [{ i, ...a.metrics }] : []);
@@ -397,7 +439,8 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
   }
 
   const cuts: Buffer[] = [];
-  for (const leg of job.legs) cuts.push(await stored(leg.attempts[leg.chosen!]!.cut));
+  for (const leg of job.legs) if (!leg.dropped) cuts.push(await stored(leg.attempts[leg.chosen!]!.cut));
+  if (!cuts.length) return fail("The only leg ended at a dropped keyframe. Unspent reservation released.");
   const { bytes, media } = await joinLegs(cuts), video = file("video", "mp4", bytes);
   await uploadJpeg(video.key, bytes, "video/mp4", AbortSignal.timeout(90_000));
   await settle(db, live, "ready", { video, media }); return 0;
@@ -437,8 +480,9 @@ async function access(sid: string, id: string, kind = "motion study") {
 const wire = (job: PathVideoDoc) => ({ id: job.id, status: job.status, reservation: job.reservation, committed: job.committed,
   created_at: job.created_at.toISOString(), ...(job.error ? { error: job.error } : {}), ...(job.media ? { media: job.media } : {}),
   keyframes: job.keyframes.map(kf => ({ time: kf.time, stage: kf.stage, status: kf.file ? "ready" : kf.attempt?.status ?? "waiting",
-    ...(kf.result ? { gate: kf.result.gate, passed: kf.result.passed } : {}) })),
-  legs: job.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, ...(leg.landed === undefined ? {} : { landed: leg.landed }),
+    ...(kf.result ? { gate: kf.result.gate, passed: kf.result.passed } : {}), ...(kf.retry ? { retry: kf.retry } : {}),
+    ...(kf.dropped ? { dropped: true, drop_reason: kf.drop_reason } : {}) })),
+  legs: job.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, ...(leg.landed === undefined ? {} : { landed: leg.landed }), ...(leg.dropped ? { dropped: true } : {}),
     attempts: leg.attempts.map(a => ({ status: a.status, ...(a.metrics ? { land: a.metrics.land, snap: a.metrics.snap, ok: a.metrics.ok } : {}) })) })) });
 const jobList = async (db: Db, sid: string, scope: Scope) =>
   (await db.collection<PathVideoDoc>("path_videos").find({ session_id: sid, ...scope }).sort({ created_at: -1 }).limit(20).toArray()).map(wire);

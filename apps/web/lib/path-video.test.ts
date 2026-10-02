@@ -254,6 +254,66 @@ it.each(["retry", "capped"])("checks every landing, with exactly one separately 
   }
 });
 
+// The gate of each next painted keyframe: "pass", or a failure at this IoU.
+function gates(...results: ("pass" | number)[]) {
+  const finish = vi.mocked(finishKeyframe), real = finish.getMockImplementation()!;
+  for (const r of results) finish.mockImplementationOnce(r === "pass" ? real
+    : async () => ({ bytes: Buffer.from(`kf-${++memory.painted}`), gate: "failed", candidates: [{ iou: r }], chosen: 0, passed: false, sky_pinned: false }) as never);
+}
+const keyframeTry = (k: number) => [job().keyframes[k].result.passed, job().keyframes[k].result.candidates[0]?.iou, String(memory.files.get(job().keyframes[k].file.key))];
+
+it("drops a last keyframe that fails its gate twice: the video ends one leg early and the leg's reservation is released", async () => {
+  gates("pass", .5, .6);
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1 }); expect(job().committed).toBeCloseTo(.7); expect(totals()).toEqual([.7, .7, .7]);
+  expect(calls("/illustration/submit")).toHaveLength(3); expect(calls("/motion/leg")).toHaveLength(1);
+  // The retry is kept (nearer the gate), the first try beside it; the leg into it is never made.
+  expect(job().keyframes[2]).toMatchObject({ retry: "reserved", dropped: true, drop_reason: expect.stringMatching(/ends at the keyframe before it/), other: { result: { passed: false } } });
+  expect(keyframeTry(2)).toEqual([false, .6, "kf-3"]);
+  expect(job().legs[1]).toMatchObject({ dropped: true, attempts: [] }); expect(job().legs[0]).toMatchObject({ chosen: 0, landed: true });
+  expect((await pathVideoBytes("world", "study", "walk")).toString()).toBe(`cut-${(97 / 24).toFixed(3)}-${(72 / 97).toFixed(3)}`);
+  expect((await pathVideoLibrary("world", "study")).jobs[0]).toMatchObject({ keyframes: [{}, { passed: true }, { retry: "reserved", dropped: true, passed: false }], legs: [{ landed: true }, { dropped: true }] });
+  // With one leg, nothing is left to join: the job fails and releases the leg.
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  savedView("v0", eye(0, 1.6, 8, 0)); savedView("v1", eye(0, 1.6, 4, 0));
+  store("path_videos").clear(); store("spend_ledger").clear(); provider.mockClear();
+  gates("pass", .5, .5);
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"]));
+  await drain();
+  expect(job()).toMatchObject({ status: "failed", reservation: .7, error: expect.stringMatching(/dropped keyframe/) }); expect(totals()).toEqual([.3, .3, .3]);
+  expect(calls("/motion/leg")).toHaveLength(0);
+});
+
+it("uses a keyframe whose retry passes, and chains the next one from it", async () => {
+  gates(.4, "pass", "pass"); memory.landings = [200, 0];
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1, committed: 1.1 }); expect(totals()).toEqual([1.1, 1.1, 1.1]);
+  expect(job().keyframes[1]).toMatchObject({ retry: "reserved", other: { result: { passed: false } } }); expect(job().keyframes[1]).not.toHaveProperty("dropped");
+  expect(keyframeTry(1)).toEqual([true, undefined, "kf-2"]);
+  const prepare = vi.mocked(prepareKeyframeInput).mock.calls;
+  expect(prepare).toHaveLength(3); expect(prepare[2]![3]!.image.toString()).toBe("kf-2");
+  expect(calls("/illustration/submit")).toHaveLength(3); expect(calls("/motion/leg")).toHaveLength(2);
+});
+
+it.each(["fails again", "is refused"])("keeps the better try, flagged, when a middle keyframe's retry %s", async kind => {
+  if (kind === "fails again") gates(.5, .3, "pass");
+  else { gates(.5, "pass"); memory.onSubmit = async () => { if (calls("/illustration/submit").length === 2) return Response.json({ detail: "Keyframe generation is not configured" }, { status: 503 }); }; }
+  // Each leg lands on its end keyframe's grey ("kf-3", or "kf-2" when the refused retry painted nothing).
+  memory.landings = [100, kind === "fails again" ? 0 : 200];
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  // The first try is nearer the gate: it is used, and the next keyframe chains from it.
+  const spent = kind === "fails again" ? 1.1 : 1;
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1 }); expect(job().committed).toBeCloseTo(spent); expect(totals()).toEqual([spent, spent, spent]);
+  expect(keyframeTry(1)).toEqual([false, .5, "kf-1"]);
+  expect(job().keyframes[1]).toMatchObject({ retry: "reserved", result: { gate: "failed" }, other: { attempt: { status: kind === "fails again" ? "ready" : "refused" } } });
+  expect(job().keyframes[1]).not.toHaveProperty("dropped"); expect(job().legs.map((leg: Document) => leg.dropped)).toEqual([undefined, undefined]);
+  expect(vi.mocked(prepareKeyframeInput).mock.calls.at(-1)![3]!.image.toString()).toBe("kf-1");
+  expect(calls("/motion/leg")).toHaveLength(2);
+});
+
 it("cancels before any step and releases the whole reservation", async () => {
   await pathVideoAction("world", "study", await input());
   await pathVideoAction("world", "study", { action: "cancel", id: "walk" });

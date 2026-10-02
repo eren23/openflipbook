@@ -106,10 +106,18 @@ the end keyframe measures (the most visible one). A leg plans its length at
 trim and retime apply.
 
 Billing, the one retry, refusals and provenance (view ids and their hash, not a
-study) are the same as for a study path video. A place has at most 20 walk
-videos that are active or ready. Failed and cancelled jobs do not count. All views must be current 3D
+study) are the same as for a study path video. All views must be current 3D
 views of the same place, at the same size. A geometry change during a job stops
-it before its next paid step and releases the rest.
+it before its next paid step and releases the rest. A place has at most 20 walk
+videos that are active or ready. Failed and cancelled jobs do not count.
+
+In study and walk path videos, a keyframe that fails its gate is painted once
+more. The job reserves this retry on its own, as it does for a leg retry. If
+the retry passes, the job uses it. If not, the job keeps the try that is nearer
+the gate (IoU) and flags it. The last keyframe is different: if it still fails,
+the job drops it and the leg into it. The video then ends at the keyframe before
+it, and the job releases the reservation of that leg. The job record shows the
+retry (`retry`) and the drop (`dropped`, `drop_reason`) on the keyframe.
 
 ## Next Acceptance Work
 

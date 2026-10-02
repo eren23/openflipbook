@@ -65,10 +65,11 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
     {library?.jobs.map(job => <div key={job.id} className={s.illustrationJob}>
       <span>{job.status.replaceAll("_", " ")} / {dollars(job.committed)} of {dollars(job.reservation)} committed</span>
       {job.error && <p>{job.error}</p>}
-      <ol>{job.keyframes.map((kf, i) => <li key={i}>Keyframe {i + 1}: {kf.stage === "source" ? "accepted artwork" : kf.status.replaceAll("_", " ")}{kf.gate ? ` / gate ${kf.gate}` : ""}</li>)}</ol>
+      <ol>{job.keyframes.map((kf, i) => <li key={i}>Keyframe {i + 1}: {kf.stage === "source" ? "accepted artwork" : kf.status.replaceAll("_", " ")}{kf.gate ? ` / gate ${kf.gate}` : ""}
+        {kf.retry === "reserved" && " / painted twice"}{kf.dropped && <strong> / dropped: {kf.drop_reason}</strong>}</li>)}</ol>
       <ol>{job.legs.map((leg, i) => <li key={i}>Leg {i + 1}: {leg.seconds}s ({leg.duration}s clip)
         {leg.attempts.map((a, n) => <span key={n}> / {a.status.replaceAll("_", " ")}{a.land === undefined ? "" : ` land ${a.land.toFixed(2)} snap ${a.snap!.toFixed(1)}`}</span>)}
-        {leg.landed === false && <strong> / did not land</strong>}</li>)}</ol>
+        {leg.landed === false && <strong> / did not land</strong>}{leg.dropped && <strong> / dropped</strong>}</li>)}</ol>
       {(job.status === "scheduled" || job.status === "running" || job.status === "submission_unknown") &&
         <button title="Cancel path video" aria-label="Cancel path video" disabled={busy} onClick={() => void send({ action: "cancel", id: job.id })}><X size={16}/></button>}
       {job.media && <video controls playsInline muted preload="metadata" style={{ width: "100%", aspectRatio: `${job.media.width}/${job.media.height}` }}
