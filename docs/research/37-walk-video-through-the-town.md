@@ -49,3 +49,11 @@ Both runs had no frozen frame.
 - **Legs are sped up.** H3 moves for the whole 5 s clip, and the planned legs
   are about 2.9 s, so each leg plays about 1.8 times as fast. A shorter
   request would cost less.
+
+## Follow-up
+
+The product now handles two of these. The job drops a middle keyframe that
+fails its gate after its retry: the next keyframe chains from the last kept
+keyframe, and one leg spans both steps. Each leg asks H3 for its planned
+length in whole seconds (at least 3 s), not for 5 s. See docs/CAMERA_MOTION.md.
+No live run has checked these changes yet.

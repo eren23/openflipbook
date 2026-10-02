@@ -104,18 +104,20 @@ def object_action_prompt(subject: str, action: str, x_pct: float, y_pct: float) 
     )
 
 
-# Measured 2026-10-02 on the four Lantern Quay walk legs (route-video seg0-3):
-# motion fades below 0.3 MAD at 4.2-4.5 s of 5.17 s; 0.58 was the map-to-inn
-# descent clip (research 33 F4); see docs/research/36. Tunable.
-LEG_MOTION_SHARE = 0.8
+# The shortest first/last-frame leg we ask H3 for. fal's image-to-video schema
+# allows 0.92-15 s (checked 2026-10-02). 3 s is the shortest H3 clip this file
+# already sends (camera-controls), and it keeps the shortest planned leg (a
+# 1.5 s turn on the spot) at the web retime's 0.5 limit. Tunable.
+LEG_MIN_SECONDS = 3
 
 
 def leg_seconds(planned: float) -> int:
-    """The H3 duration to ask for so the move itself lasts `planned` seconds.
+    """The H3 duration to ask for a leg planned to last `planned` seconds.
 
-    The frozen tail is trimmed afterwards (web side). fal takes whole seconds,
-    1-15 (schema checked 2026-10-02); 5 is this file's H3 floor."""
-    return max(5, min(15, math.ceil(round(planned / LEG_MOTION_SHARE, 6))))
+    H3 moves for the whole clip (research 37), so a leg asks for its planned
+    length in whole seconds. The web side trims and retimes the clip to the
+    plan. The web mirror is legSeconds in apps/web/lib/path-video.ts."""
+    return max(LEG_MIN_SECONDS, min(15, math.ceil(round(planned, 6))))
 
 
 def _side(value: float) -> str:

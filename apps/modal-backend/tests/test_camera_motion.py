@@ -436,9 +436,12 @@ def leg(**changes):
     )
 
 
-async def test_leg_is_one_post_with_both_frames_and_the_move_prompt(enabled, monkeypatch):
+@pytest.mark.parametrize(("duration", "reservation"), [(6, 0.48), (3, 0.24)])
+async def test_leg_is_one_post_with_both_frames_and_the_move_prompt(
+    enabled, monkeypatch, duration, reservation
+):
     calls = []
-    request = leg()
+    request = leg(duration=duration, reservation=reservation)
 
     def handler(sent):
         calls.append(sent)
@@ -447,7 +450,8 @@ async def test_leg_is_one_post_with_both_frames_and_the_move_prompt(enabled, mon
         sent_json = json.loads(sent.content)
         assert sent_json["image_url"] == request.start.url
         assert sent_json["end_image_url"] == request.end.url
-        assert sent_json["duration"] == 6
+        # The requested length, under the 5 s floor of other H3 clips.
+        assert sent_json["duration"] == duration
         assert "circles about 20 degrees to its right around The Copper Kettle" in sent_json["prompt"]
         # A metric leg with no forward given does not invent a walk.
         assert "forward" not in sent_json["prompt"]
@@ -490,6 +494,15 @@ async def test_leg_rejects_a_reservation_that_does_not_match_the_rate(enabled, m
     with pytest.raises(HTTPException) as error:
         await motion.leg(leg(**changes))
     assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize(("duration", "valid"), [(2, False), (3, True), (15, True), (16, False)])
+def test_leg_duration_runs_from_the_leg_floor_to_15_seconds(duration, valid) -> None:
+    if valid:
+        assert leg(duration=duration).duration == duration
+    else:
+        with pytest.raises(ValidationError):
+            leg(duration=duration)
 
 
 async def test_leg_frames_must_be_the_bytes_they_claim(enabled, monkeypatch):

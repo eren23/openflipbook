@@ -463,7 +463,9 @@ def test_move_prompt_omits_zero_parts_and_keeps_the_fixed_tail() -> None:
 
 
 @pytest.mark.parametrize(
-    ("planned", "expected"), [(1, 5), (4, 5), (4.8, 6), (8, 10), (12, 15), (40, 15)]
+    ("planned", "expected"),
+    [(1, 3), (2.75, 3), (2.857, 3), (3.0000001, 3), (4.8, 5), (12, 12), (40, 15)],
 )
-def test_leg_seconds_pads_for_the_frozen_tail_within_h3_limits(planned, expected) -> None:
+def test_leg_seconds_asks_for_the_planned_length_within_h3_limits(planned, expected) -> None:
+    assert video.LEG_MIN_SECONDS == 3
     assert video.leg_seconds(planned) == expected

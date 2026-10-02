@@ -18,11 +18,12 @@ async function access(sid: string, studyId: string) {
   if (!isSafeId(studyId)) throw new CreatorError("Invalid motion study id", 400);
   return requireCreator(sid);
 }
-export async function motionQuote(db: Db, duration: number) {
+// `min` is 5 s for camera-controls studies; path video legs ask for less.
+export async function motionQuote(db: Db, duration: number, min = 5) {
   const config = await assetBackend("motion", "capabilities"), rate = config.reservation_usd_per_second;
   if (!placeScenesEnabled() || !config.enabled || config.model !== H3_CAMERA_MODEL || config.adapter !== H3_CAMERA_ADAPTER
     || config.purpose !== "calibration" || config.resolution !== "768P" || !Number.isFinite(rate) || rate < .08 || rate > .5
-    || !Number.isInteger(duration) || duration < 5 || duration > 15) throw new CreatorError("Motion calibration is not configured", 503);
+    || !Number.isInteger(duration) || duration < min || duration > 15) throw new CreatorError("Motion calibration is not configured", 503);
   const micros = Math.round(rate * 1_000_000);
   if (Math.abs(micros / 1_000_000 - rate) > 1e-12) throw new CreatorError("Motion price precision unsupported", 503);
   if (!await db.collection("generation_workers").findOne({ kind: "place-layout", motion_v1: true, motion_review_v1: true, last_seen: { $gt: new Date(Date.now() - 30_000) } }))
