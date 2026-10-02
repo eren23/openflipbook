@@ -24,6 +24,8 @@ async function access(sid: string, viewId: string) {
   const db = await requireCreator(sid);
   const view = await db.collection<PlaceViewDoc>("place_views").findOne({ _id: `${sid}:${viewId}`, session_id: sid });
   if (!view) throw new CreatorError("Saved camera view not found", 404);
+  // Checkpoints serve walk videos only and are not exported: their artwork would be lost.
+  if (view.walk_checkpoint) throw new CreatorError("Walk checkpoint views cannot be illustrated", 409);
   return { db, view };
 }
 export function wireIllustration(asset: MeshAssetDoc, view: PlaceViewDoc, historical: boolean): SavedIllustration {

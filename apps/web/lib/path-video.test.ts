@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import type { ClientSession, Db, Document } from "mongodb";
-import { Vector3 } from "three";
+import { PerspectiveCamera, Vector3 } from "three";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, Document>>(), files: new Map<string, Buffer>(), tail: Promise.resolve(),
-  stale: false, painted: 0, landings: [] as number[], keyframes: true, statusDown: false, onSubmit: null as (() => Promise<Response | void>) | null }));
+  stale: false, painted: 0, landings: [] as number[], keyframes: true, statusDown: false, onSubmit: null as (() => Promise<Response | void>) | null, historical: [] as string[] }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
 function matches(row: Document, query: Document): boolean {
   return Object.entries(query).every(([key, value]) => {
@@ -59,6 +59,13 @@ vi.mock("./r2", () => ({
   uploadJpeg: vi.fn(async (key: string, bytes: Buffer) => { memory.files.set(key, bytes); return { key, url: "stored", contentType: "video/mp4" }; }),
 }));
 vi.mock("./illustration-input", async original => ({ ...(await original<object>()), keyframeArt: vi.fn(async () => null) }));
+// Saved views are current unless listed; their geometry names the gated building.
+vi.mock("./place-view-store", async original => ({ ...(await original<object>()),
+  assertCurrentView: vi.fn(async (_db: unknown, view: { id: string }) => {
+    if (memory.historical.includes(view.id)) throw new CreatorError("View sources changed. Capture the saved scene again.", 409);
+    return [{ definition: { objects: [{ id: "target", label: "Copper Kettle", kind: "building" }] } }];
+  }),
+}));
 vi.mock("./illustration-keyframe-server", () => ({
   prepareKeyframeInput: vi.fn(async (_passes: unknown, _sources: unknown, _art: unknown, chain?: unknown) => ({ inputs: { image_url: "data:image/png;base64,AA==", keyframe_stage: chain ? "chain" : "first" }, gate_object_id: "target" })),
   keyframeGateBody: vi.fn(async (_passes: unknown, id: string | null, urls: string[]) => id ? { image_urls: urls, box: [0, 0, 8, 8], width: 64, height: 32, label: "building" } : null),
@@ -84,7 +91,7 @@ import { cutLeg, joinLegs } from "./motion-video";
 import sharp from "sharp";
 import { finishKeyframe, prepareKeyframeInput } from "./illustration-keyframe-server";
 import { keyframeArt } from "./illustration-input";
-import { legMove, legSeconds, pathVideoAction, pathVideoBytes, pathVideoLibrary, processNextPathVideo } from "./path-video";
+import { legMove, legSeconds, pathVideoAction, pathVideoBytes, pathVideoLibrary, processNextPathVideo, viewMove, walkVideoAction, walkVideoBytes, walkVideoLibrary } from "./path-video";
 
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const put = (key: string, text: string | Buffer) => { const bytes = Buffer.isBuffer(text) ? text : Buffer.from(text); memory.files.set(key, bytes); return { key, sha256: sha(bytes), bytes: bytes.length }; };
@@ -117,13 +124,13 @@ async function drain(limit = 80) {
   throw new Error("Path video did not settle");
 }
 beforeEach(() => {
-  memory.rows.clear(); memory.files.clear(); memory.tail = Promise.resolve(); memory.stale = false; memory.painted = 0; memory.landings = [100, 200]; memory.keyframes = true; memory.statusDown = false; memory.onSubmit = null;
+  memory.rows.clear(); memory.files.clear(); memory.tail = Promise.resolve(); memory.stale = false; memory.painted = 0; memory.landings = [100, 200]; memory.keyframes = true; memory.statusDown = false; memory.onSubmit = null; memory.historical = [];
   vi.clearAllMocks(); vi.stubGlobal("fetch", provider);
   vi.stubEnv("MODAL_API_URL", "https://backend.test"); vi.stubEnv("NEXT_PUBLIC_WORLD_SCENES", "1"); vi.stubEnv("PATH_VIDEO_ENABLED", "1");
   vi.stubEnv("MAX_DAILY_SPEND", "0"); vi.stubEnv("MAX_SESSION_SPEND", "0"); vi.stubEnv("MOTION_DAILY_CAP_USD", "3");
   store("motion_studies").set("world:study", pathStudy());
   store("illustration_assets").set("world:illustration_a", { _id: "world:illustration_a", id: "illustration_a", session_id: "world", prompt: "Inked stone, warm light" });
-  store("generation_workers").set("worker", { _id: "worker", kind: "place-layout", motion_v1: true, motion_review_v1: true, path_video_v1: true, last_seen: new Date() });
+  store("generation_workers").set("worker", { _id: "worker", kind: "place-layout", motion_v1: true, motion_review_v1: true, path_video_v1: true, path_video_views_v1: true, last_seen: new Date() });
   let painted = 0, legs = 0;
   provider.mockImplementation(async (url: string) => {
     if (url.endsWith("/illustration/keyframe-capabilities")) return Response.json({ enabled: memory.keyframes, model: KEYFRAME_MODEL, reservation: memory.keyframes ? .1 : 0, parameters: { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v1" } });
@@ -247,6 +254,66 @@ it.each(["retry", "capped"])("checks every landing, with exactly one separately 
   }
 });
 
+// The gate of each next painted keyframe: "pass", or a failure at this IoU.
+function gates(...results: ("pass" | number)[]) {
+  const finish = vi.mocked(finishKeyframe), real = finish.getMockImplementation()!;
+  for (const r of results) finish.mockImplementationOnce(r === "pass" ? real
+    : async () => ({ bytes: Buffer.from(`kf-${++memory.painted}`), gate: "failed", candidates: [{ iou: r }], chosen: 0, passed: false, sky_pinned: false }) as never);
+}
+const keyframeTry = (k: number) => [job().keyframes[k].result.passed, job().keyframes[k].result.candidates[0]?.iou, String(memory.files.get(job().keyframes[k].file.key))];
+
+it("drops a last keyframe that fails its gate twice: the video ends one leg early and the leg's reservation is released", async () => {
+  gates("pass", .5, .6);
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1 }); expect(job().committed).toBeCloseTo(.7); expect(totals()).toEqual([.7, .7, .7]);
+  expect(calls("/illustration/submit")).toHaveLength(3); expect(calls("/motion/leg")).toHaveLength(1);
+  // The retry is kept (nearer the gate), the first try beside it; the leg into it is never made.
+  expect(job().keyframes[2]).toMatchObject({ retry: "reserved", dropped: true, drop_reason: expect.stringMatching(/ends at the keyframe before it/), other: { result: { passed: false } } });
+  expect(keyframeTry(2)).toEqual([false, .6, "kf-3"]);
+  expect(job().legs[1]).toMatchObject({ dropped: true, attempts: [] }); expect(job().legs[0]).toMatchObject({ chosen: 0, landed: true });
+  expect((await pathVideoBytes("world", "study", "walk")).toString()).toBe(`cut-${(97 / 24).toFixed(3)}-${(72 / 97).toFixed(3)}`);
+  expect((await pathVideoLibrary("world", "study")).jobs[0]).toMatchObject({ keyframes: [{}, { passed: true }, { retry: "reserved", dropped: true, passed: false }], legs: [{ landed: true }, { dropped: true }] });
+  // With one leg, nothing is left to join: the job fails and releases the leg.
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  savedView("v0", eye(0, 1.6, 8, 0)); savedView("v1", eye(0, 1.6, 4, 0));
+  store("path_videos").clear(); store("spend_ledger").clear(); provider.mockClear();
+  gates("pass", .5, .5);
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"]));
+  await drain();
+  expect(job()).toMatchObject({ status: "failed", reservation: .7, error: expect.stringMatching(/dropped keyframe/) }); expect(totals()).toEqual([.3, .3, .3]);
+  expect(calls("/motion/leg")).toHaveLength(0);
+});
+
+it("uses a keyframe whose retry passes, and chains the next one from it", async () => {
+  gates(.4, "pass", "pass"); memory.landings = [200, 0];
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1, committed: 1.1 }); expect(totals()).toEqual([1.1, 1.1, 1.1]);
+  expect(job().keyframes[1]).toMatchObject({ retry: "reserved", other: { result: { passed: false } } }); expect(job().keyframes[1]).not.toHaveProperty("dropped");
+  expect(keyframeTry(1)).toEqual([true, undefined, "kf-2"]);
+  const prepare = vi.mocked(prepareKeyframeInput).mock.calls;
+  expect(prepare).toHaveLength(3); expect(prepare[2]![3]!.image.toString()).toBe("kf-2");
+  expect(calls("/illustration/submit")).toHaveLength(3); expect(calls("/motion/leg")).toHaveLength(2);
+});
+
+it.each(["fails again", "is refused"])("keeps the better try, flagged, when a middle keyframe's retry %s", async kind => {
+  if (kind === "fails again") gates(.5, .3, "pass");
+  else { gates(.5, "pass"); memory.onSubmit = async () => { if (calls("/illustration/submit").length === 2) return Response.json({ detail: "Keyframe generation is not configured" }, { status: 503 }); }; }
+  // Each leg lands on its end keyframe's grey ("kf-3", or "kf-2" when the refused retry painted nothing).
+  memory.landings = [100, kind === "fails again" ? 0 : 200];
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  // The first try is nearer the gate: it is used, and the next keyframe chains from it.
+  const spent = kind === "fails again" ? 1.1 : 1;
+  expect(job()).toMatchObject({ status: "ready", reservation: 1.1 }); expect(job().committed).toBeCloseTo(spent); expect(totals()).toEqual([spent, spent, spent]);
+  expect(keyframeTry(1)).toEqual([false, .5, "kf-1"]);
+  expect(job().keyframes[1]).toMatchObject({ retry: "reserved", result: { gate: "failed" }, other: { attempt: { status: kind === "fails again" ? "ready" : "refused" } } });
+  expect(job().keyframes[1]).not.toHaveProperty("dropped"); expect(job().legs.map((leg: Document) => leg.dropped)).toEqual([undefined, undefined]);
+  expect(vi.mocked(prepareKeyframeInput).mock.calls.at(-1)![3]!.image.toString()).toBe("kf-1");
+  expect(calls("/motion/leg")).toHaveLength(2);
+});
+
 it("cancels before any step and releases the whole reservation", async () => {
   await pathVideoAction("world", "study", await input());
   await pathVideoAction("world", "study", { action: "cancel", id: "walk" });
@@ -358,4 +425,116 @@ it("releases a refused step's cost even when a cancel lands between its claim an
   await drain();
   expect(job()).toMatchObject({ status: "cancelled", committed: 0 }); expect(job().keyframes[1].attempt.status).toBe("refused");
   expect(calls("/illustration/submit")).toHaveLength(1); expect(totals()).toEqual([0, 0, 0]);
+});
+
+// Walk videos: a path video over saved views. Yaw 0 looks toward -z (walk-position).
+function eye(x: number, y: number, z: number, yaw: number) {
+  const camera = new PerspectiveCamera(60, 2, .05, 400); camera.position.set(x, y, z); camera.rotation.set(0, yaw, 0, "YXZ"); camera.updateMatrixWorld(true);
+  return camera.matrixWorld.toArray();
+}
+// Walk views draw the root place at its chunk offset (z = 6 here).
+function savedView(id: string, world_matrix: number[], extra: Record<string, unknown> = {}) {
+  const view = { _id: `world:${id}`, id, session_id: "world", root_place_id: "place", label: id, version: 1, mode: "walk", width: 64, height: 32, floor_id: null,
+    camera: { projection: "perspective", world_matrix, projection_matrix: [], near: .05, far: 400 }, depth: { encoding: "linear_view_z_8bit_near_white", near: 1, far: 90 },
+    normals: "view_space_rgb", surface_policy: "opaque_geometry", objects: [], assets: [], provenance: "client_rendered_saved_geometry", created_at: "", request_sha256: id,
+    sources: [{ scene_id: "scene_place", place_id: "place", revision: 1, x: 0, z: 6, definition_sha256: "def" }],
+    files: Object.fromEntries(["render", "depth", "normals", "objects"].map(pass => [pass, put(`${id}-${pass}`, `${pass}-${id}`)])), ...extra };
+  store("place_views").set(view._id, view); return view;
+}
+const walkInput = async (ids: string[], extra: Record<string, unknown> = {}) => {
+  const library = await walkVideoLibrary("world", "place", ids);
+  return { action: "generate", id: "walk", confirmed: true, view_ids: ids, views_sha256: library.views_sha256, reservation: library.quote?.reservation, prompt: "Inked stone", ...extra };
+};
+
+it("words a walk leg from two cameras: forward on the start heading, a right turn positive, rise in metres", () => {
+  expect(viewMove(eye(0, 1.6, 0, 0), eye(0, 1.6, -4, 0), null)).toEqual({ orbit_deg: 0, turn_deg: 0, rise_m: 0, forward_m: 4, subject: null });
+  expect(viewMove(eye(0, 1.6, 0, 0), eye(0, 1.6, 3, 0), null)).toMatchObject({ forward_m: -3 });
+  // The walk's ArrowRight lowers yaw. That turns the camera toward its own right (+x at yaw 0), and reads as a positive turn.
+  const right = eye(0, 1.6, 0, -Math.PI / 6);
+  expect(-right[8]!).toBeGreaterThan(0);
+  expect(viewMove(eye(0, 1.6, 0, 0), right, null)).toMatchObject({ turn_deg: 30, forward_m: 0 });
+  expect(viewMove(eye(0, 1.6, 0, 0), eye(0, 1.6, 0, Math.PI / 6), null)).toMatchObject({ turn_deg: -30 });
+  // Facing -x: a sideways step is not forward, and a climb is a rise. Pitch does not move the heading.
+  expect(viewMove(eye(0, 1.6, 0, Math.PI / 2), eye(-4, 2.6, 1, Math.PI / 2), "Inn")).toEqual({ orbit_deg: 0, turn_deg: 0, rise_m: 1, forward_m: 4, subject: "Inn" });
+  const pitched = new PerspectiveCamera(); pitched.position.set(0, 1.6, -4); pitched.rotation.set(.5, 0, 0, "YXZ"); pitched.updateMatrixWorld(true);
+  expect(viewMove(eye(0, 1.6, 0, 0), pitched.matrixWorld.toArray(), null)).toMatchObject({ turn_deg: 0, forward_m: 4 });
+});
+
+it("makes one walk video over saved views, chaining each keyframe from the last across chunk offsets", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  memory.landings = [200, 0];
+  // An orbit view draws the place at the origin, so its eye (z = 2) is z = 8 in the walk views' frame.
+  savedView("v0", eye(0, 1.6, 2, 0), { mode: "orbit", sources: [{ scene_id: "scene_place", place_id: "place", revision: 1, x: 0, z: 0, definition_sha256: "def" }] });
+  savedView("v1", eye(0, 1.6, 4, 0)); savedView("v2", eye(0, 1.6, 4, -Math.PI / 6));
+  const ids = ["v0", "v1", "v2"], library = await walkVideoLibrary("world", "place", ids);
+  // 4 m at 1.4 m/s, then a turn on the spot (1.5 s). No accepted artwork at view 0, so all three keyframes are painted from words.
+  expect(library).toMatchObject({ checkpoints: 3, reason: "", quote: { reservation: 1.1, paid_keyframes: 3, appearance: true, legs: [{ seconds: 2.857, duration: 5 }, { seconds: 1.5, duration: 5 }] } });
+  await walkVideoAction("world", "place", await walkInput(ids));
+  expect(totals()).toEqual([1.1, 1.1, 1.1]); expect(calls("/submit")).toHaveLength(0);
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", place_id: "place", view_ids: ids, views_sha256: library.views_sha256, reservation: 1.1, committed: 1.1, prompt: "Inked stone" });
+  expect(job()).not.toHaveProperty("study_id"); expect(totals()).toEqual([1.1, 1.1, 1.1]);
+  expect(job().keyframes.map((k: Document) => k.stage)).toEqual(["first", "chain", "chain"]);
+  expect(calls("/illustration/submit")).toHaveLength(3); expect(calls("/motion/leg")).toHaveLength(2);
+  const prepare = vi.mocked(prepareKeyframeInput).mock.calls;
+  expect(prepare[0]![0].view).toMatchObject({ id: "v0" }); expect(prepare[0]![3]).toBeUndefined();
+  // Keyframe 1 chains from painted keyframe 0, whose camera is moved into view 1's frame (+6 m in z).
+  expect(prepare[1]![3]!.image.toString()).toBe("kf-1"); expect(prepare[1]![3]!.depth.toString()).toBe("depth-v0");
+  expect(prepare[1]![3]!.view.camera.world_matrix[14]).toBeCloseTo(8);
+  expect(prepare[2]![0].view).toMatchObject({ id: "v2" }); expect(prepare[2]![3]!.view.camera.world_matrix[14]).toBeCloseTo(4);
+  // Each leg says the real move, toward the building the end keyframe's gate measured.
+  expect(body("/motion/leg", 0)).toMatchObject({ duration: 5, reservation: .4, move: { orbit_deg: 0, turn_deg: 0, rise_m: 0, forward_m: 4, subject: "Copper Kettle" }, start: { width: 64, height: 32, sha256: sha(Buffer.from("kf-1")) } });
+  expect(body("/motion/leg", 1).move).toMatchObject({ turn_deg: 30, forward_m: 0, subject: "Copper Kettle" });
+  expect(vi.mocked(cutLeg).mock.calls.map(call => call[2])).toEqual([2.857 / (97 / 24), 1.5 / (97 / 24)].map(f => Math.max(.5, f)));
+  expect((await walkVideoBytes("world", "place", "walk")).length).toBeGreaterThan(0);
+  expect((await walkVideoLibrary("world", "place", null)).jobs).toMatchObject([{ id: "walk", status: "ready" }]);
+  // A study's path videos do not list it.
+  expect((await pathVideoLibrary("world", "study")).jobs).toEqual([]);
+});
+
+it("starts from view 0's accepted artwork when it has one", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  savedView("v0", eye(0, 1.6, 8, 0), { accepted_illustration_id: "illustration_a", width: 64, height: 32 }); savedView("v1", eye(0, 1.6, 4, 0));
+  store("illustration_assets").set("world:illustration_a", { _id: "world:illustration_a", id: "illustration_a", session_id: "world", prompt: "Inked stone, warm light", ...sourceFile() });
+  expect((await walkVideoLibrary("world", "place", ["v0", "v1"])).quote).toMatchObject({ paid_keyframes: 1, appearance: false, reservation: .5 });
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"], { prompt: "Ignored" }));
+  expect(job()).toMatchObject({ prompt: "Inked stone, warm light", keyframes: [{ stage: "source", file: sourceFile() }, { stage: "chain" }] });
+  await drain();
+  expect(job().status).toBe("ready"); expect(calls("/illustration/submit")).toHaveLength(1);
+  expect(Buffer.from(body("/motion/leg").start.url.split(",")[1], "base64").equals(sourcePng)).toBe(true);
+});
+
+it("counts only live and ready walk videos toward the 20-job cap", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  savedView("v0", eye(0, 1.6, 8, 0)); savedView("v1", eye(0, 1.6, 4, 0));
+  const old = (i: number, status: string) => store("path_videos").set(`world:old${i}`, { _id: `world:old${i}`, id: `old${i}`, session_id: "world", place_id: "place", status,
+    created_at: new Date(0), reservation: 0, committed: 0, keyframes: [], legs: [] });
+  for (let i = 0; i < 20; i++) old(i, ["failed", "cancelled"][i % 2]!);
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"]));
+  expect(job().status).toBe("scheduled");
+  for (let i = 0; i < 19; i++) old(i, ["ready", "running"][i % 2]!);
+  await expect(walkVideoAction("world", "place", await walkInput(["v0", "v1"], { id: "another" }))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/20 walk videos/) });
+});
+
+it("refuses views of another place, historical views, more than 12, and a walk whose geometry changes mid-run", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  for (let i = 0; i < 13; i++) savedView(`v${i}`, eye(0, 1.6, -i, 0));
+  const reason = async (ids: string[]) => (await walkVideoLibrary("world", "place", ids)).reason;
+  expect(await reason(["v0", "v1"])).toBe("");
+  expect(await reason(Array.from({ length: 13 }, (_, i) => `v${i}`))).toMatch(/2 to 12 saved views/);
+  expect(await reason(["v0", "v0"])).toMatch(/2 to 12 saved views/);
+  store("place_views").get("world:v1")!.root_place_id = "other";
+  expect(await reason(["v0", "v1"])).toMatch(/of this place/);
+  store("place_views").get("world:v1")!.root_place_id = "place"; memory.historical = ["v1"];
+  expect(await reason(["v0", "v1"])).toMatch(/Capture the saved scene again/);
+  await expect(walkVideoAction("world", "place", await walkInput(["v0", "v1"], { reservation: .6 }))).rejects.toMatchObject({ status: 409 });
+  expect(totals()).toEqual([]); expect(store("path_videos").size).toBe(0);
+  // Geometry that changes after scheduling stops the job before its next paid step and releases the rest.
+  memory.historical = [];
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"]));
+  memory.historical = ["v1"];
+  await drain();
+  expect(job()).toMatchObject({ status: "failed", committed: .1 }); expect(calls("/illustration/submit")).toHaveLength(1); expect(totals()).toEqual([.1, .1, .1]);
+  vi.stubEnv("PATH_VIDEO_ENABLED", "0");
+  await expect(walkVideoLibrary("world", "place", null)).rejects.toMatchObject({ status: 404 });
 });

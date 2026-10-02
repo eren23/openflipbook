@@ -58,12 +58,14 @@ const unproject = (p: number[], nx: number, ny: number, z: number) => {
 
 // ponytail: tunable. Over this many B pixels per A pixel along some direction,
 // A saw the surface at a grazing angle (or from much farther): its paint arrives
-// stretched into stripes, and the error compounds down a chain, so B paints it.
-// The 2x2 splat stays gap-free up to 2x. On the research pair (28 degrees,
-// 960 -> 832 px) the grazing back roof measures over 3x, the far ground up to
-// about 1.5x, and almost nothing lies between, so 1.6 is not a fine balance.
+// stretched and soft, and the error compounds down a chain, so B paints it.
+// On the research pair (28 degrees, 960 -> 832 px) the grazing back roof and
+// gable measure over 4x and the ground 0.8-1.6x (within 1% of the exact plane
+// value). Only 1.3% of geometry lies between 1.65 and 4, so 1.6 cuts the far
+// ground at the frame edge; raise it into that gap if the cut shows.
 export const WARP_MAX_MAGNIFICATION = 1.6;
-const MAGNIFICATION_STEP = 8;
+// Secant and smoothing runs, in B pixels: a long run averages out 8-bit depth stairs.
+const DEPTH_RUN = 8;
 
 /** Sum of `mask` over the (2r+1)^2 window at each pixel, clipped to the frame. */
 function boxSum(mask: Uint8Array, width: number, height: number, r: number) {
@@ -78,15 +80,42 @@ function boxSum(mask: Uint8Array, width: number, height: number, r: number) {
 }
 
 /**
- * Warp A's accepted picture into camera B. Each A pixel is unprojected with
- * A's depth and matrices, projected into B, and splatted 2x2. A splat only
- * lands where B's depth agrees within 0.35 m + 2% (otherwise B sees another
- * surface there); a point that falls inside the pixel beats a neighbour's
- * splat, then the nearer point wins. A splat whose source is magnified past
- * `maxMagnification` is dropped (see WARP_MAX_MAGNIFICATION). Cracks with 4+
- * valid neighbours take their mean, and below 60% coverage of B's geometry
- * in a 9x9 window the warp is not evidence (grazing surfaces arrive as
- * sparse stripes). B's sky takes A's sky as a vertical gradient.
+ * 8-bit depth is a staircase: unprojected as is, a sloped surface lands in A
+ * in bands, and the texture tears at every step. Each axis in turn takes the
+ * mean over a symmetric run of up to DEPTH_RUN pixels each side (NaN is no
+ * geometry). The run stops where the depth stops being linear by more than two
+ * 8-bit steps (`step` metres), so a plane keeps its slope and a crease or a
+ * depth edge stays sharp.
+ */
+function smoothDepth(z: Float64Array, width: number, height: number, step: number) {
+  let out = z;
+  for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+    const src = out;
+    out = new Float64Array(z.length).fill(NaN);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const t = y * width + x;
+      if (Number.isNaN(z[t]!)) continue;
+      let sum = src[t]!, count = 1;
+      for (let k = 1; k <= DEPTH_RUN; k++) {
+        const x0 = x - dx * k, y0 = y - dy * k, x1 = x + dx * k, y1 = y + dy * k, p = y0 * width + x0, q = y1 * width + x1;
+        if (x0 < 0 || y0 < 0 || x1 >= width || y1 >= height || !(Math.abs(z[p]! + z[q]! - 2 * z[t]!) <= 2 * step)) break;
+        sum += src[p]! + src[q]!; count += 2;
+      }
+      out[t] = sum / count;
+    }
+  }
+  return out;
+}
+
+/**
+ * Warp A's accepted picture into camera B, backward: each B pixel with
+ * geometry is unprojected with B's smoothed depth and matrices, projected
+ * into A, and samples A's picture bilinearly over the taps on the same
+ * surface. Every B pixel reads A once, so a chain does not alias. A pixel is
+ * trusted only when it lands inside A's frame, A's depth there (nearest pixel)
+ * agrees within 0.35 m + 2% (otherwise A saw another surface), and one A pixel there covers at most
+ * `maxMagnification` B pixels (see WARP_MAX_MAGNIFICATION). B's sky takes A's
+ * sky as a vertical gradient.
  */
 export function warpKeyframe(
   a: { view: KeyframeView; image: Uint8Array; depth: Uint8Array },
@@ -98,82 +127,88 @@ export function warpKeyframe(
   rgba(b.render, w, h, "Keyframe B render"); rgba(b.depth, w, h, "Keyframe B depth");
   const Ma = a.view.camera.world_matrix, Pa = a.view.camera.projection_matrix;
   const Mb = b.view.camera.world_matrix, Pb = b.view.camera.projection_matrix;
-  const zB = new Float64Array(n), geometry = new Uint8Array(n);
-  for (let t = 0; t < n; t++) if (b.depth[t * 4]) { zB[t] = distance(b.view, b.depth[t * 4]!); geometry[t] = 1; }
-
-  const source = new Int32Array(n).fill(-1), sourceZ = new Float64Array(n), inside = new Uint8Array(n);
-  const fx = new Float32Array(wa * ha).fill(NaN), fy = new Float32Array(wa * ha).fill(NaN);
   let px = 0, py = 0, pz = 0, points = 0;
   for (let v = 0; v < ha; v++) for (let u = 0; u < wa; u++) {
-    const q = v * wa + u, byte = a.depth[q * 4]!;
+    const byte = a.depth[(v * wa + u) * 4]!;
     if (!byte) continue;
     const z = -distance(a.view, byte), [x, y] = unproject(Pa, (u + 0.5) / wa * 2 - 1, 1 - (v + 0.5) / ha * 2, z);
     const [wx, wy, wz] = toWorld(Ma, x, y, z);
     px += wx; py += wy; pz += wz; points++;
-    const [bx, by, bz] = toCamera(Mb, wx, wy, wz), d = -bz;
-    if (d <= b.view.camera.near) continue;
-    const [nx, ny] = project(Pb, bx, by, bz);
-    fx[q] = (nx + 1) / 2 * w; fy[q] = (1 - ny) / 2 * h;
-    const ix = Math.floor(fx[q]!), iy = Math.floor(fy[q]!);
-    for (let k = 0; k < 4; k++) {
-      const tx = ix + (k & 1), ty = iy + (k >> 1);
-      if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
-      const t = ty * w + tx, centre = k === 0 ? 1 : 0;
-      if (!geometry[t] || Math.abs(d - zB[t]!) > 0.35 + 0.02 * zB[t]!) continue;
-      if (source[t]! >= 0 && (centre < inside[t]! || (centre === inside[t] && d >= sourceZ[t]!))) continue;
-      source[t] = q; sourceZ[t] = d; inside[t] = centre;
-    }
   }
   if (!points) throw new Error("Keyframe A depth has no geometry");
 
-  // Local magnification of A pixel q in B: the largest stretch of the warp's
-  // Jacobian, from secants over up to MAGNIFICATION_STEP pixels along A's axes
-  // (a long secant averages out 8-bit depth stairs). A walk stops before a
-  // depth edge (one step over twice the limit) and each axis keeps its shorter
-  // side, so an edge is not a stretch; with edges on both sides, the edge step counts.
-  const jump = 2 * maxMagnification;
-  const axis = (q: number, du: number, dv: number): [number, number] => {
-    const u = q % wa, v = (q - u) / wa;
-    let best: [number, number] = [0, 0], length = Infinity, edge = 0;
-    for (const s of [1, -1]) {
-      let end = q, j = 0;
-      for (; j < MAGNIFICATION_STEP; j++) {
-        const u2 = u + du * s * (j + 1), v2 = v + dv * s * (j + 1), next = v2 * wa + u2;
-        if (u2 < 0 || v2 < 0 || u2 >= wa || v2 >= ha || Number.isNaN(fx[next]!)) break;
-        const step = Math.hypot(fx[next]! - fx[end]!, fy[next]! - fy[end]!);
-        if (step > jump) { if (!j) edge = step; break; }
-        end = next;
-      }
-      const dx = (fx[end]! - fx[q]!) / j, dy = (fy[end]! - fy[q]!) / j;
-      if (j && dx * dx + dy * dy < length) { best = [dx, dy]; length = dx * dx + dy * dy; }
-    }
-    return length < Infinity ? best : [edge, 0];
-  };
-  const magnification = (q: number) => {
-    const [p, r] = axis(q, 1, 0), [s, t] = axis(q, 0, 1);
-    const f = p * p + r * r + s * s + t * t, det = p * t - r * s;
-    return Math.sqrt((f + Math.sqrt(Math.max(0, f * f - 4 * det * det))) / 2);
-  };
-  for (let t = 0; t < n; t++) if (source[t]! >= 0 && magnification(source[t]!) > maxMagnification) source[t] = -1;
-
-  const out = new Uint8Array(n * 4), valid = new Uint8Array(n);
-  for (let t = 0; t < n; t++) if (source[t]! >= 0) { out.set(a.image.subarray(source[t]! * 4, source[t]! * 4 + 4), t * 4); valid[t] = 1; }
-  for (let pass = 0; pass < 3; pass++) {
-    const grow: [number, number, number, number][] = [];
-    for (let t = 0; t < n; t++) {
-      if (valid[t] || !geometry[t]) continue;
-      const x = t % w, y = (t - x) / w;
-      let c = 0, r = 0, g = 0, bl = 0;
-      for (let j = Math.max(0, y - 1); j <= Math.min(h - 1, y + 1); j++) for (let i = Math.max(0, x - 1); i <= Math.min(w - 1, x + 1); i++) {
-        const s = j * w + i;
-        if (valid[s]) { c++; r += out[s * 4]!; g += out[s * 4 + 1]!; bl += out[s * 4 + 2]!; }
-      }
-      if (c >= 4) grow.push([t, r / c, g / c, bl / c]);
-    }
-    for (const [t, r, g, bl] of grow) { out.set([Math.round(r), Math.round(g), Math.round(bl), 255], t * 4); valid[t] = 1; }
+  // Where each B surface point lands in A (pixel units), and whether A saw it:
+  // inside A's frame, with A's depth there (nearest pixel) on the same surface.
+  const zB = new Float64Array(n).fill(NaN);
+  for (let t = 0; t < n; t++) if (b.depth[t * 4]) zB[t] = distance(b.view, b.depth[t * 4]!);
+  const smooth = smoothDepth(zB, w, h, (b.view.depth.far - b.view.depth.near) / 255), fx = new Float64Array(n).fill(NaN), fy = new Float64Array(n).fill(NaN), seen = new Uint8Array(n), dA = new Float64Array(n);
+  const sameSurface = (byte: number, d: number) => byte > 0 && Math.abs(distance(a.view, byte) - d) <= 0.35 + 0.02 * d;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const t = y * w + x, z = -smooth[t]!;
+    if (Number.isNaN(z)) continue;
+    const [cx, cy] = unproject(Pb, (x + 0.5) / w * 2 - 1, 1 - (y + 0.5) / h * 2, z);
+    const [ax, ay, az] = toCamera(Ma, ...toWorld(Mb, cx, cy, z)), d = dA[t] = -az;
+    if (d <= a.view.camera.near) continue;
+    const [nx, ny] = project(Pa, ax, ay, az), u = fx[t] = (nx + 1) / 2 * wa, v = fy[t] = (1 - ny) / 2 * ha;
+    if (!(u >= 0 && v >= 0 && u < wa && v < ha)) continue;
+    if (sameSurface(a.depth[(Math.floor(v) * wa + Math.floor(u)) * 4]!, d)) seen[t] = 1;
   }
-  const covered = boxSum(valid, w, h, 4), surface = boxSum(geometry, w, h, 4);
-  for (let t = 0; t < n; t++) if (valid[t] && covered[t]! < 0.6 * surface[t]!) valid[t] = 0;
+
+  // B pixels per A pixel at B pixel t, along the worst direction: the inverse
+  // of the B -> A Jacobian, from secants over up to DEPTH_RUN pixels along B's
+  // axes. A walk may cross surface A did not see (only positions are used) and
+  // stops where its step into A changes by more than half: a depth edge, a
+  // crease or a fold. Each axis keeps the side with the longer walk, then the
+  // shorter secant, so a neighbouring face does not count. A flipped Jacobian
+  // is a face A sees from behind: A's depth matched it only within tolerance.
+  const axis = (t: number, dx: number, dy: number): [number, number] => {
+    const x = t % w, y = (t - x) / w;
+    let best: [number, number] = [0, 0], run = 0, length = Infinity;
+    for (const s of [1, -1]) {
+      let end = t, j = 0, sx = 0, sy = 0;
+      for (; j < DEPTH_RUN; j++) {
+        const x2 = x + dx * s * (j + 1), y2 = y + dy * s * (j + 1), next = y2 * w + x2;
+        if (x2 < 0 || y2 < 0 || x2 >= w || y2 >= h || Number.isNaN(fx[next]!)) break;
+        const ex = fx[next]! - fx[end]!, ey = fy[next]! - fy[end]!;
+        if (j && (ex - sx) ** 2 + (ey - sy) ** 2 > 0.25 * Math.max(ex * ex + ey * ey, sx * sx + sy * sy)) break;
+        sx = ex; sy = ey; end = next;
+      }
+      const ex = (fx[end]! - fx[t]!) / (s * j), ey = (fy[end]! - fy[t]!) / (s * j);
+      if (j > run || (j && j === run && ex * ex + ey * ey < length)) { best = [ex, ey]; run = j; length = ex * ex + ey * ey; }
+    }
+    return best;
+  };
+  const magnification = (t: number) => {
+    const [p, r] = axis(t, 1, 0), [s, q] = axis(t, 0, 1);
+    const f = p * p + r * r + s * s + q * q, det = p * q - r * s;
+    return det > 0 ? Math.sqrt((f + Math.sqrt(Math.max(0, f * f - 4 * det * det))) / 2) / det : Infinity;
+  };
+
+  // Magnification changes slowly across a surface, so where it crosses the
+  // limit, small depth noise would dither the decision into a ragged patchwork
+  // of A's and B's paint. Within 10% of the limit, the majority of A's seen
+  // pixels in the 9x9 window decides.
+  const mag = new Float64Array(n), over = new Uint8Array(n);
+  for (let t = 0; t < n; t++) if (seen[t]) { mag[t] = magnification(t); over[t] = mag[t]! > maxMagnification ? 1 : 0; }
+  const overs = boxSum(over, w, h, 4), seens = boxSum(seen, w, h, 4);
+  const out = new Uint8Array(n * 4), valid = new Uint8Array(n), sum = new Float64Array(4);
+  for (let t = 0; t < n; t++) {
+    if (!seen[t] || (Math.abs(mag[t]! / maxMagnification - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t])) continue;
+    const u = fx[t]!, v = fy[t]!, sx = Math.min(Math.max(u - 0.5, 0), wa - 1), sy = Math.min(Math.max(v - 0.5, 0), ha - 1);
+    const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = Math.min(x0 + 1, wa - 1), y1 = Math.min(y0 + 1, ha - 1), gx = sx - x0, gy = sy - y0;
+    // A tap on another surface (a thin pole's edge against the wall behind it)
+    // gets no weight, so neither surface's paint bleeds across the silhouette.
+    let total = 0; sum.fill(0);
+    for (let k = 0; k < 4; k++) {
+      const q = (k < 2 ? y0 : y1) * wa + (k % 2 ? x1 : x0), weight = (k % 2 ? gx : 1 - gx) * (k < 2 ? 1 - gy : gy);
+      if (!weight || !sameSurface(a.depth[q * 4]!, dA[t]!)) continue;
+      total += weight;
+      for (let c = 0; c < 4; c++) sum[c]! += a.image[q * 4 + c]! * weight;
+    }
+    if (!total) continue;
+    for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(sum[c]! / total);
+    valid[t] = 1;
+  }
 
   // Sky: every B sky pixel takes the mean of A's sky in the proportional row
   // (rows without A sky take the nearest row with it), so a chain keeps one
@@ -198,12 +233,13 @@ export function warpKeyframe(
   const hole = new Uint8Array(n), sky = new Uint8Array(n);
   let holes = 0, surfacePixels = 0;
   for (let t = 0; t < n; t++) {
-    if (geometry[t]) { surfacePixels++; if (valid[t]) continue; }
+    const geometry = b.depth[t * 4]! > 0;
+    if (geometry) { surfacePixels++; if (valid[t]) continue; }
     else {
       const colour = skyColours[Math.floor(t / w)];
       if (colour) { out.set(colour, t * 4); sky[t] = 1; continue; }
     }
-    hole[t] = 1; if (geometry[t]) holes++;
+    hole[t] = 1; if (geometry) holes++;
     out.set(b.render.subarray(t * 4, t * 4 + 4), t * 4);
   }
 

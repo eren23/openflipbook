@@ -18,6 +18,8 @@ import { parseSavedCameraPath } from "./saved-camera-path";
 export type { PlaceViewDoc } from "./place-view-store";
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const bytesHash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+// 20 walk videos of 12 checkpoints each.
+const WALK_CHECKPOINT_VIEWS = 240;
 async function access(sid: string, pid?: string) {
   if (!isSafeId(sid) || pid !== undefined && !isSafeId(pid)) throw new CreatorError("Invalid place identity", 400);
   return requireCreator(sid);
@@ -85,6 +87,12 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
   if (!placeScenesEnabled()) throw new CreatorError("World scenes are not enabled", 404);
   if (!isSafeId(input.id) || typeof input.label !== "string" || input.label.trim().length < 1 || input.label.length > 120) throw new CreatorError("Give this view a name and valid identity", 400);
   const capture = parseCaptureMetadata(input.capture), request_sha256 = hash(input), key = `${sid}:${input.id}`;
+  // Walk-video checkpoints are saved views with their own cap, outside the
+  // user's 50 views, the library list and the export (walk videos are not exported).
+  const checkpoint = input.walk_checkpoint === true;
+  if (input.walk_checkpoint !== undefined && (!checkpoint || capture.mode !== "walk")) throw new CreatorError("Walk checkpoints must be walk views", 400);
+  const [kind, limit, limitMessage] = checkpoint ? [{ walk_checkpoint: true as const }, WALK_CHECKPOINT_VIEWS, `This place already has ${WALK_CHECKPOINT_VIEWS} walk checkpoint views`]
+    : [{ walk_checkpoint: { $exists: false } }, 50, "This place already has 50 saved views"];
   const prior = await db.collection<PlaceViewDoc>("place_views").findOne({ _id: key });
   if (prior) { if (prior.request_sha256 !== request_sha256 || prior.root_place_id !== pid) throw new CreatorError("View identity already used", 409); return { id: prior.id }; }
   const refreshedFrom = input.refreshed_from;
@@ -93,19 +101,29 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
     if (!isSafeId(refreshedFrom) || refreshedFrom === input.id) throw new CreatorError("Invalid source camera view", 400);
     const source = await database.collection<PlaceViewDoc>("place_views").findOne({ _id: `${sid}:${refreshedFrom}`, session_id: sid }, session ? { session } : {});
     if (!source || source.root_place_id !== pid) throw new CreatorError("Source camera view is unavailable", 409);
+    // Checkpoints are not exported, so a refresh history through one could not be imported.
+    if (checkpoint || source.walk_checkpoint) throw new CreatorError("Walk checkpoint views cannot be refreshed", 409);
     if (source.mode !== capture.mode || source.floor_id !== capture.floor_id || source.width !== capture.width || source.height !== capture.height
       || !isDeepStrictEqual(source.camera, capture.camera) || capture.path
       || !capture.sources.some(s => s.place_id === pid && source.sources.some(old => old.place_id === pid && old.scene_id === s.scene_id))) throw new CreatorError("Refreshed view must retain the exact saved camera and framing", 409);
   };
   await validateRefresh(db);
-  if (await db.collection<PlaceViewDoc>("place_views").countDocuments({ session_id: sid, root_place_id: pid }) >= 50) throw new CreatorError("This place already has 50 saved views", 409);
   const sources = await currentSources(db, sid, pid, capture.mode);
   if (capture.path && sources.some(source => source.definition.material_pack)) throw new CreatorError("Legacy atlas camera paths require immutable atlas provenance before saving", 409);
   if (!isDeepStrictEqual([...capture.sources].sort((a, b) => a.place_id.localeCompare(b.place_id)), sources)) throw new CreatorError("View geometry changed. Capture the saved scene again.", 409);
   if (capture.floor_id && (capture.mode === "walk" || !sources.some(s => s.definition.objects.some(o => o.structure?.floors.some(f => f.id === capture.floor_id))))) throw new CreatorError("View floor is unavailable", 400);
   const ids = sources.flatMap(s => s.definition.objects.map(o => o.id)).sort();
   if (new Set(ids).size !== ids.length || !isDeepStrictEqual(capture.objects, ids.map((object_id, i) => ({ object_id, rgb: objectMaskColor(i) })))) throw new CreatorError("View object mask identities differ", 400);
-  const binding = await bindings(db, sid, sources), decoded = await decodeViewPasses(capture);
+  const binding = await bindings(db, sid, sources);
+  // Each "Make walk video" saves its checkpoints again: a current checkpoint at
+  // the same camera and size is reused, so previews do not fill the cap.
+  if (checkpoint) {
+    const same = (await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: pid, walk_checkpoint: true, width: capture.width, height: capture.height }).toArray())
+      .find(v => isDeepStrictEqual(v.camera, capture.camera) && isDeepStrictEqual({ sources: v.sources, assets: v.assets }, binding));
+    if (same) return { id: same.id };
+  }
+  if (await db.collection<PlaceViewDoc>("place_views").countDocuments({ session_id: sid, root_place_id: pid, ...kind }) >= limit) throw new CreatorError(limitMessage, 409);
+  const decoded = await decodeViewPasses(capture);
   const files = {} as PlaceViewDoc["files"];
   for (const pass of VIEW_PASSES) {
     const bytes = decoded[pass], sha256 = bytesHash(bytes), path = `${sid}/views/${input.id}/${pass}-${sha256}.png`;
@@ -113,14 +131,14 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
   }
   const { sources: _sources, passes: _passes, ...metadata } = capture;
   const doc: PlaceViewDoc = { ...metadata, ...binding, _id: key, id: input.id as string, session_id: sid, root_place_id: pid,
-    label: input.label.trim(), request_sha256, created_at: new Date().toISOString(), files, provenance: "client_rendered_saved_geometry", ...(typeof refreshedFrom === "string" ? { refreshed_from: refreshedFrom } : {}) };
+    label: input.label.trim(), request_sha256, created_at: new Date().toISOString(), files, provenance: "client_rendered_saved_geometry", ...(checkpoint ? { walk_checkpoint: true as const } : {}), ...(typeof refreshedFrom === "string" ? { refreshed_from: refreshedFrom } : {}) };
   return withDbTransaction(async (db, session) => {
     const col = db.collection<PlaceViewDoc>("place_views"), options = { session };
     const existing = await col.findOne({ _id: key }, options);
     if (existing) { if (existing.request_sha256 !== request_sha256) throw new CreatorError("View identity already used", 409); return { id: existing.id }; }
     await validateRefresh(db, session);
     if (!isDeepStrictEqual(await bindings(db, sid, await currentSources(db, sid, pid, capture.mode, session), session), binding)) throw new CreatorError("View sources changed during storage. Capture again.", 409);
-    if (await col.countDocuments({ session_id: sid, root_place_id: pid }, options) >= 50) throw new CreatorError("This place already has 50 saved views", 409);
+    if (await col.countDocuments({ session_id: sid, root_place_id: pid, ...kind }, options) >= limit) throw new CreatorError(limitMessage, 409);
     // Serialize publication with structural/frame edits, without changing geometry
     // or its revision. Reads alone would permit snapshot-isolation write skew.
     for (const source of sources) await db.collection<SceneDoc>("place_scenes").updateOne({ _id: `${sid}:${source.place_id}`, revision: source.revision }, { $inc: { view_capture_fence: 1 } }, options);
@@ -129,7 +147,7 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
   });
 }
 export async function placeViewLibrary(sid: string, pid: string) {
-  const db = await access(sid, pid), docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: pid }).sort({ created_at: -1 }).limit(50).toArray();
+  const db = await access(sid, pid), docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: pid, walk_checkpoint: { $exists: false } }).sort({ created_at: -1 }).limit(50).toArray();
   const cache = new Map<string, Awaited<ReturnType<typeof bindings>> | null>(), views: SavedPlaceView[] = [];
   for (const doc of docs) {
     if (!cache.has(doc.mode)) {
@@ -162,7 +180,7 @@ export interface PlaceViewExportSnapshot {
 // after the transaction, so slow storage cannot hold a database snapshot open.
 export async function snapshotPlaceViewExports(db: Db, sid: string, session: ClientSession): Promise<PlaceViewExportSnapshot[]> {
   const options = { session };
-  const docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid }, options).sort({ created_at: 1 }).limit(501).toArray();
+  const docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, walk_checkpoint: { $exists: false } }, options).sort({ created_at: 1 }).limit(501).toArray();
   if (docs.length > 500 || docs.reduce((sum, d) => sum + VIEW_PASSES.reduce((n, pass) => n + d.files[pass].bytes, 0), 0) > 64 * 1024 * 1024) throw new CreatorError("Camera view export exceeds 500 views or 64 MiB", 413);
   const cache = new Map<string, Awaited<ReturnType<typeof bindings>> | null>(), result: PlaceViewExportSnapshot[] = [];
   for (const doc of docs) {

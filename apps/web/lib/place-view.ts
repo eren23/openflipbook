@@ -34,8 +34,12 @@ export interface SavedPlaceView extends Omit<ViewCapture, "passes" | "sources"> 
   provenance: "client_rendered_saved_geometry";
   accepted_illustration_id?: string;
   refreshed_from?: string;
+  // Saved by "Make walk video": outside the 50-view limit, the library list and export.
+  walk_checkpoint?: true;
 }
 export type RefreshPlaceView = (view: SavedPlaceView) => Promise<ViewCapture>;
+// The live viewport's capture. In the Walk view, `pose` captures that eye pose instead (walk-route WalkCheckpoint).
+export type CapturePlaceView = (pose?: { x: number; z: number; yaw: number }) => ViewCapture;
 export interface PlaceViewExport {
   view: SavedPlaceView;
   capture_metadata?: Record<string, unknown>;

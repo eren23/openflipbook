@@ -9,6 +9,8 @@ vi.mock("next/dynamic",()=>({default:()=>function Viewport(props:{selected:strin
   return <div data-testid="viewport" data-selected={selected??""} data-mode={mode} data-floor={floorId??""} data-focus={focusKey}/>;
 }}));
 vi.mock("@/hooks/useWalkPosition",()=>({useWalkPosition:()=>({ready:true,getPose:()=>null,record:()=>{},flush:()=>{},state:{status:"idle"},retry:()=>{}})}));
+const walkVideo=vi.hoisted(()=>({props:null as {route?:unknown;placeId?:string}|null}));
+vi.mock("./path-video",()=>({default:()=>null,WalkVideo:(props:{route:unknown;placeId:string})=>{walkVideo.props=props;return null;}}));
 vi.mock("./mesh-generator",()=>({default:()=>null}));
 vi.mock("./place-builder",()=>({default:()=>null}));
 vi.mock("./adjacent-place-editor",()=>({default:()=>null}));
@@ -27,7 +29,7 @@ const definition={...emptyPlaceScene(),version:2 as const,objects:[inn,shop,{...
 const scene={id:"scene",session_id:"world",place_id:"place",revision:1,source_node_id:"street",source_image_key:"street.png",updated_at:new Date(0).toISOString(),definition};
 let connectionError=false;
 beforeEach(()=>{
-  connectionError=false;window.history.replaceState(null,"","/sketch/world?world=world&place=place&object=inn&view=orbit&camera=shot");
+  connectionError=false;walkVideo.props=null;window.history.replaceState(null,"","/sketch/world?world=world&place=place&object=inn&view=orbit&camera=shot");
   vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:!url.endsWith("connections")||!connectionError,json:async()=>url.endsWith("connections")?connectionError?{error:"Missing connection"}:{network:null}:{session_id:"world",place_id:"place",source_node_id:"street",source_url:"/street.png",initial:definition,scene,history:[scene],drawing:null}})));
 });
 async function ready(){await screen.findByRole("button",{name:"Inn building"});await waitFor(()=>expect(screen.getAllByTestId("viewport").length).toBeGreaterThan(0));}
@@ -77,6 +79,8 @@ it("walks a route handed over from /play, starting once at its first point",asyn
   render(<WorldEditor/>);await ready();expect(screen.getByTestId("viewport").getAttribute("data-mode")).toBe("walk");
   const w=definition.width/2,d=definition.depth/2;
   expect(viewport.props.route).toEqual([{x:w-2,z:d+1,yaw:0.5},{x:w+3,z:d+1,yaw:-1.57}]);
+  // "Make walk video" gets the same route.
+  expect(walkVideo.props).toMatchObject({placeId:"place",route:viewport.props.route});
   expect(viewport.props.getWalkPose!()).toEqual({version:1,place_id:"place",scene_revision:1,position:{x:w-2,y:0.82,z:d+1},yaw:0.5,pitch:0});
   expect(viewport.props.getWalkPose!()).toBeNull();
   // Consumed: a later reload (save, fork) must not teleport back to the start.
