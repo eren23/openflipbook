@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import PathVideo from "./path-video";
+import PathVideo, { WalkVideo } from "./path-video";
+import type { ViewCapture } from "@/lib/place-view";
 const job = { id: "walk", status: "ready", reservation: 1.4, committed: 1.4, created_at: "", media: { width: 64, height: 32 },
   keyframes: [{ time: 0, stage: "source", status: "ready" }, { time: 1, stage: "chain", status: "ready", gate: "failed", passed: false }],
   legs: [{ seconds: 6, duration: 8, landed: false, attempts: [{ status: "ready", land: 1, snap: 2, ok: false }, { status: "ready", land: .5, snap: 3, ok: false }] }] };
@@ -35,4 +36,39 @@ it("asks no appearance words when every paid keyframe chains from the accepted a
   // Consent resets when the quote arrives, so tick it again until it holds.
   const consent = screen.getByRole("checkbox", { name: "Reserve $0.74 for 1 keyframes and 1 legs" }) as HTMLInputElement;
   await waitFor(() => { if (!consent.checked) fireEvent.click(consent); expect((generate as HTMLButtonElement).disabled).toBe(false); });
+});
+it("makes a walk video: a saved checkpoint view at each eye pose of the route, then one priced job over them", async () => {
+  const empty = { views_sha256: "", checkpoints: 0, quote: null, reason: "", jobs: [] };
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/places/place/views") && init?.method === "POST") return Response.json({ id: JSON.parse(String(init.body)).id });
+    if (url.includes("/walk-videos?views=")) return Response.json({ ...empty, views_sha256: "pinned", checkpoints: 3,
+      quote: { reservation: 1.1, paid_keyframes: 3, appearance: true, keyframe_reservation: .1, legs: [{ seconds: 2.857, duration: 5, reservation: .4 }, { seconds: 2.857, duration: 5, reservation: .4 }] } });
+    if (url.endsWith("/walk-videos") && init?.method === "POST") return Response.json({ job: { id: "walk" } });
+    return Response.json(empty);
+  });
+  const capture = vi.fn((pose?: { x: number; z: number; yaw: number }) => ({ mode: "walk", pose }) as unknown as ViewCapture);
+  render(<WalkVideo sessionId="world" placeId="place" route={[{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -8, yaw: 0 }]} capture={capture} disabled={false}/>);
+  fireEvent.click(await screen.findByRole("button", { name: "Make walk video" }));
+  const generate = await screen.findByRole("button", { name: "Generate walk video" });
+  expect(capture.mock.calls.map(([pose]) => [pose!.x, pose!.z, pose!.yaw])).toEqual([[0, 0, 0], [0, -4, 0], [0, -8, 0]]);
+  const posts = (suffix: string) => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && init?.method === "POST").map(([, init]) => JSON.parse(String(init!.body)));
+  const saved = posts("/places/place/views"), ids = saved.map(view => view.id);
+  expect(saved.map(view => [view.label, view.walk_checkpoint, view.capture.pose.z])).toEqual([["Walk checkpoint 1/3", true, 0], ["Walk checkpoint 2/3", true, -4], ["Walk checkpoint 3/3", true, -8]]);
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith(`/walk-videos?views=${encodeURIComponent(ids.join(","))}`))).toBe(true);
+  expect(screen.queryByRole("button", { name: "Make walk video" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Path video appearance" }), { target: { value: "Inked stone" } });
+  const consent = screen.getByRole("checkbox", { name: "Reserve $1.10 for 3 keyframes and 2 legs" }) as HTMLInputElement;
+  await waitFor(() => { if (!consent.checked) fireEvent.click(consent); expect((generate as HTMLButtonElement).disabled).toBe(false); });
+  fireEvent.click(generate);
+  await waitFor(() => expect(posts("/walk-videos")).toHaveLength(1));
+  expect(posts("/walk-videos")[0]).toMatchObject({ action: "generate", confirmed: true, prompt: "Inked stone", view_ids: ids, views_sha256: "pinned", reservation: 1.1 });
+});
+it("refuses a walk route that needs more than 12 checkpoints before saving anything", async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ views_sha256: "", checkpoints: 0, quote: null, reason: "", jobs: [] }));
+  const capture = vi.fn(() => ({}) as ViewCapture);
+  render(<WalkVideo sessionId="world" placeId="place" route={[{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -60, yaw: 0 }]} capture={capture} disabled={false}/>);
+  fireEvent.click(await screen.findByRole("button", { name: "Make walk video" }));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/16 checkpoints, more than 12/);
+  expect(capture).not.toHaveBeenCalled(); expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });

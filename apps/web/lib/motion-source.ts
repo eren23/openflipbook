@@ -21,7 +21,8 @@ export async function currentMotionStudy(db: Db, sid: string, id: string, sha?: 
   if (!view || (view.accepted_illustration_id ?? null) !== study.source.image.asset_id) throw new CreatorError("Accepted motion source changed", 409);
   return { study, view };
 }
-export async function motionSourceImage(study: MotionStudyDoc) {
+// A study's source, or (path videos) a saved view's accepted artwork at that view's size.
+export async function motionSourceImage(study: { source: { image: { key: string; sha256: string; bytes: number }; view: { width: number; height: number } } }) {
   const source = study.source.image, stored = await getStoredBytes(source.key, AbortSignal.timeout(30_000));
   if (!stored || stored.bytes.length !== source.bytes || createHash("sha256").update(stored.bytes).digest("hex") !== source.sha256)
     throw new CreatorError("Motion source bytes unavailable or corrupted", 503);
