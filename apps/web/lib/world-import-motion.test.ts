@@ -11,7 +11,7 @@ import JSZip from "jszip";
 import { PerspectiveCamera, Vector3 } from "three";
 import { emptyPlaceScene, newComponent } from "./place-scene";
 import { orbitPosition } from "./camera-path";
-import { prepareCameraMotion } from "./camera-motion";
+import { prepareCameraMotion, H3_CAMERA_ADAPTER_V1 } from "./camera-motion";
 import { measureMotionLandmarks } from "./camera-motion-reference";
 import { VIEW_PASSES, objectMaskColor, type ViewCapture, type PlaceViewExport } from "./place-view";
 import { wirePlaceView } from "./place-view-server";
@@ -25,7 +25,7 @@ import type { MotionFile } from "./motion-job";
 import { motionVideoToolsAvailable, silentMotionVideo } from "./motion-video";
 import { motionComparisonPlan, evaluateMotionReview, type MotionReviewInput } from "./motion-comparison";
 
-async function fixture() {
+async function fixture(adapter?: typeof H3_CAMERA_ADAPTER_V1) {
   const definition = { ...emptyPlaceScene(), objects: [{ ...newComponent("building", 8, 10), id: "inn" }, { ...newComponent("well", 12, 15), id: "well" }, { ...newComponent("bench", 14, 12), id: "bench" }] };
   const date = new Date(0).toISOString(), scene = { id: "scene", place_id: "place", session_id: "source", revision: 1, source_node_id: null, source_image_key: null, updated_at: date, definition };
   const path = { version: 1 as const, duration: 6, time: 0, pivot: [8, definition.objects[0]!.height / 2, 10] as [number, number, number], target_id: "inn",
@@ -42,7 +42,7 @@ async function fixture() {
   const { passes: _passes, sources: _sources, ...metadata } = capture;
   const view: PlaceViewDoc = { ...metadata, _id: "source:view", session_id: "source", id: "view", label: "Inn arc", created_at: date, root_place_id: "place", request_sha256: "a".repeat(64),
     sources: [{ scene_id: "scene", place_id: "place", revision: 1, x: 0, z: 0, definition_sha256: viewHash(definition) }], assets: [], files, provenance: "client_rendered_saved_geometry" };
-  const preparation = prepareCameraMotion(capture), source = { view_id: view.id, view_input_sha256: view.request_sha256,
+  const preparation = prepareCameraMotion(capture, adapter), source = { view_id: view.id, view_input_sha256: view.request_sha256,
     image: { kind: "render", asset_id: null, sha256, width: view.width, height: view.height }, registration: "saved_camera_dependency_not_visual_attestation", sources: view.sources, assets: [] };
   const measurements = measureMotionLandmarks(await sharp(bytes).ensureAlpha().raw().toBuffer(), view.width, view.height, view.objects);
   const study: MotionStudyDoc = { _id: "source:study", id: "study", session_id: "source", view_id: view.id, label: "Arc reference", created_at: date, request_sha256: "b".repeat(64),
@@ -74,6 +74,13 @@ it("round-trips actual PNGs, reference cameras and source bindings without jobs 
   expect(restored.restored_from).toMatchObject({ session_id: "source", study_id: "study", study_sha256: viewHash(original), provenance: "user_supplied_archive" });
   expect(new Set(plan.uploads.map(u => u.key)).size).toBe(1); expect(plan.uploads.every(u => u.bytes.equals(f.bytes))).toBe(true);
   expect(Object.keys(plan.records).some(key => /jobs|reservation|workers|owners/.test(key))).toBe(false);
+});
+it("still imports a study saved under the v1 camera adapter", async () => {
+  const f = await fixture(H3_CAMERA_ADAPTER_V1), plan = await prepareWorldImport(await readWorldArchive(await f.zip()), "destination");
+  const restored = plan.records.motion_studies![0] as MotionStudyDoc;
+  expect(restored.preparation).toEqual(f.snapshot.studies[0]!.preparation);
+  expect(restored.preparation.adapter).toBe(H3_CAMERA_ADAPTER_V1);
+  expect(motionComparisonPlan(restored).version).toBe("visible-bounds-human-v1");
 });
 it("keeps historical reference geometry and missing client preflight without inventing current evidence", async () => {
   const f = await fixture(); delete f.snapshot.studies[0]!.client_preflight;

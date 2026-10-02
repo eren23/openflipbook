@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PerspectiveCamera, Vector3 } from "three";
 import { orbitPosition, sampleCameraPath } from "./camera-path";
-import { prepareCameraMotion, H3_CAMERA_MODEL } from "./camera-motion";
+import { prepareCameraMotion, h3SentDistance, H3_CAMERA_MODEL, H3_CAMERA_ADAPTER_V1, H3_LIMITS, H3_NOTES } from "./camera-motion";
 import { emptyPlaceScene, newComponent } from "./place-scene";
 import type { ViewCapture } from "./place-view";
 
@@ -27,14 +27,17 @@ function recapture(c: ViewCapture) {
 }
 
 describe("source-bound H3 camera preparation", () => {
-  it("maps source-relative angles and distance, without claiming calibration or sending geometry", () => {
-    const c = fixture(), before = structuredClone(c), plan = prepareCameraMotion(c);
+  it("keeps the v1 hypothesis output byte-for-byte for archived studies", () => {
+    const c = fixture(), before = structuredClone(c), plan = prepareCameraMotion(c, H3_CAMERA_ADAPTER_V1);
     expect(plan.model).toBe(H3_CAMERA_MODEL);
+    expect(plan.adapter).toBe(H3_CAMERA_ADAPTER_V1);
     expect(plan.calibration).toBe("unverified");
+    expect(Object.keys(plan)).toEqual(["model", "adapter", "calibration", "schema", "parameters", "mapping", "path", "reference_cameras", "checks_required"]);
     expect(plan.parameters.camera_trajectory).toEqual([
       { time: 0, azimuth: 0, elevation: 0, distance: 1 },
       { time: 1, azimuth: 20, elevation: 10, distance: 0.5 },
     ]);
+    expect(plan.reference_cameras.map(frame => frame.time)).toEqual([0, 0.25, 0.5, 0.75, 1]);
     expect(plan.parameters).not.toHaveProperty("end_image_url");
     expect(plan.parameters).not.toHaveProperty("depth");
     expect(plan.parameters).not.toHaveProperty("image_url");
@@ -43,11 +46,59 @@ describe("source-bound H3 camera preparation", () => {
     plan.path.keyframes[0]!.azimuth = 50;
     expect(c).toEqual(before);
   });
+  it("compensates the measured H3 push gain and labels what arrives", () => {
+    const c = fixture(); c.path!.keyframes[1]!.distance = 15.8;
+    const plan = prepareCameraMotion(c);
+    expect(plan.adapter).toBe("h3-source-relative-v2-measured");
+    expect(plan.calibration).toBe("measured");
+    expect(plan.parameters.camera_trajectory[0]).toEqual({ time: 0, azimuth: 0, elevation: 0, distance: 1 });
+    expect(plan.parameters.camera_trajectory[1]).toMatchObject({ time: 1, azimuth: 20, elevation: 10 });
+    expect(plan.parameters.camera_trajectory[1]!.distance).toBeCloseTo(0.65, 12);
+    expect(plan.limit_issues).toEqual([]);
+    expect(plan.calibration_notes).toEqual([H3_NOTES.azimuth, H3_NOTES.elevation]);
+    expect(h3SentDistance(0.3)).toBe(0.2);
+    expect(h3SentDistance(1)).toBe(1);
+    c.path!.keyframes[1]!.distance = 24;
+    expect(prepareCameraMotion(c).parameters.camera_trajectory[1]!.distance).toBe(1.2);
+    expect(prepareCameraMotion(c).calibration_notes).toContain(H3_NOTES.pull_back);
+    c.path!.keyframes[1]!.distance = 6;
+    expect(prepareCameraMotion(c).calibration_notes).toContain(H3_NOTES.push_floor);
+  });
+  it("flags moves beyond the measured H3 turn and rise limits", () => {
+    const c = fixture(); c.path!.keyframes[1]!.distance = 18;
+    c.path!.keyframes[1]!.azimuth = 200; c.path!.keyframes[1]!.elevation = 35;
+    expect(prepareCameraMotion(c).limit_issues).toEqual([]);
+    c.path!.keyframes[1]!.azimuth = 201; c.path!.keyframes[1]!.elevation = 36;
+    expect(prepareCameraMotion(c).limit_issues).toHaveLength(2);
+    expect(H3_LIMITS).toEqual({ distance_gain: 0.6, min_distance: 0.2, max_azimuth_deg: 30, max_elevation_deg: 15 });
+  });
   it("preserves negative motion and authored full turns instead of wrapping", () => {
     const c = fixture(); c.path!.keyframes[1]!.azimuth = -170;
+    expect(prepareCameraMotion(c, H3_CAMERA_ADAPTER_V1).parameters.camera_trajectory[1]!.azimuth).toBe(-340);
     expect(prepareCameraMotion(c).parameters.camera_trajectory[1]!.azimuth).toBe(-340);
+    expect(prepareCameraMotion(c).limit_issues).toHaveLength(1);
     c.path!.keyframes[1]!.azimuth = 530;
-    expect(prepareCameraMotion(c).parameters.camera_trajectory[1]!.azimuth).toBe(360);
+    expect(prepareCameraMotion(c, H3_CAMERA_ADAPTER_V1).parameters.camera_trajectory[1]!.azimuth).toBe(360);
+    c.path!.keyframes[1]!.azimuth = 150;
+    expect(prepareCameraMotion(c).parameters.camera_trajectory[1]!.azimuth).toBe(-20);
+  });
+  it("refuses a v2 path that needs more than 12 keyframe checkpoints", () => {
+    const c = fixture(); c.path!.keyframes[0]!.elevation = 0; c.path!.keyframes[1]!.elevation = 0;
+    c.path!.keyframes[1]!.azimuth = -170; recapture(c);
+    expect(() => prepareCameraMotion(c)).toThrow(/12 keyframe checkpoints/);
+    expect(prepareCameraMotion(c, H3_CAMERA_ADAPTER_V1).reference_cameras).toHaveLength(5);
+  });
+  it("adds keyframe checkpoints only where the path needs them", () => {
+    const c = fixture(); c.path!.keyframes[1]!.distance = 15;
+    const v1 = prepareCameraMotion(c, H3_CAMERA_ADAPTER_V1), v2 = prepareCameraMotion(c);
+    expect(v2.reference_cameras).toEqual(v1.reference_cameras);
+    expect(v2.checkpoints).toEqual([0, 4]);
+    // At zero elevation the great-circle angle equals the turn, so 90 degrees is 3 legs.
+    c.path!.keyframes[0]!.elevation = 0; c.path!.keyframes[1]!.elevation = 0;
+    c.path!.keyframes[1]!.azimuth = 260; recapture(c);
+    const arc = prepareCameraMotion(c);
+    expect(arc.checkpoints!.map(i => arc.reference_cameras[i]!.time)).toEqual([0, 1 / 3, 2 / 3, 1]);
+    expect(arc.reference_cameras.map(frame => frame.time)).toEqual([0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1]);
   });
   it("is invariant to world translation and uniform distance scaling", () => {
     const c = fixture(), initial = prepareCameraMotion(c);
@@ -60,7 +111,9 @@ describe("source-bound H3 camera preparation", () => {
   it("retains exact source projection and intermediate world reference cameras", () => {
     const c = fixture(); c.path!.keyframes.splice(1, 0, { time: 0.3, azimuth: 176, elevation: 23, distance: 17 });
     const plan = prepareCameraMotion(c);
-    expect(plan.reference_cameras.map(frame => frame.time)).toEqual([0, 0.25, 0.3, 0.5, 0.75, 1]);
+    // 17 m to 10 m passes the 1.5 distance ratio, so one checkpoint is added.
+    expect(plan.reference_cameras.map(frame => frame.time)).toEqual([0, 0.25, 0.3, 0.5, 0.75, 208 / 240, 1]);
+    expect(plan.checkpoints).toEqual([0, 2, 5, 6]);
     expect(plan.reference_cameras[0]!.world_matrix).toEqual(c.camera.world_matrix);
     for (const frame of plan.reference_cameras) {
       expect(frame.projection_matrix).toEqual(c.camera.projection_matrix);

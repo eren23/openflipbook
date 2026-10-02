@@ -7,7 +7,7 @@ import { VIEW_PASSES, type ViewSource } from "./place-view";
 import { viewHash, type PlaceViewDoc } from "./place-view-store";
 import { parseCaptureMetadata, wirePlaceView } from "./place-view-server";
 import { reportedPreflight } from "./motion-study-server";
-import { prepareCameraMotion } from "./camera-motion";
+import { prepareCameraMotion, H3_CAMERA_ADAPTER_V1 } from "./camera-motion";
 import { measureMotionLandmarks } from "./camera-motion-reference";
 import { illustrationDependency } from "./illustration-input";
 import { motionComparisonPlan, parseMotionReview, evaluateMotionReview } from "./motion-comparison";
@@ -74,7 +74,8 @@ export async function importWorldMotion(archive: WorldArchive, sid: string, reco
     });
     same(source.definitions, definitions, "Motion source geometry differs from saved revisions");
     const capture = parseCaptureMetadata({ ...view, sources: definitions, passes: { render: "", depth: "", normals: "", objects: "" } });
-    const preparation = prepareCameraMotion(capture);
+    // Archives made before the v2 adapter rebuild with v1 and must match it exactly.
+    const preparation = prepareCameraMotion(capture, (raw.preparation as { adapter?: unknown } | null)?.adapter === H3_CAMERA_ADAPTER_V1 ? H3_CAMERA_ADAPTER_V1 : undefined);
     same(raw.preparation, preparation, "Motion adapter or camera preparation differs");
     const fingerprint = { view_id: viewId, view_input_sha256: view!.request_sha256,
       image: { kind: assetId ? "accepted_illustration" : "render", asset_id: assetId, sha256: sourceImage.sha256, width: view!.width, height: view!.height },

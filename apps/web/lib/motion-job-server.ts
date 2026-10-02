@@ -9,7 +9,7 @@ import { currentMotionStudy, motionSourceImage } from "./motion-source";
 import { fenceViewSources, viewHash } from "./place-view-store";
 import { reserveGenerationSpend } from "./generation-reservation";
 import { wireMotionJob, type MotionJobDoc, type MotionAssetDoc, type MotionReviewDoc } from "./motion-job";
-import { motionComparisonPlan, parseMotionReview, evaluateMotionReview } from "./motion-comparison";
+import { motionComparisonPlan, parseMotionReview, evaluateMotionReview, motionDurationMatches, MOTION_COMPARISON_VERSION } from "./motion-comparison";
 import type { MotionStudyDoc } from "./motion-study";
 import { createHash } from "node:crypto";
 import { getStoredBytes } from "./r2";
@@ -51,7 +51,9 @@ export async function motionJobLibrary(sid: string, studyId: string) {
   return { comparison, reviews: reviews.map(r => ({ id: r.id, asset_id: r.asset_id, review: r.review, outcome: r.outcome })),
     jobs: jobs.map(wireMotionJob), assets: assets.map(a => ({ id: a.id, media: a.media, historical, comparison: a.comparison ?? null,
     ...(a.restored_from ? { imported: true as const } : {}),
-    duration_matches: Math.abs(a.media.duration - a.parameters.duration) <= .5 })), accepted_id: selection?.asset_id ?? null,
+    // v2 clips are judged by the frozen plan's ratio; older clips keep the 0.5 s rule.
+    duration_matches: a.comparison?.plan.version === MOTION_COMPARISON_VERSION ? motionDurationMatches(a.comparison.plan, a.media.duration)
+      : Math.abs(a.media.duration - a.parameters.duration) <= .5 })), accepted_id: selection?.asset_id ?? null,
     study_sha256: viewHash(study), historical, quote, reason };
 }
 export async function submitMotionJob(sid: string, studyId: string, input: Record<string, unknown>) {
