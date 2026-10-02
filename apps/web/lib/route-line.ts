@@ -373,3 +373,12 @@ export function routeShots(
     };
   });
 }
+
+/** The shots a walk paints: the worthy ones, and with two or more of them only
+ *  those next to another worthy shot (index ± 1). The backend links only
+ *  neighbours, so a stranded shot would be paid for and never walked to. A
+ *  lone shot still paints, as a keyframe. Mirrors walk.painted(). */
+export function paintableShots(shots: readonly RouteShot[]): RouteShot[] {
+  const worth = shots.filter((s) => s.worth), at = new Set(worth.map((s) => s.index));
+  return worth.length < 2 ? worth : worth.filter((s) => at.has(s.index - 1) || at.has(s.index + 1));
+}

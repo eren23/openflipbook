@@ -4,6 +4,7 @@ import type { PlaceNetwork, PlaceSceneDefinition, PlaceSceneSnapshot } from "@op
 import { buildPlaceScene, disposePlace, THREE, OrbitControls } from "./place-scene-renderer";
 import s from "./world-editor.module.css";
 import { routeMovement, type WalkWaypoint } from "@/lib/walk-route";
+import { routeWords } from "@/lib/ankh-scene";
 import { loadPlacePhysics } from "@/lib/place-physics";
 import { applyRoofMaterials, applyStreetMaterials } from "./street-materials";
 import { batchStreetMeshes } from "./street-batching";
@@ -70,7 +71,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
     const abort = new AbortController();
     let cleanup = () => {};
     setError(""); setCurrentPlace(""); setCurrentRoom("");setRecovery(""); walkInput.clear();
-    setRouteStatus(route ? "Walking to the Drum" : "");
+    setRouteStatus(route ? routeWords(route).walking : "");
     void (async () => {
       const connected=network&&placeId&&mode==="walk"?buildConnectedPlaces(network,placeId):null;
       const definition=connected?.definition??localDefinition;
@@ -172,7 +173,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
       let yaw = definition.entrance.yaw, pitch = 0;
       let guiding = !!route, stalled = 0;
       const routeState = { index: 0, held: 0 };
-      const endRoute = (status: string) => { guiding = false; container.dataset.routeState = status; setRouteStatus(status === "complete" ? "At the Mended Drum" : status === "blocked" ? "Route blocked" : ""); };
+      const endRoute = (status: string) => { guiding = false; container.dataset.routeState = status; setRouteStatus(status === "complete" && route ? routeWords(route).end : status === "blocked" ? "Route blocked" : ""); };
       let pointer: { x: number; y: number; startX: number; startY: number; moved: boolean } | null = null;
       let footprintStart: { x: number; z: number; px: number; py: number } | null = null;
       const groundPoint = (e: PointerEvent) => {

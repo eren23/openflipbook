@@ -104,9 +104,9 @@ def object_action_prompt(subject: str, action: str, x_pct: float, y_pct: float) 
     )
 
 
-# Measured on the 4 H3 first/last walk legs of research 33 (route-video
-# seg0-3): the camera moves for ~4.2-4.5 s of a 5.17 s clip, then holds the end
-# frame. Tunable.
+# Measured 2026-10-02 on the four Lantern Quay walk legs (route-video seg0-3):
+# motion fades below 0.3 MAD at 4.2-4.5 s of 5.17 s; 0.58 was the map-to-inn
+# descent clip (research 33 F4); see docs/research/36. Tunable.
 LEG_MOTION_SHARE = 0.8
 
 

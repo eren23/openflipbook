@@ -231,3 +231,17 @@ it("recomputes acceptance from bound measurements instead of trusting a stored p
   await expect(motionJobAction("world", "study", { action: "accept", id: "motion_shot", previous_id: null, review_id: "review" })).rejects.toMatchObject({ status: 409 });
   expect(store("motion_selections").size).toBe(0);
 });
+it("refuses a path beyond the measured H3 limits before quoting or reserving", async () => {
+  // A 45° orbit: camera-motion.ts lists it as a limit issue and the backend
+  // would 422 it after the spend was reserved.
+  const saved = structuredClone(study.preparation);
+  try {
+    study.preparation.parameters.camera_trajectory[1]!.azimuth = 45;
+    (study.preparation as { limit_issues?: string[] }).limit_issues = ["H3 camera controls are measured only up to 30° of turn per clip"];
+    store("motion_studies").set("world:study", structuredClone(study));
+    const library = await motionJobLibrary("world", "study");
+    expect(library.quote).toBeNull(); expect(library.reason).toMatch(/30° of turn/);
+    await expect(submitMotionJob("world", "study", input())).rejects.toMatchObject({ status: 409 });
+    expect(total()).toEqual([]); expect(store("motion_jobs").size).toBe(0); expect(submissions()).toHaveLength(0);
+  } finally { study.preparation = saved; }
+});

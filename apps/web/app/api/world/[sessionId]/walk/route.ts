@@ -14,11 +14,37 @@ import { getNode, setNodeWalk } from "@/lib/db";
 import { verifyOwnerReadonly } from "@/lib/session-owner";
 
 import { modalAuthHeaders, modalUrl as joinModalUrl } from "@/lib/modal";
+import { download } from "@/lib/motion-execution";
+import { legMotion, motionEnd } from "@/lib/motion-video";
 import { inlineStoredImage } from "@/lib/r2";
 import { TRACE_HEADER, newTraceId } from "@/lib/trace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** Mark where each clip stops moving (play_until, seconds), so playback cuts
+ *  before the frozen tail. Best effort: a failed download, no ffmpeg or a clip
+ *  that never moves leaves it unset, and the player waits for the clip's end.
+ *  ponytail: bounded by the 20 s download and ffmpeg's own 90 s kill, not by
+ *  one deadline; add a race if a slow decode ever shows up in the walk time. */
+async function withPlayUntil(text: string): Promise<string> {
+  try {
+    const done = JSON.parse(text) as { clips?: WalkClipRow[] };
+    if (!done.clips?.length) return text;
+    await Promise.all(done.clips.map(async (clip) => {
+      try {
+        const { deltas, fps } = await legMotion(await download(clip.video_url, AbortSignal.timeout(20_000)));
+        const end = motionEnd(deltas, fps);
+        if (end > 0) clip.play_until = end;
+      } catch {
+        // leave it unset
+      }
+    }));
+    return JSON.stringify(done);
+  } catch {
+    return text;
+  }
+}
 
 /** Paint a drawn route: a keyframe per shot, a clip between neighbours.
  *
@@ -68,7 +94,8 @@ export async function POST(
     if ((err as Error).name === "AbortError") return new Response(null, { status: 499 });
     throw err;
   }
-  const text = await upstream.text();
+  let text = await upstream.text();
+  if (upstream.ok) text = await withPlayUntil(text);
   // A walk is paid for, so it outlives the tab that made it: keep the clips
   // and what each shot was OF on the page the route was drawn on. The
   // keyframes are left behind deliberately -- they return as data URIs, and a

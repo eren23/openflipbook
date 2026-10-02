@@ -638,8 +638,9 @@ def _view_spec_for(
         f = focus["footprint"]
         if f.get("w") and f.get("d"):
             fp = (float(f["w"]), float(f["d"]))
-    # Another-angle on re-enter (flag-gated OFF): the client's revisit count
-    # rotates a scene enter to a new side. Off ⇒ 0 ⇒ byte-identical.
+    # Another-angle on re-enter (default ON; ENTER_AZIMUTH_ROTATE=false is the
+    # kill switch): the client's revisit count rotates a scene enter to a new
+    # side. Off ⇒ 0 ⇒ byte-identical.
     enter_index = (
         int(sv.enter_index)
         if sv and sv.enter_index and sv.enter_index > 0 and env_flag("ENTER_AZIMUTH_ROTATE", "true")
@@ -1260,12 +1261,15 @@ async def walk(req: Request, body: WalkBody) -> JSONResponse:
         return limited
 
     trace_id = bind_trace(req.headers.get(TRACE_HEADER) or body.trace_id)
-    grounded = any(s.surroundings_data_url for s in body.shots)
-    links = len(walk_provider.linked([s.index for s in body.shots]))
-    estimate = walk_provider.estimate_usd(len(body.shots), body.clip_seconds, grounded, links)
+    indices = [s.index for s in body.shots]
+    # Quote what paint() will paint: a shot no clip reaches is dropped there.
+    kept = [body.shots[p] for p in walk_provider.painted(indices)]
+    grounded = any(s.surroundings_data_url for s in kept)
+    links = len(walk_provider.linked(indices))
+    estimate = walk_provider.estimate_usd(len(kept), body.clip_seconds, grounded, links)
     if body.estimate_only:
         return JSONResponse(
-            {"shots": len(body.shots), "estimate_usd": estimate, "grounded": grounded},
+            {"shots": len(kept), "estimate_usd": estimate, "grounded": grounded},
             headers={"X-Trace-Id": trace_id},
         )
     log("info", "walk.request", shots=len(body.shots), estimate_usd=estimate, grounded=grounded)

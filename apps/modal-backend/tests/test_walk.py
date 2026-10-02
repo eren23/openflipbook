@@ -89,12 +89,32 @@ async def test_paint_makes_a_keyframe_per_shot_and_a_clip_per_gap(
 ) -> None:
     monkeypatch.setenv("MOCK_PROVIDERS", "1")
     monkeypatch.setattr(spend, "reserve", lambda *_args, **_kw: 0.0)
-    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1), _shot(3)])
-    assert len(result.keyframes) == 3
+    result = await walk.paint(
+        session_id="s1", shots=[_shot(0), _shot(1), _shot(3), _shot(4)]
+    )
+    assert len(result.keyframes) == 4
     # Shot 2 was skipped, so 1 -> 3 is a cut, not an unchecked turn.
-    assert [(c.from_shot, c.to_shot) for c in result.clips] == [(0, 1)]
+    assert [(c.from_shot, c.to_shot) for c in result.clips] == [(0, 1), (3, 4)]
     assert all(k.startswith("data:") for k in result.keyframes)
     assert result.spent_usd > 0
+
+
+@pytest.mark.asyncio
+async def test_a_shot_no_clip_reaches_is_not_painted(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review 2026-10-02: [0, 2, 4] reserved three keyframes and made no clip.
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    reserved: list[float] = []
+    monkeypatch.setattr(spend, "reserve", lambda _s, usd: reserved.append(usd) or 0.0)
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1), _shot(3)])
+    assert len(result.keyframes) == 2
+    assert len(reserved) == 3  # two keyframes and one clip
+    reserved.clear()
+    with pytest.raises(ValueError, match="neighbour"):
+        await walk.paint(session_id="s1", shots=[_shot(0), _shot(2), _shot(4)])
+    assert reserved == []
+    assert walk.painted([0, 2, 4]) == []
+    assert walk.painted([0, 1, 3]) == [0, 1]
+    assert walk.painted([5]) == [0]
 
 
 @pytest.mark.asyncio
@@ -298,7 +318,11 @@ async def test_endpoint_quotes_only_the_links_it_will_make(
     monkeypatch.setattr(generate, "_rate_limited", lambda _req: None)
     res = await generate.walk(_Req(), _body([0, 1, 3], estimate_only=True, clip_seconds=8))
     payload = json.loads(bytes(res.body))
-    assert payload["estimate_usd"] == walk.estimate_usd(3, 8, links=1)
+    # Shot 3 has no neighbour, so it is not painted either.
+    assert payload["shots"] == 2
+    assert payload["estimate_usd"] == walk.estimate_usd(2, 8, links=1)
+    res = await generate.walk(_Req(), _body([0, 2, 4], estimate_only=True))
+    assert json.loads(bytes(res.body))["estimate_usd"] == 0
 
 
 @pytest.mark.asyncio

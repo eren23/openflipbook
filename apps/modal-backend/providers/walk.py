@@ -153,6 +153,16 @@ def linked(indices: list[int]) -> list[int]:
     return [i for i in range(len(indices) - 1) if indices[i + 1] == indices[i] + 1]
 
 
+def painted(indices: list[int]) -> list[int]:
+    """Positions worth painting: all of a lone shot, else only those a clip reaches.
+
+    A shot with no neighbour would be paid for and shown, then never walked to.
+    """
+    if len(indices) < 2:
+        return list(range(len(indices)))
+    return sorted({p for i in linked(indices) for p in (i, i + 1)})
+
+
 def estimate_usd(
     shots: int,
     clip_seconds: int = DEFAULT_CLIP_SECONDS,
@@ -189,6 +199,9 @@ async def paint(
         raise ValueError("a walk needs at least one shot")
     if len(shots) > MAX_SHOTS:
         raise ValueError(f"a walk is capped at {MAX_SHOTS} shots, got {len(shots)}")
+    shots = [shots[p] for p in painted([s.index for s in shots])]
+    if not shots:
+        raise ValueError("no shot on this route has a neighbour to walk to")
 
     spent = 0.0
     keyframes: list[str] = []
