@@ -78,12 +78,13 @@ async function submit(db: Db) {
   }
   return true;
 }
-async function verified(file?: MotionFile) {
+// Stored bytes, or null when missing or changed. `bytes` is optional for pins that only kept a hash.
+export async function verified(file?: { key: string; sha256: string; bytes?: number }) {
   if (!file) return null;
   const value = await getStoredBytes(file.key, AbortSignal.timeout(30_000));
-  return value && value.bytes.length === file.bytes && hash(value.bytes) === file.sha256 ? value.bytes : null;
+  return value && (file.bytes === undefined || value.bytes.length === file.bytes) && hash(value.bytes) === file.sha256 ? value.bytes : null;
 }
-async function download(url: string) {
+export async function download(url: string) {
   const response = await fetch(meshDownloadUrl(url), { redirect: "error", signal: AbortSignal.timeout(90_000) });
   if (!response.ok || !response.body || Number(response.headers.get("content-length")) > MAX_MOTION_BYTES) throw new Error("Motion download unavailable or too large");
   const chunks: Uint8Array[] = [], reader = response.body.getReader(); let size = 0;

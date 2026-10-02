@@ -9,7 +9,8 @@ export interface MotionStudy {
   status: "reference_only"; provenance: "client_rendered_saved_geometry";
   preflight: "not_server_attested";
   client_preflight?: CameraPathCheck | null;
-  frames: { time: number; seconds: number; camera: ViewCamera;
+  // depth: the capture's depth-pass range. Studies saved before path videos have none.
+  frames: { time: number; seconds: number; camera: ViewCamera; depth?: { near: number; far: number };
     measurements: ReturnType<typeof measureMotionLandmarks> }[];
 }
 export interface MotionStudyDoc extends Omit<MotionStudy, "historical"> {

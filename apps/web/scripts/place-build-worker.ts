@@ -6,6 +6,7 @@ import { processNextMeshJob, processNextAssetJob } from "../lib/mesh-execution";
 import { readServerEnv, requireR2 } from "../lib/env";
 import { MongoServerError } from "mongodb";
 import { processNextMotionJob } from "../lib/motion-execution";
+import { processNextPathVideo } from "../lib/path-video";
 import { motionVideoToolsAvailable } from "../lib/motion-video";
 
 // Configuration is explicit: Docker supplies environment variables; local
@@ -21,7 +22,7 @@ async function main() {
   let stopping = false;
   const stop = () => { stopping = true; };
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
-  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", layout_connections: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, motion_v1: motion, motion_review_v1: motion, last_seen: new Date() } }, { upsert: true });
+  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", layout_connections: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, motion_v1: motion, motion_review_v1: motion, path_video_v1: motion, last_seen: new Date() } }, { upsert: true });
   await heartbeat();
   const timer = setInterval(() => { void heartbeat().catch(() => process.stderr.write("Layout worker heartbeat unavailable\n")); }, 5000);
   process.stdout.write(`Layout worker ready; mesh and material processing ${mesh ? "enabled" : "disabled"}\n`);
@@ -35,7 +36,7 @@ async function main() {
     };
     // Independent layout, mesh and material lanes keep long layout calls from
     // delaying retrieval of already-paid assets before their URLs expire.
-    await Promise.all([loop(() => processNextPlaceBuild(db)), ...(mesh ? [loop(() => processNextMeshJob(db)), loop(() => processNextAssetJob(db, "material")), loop(() => processNextAssetJob(db, "illustration"))] : []), ...(motion ? [loop(() => processNextMotionJob(db))] : [])]);
+    await Promise.all([loop(() => processNextPlaceBuild(db)), ...(mesh ? [loop(() => processNextMeshJob(db)), loop(() => processNextAssetJob(db, "material")), loop(() => processNextAssetJob(db, "illustration"))] : []), ...(motion ? [loop(() => processNextMotionJob(db)), loop(() => processNextPathVideo(db))] : [])]);
   } finally {
     clearInterval(timer);
     // SIGTERM drains the in-flight operations. SIGKILL leaves a paid claim

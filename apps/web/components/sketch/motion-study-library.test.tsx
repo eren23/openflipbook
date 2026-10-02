@@ -4,6 +4,7 @@ import type { SavedPlaceView } from "@/lib/place-view";
 import type { MotionReferenceCapture } from "./camera-motion-capture";
 import MotionStudyLibrary from "./motion-study-library";
 vi.mock("./motion-generation", () => ({ default: () => null }));
+vi.mock("./path-video", () => ({ default: () => null }));
 const view = { id: "view", label: "Inn", width: 64, height: 32, historical: false } as SavedPlaceView;
 const reference = { preparation_sha256: "frozen", preflight: { status: "blocked", samples: 12, clearance: .2, visibility: "sampled", issues: [{ kind: "collision", time: .25, end_time: .5 }] }, frames: [{ time: 0, seconds: 0, capture: { original: true } }] } as unknown as MotionReferenceCapture;
 const study = { id: "study", label: "Inn motion", historical: false, frames: [{ time: 0, seconds: 0 }, { time: 1, seconds: 6 }] };

@@ -93,7 +93,7 @@ export async function saveMotionStudy(sid: string, viewId: string, input: Record
     if (totalBytes > 48 * 1024 * 1024) throw new CreatorError("Motion study exceeds 48 MiB", 413);
     decodedFrames.push(decoded);
     const rgba = await sharp(decoded.objects).ensureAlpha().raw().toBuffer();
-    frames.push({ time: expected.time, seconds: expected.seconds, camera: capture.camera,
+    frames.push({ time: expected.time, seconds: expected.seconds, camera: capture.camera, depth: { near: capture.depth.near, far: capture.depth.far },
       measurements: measureMotionLandmarks(rgba, capture.width, capture.height, capture.objects) });
   }
   for (const [index, decoded] of decodedFrames.entries()) {
