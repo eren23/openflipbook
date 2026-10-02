@@ -15,7 +15,7 @@ import { assetBackend } from "./mesh-execution";
 import { meshDownloadUrl } from "./mesh-asset";
 import { download, verified } from "./motion-execution";
 import { motionQuote } from "./motion-job-server";
-import { currentMotionStudy } from "./motion-source";
+import { currentMotionStudy, motionSourceImage } from "./motion-source";
 import { fenceViewSources, viewHash } from "./place-view-store";
 import { reserveGenerationSpend } from "./generation-reservation";
 import { keyframeArt } from "./illustration-input";
@@ -40,16 +40,18 @@ export const legSeconds = (planned: number) => Math.max(5, Math.min(15, Math.cei
 const round = (n: number, places = 2) => Math.round(n * 10 ** places) / 10 ** places;
 const clamp = (n: number, limit: number) => Math.max(-limit, Math.min(limit, n));
 const height = (pose: OrbitPose) => pose.distance * Math.sin(MathUtils.degToRad(pose.elevation));
+const ground = (pose: OrbitPose) => pose.distance * Math.cos(MathUtils.degToRad(pose.elevation));
 /**
  * The /motion/leg move between two path times. A positive orbit moves the
  * camera to its own right (azimuth grows from +Z toward +X, see orbitPosition).
  * rise is the change in height over the pivot; forward is how much closer to
- * the pivot the camera ends. The camera keeps facing the pivot, so no turn.
+ * the pivot the camera ends on the ground plane, so the two never share one
+ * move. The camera keeps facing the pivot, so no turn.
  */
 export function legMove(keyframes: readonly CameraKeyframe[], from: number, to: number, subject: string | null) {
   const a = sampleCameraPath(keyframes, from), b = sampleCameraPath(keyframes, to);
   return { orbit_deg: round(clamp(b.azimuth - a.azimuth, 180)), turn_deg: 0, rise_m: round(clamp(height(b) - height(a), 500)),
-    forward_m: round(clamp(a.distance - b.distance, 500)), subject };
+    forward_m: round(clamp(ground(a) - ground(b), 500)), subject };
 }
 
 type AttemptState = "submitting" | "submission_unknown" | "queued" | "running" | "ready" | "failed" | "refused";
@@ -95,7 +97,9 @@ export function pathVideoPlan(study: MotionStudyDoc) {
       return { seconds, duration: legSeconds(seconds), move: legMove(prep.path.keyframes, times[i]!, to, subject) };
     }) };
 }
-async function pathVideoQuote(db: Db, plan: ReturnType<typeof pathVideoPlan>) {
+async function pathVideoQuote(db: Db, study: MotionStudyDoc, plan: ReturnType<typeof pathVideoPlan>) {
+  // /motion/leg reads the accepted source as leg 0's start: check it before any spend.
+  if (plan.keyframes[0]!.stage === "source") await motionSourceImage(study);
   const config = await assetBackend("illustration", "keyframe-capabilities");
   if (!config?.enabled || config.model !== KEYFRAME_MODEL || !Number.isFinite(config.reservation) || config.reservation <= 0 || !config.parameters)
     throw new CreatorError("Keyframe painting is not configured", 503);
@@ -106,7 +110,8 @@ async function pathVideoQuote(db: Db, plan: ReturnType<typeof pathVideoPlan>) {
   const micros = (n: number) => Math.round(n * 1_000_000), paid = plan.keyframes.filter(k => k.stage !== "source").length;
   const reservation = (paid * micros(config.reservation) + plan.legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
   if (reservation > PATH_VIDEO_CAP_USD) throw new CreatorError(`This path video needs $${reservation.toFixed(2)}, over the $${PATH_VIDEO_CAP_USD} cap. Shorten the path.`, 409);
-  return { reservation, paid_keyframes: paid, keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
+  // Only a first paint reads appearance words; chain keyframes take the style from the image before.
+  return { reservation, paid_keyframes: paid, appearance: plan.keyframes[0]!.stage === "first", keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
     legs: plan.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, reservation: costs.get(leg.duration)! })) };
 }
 
@@ -151,16 +156,23 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     await col.updateOne(live, { $set: { status: "submission_unknown", error: "A paid response was lost. It may be billable; nothing is sent again. Cancel to release the rest." } });
     return 0;
   };
-  // Claim (cost committed) -> one POST -> request id.
+  // A refused step was never sent: un-commit its cost. If a cancel settled the
+  // job meanwhile, that release counted this cost as spent, so release it here.
+  const uncommit = (attempt: Attempt, arrays: () => Partial<PathVideoDoc>) => withDbTransaction(async (db, session) => {
+    const jobs = db.collection<PathVideoDoc>("path_videos"), options = { session }, doc = await jobs.findOne(lease, options);
+    if (!doc) return;
+    if (!ACTIVE.includes(doc.status)) for (const id of doc.ledger_ids) await db.collection<{ _id: string; total: number }>("spend_ledger").updateOne({ _id: id }, { $inc: { total: -attempt.cost } }, options);
+    await jobs.updateOne(lease, { $set: arrays(), $inc: { committed: -attempt.cost } }, options);
+  });
+  // Claim (cost committed) -> one POST -> request id. A refused or failed
+  // step is only recorded here; the next step decides what it means.
   const post = async (attempt: Attempt, arrays: () => Partial<PathVideoDoc>, model: string, send: () => Promise<Record<string, unknown>>) => {
     if (!(await col.updateOne({ ...live, work_until: { $gt: new Date(Date.now() + 120_000) } }, { $set: arrays(), $inc: { committed: attempt.cost } })).matchedCount) return 0;
     let receipt: Record<string, unknown> | undefined;
     try { receipt = await send(); }
     catch (e) {
       if (!refused(e)) return halt(attempt, arrays);
-      attempt.status = "refused";
-      await col.updateOne(live, { $set: arrays(), $inc: { committed: -attempt.cost } });
-      return fail("The backend refused a paid step before sending it. Unspent reservation released.");
+      attempt.status = "refused"; await uncommit(attempt, arrays); return 0;
     }
     if (!isSafeId(receipt?.request_id) || receipt.request_id.length > 100 || receipt.model !== model) return halt(attempt, arrays);
     // A late id is kept even if the job was cancelled meanwhile.
@@ -171,7 +183,7 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
   const poll = async (attempt: Attempt, arrays: () => Partial<PathVideoDoc>, path: string, kind: "illustration" | "motion") => {
     const result = await assetBackend(kind, path);
     if (result?.status === "queued" || result?.status === "running") { attempt.status = result.status; await save(arrays()); return 5000; }
-    if (result?.status === "failed") { attempt.status = "failed"; await save(arrays()); return fail("The provider rejected a paid step. Unspent reservation released."); }
+    if (result?.status === "failed") { attempt.status = "failed"; await save(arrays()); return 0; }
     if (result?.status !== "ready") throw new Error("Unknown provider state");
     return result as Record<string, unknown>;
   };
@@ -235,8 +247,9 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       return post(attempt, arrays, LEG_MODEL, () => assetBackend("motion", "leg", { reservation: leg.cost, duration: leg.duration, move: leg.move, start, end }));
     }
     if (last.status === "submitting" || last.status === "submission_unknown") return halt(last, arrays);
-    if (last.status === "failed" || last.status === "refused") return fail("A leg was not made. Unspent reservation released.");
-    if (last.status !== "ready") {
+    // A failed or refused retry leaves the first attempt to choose from.
+    if ((last.status === "failed" || last.status === "refused") && leg.attempts.length === 1) return fail("A leg was not made. Unspent reservation released.");
+    if (last.status === "queued" || last.status === "running") {
       const result = await poll(last, arrays, `requests/${encodeURIComponent(last.request_id!)}?model=leg`, "motion");
       if (typeof result === "number") return result;
       const raw = await download((result.video as { url?: unknown } | undefined)?.url as string), n = leg.attempts.length - 1;
@@ -253,7 +266,7 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       Object.assign(last, { status: "ready", metrics: { end: round(endAt, 3), land: round(check.land, 3), snap: round(check.snap, 3), ok: check.ok, factor: round(factor, 3) } });
       await save(arrays());
     }
-    if (!last.metrics!.ok && leg.attempts.length === 1 && !leg.retry) {
+    if (leg.attempts.length === 1 && !leg.retry && !last.metrics!.ok) {
       // Exactly one retry, reserved on its own, on the job's scheduling day.
       try {
         if (round(job.reservation + leg.cost, 6) > PATH_VIDEO_CAP_USD) throw new CreatorError(`it would pass the $${PATH_VIDEO_CAP_USD} cap`, 409);
@@ -270,9 +283,9 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       }
     }
     // A landed attempt wins; otherwise keep the one that came closest.
-    const landed = leg.attempts.findIndex(a => a.metrics!.ok);
-    const best = landed >= 0 ? landed : leg.attempts.reduce((b, a, i) => a.metrics!.land < leg.attempts[b]!.metrics!.land ? i : b, 0);
-    Object.assign(leg, { chosen: best, landed: leg.attempts[best]!.metrics!.ok }); await save(arrays()); return 0;
+    const measured = leg.attempts.flatMap((a, i) => a.metrics ? [{ i, ...a.metrics }] : []);
+    const best = measured.find(a => a.ok) ?? measured.reduce((b, a) => a.land < b.land ? a : b);
+    Object.assign(leg, { chosen: best.i, landed: best.ok }); await save(arrays()); return 0;
   }
 
   const cuts: Buffer[] = [];
@@ -293,9 +306,13 @@ export async function processNextPathVideo(db: Db) {
   try { wait = await step(db, job, token); }
   catch { wait = 30_000; error = "A path video step is unavailable and will be tried again. No paid step is sent twice."; }
   const errors = error ? (job.errors ?? 0) + 1 : 0, live = { _id: job._id, work_token: token, status: "running" as const };
-  // Storage, decode or status outages retry for about ten minutes, then stop.
-  if (errors >= 20) await settle(db, live, "failed", { error: "Path video storage or provider stayed unavailable. Unspent reservation released." });
+  // Storage, decode or status outages retry for about ten minutes, then stop,
+  // unless a paid result is still unread: that job stays resumable and backs
+  // off to hourly checks until the result is read or the job is cancelled.
+  const unread = [...job.keyframes.map(kf => kf.attempt), ...job.legs.flatMap(leg => leg.attempts)].some(a => a?.request_id && (a.status === "queued" || a.status === "running"));
+  if (errors >= 20 && !unread) await settle(db, live, "failed", { error: "Path video storage or provider stayed unavailable. Unspent reservation released." });
   else await col.updateOne(live, error ? { $set: { error } } : { $unset: { error: "" } });
+  if (errors >= 20) wait = Math.min(3_600_000, wait * 2 ** (errors - 20));
   await col.updateOne({ _id: job._id, work_token: token }, { $set: { next_check: new Date(Date.now() + wait), errors }, $unset: { work_token: "", work_until: "" } });
   return true;
 }
@@ -322,16 +339,15 @@ export async function pathVideoLibrary(sid: string, studyId: string) {
   try {
     await currentMotionStudy(db, sid, studyId);
     const plan = pathVideoPlan(study); checkpoints = plan.keyframes.length;
-    const { keyframe_parameters: _parameters, ...priced } = await pathVideoQuote(db, plan); quote = priced;
+    const { keyframe_parameters: _parameters, ...priced } = await pathVideoQuote(db, study, plan); quote = priced;
   } catch (e) { reason = e instanceof CreatorError ? e.message : "Path video backend unavailable"; }
   return { study_sha256: viewHash(study), checkpoints, quote, reason, jobs: jobs.map(wire) };
 }
 async function submitPathVideo(sid: string, studyId: string, input: Record<string, unknown>) {
   const db = await access(sid, studyId);
-  if (!isSafeId(input.id) || input.id.length > 121 || input.confirmed !== true || typeof input.study_sha256 !== "string"
-    || typeof input.prompt !== "string" || input.prompt.trim().length < 3 || input.prompt.length > 1024)
-    throw new CreatorError("An appearance prompt and explicit priced consent are required", 400);
-  const id = input.id, key = `${sid}:${id}`, requestHash = viewHash(input), sha = input.study_sha256, prompt = input.prompt.trim();
+  if (!isSafeId(input.id) || input.id.length > 121 || input.confirmed !== true || typeof input.study_sha256 !== "string")
+    throw new CreatorError("Explicit priced consent is required", 400);
+  const id = input.id, key = `${sid}:${id}`, requestHash = viewHash(input), sha = input.study_sha256;
   const same = (job: PathVideoDoc) => {
     if (job.study_id !== studyId || job.request_sha256 !== requestHash) throw new CreatorError("Path video request identity already used", 409);
     return { job: wire(job) };
@@ -339,8 +355,11 @@ async function submitPathVideo(sid: string, studyId: string, input: Record<strin
   const prior = await db.collection<PathVideoDoc>("path_videos").findOne({ _id: key, session_id: sid });
   if (prior) return same(prior);
   const { study } = await currentMotionStudy(db, sid, studyId, sha);
-  const plan = pathVideoPlan(study), quote = await pathVideoQuote(db, plan);
+  const plan = pathVideoPlan(study), quote = await pathVideoQuote(db, study, plan);
   if (input.reservation !== quote.reservation) throw new CreatorError("Path video price changed. Review the reservation.", 409);
+  // The chain prompt ignores words, but the backend still needs three characters.
+  const prompt = !quote.appearance ? "Match the accepted artwork" : typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (prompt.length < 3 || prompt.length > 1024) throw new CreatorError("An appearance prompt is required", 400);
   const art = plan.keyframes[0]!.stage === "first" ? await keyframeArt(db, sid, study.source.view.root_place_id) : null;
   return withDbTransaction(async (db, session) => {
     const options = { session }, jobs = db.collection<PathVideoDoc>("path_videos");

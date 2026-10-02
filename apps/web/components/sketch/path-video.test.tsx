@@ -4,7 +4,7 @@ import PathVideo from "./path-video";
 const job = { id: "walk", status: "ready", reservation: 1.4, committed: 1.4, created_at: "", media: { width: 64, height: 32 },
   keyframes: [{ time: 0, stage: "source", status: "ready" }, { time: 1, stage: "chain", status: "ready", gate: "failed", passed: false }],
   legs: [{ seconds: 6, duration: 8, landed: false, attempts: [{ status: "ready", land: 1, snap: 2, ok: false }, { status: "ready", land: .5, snap: 3, ok: false }] }] };
-const base = { study_sha256: "frozen", checkpoints: 2, reason: "", jobs: [job], quote: { reservation: .74, paid_keyframes: 1, keyframe_reservation: .1, legs: [{ seconds: 6, duration: 8, reservation: .64 }] } };
+const base = { study_sha256: "frozen", checkpoints: 2, reason: "", jobs: [job], quote: { reservation: .74, paid_keyframes: 1, appearance: true, keyframe_reservation: .1, legs: [{ seconds: 6, duration: 8, reservation: .64 }] } };
 beforeEach(() => vi.stubGlobal("fetch", vi.fn(async () => Response.json(base))));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it("stays hidden when the server flag is off", async () => {
@@ -26,4 +26,13 @@ it("shows the quote and per-leg checks, and generates only after a prompt and pr
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(call => call[1]?.method === "POST")).toBe(true));
   const write = vi.mocked(fetch).mock.calls.find(call => call[1]?.method === "POST")!;
   expect(JSON.parse(String(write[1]!.body))).toMatchObject({ action: "generate", confirmed: true, prompt: "Watercolour inn", study_sha256: "frozen", reservation: .74 });
+});
+it("asks no appearance words when every paid keyframe chains from the accepted artwork", async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ ...base, quote: { ...base.quote, appearance: false } }));
+  render(<PathVideo sessionId="world" studyId="study" disabled={false}/>);
+  const generate = await screen.findByRole("button", { name: "Generate path video" });
+  expect(screen.queryByRole("textbox")).toBeNull();
+  // Consent resets when the quote arrives, so tick it again until it holds.
+  const consent = screen.getByRole("checkbox", { name: "Reserve $0.74 for 1 keyframes and 1 legs" }) as HTMLInputElement;
+  await waitFor(() => { if (!consent.checked) fireEvent.click(consent); expect((generate as HTMLButtonElement).disabled).toBe(false); });
 });

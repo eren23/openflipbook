@@ -21,6 +21,8 @@ export default function PathVideo({ sessionId, studyId, disabled }: { sessionId:
   }, [url]);
   const refresh = useCallback(() => void reload().catch(e => { if (mounted.current) setError(e.message); }), [reload]);
   useEffect(() => { mounted.current = true; refresh(); return () => { mounted.current = false; }; }, [refresh]);
+  // Only a first paint reads words; chain keyframes copy the accepted artwork.
+  const appearance = !!library?.quote?.appearance;
   const active = library?.jobs.some(job => job.status === "scheduled" || job.status === "running");
   useEffect(() => { if (!active) return; const timer = setInterval(refresh, 5000); return () => clearInterval(timer); }, [active, refresh]);
   useEffect(() => { setConsent(false); }, [library?.quote?.reservation, library?.study_sha256]);
@@ -46,11 +48,11 @@ export default function PathVideo({ sessionId, studyId, disabled }: { sessionId:
       <button title="Refresh path videos" aria-label="Refresh path videos" disabled={busy} onClick={refresh}><RefreshCw size={16}/></button></div>
     {library && <p role="status">{library.checkpoints} keyframe checkpoints / {Math.max(0, library.checkpoints - 1)} legs</p>}
     {library?.quote && <>
-      <label>Appearance<textarea aria-label="Path video appearance" value={prompt} maxLength={1024} disabled={busy || disabled} onChange={e => setPrompt(e.target.value)}/></label>
+      {appearance && <label>Appearance<textarea aria-label="Path video appearance" value={prompt} maxLength={1024} disabled={busy || disabled} onChange={e => setPrompt(e.target.value)}/></label>}
       <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || disabled} onChange={e => setConsent(e.target.checked)}/>
         Reserve {dollars(library.quote.reservation)} for {library.quote.paid_keyframes} keyframes and {library.quote.legs.length} legs</label>
     </>}
-    {(library?.quote || pending.current) && <button disabled={busy || !pending.current && (disabled || !consent || prompt.trim().length < 3)} onClick={() => void send({ action: "generate" })}>
+    {(library?.quote || pending.current) && <button disabled={busy || !pending.current && (disabled || !consent || appearance && prompt.trim().length < 3)} onClick={() => void send({ action: "generate" })}>
       <Video size={16}/>{busy ? "Submitting..." : pending.current ? "Retry same path video request" : "Generate path video"}</button>}
     {library?.reason && <p>{library.reason}</p>}
     {library?.jobs.map(job => <div key={job.id} className={s.illustrationJob}>
