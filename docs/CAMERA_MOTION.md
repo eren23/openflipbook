@@ -108,7 +108,9 @@ trim and retime apply.
 H3 moves for the whole clip that a leg asks for (research 37). Thus each study
 or walk leg asks H3 for its planned length, rounded up to whole seconds, with a
 minimum of `LEG_MIN_SECONDS` (3 s). fal's schema accepts 0.92 to 15 s. Before,
-each leg asked for at least 5 s. A walk leg of 4 m (2.9 s planned) now costs
+each leg asked for at least 5 s. The backend gives its floor as
+`leg_min_seconds` in `/motion/capabilities`. When a backend does not give it
+(an older backend that refuses legs under 5 s), the web sizes legs at 5 s. A walk leg of 4 m (2.9 s planned) now costs
 3 s, so the legs of a 4-leg walk cost $0.96 at $0.08/s, not $1.60. The web
 side trims each clip at the end of its motion and retimes it to the plan
 (0.5 to 2 times).
@@ -129,15 +131,19 @@ keyframe, so that the video does not show an invented picture:
   has no gate, because the job does not paint it.)
 - The job skips a failed middle keyframe. The next keyframe chains from the
   last kept keyframe, and one leg goes from that keyframe to the next one. The
-  leg adds the two moves and the two planned lengths, and costs its own length.
+  leg's move is the real move between those two cameras. The leg adds the two
+  planned lengths, and costs its own length.
   The job releases the rest of the two legs' reservation.
 - The job drops a failed last keyframe and the leg into it. The video then
   ends at the keyframe before it, and the job releases the reservation of that
   leg.
 
-The job does not drop a middle keyframe when the combined step is more than two
-checkpoint steps: more than 60 degrees of orbit for a study, or more than 8 m
-or 60 degrees of turn for a walk. A chain that long is not reliable. Then the
+The job does not drop a middle keyframe when the step from the last kept
+keyframe to the next one is more than two checkpoint steps. For a study, the
+view direction turns more than 60 degrees (orbit and elevation together), or
+the distance changes by more than 1.5 x 1.5 = 2.25 times. For a walk, the eye
+moves more than 8 m, or turns more than 60 degrees. A chain that long is not
+reliable. Then the
 job keeps the try that is nearer the gate (IoU) and flags it (`kept_reason`).
 The job record shows the retry (`retry`), the drop (`dropped`, `drop_reason`)
 on the keyframe, and the keyframe that each chain started from

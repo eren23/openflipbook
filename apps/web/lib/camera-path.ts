@@ -50,17 +50,18 @@ export function sampleCameraPath(frames: readonly CameraKeyframe[], time: number
 export const CHECKPOINT_MAX_DEGREES = 30;
 export const CHECKPOINT_MAX_DISTANCE_RATIO = 1.5;
 export const MAX_CHECKPOINTS = 12;
+const direction = (pose: OrbitPose) => orbitPosition(new Vector3(), { ...pose, distance: 1 });
+/** Two poses farther apart than `steps` checkpoint legs can reach: the view turns past steps x the degrees, or the distance changes past the ratio^steps. */
+export const checkpointFar = (a: OrbitPose, b: OrbitPose, steps = 1) => MathUtils.radToDeg(direction(a).angleTo(direction(b))) > steps * CHECKPOINT_MAX_DEGREES + 1e-6
+  || Math.max(a.distance / b.distance, b.distance / a.distance) > CHECKPOINT_MAX_DISTANCE_RATIO ** steps + 1e-9;
 export function checkpointTimes(frames: readonly CameraKeyframe[]): number[] {
   const authored = new Set([0, 1, ...frames.map(frame => frame.time)]);
   const samples = [...new Set([...Array.from({ length: 241 }, (_, i) => i / 240), ...authored])].sort((a, b) => a - b);
-  const direction = (pose: OrbitPose) => orbitPosition(new Vector3(), { ...pose, distance: 1 });
-  const far = (a: OrbitPose, b: OrbitPose) => MathUtils.radToDeg(direction(a).angleTo(direction(b))) > CHECKPOINT_MAX_DEGREES + 1e-6
-    || Math.max(a.distance / b.distance, b.distance / a.distance) > CHECKPOINT_MAX_DISTANCE_RATIO + 1e-9;
   const times = [0];
   let last = sampleCameraPath(frames, 0), previous = 0;
   for (const time of samples.slice(1)) {
     // Close the leg at the last sample that was still within the limits.
-    if (previous !== times.at(-1) && far(last, sampleCameraPath(frames, time))) { times.push(previous); last = sampleCameraPath(frames, previous); }
+    if (previous !== times.at(-1) && checkpointFar(last, sampleCameraPath(frames, time))) { times.push(previous); last = sampleCameraPath(frames, previous); }
     if (authored.has(time)) { times.push(time); last = sampleCameraPath(frames, time); }
     previous = time;
   }

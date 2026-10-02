@@ -60,6 +60,8 @@ def configuration() -> dict[str, object]:
         "resolution": "768P",
         "min_duration": 5,
         "max_duration": 15,
+        # Path video legs (/motion/leg) may be this short; the web reads it before sizing them.
+        "leg_min_seconds": LEG_MIN_SECONDS,
         "reservation_usd_per_second": float(rate) if enabled else 0,
         "reason": None
         if enabled

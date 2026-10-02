@@ -23,7 +23,7 @@ import { chainShift, illustrationDependency, keyframeArt, keyframeViewPasses } f
 import { finishKeyframe, keyframeGateBody, prepareKeyframeInput, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
 import { KEYFRAME_MODEL } from "./asset-pipeline";
 import { H3_CAMERA_ADAPTER } from "./camera-motion";
-import { CHECKPOINT_MAX_DEGREES, MAX_CHECKPOINTS, sampleCameraPath, type CameraKeyframe, type OrbitPose } from "./camera-path";
+import { CHECKPOINT_MAX_DEGREES, checkpointFar, MAX_CHECKPOINTS, sampleCameraPath, type CameraKeyframe, type OrbitPose } from "./camera-path";
 import { WALK_CHECKPOINT_METRES } from "./walk-route";
 import { cutLeg, grayFrame, joinLegs, landCheck, legMotion, motionEnd } from "./motion-video";
 import { uploadJpeg } from "./r2";
@@ -36,9 +36,10 @@ export const PATH_VIDEO_CAP_USD = 10;
 export const LEG_MODEL = "minimax/h3-max/image-to-video";
 // Mirrors LEG_MIN_SECONDS and leg_seconds() in providers/video.py: H3 moves
 // for the whole clip (research 37), so a leg asks for its planned length in
-// whole seconds. Change both together.
+// whole seconds. Change both together. A backend that does not advertise its
+// floor in /motion/capabilities (an old one) takes 5 s legs at least.
 export const LEG_MIN_SECONDS = 3;
-export const legSeconds = (planned: number) => Math.max(LEG_MIN_SECONDS, Math.min(15, Math.ceil(Number(planned.toFixed(6)))));
+export const legSeconds = (planned: number, floor = LEG_MIN_SECONDS) => Math.max(floor, Math.min(15, Math.ceil(Number(planned.toFixed(6)))));
 
 const round = (n: number, places = 2) => Math.round(n * 10 ** places) / 10 ** places;
 const clamp = (n: number, limit: number) => Math.max(-limit, Math.min(limit, n));
@@ -125,10 +126,7 @@ export function pathVideoPlan(study: MotionStudyDoc) {
   const times = checkpoints.map(i => study.frames[i]!.time);
   return { subject, duration: prep.path.duration,
     keyframes: checkpoints.map((frame, i): PathVideoKeyframe => ({ frame, time: times[i]!, stage: i ? "chain" : study.source.image.asset_id ? "source" : "first" })),
-    legs: times.slice(1).map((to, i) => {
-      const seconds = round(prep.path.duration * (to - times[i]!), 3);
-      return { seconds, duration: legSeconds(seconds), move: legMove(prep.path.keyframes, times[i]!, to, subject) };
-    }) };
+    legs: times.slice(1).map((to, i) => ({ seconds: round(prep.path.duration * (to - times[i]!), 3), move: legMove(prep.path.keyframes, times[i]!, to, subject) })) };
 }
 type Plan = ReturnType<typeof pathVideoPlan>;
 // Camera A moved into camera B's frame (walk views draw the root place at its chunk offset).
@@ -136,15 +134,19 @@ const inFrame = <T extends Pick<PlaceViewDoc, "root_place_id" | "sources" | "cam
   const shift = chainShift(a, b)!;
   return { ...a, camera: { ...a.camera, world_matrix: a.camera.world_matrix.map((v, i) => v + (i === 12 ? shift.x : i === 14 ? shift.z : 0)) } };
 };
+// The real move from view a to view b, and how far the eye goes.
+const viewStep = (a: PlaceViewDoc, b: PlaceViewDoc) => {
+  const m = inFrame(a, b).camera.world_matrix, n = b.camera.world_matrix;
+  return { move: viewMove(m, n, null), metres: Math.hypot(n[12]! - m[12]!, n[13]! - m[13]!, n[14]! - m[14]!) };
+};
 /** Keyframes at saved views in order, and a leg between each pair; throws 409 when the views cannot make one video. */
 export function walkVideoPlan(views: readonly PlaceViewDoc[]): Plan {
   const first = views[0]!;
   if (views.some(v => v.mode === "plan" || v.width !== first.width || v.height !== first.height || !chainShift(v, first)))
     throw new CreatorError("Use 3D views of one place, saved at one size", 409);
   const legs = views.slice(1).map((b, i) => {
-    const a = inFrame(views[i]!, b).camera.world_matrix, m = b.camera.world_matrix;
-    const seconds = round(Math.max(WALK_LEG_MIN_SECONDS, Math.hypot(m[12]! - a[12]!, m[13]! - a[13]!, m[14]! - a[14]!) / WALK_SPEED_MPS), 3);
-    return { seconds, duration: legSeconds(seconds), move: viewMove(a, m, null) };
+    const { move, metres } = viewStep(views[i]!, b);
+    return { seconds: round(Math.max(WALK_LEG_MIN_SECONDS, metres / WALK_SPEED_MPS), 3), move };
   });
   const duration = round(legs.reduce((sum, leg) => sum + leg.seconds, 0), 3);
   let elapsed = 0;
@@ -198,12 +200,14 @@ async function pathVideoQuote(db: Db, sid: string, { plan, image, size, worker }
   const config = await assetBackend("illustration", "keyframe-capabilities");
   if (!config?.enabled || config.model !== KEYFRAME_MODEL || !Number.isFinite(config.reservation) || config.reservation <= 0 || !config.parameters)
     throw new CreatorError("Keyframe painting is not configured", 503);
-  const costs = new Map<number, number>();
-  for (const { duration } of plan.legs) if (!costs.has(duration)) costs.set(duration, (await motionQuote(db, duration, LEG_MIN_SECONDS)).reservation);
+  // An old backend refuses legs under its 5 s floor, after the keyframes are paid: size legs at the floor it advertises.
+  const advertised = (await assetBackend("motion", "capabilities"))?.leg_min_seconds, floor = Math.max(LEG_MIN_SECONDS, Number.isInteger(advertised) ? advertised : 5);
+  const legs = plan.legs.map(leg => ({ seconds: leg.seconds, duration: legSeconds(leg.seconds, floor) })), costs = new Map<number, number>();
+  for (const { duration } of legs) if (!costs.has(duration)) costs.set(duration, (await motionQuote(db, duration, floor)).reservation);
   if (!await db.collection("generation_workers").findOne({ kind: "place-layout", [worker]: true, last_seen: { $gt: new Date(Date.now() - 30_000) } }))
     throw new CreatorError("Compatible path video worker unavailable", 503);
   const micros = (n: number) => Math.round(n * 1_000_000), paid = plan.keyframes.filter(k => k.stage !== "source").length;
-  const reservation = (paid * micros(config.reservation) + plan.legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
+  const reservation = (paid * micros(config.reservation) + legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
   if (reservation > PATH_VIDEO_CAP_USD) throw new CreatorError(`This path video needs $${reservation.toFixed(2)}, over the $${PATH_VIDEO_CAP_USD} cap. Shorten the path.`, 409);
   // Every keyframe is painted like a first one. When keyframe 0 is accepted
   // artwork, its own prompt is the appearance; otherwise the user words it.
@@ -211,7 +215,7 @@ async function pathVideoQuote(db: Db, sid: string, { plan, image, size, worker }
     .findOne({ _id: `${sid}:${image.asset_id}`, session_id: sid }))?.prompt.trim() ?? "" : "";
   const sourcePrompt = source.length >= 3 && source.length <= 1024 ? source : null;
   return { reservation, paid_keyframes: paid, appearance: !sourcePrompt, source_prompt: sourcePrompt, keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
-    legs: plan.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, reservation: costs.get(leg.duration)! })) };
+    legs: legs.map(leg => ({ ...leg, reservation: costs.get(leg.duration)! })) };
 }
 
 // Release the unspent part of the reservation and close the job, once.
@@ -249,13 +253,20 @@ async function jobFrames(db: Db, job: PathVideoDoc) {
     if (views.length !== found.length || viewsHash(views) !== job.views_sha256) return null;
     return { size: views[0]!, source: null, passes: (i: number) => keyframeViewPasses(views[i]!),
       chain: async (a: number, b: number) => ({ view: inFrame(views[a]!, views[b]!), depth: await stored(views[a]!.files.depth) }),
-      sources: (i: number) => assertCurrentView(db, views[i]!) };
+      sources: (i: number) => assertCurrentView(db, views[i]!),
+      span: (a: number, b: number) => {
+        const { move, metres } = viewStep(views[a]!, views[b]!);
+        return { move, far: metres > 2 * WALK_CHECKPOINT_METRES + 1e-6 || Math.abs(move.turn_deg) > 2 * CHECKPOINT_MAX_DEGREES + 1e-6 };
+      } };
   }
   const study = await db.collection<MotionStudyDoc>("motion_studies").findOne({ _id: `${job.session_id}:${job.study_id}`, session_id: job.session_id });
   if (!study || viewHash(study) !== job.study_sha256) return null;
+  const path = study.preparation.path.keyframes, time = (i: number) => study.frames[i]!.time;
   return { size: study.source.view, source: study.source.image, passes: (i: number) => framePasses(study, i),
     chain: async (a: number) => ({ view: frameView(study, a), depth: await stored(study.files[a]!.depth) }),
-    sources: async () => study.source.definitions };
+    sources: async () => study.source.definitions,
+    span: (a: number, b: number) => ({ move: legMove(path, time(a), time(b), job.subject),
+      far: checkpointFar(sampleCameraPath(path, time(a)), sampleCameraPath(path, time(b)), 2) }) };
 }
 
 // One step of one job. Returns how long to wait before its next step.
@@ -355,19 +366,18 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
           into.dropped = true;
         } else {
           // A middle one is skipped: the next keyframe chains from the last kept
-          // one, and one leg spans both steps. A step past twice the checkpoint
-          // limits is too far to chain, so then the failed keyframe is kept, flagged.
-          const sum = (key: "orbit_deg" | "turn_deg" | "rise_m" | "forward_m") => round(clamp(into.move[key] + out.move[key], 500));
-          const move = { orbit_deg: sum("orbit_deg"), turn_deg: sum("turn_deg"), rise_m: sum("rise_m"), forward_m: sum("forward_m"), subject: out.move.subject };
-          const degrees = 2 * CHECKPOINT_MAX_DEGREES + 1e-6, far = job.view_ids
-            ? Math.abs(move.forward_m) > 2 * WALK_CHECKPOINT_METRES + 1e-6 || Math.abs(move.turn_deg) > degrees : Math.abs(move.orbit_deg) > degrees;
+          // one, and one leg spans both steps, with the real move between the two.
+          // A step past twice the checkpoint limits is too far to chain, so then
+          // the failed keyframe is kept, flagged.
+          const { move, far } = frames.span(prev!.frame, job.keyframes[k + 1]!.frame);
           if (far) kf.kept_reason = "This keyframe failed its gate after one retry. It is kept: without it, one step would pass twice the checkpoint limits.";
           else {
-            const seconds = round(into.seconds + out.seconds, 3), duration = legSeconds(seconds);
+            // out.duration carries the backend's leg floor.
+            const seconds = round(into.seconds + out.seconds, 3), duration = Math.max(legSeconds(seconds), out.duration);
             Object.assign(kf, { dropped: true, drop_reason: `This keyframe failed its gate after one retry. The next keyframe chains from keyframe ${p + 1}, and one leg spans both steps.` });
             into.dropped = true;
             // The quote's price per second. The unspent rest is released when the job settles.
-            Object.assign(out, { seconds, duration, cost: Math.round(out.cost * 1_000_000 / out.duration) * duration / 1_000_000, move });
+            Object.assign(out, { seconds, duration, cost: Math.round(out.cost * 1_000_000 / out.duration) * duration / 1_000_000, move: { ...move, subject: out.move.subject } });
           }
         }
       }
@@ -569,7 +579,7 @@ async function schedule(db: Db, sid: string, input: Record<string, unknown>, sco
     const job: PathVideoDoc = { _id: key, id, session_id: sid, ...source.identity,
       request_sha256: requestHash, created_at: now, status: "scheduled", prompt, reservation: quote.reservation, committed: 0, ledger_ids,
       keyframe_reservation: quote.keyframe_reservation, keyframe_parameters: quote.keyframe_parameters, art, duration: plan.duration, subject: plan.subject,
-      keyframes: plan.keyframes, legs: plan.legs.map((leg, i) => ({ ...leg, cost: quote.legs[i]!.reservation, attempts: [] })) };
+      keyframes: plan.keyframes, legs: plan.legs.map((leg, i) => ({ ...leg, duration: quote.legs[i]!.duration, cost: quote.legs[i]!.reservation, attempts: [] })) };
     await jobs.insertOne(job, options); return { job: wire(job) };
   });
 }

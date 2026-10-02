@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { ClientSession, Db, Document } from "mongodb";
 import { PerspectiveCamera, Vector3 } from "three";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, Document>>(), files: new Map<string, Buffer>(), tail: Promise.resolve(),
-  stale: false, painted: 0, landings: [] as number[], keyframes: true, statusDown: false, onSubmit: null as (() => Promise<Response | void>) | null, historical: [] as string[] }));
+  stale: false, painted: 0, landings: [] as number[], keyframes: true, statusDown: false, onSubmit: null as (() => Promise<Response | void>) | null, historical: [] as string[], legFloor: 3 as number | null }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
 function matches(row: Document, query: Document): boolean {
   return Object.entries(query).every(([key, value]) => {
@@ -124,7 +124,7 @@ async function drain(limit = 80) {
   throw new Error("Path video did not settle");
 }
 beforeEach(() => {
-  memory.rows.clear(); memory.files.clear(); memory.tail = Promise.resolve(); memory.stale = false; memory.painted = 0; memory.landings = [100, 200]; memory.keyframes = true; memory.statusDown = false; memory.onSubmit = null; memory.historical = [];
+  memory.rows.clear(); memory.files.clear(); memory.tail = Promise.resolve(); memory.stale = false; memory.painted = 0; memory.landings = [100, 200]; memory.keyframes = true; memory.statusDown = false; memory.onSubmit = null; memory.historical = []; memory.legFloor = 3;
   vi.clearAllMocks(); vi.stubGlobal("fetch", provider);
   vi.stubEnv("MODAL_API_URL", "https://backend.test"); vi.stubEnv("NEXT_PUBLIC_WORLD_SCENES", "1"); vi.stubEnv("PATH_VIDEO_ENABLED", "1");
   vi.stubEnv("MAX_DAILY_SPEND", "0"); vi.stubEnv("MAX_SESSION_SPEND", "0"); vi.stubEnv("MOTION_DAILY_CAP_USD", "3");
@@ -134,7 +134,8 @@ beforeEach(() => {
   let painted = 0, legs = 0;
   provider.mockImplementation(async (url: string) => {
     if (url.endsWith("/illustration/keyframe-capabilities")) return Response.json({ enabled: memory.keyframes, model: KEYFRAME_MODEL, reservation: memory.keyframes ? .1 : 0, parameters: { num_images: 2, prompt_version: "saved-camera-qwen-keyframe-v1" } });
-    if (url.endsWith("/motion/capabilities")) return Response.json({ enabled: true, model: H3_CAMERA_MODEL, adapter: H3_CAMERA_ADAPTER, purpose: "calibration", resolution: "768P", reservation_usd_per_second: .08 });
+    if (url.endsWith("/motion/capabilities")) return Response.json({ enabled: true, model: H3_CAMERA_MODEL, adapter: H3_CAMERA_ADAPTER, purpose: "calibration", resolution: "768P", reservation_usd_per_second: .08,
+      ...(memory.legFloor === null ? {} : { leg_min_seconds: memory.legFloor }) });
     if (url.endsWith("/illustration/submit")) return await memory.onSubmit?.() ?? Response.json({ request_id: `kf${++painted}`, model: KEYFRAME_MODEL });
     if (url.includes("/illustration/requests/")) return Response.json({ status: "ready", images: [{ url: "https://fal.media/a.jpg" }, { url: "https://fal.media/b.jpg" }] });
     if (url.endsWith("/illustration/gate")) return Response.json({ masks: [{ mask_png: "m0" }, { mask_png: "m1" }] });
@@ -157,7 +158,7 @@ it("words a leg as the camera's own move: right orbit positive, rise in metres, 
   const pivot = new Vector3(), a = orbitPosition(pivot, { azimuth: 0, elevation: 0, distance: 10 }), b = orbitPosition(pivot, { azimuth: 10, elevation: 0, distance: 10 });
   const right = pivot.clone().sub(a).normalize().cross(new Vector3(0, 1, 0));
   expect(b.clone().sub(a).dot(right)).toBeGreaterThan(0);
-  expect([1, 2.75, 2.857, 3.0000001, 4.8, 12, 40].map(legSeconds)).toEqual([3, 3, 3, 3, 5, 12, 15]);
+  expect([1, 2.75, 2.857, 3.0000001, 4.8, 12, 40].map(t => legSeconds(t))).toEqual([3, 3, 3, 3, 5, 12, 15]);
 });
 
 it("paints chained keyframes, makes one POST per step, joins the legs and releases nothing it spent", async () => {
@@ -351,6 +352,57 @@ it("drops a middle keyframe that fails its gate twice: the next one chains from 
   expect(job().keyframes[2]).toMatchObject({ chained_from: 0 }); expect(vi.mocked(prepareKeyframeInput).mock.calls.at(-1)![3]!.image.toString()).toBe("kf-4");
   expect(job().legs[1]).toMatchObject({ seconds: 3, duration: 3, cost: .24, move: { turn_deg: 60, forward_m: 0, subject: "Copper Kettle" } });
   expect(body("/motion/leg")).toMatchObject({ duration: 3, reservation: .24, move: { turn_deg: 60 } });
+});
+
+it.each([
+  // 15 degrees of orbit and 20 of climb a step: about 25 degrees of view direction each, 69 over three steps, though the orbit sums to 45.
+  ["an orbit that climbs", [{ time: 0, azimuth: 0, elevation: 0, distance: 20 }, { time: .75, azimuth: 45, elevation: 60, distance: 20 }]],
+  ["a crane", [{ time: 0, azimuth: 0, elevation: 0, distance: 20 }, { time: .75, azimuth: 0, elevation: 75, distance: 20 }]],
+  // 1.5 times nearer a step: 2.25 over two steps, 3.375 over three.
+  ["a dolly", [27, 18, 12, 8].map((distance, i) => ({ time: i / 4, azimuth: 0, elevation: 30, distance }))],
+])("drops one middle keyframe of %s but not the next, when the chain would pass twice the checkpoint limits", async (_, keyframes) => {
+  const study = store("motion_studies").get("world:study")!;
+  study.preparation.checkpoints = [0, 1, 2, 3]; study.preparation.path.keyframes = keyframes;
+  gates(.5, .4, .5, .4, "pass"); memory.landings = [];
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job().status).toBe("ready");
+  expect(job().keyframes[1]).toMatchObject({ dropped: true });
+  expect(job().keyframes[2]).toMatchObject({ chained_from: 0, kept_reason: expect.stringMatching(/twice the checkpoint limits/) }); expect(job().keyframes[2]).not.toHaveProperty("dropped");
+  expect(job().keyframes[3]).toMatchObject({ chained_from: 2, result: { passed: true } });
+  expect(job().legs.map((leg: Document) => leg.dropped)).toEqual([true, undefined, undefined]);
+});
+
+it("words a spanning walk leg as the real move from the last kept view, and keeps a walk keyframe whose span passes 8 m", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  // v1 turns 30 degrees right on the spot; v2 steps 4 m to v1's right. The two legs' own forwards sum to 0,
+  // but from v0 the eye ends 2 m back on v0's heading.
+  const right = new Vector3(Math.cos(Math.PI / 6), 0, Math.sin(Math.PI / 6)).multiplyScalar(4);
+  savedView("v0", eye(0, 1.6, 8, 0)); savedView("v1", eye(0, 1.6, 8, -Math.PI / 6)); savedView("v2", eye(right.x, 1.6, 8 + right.z, -Math.PI / 6));
+  gates("pass", .5, .4, "pass"); memory.landings = [];
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1", "v2"]));
+  await drain();
+  expect(job().status).toBe("ready"); expect(job().keyframes[1]).toMatchObject({ dropped: true });
+  expect(job().legs[1]).toMatchObject({ seconds: 4.357, duration: 5, move: { turn_deg: 30, forward_m: -2, rise_m: 0 } });
+  // Two 5 m sideways steps: no forward and no turn, but the span is 10 m.
+  for (const [id, x] of [["s0", 0], ["s1", 5], ["s2", 10]] as const) savedView(id, eye(x, 1.6, 8, 0));
+  store("path_videos").clear(); store("spend_ledger").clear(); provider.mockClear();
+  gates("pass", .5, .4, "pass");
+  await walkVideoAction("world", "place", await walkInput(["s0", "s1", "s2"]));
+  await drain();
+  expect(job().status).toBe("ready");
+  expect(job().keyframes[1]).toMatchObject({ kept_reason: expect.stringMatching(/twice the checkpoint limits/) }); expect(job().keyframes[1]).not.toHaveProperty("dropped");
+  expect(job().keyframes[2]).toMatchObject({ chained_from: 1 });
+});
+
+it("sizes legs at 5 s for a backend that does not advertise its leg floor, so an old backend never refuses a paid-for leg", async () => {
+  memory.legFloor = null;
+  const library = await pathVideoLibrary("world", "study");
+  expect(library.quote).toMatchObject({ reservation: 1, legs: [{ seconds: 3, duration: 5, reservation: .4 }, { seconds: 3, duration: 5, reservation: .4 }] });
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job()).toMatchObject({ status: "ready", legs: [{ duration: 5, cost: .4 }, { duration: 5, cost: .4 }] });
+  expect([0, 1].map(n => body("/motion/leg", n).duration)).toEqual([5, 5]);
 });
 
 it("fails the job when keyframe 0 fails its gate twice: nothing to start from, and the rest is released", async () => {

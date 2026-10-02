@@ -286,6 +286,35 @@ describe("warpKeyframe with B's objects", () => {
     expect(front.filter(p => out.pure![p] && !out.hole[p]).length).toBeGreaterThan(front.length * 0.95);
   });
 
+  it("cuts an A-sourced wall that recedes past 3x in one clean line, not in stripes", () => {
+    // Only the wall, as one object. A, 2 m from it, looks 50 degrees along it; B looks at it 20 degrees right.
+    // Without the majority rule the 8-bit depth steps left 1-3 px stripes of A's paint inside the cut part.
+    const shoot = (cam: PerspectiveCamera) => {
+      const render = new Uint8Array(W * H * 4).fill(128), depth = new Uint8Array(W * H * 4).fill(255), hits: boolean[] = [];
+      for (let p = 0; p < W * H; p++) {
+        const dir = new Vector3((p % W + 0.5) / W * 2 - 1, 1 - (Math.floor(p / W) + 0.5) / H * 2, 0.5).unproject(cam).sub(cam.position).normalize();
+        const hit = new Ray(cam.position.clone(), dir).intersectPlane(WALL, new Vector3()), z = hit ? -hit.applyMatrix4(cam.matrixWorldInverse).z : 0;
+        hits.push(z > 0 && z <= FAR);
+        depth.fill(hits[p] ? Math.round(255 * (1 - (z - NEAR) / (FAR - NEAR))) : 0, p * 4, p * 4 + 3);
+      }
+      const view: KeyframeView = { width: W, height: H, depth: { near: NEAR, far: FAR },
+        camera: { projection: "perspective", world_matrix: cam.matrixWorld.toArray(), projection_matrix: cam.projectionMatrix.toArray(), near: 0.1, far: 100 } };
+      return { view, render, depth, hits };
+    };
+    const a = shoot(camera(0, -50, 0, 0, -8)), b = shoot(camera(2, -20, 0, 0, -4));
+    const args = [{ view: a.view, image: a.render, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth }] as const;
+    const out = warpKeyframe(args[0], { ...args[1], objects: Int32Array.from(b.hits, hit => (hit ? 0 : -1)) }), seen = warpKeyframe(...args, Infinity);
+    expect(out.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
+    let cut = 0;
+    for (let y = 0; y < H; y++) {
+      // Along each row, over the pixels A saw: A's paint, then at most one switch to the candidate.
+      const row = Array.from({ length: W }, (_, x) => y * W + x).filter(p => b.hits[p] && !seen.hole[p]).map(p => out.hole[p]!);
+      cut += row.filter(v => v).length;
+      expect(row.filter((v, i) => i && v !== row[i - 1]).length).toBeLessThanOrEqual(1);
+    }
+    expect(cut).toBeGreaterThan(300);
+  });
+
   it("keeps the per-pixel rule for a flat object", () => {
     // Both eyes above the box: its top is flat, so it counts as ground.
     const top = (hit: Vector3 | null) => !!hit && Math.abs(hit.y - 1) < 1e-6;

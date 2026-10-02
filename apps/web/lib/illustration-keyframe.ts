@@ -29,6 +29,8 @@ export interface KeyframeWarp {
   pure?: Uint8Array;
   /** With B's objects: how many visible objects come from A, from B's paint, or count as ground. */
   objects?: { a: number; candidate: number; ground: number };
+  /** With B's objects: each visible object's source, by object index. */
+  sources?: Map<number, "a" | "candidate" | "ground">;
   /** 1 on B's sky (depth 0) painted with A's sky row means. */
   sky: Uint8Array;
   /** Share of B's geometry pixels that are holes. */
@@ -204,13 +206,17 @@ export function warpKeyframe(
     return det > 0 ? Math.sqrt((f + Math.sqrt(Math.max(0, f * f - 4 * det * det))) / 2) / det : Infinity;
   };
 
-  // Magnification changes slowly across a surface, so where it crosses the
+  // Magnification changes slowly across a surface, so where it crosses a
   // limit, small depth noise would dither the decision into a ragged patchwork
-  // of A's and B's paint. Within 10% of the limit, the majority of A's seen
-  // pixels in the 9x9 window decides.
-  const mag = new Float64Array(n), over = new Uint8Array(n);
-  for (let t = 0; t < n; t++) if (seen[t]) { mag[t] = magnification(t); over[t] = mag[t]! > maxMagnification ? 1 : 0; }
-  const overs = boxSum(over, w, h, 4), seens = boxSum(seen, w, h, 4);
+  // of A's and B's paint. Within 10% of a limit (the warp's, or the 3x of an
+  // object from A), the majority of A's seen pixels in the 9x9 window decides.
+  const mag = new Float64Array(n), seens = boxSum(seen, w, h, 4);
+  for (let t = 0; t < n; t++) if (seen[t]) mag[t] = magnification(t);
+  const cut = (limit: number) => {
+    const over = seen.map((s, t) => (s && mag[t]! > limit ? 1 : 0)), overs = boxSum(over, w, h, 4);
+    return (t: number) => (Math.abs(mag[t]! / limit - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t] === 1);
+  };
+  const stretched = cut(maxMagnification), smeared = cut(OBJECT_MAX_MAGNIFICATION);
   const out = new Uint8Array(n * 4), sampled = new Uint8Array(n), sum = new Float64Array(4);
   for (let t = 0; t < n; t++) {
     if (!seen[t]) continue;
@@ -252,9 +258,9 @@ export function warpKeyframe(
   const valid = new Uint8Array(n), pure = objects && new Uint8Array(n);
   for (let t = 0; t < n; t++) {
     const s = objects && source.get(objects[t]!);
-    if (s === "a") valid[t] = pure![t] = sampled[t] && mag[t]! <= OBJECT_MAX_MAGNIFICATION ? 1 : 0;
+    if (s === "a") valid[t] = pure![t] = sampled[t] && !smeared(t) ? 1 : 0;
     else if (s === "candidate") pure![t] = 1;
-    else if (sampled[t] && !(Math.abs(mag[t]! / maxMagnification - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t])) valid[t] = 1;
+    else if (sampled[t] && !stretched(t)) valid[t] = 1;
   }
 
   // Sky: every B sky pixel takes the mean of A's sky in the proportional row
@@ -292,7 +298,7 @@ export function warpKeyframe(
 
   const cx = px / points, cy = py / points, cz = pz / points;
   const ea = [Ma[12]! - cx, Ma[13]! - cy, Ma[14]! - cz], eb = [Mb[12]! - cx, Mb[13]! - cy, Mb[14]! - cz];
-  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: eyeAngle(ea, eb), ...(pure ? { pure, objects: summary } : {}) };
+  return { rgba: out, hole, sky, holeShare: surfacePixels ? holes / surfacePixels : 0, angleDeg: eyeAngle(ea, eb), ...(pure ? { pure, objects: summary, sources: source } : {}) };
 }
 
 /** Angle in degrees between two eyes, each given relative to the same centre. */

@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
+import { KEYFRAME_GATE } from "./illustration-keyframe";
 import { finishKeyframe, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
 
 const S = 64, f = 1 / Math.tan(25 * Math.PI / 180);
@@ -50,5 +51,28 @@ describe("finishKeyframe", () => {
     expect(done.chain!.objects).toEqual({ a: 1, candidate: 1, ground: 0 });
     expect(done.candidates.map(c => [c.painted, c.passed])).toEqual([[0, false], [80, true]]);
     expect(done).toMatchObject({ chosen: 1, gate: "passed" });
+  });
+
+  it("judges on its own only an object the candidate paints whole, not an A-sourced one or a flat path", async () => {
+    // A saw another surface right of column 40, so B (0.3 m right) never saw its columns 38-63.
+    const depth = await png(solid([208, 208, 208])), depthA = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : (i >> 2) % S >= 40 ? 100 : 208)));
+    const finish = async (camera: (x: number) => ReturnType<typeof view>, inObject: (p: number) => boolean, render: Uint8Array, mask: string | null) => {
+      const objects = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : inObject(i >> 2) ? [100, 120, 140][i % 4]! : 0)));
+      const passes: KeyframePasses = { view: { ...camera(0.3), objects: [{ object_id: "kettle", rgb: [100, 120, 140] }], floor_id: null, mode: "walk" }, render: await png(render), depth, objects };
+      const chain: KeyframeChain = { view: camera(0), depth: depthA, image: await png(solid([200, 160, 40])) };
+      // The candidate leaves the object in the render's colours and repaints everything else by 80.
+      const candidate = await png(new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : render[i]! + (inObject(i >> 2) ? 0 : 80))));
+      return finishKeyframe(passes, mask ? "kettle" : null, [candidate], mask ? [mask] : null, chain);
+    };
+    // The inn: A saw 69% of it, so it comes from A, but its unseen columns (8% of the frame) are holes the candidate leaves grey.
+    const inn = await finish(view, inBuilding, solid([100, 110, 120]), (await png(new Uint8Array(S * S).map((_, p) => (inBuilding(p) ? 255 : 0)), 1)).toString("base64"));
+    expect(inn.chain!.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
+    expect(inn).toMatchObject({ gate: "passed", passed: true });
+    // Looking straight down at a tan path (the top three quarters of the frame): it is flat, so ground, and painted tan.
+    const down = (x: number) => ({ ...view(x), camera: { ...view(x).camera, world_matrix: [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, x, 10, 0, 1] } });
+    const onPath = (p: number) => p < S * 48;
+    const path = await finish(down, onPath, new Uint8Array(S * S * 4).map((_, i) => (i % 4 === 3 ? 255 : onPath(i >> 2) ? [180, 150, 100][i % 4]! : [100, 110, 120][i % 4]!)), null);
+    expect(path.chain!.objects).toEqual({ a: 0, candidate: 0, ground: 1 });
+    expect(path.candidates[0]!.painted).toBeGreaterThan(KEYFRAME_GATE.minPainted);
   });
 });

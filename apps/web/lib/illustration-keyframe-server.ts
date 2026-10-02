@@ -100,9 +100,11 @@ export async function finishKeyframe(passes: KeyframePasses, objectId: string | 
   // First keyframe: every geometry pixel came from the render. Chain: the
   // composite takes the candidate only in the holes (B's sky too when A has
   // none), so judge the candidate's own pixels there, not A's warp or the
-  // feather, and each object that takes 5% of the frame from it on its own.
+  // feather. Each object the candidate paints whole and that takes 5% of the
+  // frame is judged on its own too; an object from A, or ground, is not.
   const renderMask = warped?.warp.hole ?? (await decode(passes.depth, view)).filter((_, i) => i % 4 === 0).map(v => (v ? 1 : 0));
-  const painted = decoded.map(image => paintedDelta(render, image, renderMask, warped?.ids));
+  const fresh = warped?.ids.map(k => (warped.warp.sources?.get(k) === "candidate" ? k : -1));
+  const painted = decoded.map(image => paintedDelta(render, image, renderMask, fresh));
   // Chain: how far each raw candidate strays from A's warp where A was trusted (not a hole, not sky).
   const trusted = warped?.warp.hole.map((h, t) => (h || warped.warp.sky[t] ? 0 : 1));
   const agreement = warped && trusted && decoded.map(image => paintedDelta(warped.warp.rgba, image, trusted));
