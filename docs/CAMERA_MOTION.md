@@ -105,6 +105,14 @@ the end keyframe measures (the most visible one). A leg plans its length at
 1.4 m/s, and at least 1.5 s for a turn on the spot. Then the usual leg length,
 trim and retime apply.
 
+H3 moves for the whole clip that a leg asks for (research 37). Thus each study
+or walk leg asks H3 for its planned length, rounded up to whole seconds, with a
+minimum of `LEG_MIN_SECONDS` (3 s). fal's schema accepts 0.92 to 15 s. Before,
+each leg asked for at least 5 s. A walk leg of 4 m (2.9 s planned) now costs
+3 s, so the legs of a 4-leg walk cost $0.96 at $0.08/s, not $1.60. The web
+side trims each clip at the end of its motion and retimes it to the plan
+(0.5 to 2 times).
+
 Billing, the one retry, refusals and provenance (view ids and their hash, not a
 study) are the same as for a study path video. All views must be current 3D
 views of the same place, at the same size. A geometry change during a job stops
@@ -113,11 +121,27 @@ videos that are active or ready. Failed and cancelled jobs do not count.
 
 In study and walk path videos, a keyframe that fails its gate is painted once
 more. The job reserves this retry on its own, as it does for a leg retry. If
-the retry passes, the job uses it. If not, the job keeps the try that is nearer
-the gate (IoU) and flags it. The last keyframe is different: if it still fails,
-the job drops it and the leg into it. The video then ends at the keyframe before
-it, and the job releases the reservation of that leg. The job record shows the
-retry (`retry`) and the drop (`dropped`, `drop_reason`) on the keyframe.
+the retry passes, the job uses it. If it fails again, the job drops the
+keyframe, so that the video does not show an invented picture:
+
+- A failed keyframe 0 fails the job, because no chain or leg can start without
+  it. The job releases the unspent reservation. (Accepted artwork at keyframe 0
+  has no gate, because the job does not paint it.)
+- The job skips a failed middle keyframe. The next keyframe chains from the
+  last kept keyframe, and one leg goes from that keyframe to the next one. The
+  leg adds the two moves and the two planned lengths, and costs its own length.
+  The job releases the rest of the two legs' reservation.
+- The job drops a failed last keyframe and the leg into it. The video then
+  ends at the keyframe before it, and the job releases the reservation of that
+  leg.
+
+The job does not drop a middle keyframe when the combined step is more than two
+checkpoint steps: more than 60 degrees of orbit for a study, or more than 8 m
+or 60 degrees of turn for a walk. A chain that long is not reliable. Then the
+job keeps the try that is nearer the gate (IoU) and flags it (`kept_reason`).
+The job record shows the retry (`retry`), the drop (`dropped`, `drop_reason`)
+on the keyframe, and the keyframe that each chain started from
+(`chained_from`).
 
 ## Next Acceptance Work
 
