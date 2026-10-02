@@ -84,6 +84,26 @@ describe("warpKeyframe", () => {
     expect(b.hits.filter((hit, p) => hit && out.hole[p] && !unmasked.hole[p]).length).toBeLessThanOrEqual(geometry * 0.01);
   });
 
+  it("carries a fine wall texture through a small turn without aliasing", () => {
+    // Stripes about 6 px apart in A, on both axes. A turn about the eye maps
+    // B to A with no parallax, so every wall pixel in B has an exact stripe colour.
+    const stripes = (hit: Vector3) => [128 + 100 * Math.sin(2 * Math.PI * hit.x / 1.5), 128 + 100 * Math.sin(2 * Math.PI * hit.y / 1.5), 128];
+    const onWall = (hit: Vector3 | null | undefined) => !!hit && hit.z < -9;
+    const a = capture(camera(0)), b = capture(camera(0, 6)), image = a.render.slice();
+    a.hits.forEach((hit, p) => { if (onWall(hit)) image.set(stripes(hit!).map(Math.round), p * 4); });
+    const out = warpKeyframe({ view: a.view, image, depth: a.depth }, { view: b.view, render: b.render, depth: b.depth });
+    let error = 0, count = 0;
+    b.hits.forEach((hit, p) => {
+      const x = p % W, y = Math.floor(p / W);
+      if (out.hole[p] || [-1, 0, 1].some(j => [-1, 0, 1].some(i => !onWall(b.hits[(y + j) * W + x + i]) || x + i < 0 || x + i >= W))) return;
+      count++;
+      stripes(hit!).forEach((c, k) => { error += Math.abs(out.rgba[p * 4 + k]! - c); });
+    });
+    // Measured: 3.8 (bilinear softening of the stripes); the old forward splat gave 11.
+    expect(count).toBeGreaterThan(1000);
+    expect(error / (count * 3)).toBeLessThan(5);
+  });
+
   it("drops a surface A saw at a grazing angle and B sees frontally", () => {
     // A stands 1.5 m from the wall, looking 60 degrees along it; B faces it from 5 m.
     const eyeA = new Vector3(0, 0, -8.5), a = capture(camera(0, -60, 0, 0, eyeA.z)), b = capture(camera(2, 0, 0, 0, -5));
@@ -105,13 +125,13 @@ describe("warpKeyframe", () => {
   });
 
   // Raised and pitched down, B sees the box top A never saw; a y-flip in the
-  // warp cancels for sideways moves but not here. From above, more of the
-  // unseen area lies along edges, where the 2x2 splat and crack filling bleed
-  // about 1 px (measured: 3 of 80 top-face px, 89% of unseen px are holes).
+  // warp cancels for sideways moves but not here. A's depth matches the top's
+  // first row within tolerance, but A sees that face from behind (measured:
+  // 0 of 80 top-face px kept, 98.6% of unseen px are holes; sideways 98.3%).
   it.each([
-    ["shifts sideways", camera(5), (hit: Vector3) => Math.abs(hit.x - 1) < 1e-6, 0, 0.9],
-    ["rises and pitches down", camera(0, 0, 2.5, -15), (hit: Vector3) => Math.abs(hit.y - 1) < 1e-6, 0.1, 0.85],
-  ])("opens holes behind a box and on its unseen face when the camera %s", (_, camB, unseenFace, bleed, minUnseenHoles) => {
+    ["shifts sideways", camera(5), (hit: Vector3) => Math.abs(hit.x - 1) < 1e-6],
+    ["rises and pitches down", camera(0, 0, 2.5, -15), (hit: Vector3) => Math.abs(hit.y - 1) < 1e-6],
+  ])("opens holes behind a box and on its unseen face when the camera %s", (_, camB, unseenFace) => {
     const camA = camera(0), a = capture(camA), b = capture(camB);
     // A painted copy that differs from B's render everywhere, so warped pixels are traceable.
     const painted = a.render.map((c, i) => (i % 4 === 3 ? c : 255 - c));
@@ -145,9 +165,9 @@ describe("warpKeyframe", () => {
     // B sees a box face in front of wall A did see: B's depth must keep A's wall paint off it.
     const side = b.hits.flatMap((hit, p) => (hit && unseenFace(hit) ? [p] : []));
     expect(side.length).toBeGreaterThan(20);
-    expect(side.filter(p => !out.hole[p]).length).toBeLessThanOrEqual(side.length * bleed);
+    expect(side.filter(p => !out.hole[p])).toEqual([]);
     expect(unseenCount).toBeGreaterThan(50);
-    expect(unseenHoles / unseenCount).toBeGreaterThan(minUnseenHoles);
+    expect(unseenHoles / unseenCount).toBeGreaterThan(0.95);
     expect(strayHoles).toBeLessThan(geometry * 0.01);
     expect(warpedRight / warped).toBeGreaterThan(0.95); // A's paint landed on the same surfaces in B
     expect(out.holeShare).toBeCloseTo(unseenCount / geometry, 1);
