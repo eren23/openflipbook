@@ -15,6 +15,8 @@ Two things learned building it, both encoded below:
   (centre off by 0.78 of the frame) with 0.94 confidence. Scoping is done by
   CROPPING to the stored box instead, at 1.6x so a building painted wider than
   its plot has room to show the overflow rather than being clipped flush.
+  The crop lives in providers.segmenter.sam3_box_mask, shared with the
+  keyframe gate.
 - **A box is a proxy, not a building.** A pitched roof rising above a flat box
   top lowers whole-silhouette IoU honestly. `width_ratio` and `centre_dx` are
   the verdict; `iou` is context. Read them together.
@@ -25,8 +27,6 @@ SILHOUETTE_BENCH_RUN=1, the same discipline as every other paid runner here.
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 import json
 import os
 import statistics
@@ -35,10 +35,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from providers.segmenter import CROP_PAD, sam3_box_mask
+
 _REPORTS = Path(__file__).resolve().parent / "reports"
-# How much wider than the stored box to crop before segmenting. Room for
-# overflow to be visible; tight enough that a neighbour does not win the crop.
-CROP_PAD = 1.6
 
 
 def _load_env() -> None:
@@ -75,11 +74,6 @@ def mask_stats(mask: bytes, w: int, h: int) -> dict[str, float] | None:
 
 async def measure_one(masks_dir: Path, painted: Path, camera: int, label: str) -> dict[str, Any]:
     """One (camera, building): the stored silhouette vs what is painted there."""
-    import fal_client
-    from PIL import Image
-
-    from providers.image import _fetch_url_bytes
-
     plan = json.loads((masks_dir / "masks.json").read_text())
     shot = next(s for s in plan if s["camera"] == camera)
     w, h = shot["width"], shot["height"]
@@ -91,33 +85,18 @@ async def measure_one(masks_dir: Path, painted: Path, camera: int, label: str) -
     if ts is None:
         return {"camera": camera, "label": label, "error": "stored silhouette is empty"}
 
-    img = Image.open(painted).convert("RGB").resize((w, h))
-    cw, ch = ts["width"] * CROP_PAD, ts["height"] * CROP_PAD
-    cx0 = max(0, round((ts["cx"] - cw / 2) * w))
-    cx1 = min(w, round((ts["cx"] + cw / 2) * w))
-    cy0 = max(0, round((ts["cy"] - ch / 2) * h))
-    cy1 = min(h, round((ts["cy"] + ch / 2) * h))
-    buf = io.BytesIO()
-    img.crop((cx0, cy0, cx1, cy1)).save(buf, "JPEG", quality=92)
-    uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
-
-    handle = await fal_client.submit_async("fal-ai/sam-3/image", arguments={
-        "image_url": uri, "prompt": "building", "apply_mask": False,
-        "include_scores": True, "max_masks": 1,
-    })
-    result = await handle.get()
-    masks = result.get("masks") or []
-    if not masks:
-        return {"camera": camera, "label": label, "request_id": handle.request_id,
+    # The crop is centred on the silhouette's centroid, sized to its extent.
+    box = ((ts["cx"] - ts["width"] / 2) * w, (ts["cy"] - ts["height"] / 2) * h,
+           (ts["cx"] + ts["width"] / 2) * w, (ts["cy"] + ts["height"] / 2) * h)
+    found = await sam3_box_mask(painted.read_bytes(), box, "building", (w, h))
+    if found["mask"] is None:
+        return {"camera": camera, "label": label, "request_id": found["request_id"],
                 "error": "segmenter found nothing in the crop"}
-    data, _ = await _fetch_url_bytes(masks[0]["url"])
-    crop_mask = Image.open(io.BytesIO(data)).convert("L").resize((cx1 - cx0, cy1 - cy0), Image.NEAREST)
-    full = Image.new("L", (w, h), 0)
-    full.paste(crop_mask, (cx0, cy0))  # back into full-frame coordinates
-    pred = bytes(1 if p >= 128 else 0 for p in full.tobytes())
+    pred = bytes(1 if p else 0 for p in found["mask"].convert("L").tobytes())
     ps = mask_stats(pred, w, h)
     if ps is None:
         return {"camera": camera, "label": label, "error": "segmenter mask is empty"}
+    cx0, _, cx1, _ = found["crop"]
 
     inter = union = 0
     for a, b in zip(truth, pred, strict=True):  # a length mismatch is a bug, not a shorter loop
@@ -126,8 +105,8 @@ async def measure_one(masks_dir: Path, painted: Path, camera: int, label: str) -
         if a or b:
             union += 1
     return {
-        "camera": camera, "label": label, "request_id": handle.request_id,
-        "segmenter_score": round(float((result.get("scores") or [0])[0]), 3),
+        "camera": camera, "label": label, "request_id": found["request_id"],
+        "segmenter_score": round(found["score"] or 0.0, 3),
         "iou": round(inter / union, 3) if union else 0.0,
         "width_ratio": round(ps["width"] / ts["width"], 3),
         "centre_dx": round(ps["cx"] - ts["cx"], 3),

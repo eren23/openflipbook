@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import pytest
 
+from providers import segmenter
 from providers.segmenter import (
     MAX_VERTICES,
+    box_crop,
     box_from_polygon,
     detector_box_to_sam_box,
     parse_segments,
@@ -163,3 +165,69 @@ def test_detector_box_clamps_to_image_bounds() -> None:
     )
     assert b["x_min"] == 0 and b["y_min"] == 0
     assert b["x_max"] == 150 and b["y_max"] == 42
+
+
+# --- SAM-3 box mask (the keyframe gate) --------------------------------------
+
+
+def test_box_crop_grows_around_the_centre_and_clamps() -> None:
+    assert box_crop((40, 20, 60, 30), 100, 50) == (34, 17, 66, 33)
+    assert box_crop((0, 0, 50, 50), 100, 50) == (0, 0, 65, 50)
+
+
+def _png(size: tuple[int, int], color: int | tuple[int, int, int], mode: str = "RGB") -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new(mode, size, color).save(out, format="PNG")
+    return out.getvalue()
+
+
+@pytest.mark.parametrize("found", [True, False])
+async def test_sam3_box_mask_crops_posts_once_and_pastes_back(monkeypatch: pytest.MonkeyPatch, found: bool) -> None:
+    import base64
+    import io
+    import json
+    from unittest.mock import AsyncMock
+
+    import fal_client
+    import httpx
+    from PIL import Image
+
+    monkeypatch.setenv("FAL_KEY", "key")
+    monkeypatch.delenv("FAL_SAM_MODEL", raising=False)
+    posts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        posts.append(request)
+        assert str(request.url) == "https://queue.fal.run/fal-ai/sam-3/image"
+        assert request.headers["X-Fal-No-Retry"] == "1"
+        payload = json.loads(request.content)
+        assert payload["prompt"] == "building" and "box_prompts" not in payload
+        crop = Image.open(io.BytesIO(base64.b64decode(payload["image_url"].split(",", 1)[1])))
+        assert crop.size == (32, 16)  # the box x1.6, not the whole frame
+        return httpx.Response(200, json={"request_id": "sam-id"})
+
+    async def fetch(url: str) -> tuple[bytes, str]:
+        return _png((32, 16), 255, "L"), "image/png"
+
+    # Patch the mask download first: importing providers.image subclasses the real httpx client.
+    monkeypatch.setattr("providers.image._fetch_url_bytes", fetch)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(segmenter.httpx, "AsyncClient", lambda **kwargs: real(transport=httpx.MockTransport(handler)))
+    result = {"masks": [{"url": "https://v3.fal.media/files/mask.png"}], "scores": [0.8]} if found else {"masks": []}
+    monkeypatch.setattr(fal_client, "result_async", AsyncMock(return_value=result))
+    # A half-size painting is measured in the saved view's pixels.
+    out = await segmenter.sam3_box_mask(_png((50, 25), (90, 90, 90)), (40, 20, 60, 30), "building", (100, 50))
+
+    assert len(posts) == 1
+    fal_client.result_async.assert_awaited_once_with("fal-ai/sam-3/image", "sam-id")
+    assert out["request_id"] == "sam-id" and out["crop"] == (34, 17, 66, 33)
+    if found:
+        assert out["score"] == 0.8
+        assert out["mask"].mode == "1" and out["mask"].size == (100, 50)
+        assert out["mask"].getbbox() == (34, 17, 66, 33)
+    else:
+        assert out["mask"] is None and out["score"] is None

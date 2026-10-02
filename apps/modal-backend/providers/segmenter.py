@@ -24,7 +24,10 @@ import base64
 import io
 import math
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypedDict
+
+import httpx
 
 if TYPE_CHECKING:
     from .detector import Detection
@@ -62,6 +65,72 @@ def segmenter_provider() -> str:
 
 def _sam_model() -> str:
     return os.environ.get("FAL_SAM_MODEL", "fal-ai/sam-3/image")
+
+
+# How much wider than the box to crop before segmenting. Room for overflow to
+# be visible; tight enough that a neighbour does not win the crop.
+CROP_PAD = 1.6
+
+
+def box_crop(box: Sequence[float], w: int, h: int, pad: float = CROP_PAD) -> tuple[int, int, int, int]:
+    """The pixel box [x0, y0, x1, y1] grown `pad` times around its centre and
+    clamped to the frame: the region SAM-3 actually sees."""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    hw, hh = (x1 - x0) * pad / 2, (y1 - y0) * pad / 2
+    return (max(0, round(cx - hw)), max(0, round(cy - hh)), min(w, round(cx + hw)), min(h, round(cy + hh)))
+
+
+async def sam3_box_mask(
+    image_bytes: bytes, box: Sequence[float], label: str, size: tuple[int, int] | None = None
+) -> dict[str, Any]:
+    """SAM-3 mask of `label` inside the pixel `box`, in full-frame pixels.
+
+    fal-ai/sam-3 ignores `box_prompts` on the image endpoint (asked for a
+    building on the right, it returned a barrel on the far left with 0.94
+    confidence), so the box scopes the call by CROPPING, at CROP_PAD. `size`
+    resizes the image first so the box is in the saved view's pixels.
+
+    Paid: one queue POST without retries; only the free polling may retry.
+    Returns {"mask": a 1-bit frame-size image, or None when nothing was found,
+    "request_id", "score", "crop": the (x0, y0, x1, y1) that was sent}."""
+    import fal_client
+    from PIL import Image
+
+    from providers.image import _fetch_url_bytes
+
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    if size is not None and img.size != size:
+        img = img.resize(size)
+    w, h = img.size
+    crop = box_crop(box, w, h)
+    buf = io.BytesIO()
+    img.crop(crop).save(buf, "JPEG", quality=92)
+    model = _sam_model()
+    async with httpx.AsyncClient(timeout=60, follow_redirects=False,
+                                 transport=httpx.AsyncHTTPTransport(retries=0)) as client:
+        response = await client.post(
+            f"https://queue.fal.run/{model}",
+            headers={"Authorization": f"Key {os.environ['FAL_KEY']}", "X-Fal-No-Retry": "1"},
+            json={"image_url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
+                  "prompt": label, "apply_mask": False, "include_scores": True, "max_masks": 1},
+        )
+        response.raise_for_status()
+    request_id = str(response.json()["request_id"])
+    result = await fal_client.result_async(model, request_id)
+    scores = result.get("scores") or []
+    out: dict[str, Any] = {"mask": None, "request_id": request_id,
+                           "score": float(scores[0]) if scores else None, "crop": crop}
+    masks = result.get("masks") or []
+    url = masks[0].get("url") if masks and isinstance(masks[0], dict) else None
+    if url:
+        data, _ = await _fetch_url_bytes(url)
+        x0, y0, x1, y1 = crop
+        full = Image.new("L", (w, h), 0)
+        full.paste(Image.open(io.BytesIO(data)).convert("L").resize((x1 - x0, y1 - y0), Image.Resampling.NEAREST), (x0, y0))
+        mask = full.convert("1", dither=Image.Dither.NONE)  # >= 128 is the building
+        out["mask"] = mask if mask.getbbox() else None
+    return out
 
 
 def detector_box_to_sam_box(det: Detection, img_w: int, img_h: int) -> dict[str, int]:
