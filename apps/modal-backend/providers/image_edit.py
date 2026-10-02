@@ -172,7 +172,9 @@ def layout_reference_sentence(legend: list[tuple[str, str]]) -> str:
         "top is open sky. Put every building exactly where its block is and at its "
         "block's size, with nothing standing where the layout shows open ground or sky. "
         "The blocks are placeholders only: draw real architecture in the map's style, "
-        "never flat coloured boxes, and never copy the layout's colours."
+        "never flat coloured boxes, and never copy the layout's colours. The names "
+        "only identify the blocks: do not write any names, labels or map lettering "
+        "into the picture."
     )
 
 

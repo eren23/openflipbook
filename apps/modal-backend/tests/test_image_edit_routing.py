@@ -77,4 +77,6 @@ def test_layout_sentence_names_the_colours():
     assert "LAST reference image" in text
     assert "(red = The Copper Kettle; blue = Ropewalk Store)" in text
     assert "never flat coloured boxes" in text
+    # A live enter drew the legend names into the street as signs (2026-10-02).
+    assert "do not write any names, labels or map lettering" in text
     assert "(" not in edit.layout_reference_sentence([])
