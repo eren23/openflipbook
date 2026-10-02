@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import MotionGeneration from "./motion-generation";
 import { motionStudyFixture } from "@/tests/fixtures/motion-study";
 import { motionComparisonPlan } from "@/lib/motion-comparison";
@@ -11,6 +11,9 @@ it("requires both price and experimental mapping consent without automatic write
   render(<MotionGeneration sessionId="world" studyId="study" disabled={false} onTime={() => {}}/>);
   const generate = await screen.findByRole("button", { name: "Generate calibration clip" });
   expect((generate as HTMLButtonElement).disabled).toBe(true);
+  // Flush the consent reset the library load scheduled. Under a loaded run it
+  // otherwise lands at the end of the first click's act() and unticks it.
+  await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Reserve $0.48 for this clip" }));
   expect((generate as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: "Use experimental camera mapping" }));
