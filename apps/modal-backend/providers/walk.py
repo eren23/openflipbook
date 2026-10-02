@@ -10,10 +10,11 @@ Two paid halves, in this order:
   holds a camera (research 34 measured five: qwen-image-edit-2511 at IoU
   0.944, centre within 0.5%, area 1.00 -- the rest re-frame). The geometry
   comes from the render, the subject from what the shot sees.
-* **Clips.** Consecutive keyframes go to the descent slot, which honours
-  `end_image_url` and lands square on the arrival frame. Measured over a
-  chained walk: joins differ by 6-7 against 22 between neighbouring
-  keyframes, so a seam reads as motion rather than a cut.
+* **Clips.** Neighbouring keyframes (index n and n+1) go to the descent
+  slot, which honours `end_image_url` and lands square on the arrival frame.
+  Measured over a chained walk: joins differ by 6-7 against 22 between
+  neighbouring keyframes, so a seam reads as motion rather than a cut. A
+  skipped shot is a cut: no clip spans the gap it leaves.
 
 Nothing is concatenated here -- the runtime image carries no ffmpeg, and an
 ordered list of clips plays back to back just as well.
@@ -21,6 +22,7 @@ ordered list of clips plays back to back just as well.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 
@@ -55,6 +57,8 @@ class WalkShot:
     # The map around this camera, if the caller cropped one. Its presence is
     # what switches a shot from "a street with this geometry" to "this town".
     surroundings_data_url: str | None = None
+    # Observer gaze, radians: 0 faces +x (east); map y points down (south).
+    gaze: float | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,7 @@ def shot_instruction(
     sees: list[tuple[str, float]],
     medium: str | None = None,
     grounded: bool = False,
+    gaze: float | None = None,
 ) -> str:
     """What to paint at one camera, from the geometry and the names in frame.
 
@@ -95,12 +100,21 @@ def shot_instruction(
     )
     style = medium or "hand-drawn ink and watercolour"
     if grounded:
+        from providers.prompt_library.camera import gaze_to_compass
+
         # The map is the only geometry sent. The camera is words, because a box
         # proxy alongside it is the conflicting instruction research 19 caught.
+        # The crop is centred ahead of the walker, so they stand behind centre.
+        where = (
+            ""
+            if gaze is None
+            else f"You stand just {gaze_to_compass(gaze + math.pi)} of the centre of Image 1, "
+            f"facing {gaze_to_compass(gaze)}; north is up. "
+        )
         return (
             "Image 1 is this town's own map seen from directly above, and it is the truth about "
             "what stands here: draw THESE buildings, with their own roof colours, shapes and "
-            f"arrangement, and the spaces between them. You are standing among them facing "
+            f"arrangement, and the spaces between them. {where}You are standing among them facing "
             f"{subject}. Draw what that person actually sees at eye level, about 1.7 metres "
             "above the ground: those same buildings seen from the street, with doorways, "
             "shuttered windows, awnings, barrels and crates, worn cobbles underfoot and a soft "
@@ -108,11 +122,13 @@ def shot_instruction(
             "not an aerial or bird's-eye view. No lettering, no words, no people."
         )
     return (
-        "Image 1 is a depth render from an exact camera: bright is near, dark is far, "
-        "black is sky. Every wall, roofline and corner sits where it puts them, and no "
+        "Image 1 is a flat-colour block render from an exact camera: each colour is one "
+        "building with a pitched roof, the dark-brown ground is the ground and the pale-grey "
+        "sky is sky. The block colours only name the blocks -- do not paint walls in those "
+        "colours. Every wall, roofline and corner sits where it puts them, and no "
         f"building stands where it shows sky. This view looks at {subject}. Draw it at "
         "eye level as a place a person is standing in, and let the street be lived in: "
-        "doorways with real depth, shuttered windows, awnings, barrels and crates, worn "
+        "recessed doorways, shuttered windows, awnings, barrels and crates, worn "
         f"cobbles, a soft overcast sky. {style}. Do not move the camera. No lettering, "
         "no words, no people."
     )
@@ -125,23 +141,35 @@ def _frame_model(grounded: bool) -> str:
     return os.environ.get("FAL_WALK_KEYFRAME_MODEL") or KEYFRAME_MODEL
 
 
-def _clip_model() -> str:
-    """Whichever slug the descent slot will actually call."""
+def _clip_usd(clip_seconds: int) -> float:
+    """One clip on the descent slot, at the seconds it will actually bill."""
     from providers import video
 
-    return os.environ.get("FAL_DESCENT_MODEL") or video.DESCENT_ANIMATE_MODEL
+    return video.estimate_usd(clip_seconds, descent=True)
+
+
+def linked(indices: list[int]) -> list[int]:
+    """Positions whose next shot is the very next index: those get a clip."""
+    return [i for i in range(len(indices) - 1) if indices[i + 1] == indices[i] + 1]
 
 
 def estimate_usd(
-    shots: int, clip_seconds: int = DEFAULT_CLIP_SECONDS, grounded: bool = False
+    shots: int,
+    clip_seconds: int = DEFAULT_CLIP_SECONDS,
+    grounded: bool = False,
+    links: int | None = None,
 ) -> float:
-    """What a walk of this many shots would cost, before any of it runs."""
+    """What a walk would cost, before any of it runs.
+
+    `links` is how many clips it makes (see `linked`); unset means every
+    neighbour is linked.
+    """
     from providers import spend
 
     shots = max(0, min(shots, MAX_SHOTS))
+    links = max(0, shots - 1 if links is None else min(links, shots - 1))
     frames = spend.estimate_image(_frame_model(grounded)) * shots
-    clips = spend.estimate_video(_clip_model()) * max(0, shots - 1)
-    return round(frames + clips, 4)
+    return round(frames + _clip_usd(clip_seconds) * links, 4)
 
 
 async def paint(
@@ -177,21 +205,21 @@ async def paint(
         async with span("walk.keyframe", shot=shot.index, grounded=grounded):
             image = await image_edit.edit_image(
                 shot.surroundings_data_url or shot.control_data_url,
-                shot_instruction(shot.sees, medium, grounded),
+                shot_instruction(shot.sees, medium, grounded, shot.gaze),
                 model_override=model_override,
                 style_ref_url=style_ref_url,
             )
         keyframes.append(encode_data_url(image.jpeg_bytes, image.mime_type))
 
     clips: list[WalkClip] = []
-    clip_usd = spend.estimate_video(_clip_model())
-    for i in range(len(keyframes) - 1):
+    clip_usd = _clip_usd(clip_seconds)
+    for i in linked([s.index for s in shots]):
         spend.reserve(session_id, clip_usd)
         spent += clip_usd
         async with span("walk.clip", frm=i, to=i + 1):
             clip = await video.animate_image(
                 image_data_url=keyframes[i],
-                prompt=_clip_prompt(shots[i].sees, shots[i + 1].sees),
+                prompt=_clip_prompt(shots[i], shots[i + 1]),
                 duration=clip_seconds,
                 end_image_data_url=keyframes[i + 1],
             )
@@ -209,13 +237,16 @@ async def paint(
     return Walk(keyframes=keyframes, clips=clips, spent_usd=round(spent, 4))
 
 
-def _clip_prompt(frm: list[tuple[str, float]], to: list[tuple[str, float]]) -> str:
-    """The move between two shots, named by what is gained along the way."""
-    ahead = [label for label, share in to if share >= 0.02][:2]
-    toward = f" toward {' and '.join(ahead)}" if ahead else ""
-    return (
-        f"A slow continuous forward walk down the street{toward}, camera at eye height "
-        "gliding steadily ahead. Every building, window, shutter, awning, doorway and "
-        "the cobbles keep their exact hand-drawn appearance and do not change. One "
-        "unbroken shot at walking pace, no cuts, no people, no lettering."
-    )
+def _clip_prompt(frm: WalkShot, to: WalkShot) -> str:
+    """The move between two shots: the turn the gaze makes, toward what is gained.
+
+    /play units are not metres, so the walk forward stays unmeasured.
+    """
+    from providers import video
+
+    ahead = [label for label, share in to.sees if share >= 0.02][:2]
+    turn = 0.0
+    if frm.gaze is not None and to.gaze is not None:
+        # Map y points down, so a growing gaze turns right. Short way round.
+        turn = (math.degrees(to.gaze - frm.gaze) + 180) % 360 - 180
+    return video.move_prompt(turn_deg=turn, forward_m=None, subject=" and ".join(ahead))
