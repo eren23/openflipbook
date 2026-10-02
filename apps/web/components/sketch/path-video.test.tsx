@@ -41,7 +41,8 @@ it("makes a walk video: a saved checkpoint view at each eye pose of the route, t
   const empty = { views_sha256: "", checkpoints: 0, quote: null, reason: "", jobs: [] };
   vi.mocked(fetch).mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/places/place/views") && init?.method === "POST") return Response.json({ id: JSON.parse(String(init.body)).id });
+    // Checkpoint 2 matches a checkpoint saved before: the server answers with that view's id.
+    if (url.endsWith("/places/place/views") && init?.method === "POST") { const view = JSON.parse(String(init.body)); return Response.json({ id: view.label.endsWith("2/3") ? "kept" : view.id }); }
     if (url.includes("/walk-videos?views=")) return Response.json({ ...empty, views_sha256: "pinned", checkpoints: 3,
       quote: { reservation: 1.1, paid_keyframes: 3, appearance: true, keyframe_reservation: .1, legs: [{ seconds: 2.857, duration: 5, reservation: .4 }, { seconds: 2.857, duration: 5, reservation: .4 }] } });
     if (url.endsWith("/walk-videos") && init?.method === "POST") return Response.json({ job: { id: "walk" } });
@@ -53,7 +54,7 @@ it("makes a walk video: a saved checkpoint view at each eye pose of the route, t
   const generate = await screen.findByRole("button", { name: "Generate walk video" });
   expect(capture.mock.calls.map(([pose]) => [pose!.x, pose!.z, pose!.yaw])).toEqual([[0, 0, 0], [0, -4, 0], [0, -8, 0]]);
   const posts = (suffix: string) => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && init?.method === "POST").map(([, init]) => JSON.parse(String(init!.body)));
-  const saved = posts("/places/place/views"), ids = saved.map(view => view.id);
+  const saved = posts("/places/place/views"), ids = [saved[0].id, "kept", saved[2].id];
   expect(saved.map(view => [view.label, view.walk_checkpoint, view.capture.pose.z])).toEqual([["Walk checkpoint 1/3", true, 0], ["Walk checkpoint 2/3", true, -4], ["Walk checkpoint 3/3", true, -8]]);
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith(`/walk-videos?views=${encodeURIComponent(ids.join(","))}`))).toBe(true);
   expect(screen.queryByRole("button", { name: "Make walk video" })).toBeNull();
@@ -64,11 +65,11 @@ it("makes a walk video: a saved checkpoint view at each eye pose of the route, t
   await waitFor(() => expect(posts("/walk-videos")).toHaveLength(1));
   expect(posts("/walk-videos")[0]).toMatchObject({ action: "generate", confirmed: true, prompt: "Inked stone", view_ids: ids, views_sha256: "pinned", reservation: 1.1 });
 });
-it("refuses a walk route that needs more than 12 checkpoints before saving anything", async () => {
+it.each([[-60, /16 checkpoints, more than 12/], [0, /at least 2 checkpoints/]])("refuses a walk route to z %s that cannot make a video before saving anything", async (z, message) => {
   vi.mocked(fetch).mockImplementation(async () => Response.json({ views_sha256: "", checkpoints: 0, quote: null, reason: "", jobs: [] }));
   const capture = vi.fn(() => ({}) as ViewCapture);
-  render(<WalkVideo sessionId="world" placeId="place" route={[{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -60, yaw: 0 }]} capture={capture} disabled={false}/>);
+  render(<WalkVideo sessionId="world" placeId="place" route={[{ x: 0, z: 0, yaw: 0 }, { x: 0, z, yaw: 0 }]} capture={capture} disabled={false}/>);
   fireEvent.click(await screen.findByRole("button", { name: "Make walk video" }));
-  expect((await screen.findByRole("alert")).textContent).toMatch(/16 checkpoints, more than 12/);
+  expect((await screen.findByRole("alert")).textContent).toMatch(message);
   expect(capture).not.toHaveBeenCalled(); expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });

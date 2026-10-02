@@ -33,11 +33,12 @@ export interface WalkCheckpoint { x: number; z: number; yaw: number }
  * Eye-level checkpoint poses along a route, walked the way routeMovement
  * walks it: turn in place to each waypoint's yaw, then go straight to it.
  * A new checkpoint follows each 30 degrees turned or 4 m walked since the
- * last one, and the route's end is the last. Throws past 12 checkpoints.
+ * last one, and the route's end is the last. Throws under 2 (no leg to
+ * make) or past 12 checkpoints.
  */
 export function walkCheckpoints(route: readonly WalkWaypoint[]): WalkCheckpoint[] {
-  const start = route[0];
-  if (!start) return [];
+  const start = route[0], short = "This walk needs at least 2 checkpoints. Make the route longer.";
+  if (!start) throw new Error(short);
   const at = { x: start.x, z: start.z, yaw: start.yaw }, out = [{ ...at }], limit = CHECKPOINT_MAX_DEGREES * Math.PI / 180, e = 1e-9;
   let moved = 0, turned = 0;
   const push = () => { out.push({ ...at }); moved = 0; turned = 0; };
@@ -56,6 +57,7 @@ export function walkCheckpoints(route: readonly WalkWaypoint[]): WalkCheckpoint[
     }
   }
   if (moved > e || turned > e) push();
+  if (out.length < 2) throw new Error(short);
   if (out.length > MAX_CHECKPOINTS) throw new Error(`This walk needs ${out.length} checkpoints, more than ${MAX_CHECKPOINTS}. Shorten the route.`);
   return out;
 }

@@ -486,7 +486,8 @@ async function schedule(db: Db, sid: string, input: Record<string, unknown>, sco
     const options = { session }, jobs = db.collection<PathVideoDoc>("path_videos");
     const old = await jobs.findOne({ _id: key }, options); if (old) return same(old);
     const { fence } = await load(db, session);
-    if (await jobs.countDocuments({ session_id: sid, ...scope }, options) >= 20) throw new CreatorError("place_id" in scope ? "This place already has 20 walk videos" : "Motion study already has 20 path videos", 409);
+    // Failed and cancelled jobs do not count: they would lock the source out for good.
+    if (await jobs.countDocuments({ session_id: sid, ...scope, status: { $in: [...ACTIVE, "ready"] } }, options) >= 20) throw new CreatorError("place_id" in scope ? "This place already has 20 walk videos" : "Motion study already has 20 path videos", 409);
     for (const view of fence) await fenceViewSources(db, view, session);
     // The ledger day of the full estimate; a leg retry reserves on the same day.
     const now = new Date(), ledger_ids = await reserveGenerationSpend(db, session, sid, "motion", quote.reservation, "MOTION_DAILY_CAP_USD", now, "3");

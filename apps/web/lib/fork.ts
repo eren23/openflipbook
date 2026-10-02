@@ -118,7 +118,8 @@ async function copySession(
   if (sourceNodes.length === 0 && !ownsSource) throw new CreatorError("This world is not owned by this browser", 403);
   if (sourceNodeId && !sourceNodes.some(n => n._id === sourceNodeId)) throw new CreatorError("Fork source node is outside this world", 400);
   const viewCol = db.collection<PlaceViewDoc>("place_views");
-  const privateViews = ownsSource ? await viewCol.find({ session_id: sourceSessionId }, options).toArray() : [];
+  // Walk checkpoints serve only walk videos, which a fork does not copy.
+  const privateViews = ownsSource ? (await viewCol.find({ session_id: sourceSessionId }, options).toArray()).filter(view => !view.walk_checkpoint) : [];
   const privateIllustrations = privateViews.length ? await db.collection<MeshAssetDoc>("illustration_assets").find({ session_id: sourceSessionId, "view_dependency.view_id": { $in: privateViews.map(v => v.id) } }, options).toArray() : [];
   const meshAssets = db.collection<MeshAssetDoc>("mesh_assets");
   const savedMeshes = await meshAssets.find({ session_id: sourceSessionId }, options).toArray();

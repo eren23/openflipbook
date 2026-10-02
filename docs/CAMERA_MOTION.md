@@ -76,10 +76,16 @@ and camera-controls has no end frame.
    checkpoint after each 4 m walked or 30 degrees turned (`walkCheckpoints` in
    `walk-route.ts`), at the walker's eye (1.6 m) with a level gaze. If the route
    needs more than 12 checkpoints, the editor refuses it. Make the route shorter.
+   If the route gives fewer than 2 checkpoints, the editor refuses it too,
+   before it captures anything.
 3. The editor captures each checkpoint and saves it as a walk view. This is free
    and calls no model. These views have the `walk_checkpoint` mark and their own
    limit of 240 for each place. They do not count toward the 50 saved views. The
-   library list and the world export do not include them.
+   library list, the world export and forks do not include them. If a current
+   checkpoint view of the place has the same camera and size, the server gives
+   back that view and saves nothing new. Thus a second "Make walk video" on the
+   same route does not use the limit. A checkpoint view cannot be refreshed or
+   illustrated, and a motion study needs an orbit view.
 4. Read the quote, give consent and generate. The job is one path video over
    the view ids. `GET /api/world/:sid/places/:pid/walk-videos?views=a,b,c` gives
    the quote and `views_sha256`. `POST` to the same path with
@@ -100,7 +106,8 @@ the end keyframe measures (the most visible one). A leg plans its length at
 trim and retime apply.
 
 Billing, the one retry, refusals and provenance (view ids and their hash, not a
-study) are the same as for a study path video. All views must be current 3D
+study) are the same as for a study path video. A place has at most 20 walk
+videos that are active or ready. Failed and cancelled jobs do not count. All views must be current 3D
 views of the same place, at the same size. A geometry change during a job stops
 it before its next paid step and releases the rest.
 

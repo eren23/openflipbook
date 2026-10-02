@@ -110,10 +110,10 @@ function smoothDepth(z: Float64Array, width: number, height: number, step: numbe
 /**
  * Warp A's accepted picture into camera B, backward: each B pixel with
  * geometry is unprojected with B's smoothed depth and matrices, projected
- * into A, and samples A's picture bilinearly. Every B pixel reads A once, so a
- * chain does not alias. A pixel is trusted only when it lands inside A's
- * frame, A's depth there (nearest pixel) agrees within 0.35 m + 2% (otherwise
- * A saw another surface), and one A pixel there covers at most
+ * into A, and samples A's picture bilinearly over the taps on the same
+ * surface. Every B pixel reads A once, so a chain does not alias. A pixel is
+ * trusted only when it lands inside A's frame, A's depth there (nearest pixel)
+ * agrees within 0.35 m + 2% (otherwise A saw another surface), and one A pixel there covers at most
  * `maxMagnification` B pixels (see WARP_MAX_MAGNIFICATION). B's sky takes A's
  * sky as a vertical gradient.
  */
@@ -141,17 +141,17 @@ export function warpKeyframe(
   // inside A's frame, with A's depth there (nearest pixel) on the same surface.
   const zB = new Float64Array(n).fill(NaN);
   for (let t = 0; t < n; t++) if (b.depth[t * 4]) zB[t] = distance(b.view, b.depth[t * 4]!);
-  const smooth = smoothDepth(zB, w, h, (b.view.depth.far - b.view.depth.near) / 255), fx = new Float64Array(n).fill(NaN), fy = new Float64Array(n).fill(NaN), seen = new Uint8Array(n);
+  const smooth = smoothDepth(zB, w, h, (b.view.depth.far - b.view.depth.near) / 255), fx = new Float64Array(n).fill(NaN), fy = new Float64Array(n).fill(NaN), seen = new Uint8Array(n), dA = new Float64Array(n);
+  const sameSurface = (byte: number, d: number) => byte > 0 && Math.abs(distance(a.view, byte) - d) <= 0.35 + 0.02 * d;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const t = y * w + x, z = -smooth[t]!;
     if (Number.isNaN(z)) continue;
     const [cx, cy] = unproject(Pb, (x + 0.5) / w * 2 - 1, 1 - (y + 0.5) / h * 2, z);
-    const [ax, ay, az] = toCamera(Ma, ...toWorld(Mb, cx, cy, z)), d = -az;
+    const [ax, ay, az] = toCamera(Ma, ...toWorld(Mb, cx, cy, z)), d = dA[t] = -az;
     if (d <= a.view.camera.near) continue;
     const [nx, ny] = project(Pa, ax, ay, az), u = fx[t] = (nx + 1) / 2 * wa, v = fy[t] = (1 - ny) / 2 * ha;
     if (!(u >= 0 && v >= 0 && u < wa && v < ha)) continue;
-    const byte = a.depth[(Math.floor(v) * wa + Math.floor(u)) * 4]!;
-    if (byte && Math.abs(distance(a.view, byte) - d) <= 0.35 + 0.02 * d) seen[t] = 1;
+    if (sameSurface(a.depth[(Math.floor(v) * wa + Math.floor(u)) * 4]!, d)) seen[t] = 1;
   }
 
   // B pixels per A pixel at B pixel t, along the worst direction: the inverse
@@ -191,15 +191,22 @@ export function warpKeyframe(
   const mag = new Float64Array(n), over = new Uint8Array(n);
   for (let t = 0; t < n; t++) if (seen[t]) { mag[t] = magnification(t); over[t] = mag[t]! > maxMagnification ? 1 : 0; }
   const overs = boxSum(over, w, h, 4), seens = boxSum(seen, w, h, 4);
-  const out = new Uint8Array(n * 4), valid = new Uint8Array(n);
+  const out = new Uint8Array(n * 4), valid = new Uint8Array(n), sum = new Float64Array(4);
   for (let t = 0; t < n; t++) {
     if (!seen[t] || (Math.abs(mag[t]! / maxMagnification - 1) < 0.1 ? 2 * overs[t]! > seens[t]! : over[t])) continue;
     const u = fx[t]!, v = fy[t]!, sx = Math.min(Math.max(u - 0.5, 0), wa - 1), sy = Math.min(Math.max(v - 0.5, 0), ha - 1);
     const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = Math.min(x0 + 1, wa - 1), y1 = Math.min(y0 + 1, ha - 1), gx = sx - x0, gy = sy - y0;
-    for (let c = 0; c < 4; c++) {
-      const top = a.image[(y0 * wa + x0) * 4 + c]! * (1 - gx) + a.image[(y0 * wa + x1) * 4 + c]! * gx;
-      out[t * 4 + c] = Math.round(top * (1 - gy) + (a.image[(y1 * wa + x0) * 4 + c]! * (1 - gx) + a.image[(y1 * wa + x1) * 4 + c]! * gx) * gy);
+    // A tap on another surface (a thin pole's edge against the wall behind it)
+    // gets no weight, so neither surface's paint bleeds across the silhouette.
+    let total = 0; sum.fill(0);
+    for (let k = 0; k < 4; k++) {
+      const q = (k < 2 ? y0 : y1) * wa + (k % 2 ? x1 : x0), weight = (k % 2 ? gx : 1 - gx) * (k < 2 ? 1 - gy : gy);
+      if (!weight || !sameSurface(a.depth[q * 4]!, dA[t]!)) continue;
+      total += weight;
+      for (let c = 0; c < 4; c++) sum[c]! += a.image[q * 4 + c]! * weight;
     }
+    if (!total) continue;
+    for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(sum[c]! / total);
     valid[t] = 1;
   }
 

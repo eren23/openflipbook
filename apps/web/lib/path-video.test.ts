@@ -444,6 +444,18 @@ it("starts from view 0's accepted artwork when it has one", async () => {
   expect(Buffer.from(body("/motion/leg").start.url.split(",")[1], "base64").equals(sourcePng)).toBe(true);
 });
 
+it("counts only live and ready walk videos toward the 20-job cap", async () => {
+  store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
+  savedView("v0", eye(0, 1.6, 8, 0)); savedView("v1", eye(0, 1.6, 4, 0));
+  const old = (i: number, status: string) => store("path_videos").set(`world:old${i}`, { _id: `world:old${i}`, id: `old${i}`, session_id: "world", place_id: "place", status,
+    created_at: new Date(0), reservation: 0, committed: 0, keyframes: [], legs: [] });
+  for (let i = 0; i < 20; i++) old(i, ["failed", "cancelled"][i % 2]!);
+  await walkVideoAction("world", "place", await walkInput(["v0", "v1"]));
+  expect(job().status).toBe("scheduled");
+  for (let i = 0; i < 19; i++) old(i, ["ready", "running"][i % 2]!);
+  await expect(walkVideoAction("world", "place", await walkInput(["v0", "v1"], { id: "another" }))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/20 walk videos/) });
+});
+
 it("refuses views of another place, historical views, more than 12, and a walk whose geometry changes mid-run", async () => {
   store("place_scenes").set("world:place", { _id: "world:place", revision: 1 });
   for (let i = 0; i < 13; i++) savedView(`v${i}`, eye(0, 1.6, -i, 0));

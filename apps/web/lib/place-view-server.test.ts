@@ -38,6 +38,7 @@ import { readWorldArchive } from "./world-import-archive";
 import { prepareWorldImport } from "./world-import-content";
 import { illustrationDependency } from "./illustration-input";
 import { cameraMotionPreview } from "./camera-motion-server";
+import { illustrationAction, illustrationLibrary } from "./illustration-server";
 import { motionStudyLibrary, motionStudyFrame, saveMotionStudy } from "./motion-study-server";
 import { currentMotionStudy, motionSourceImage } from "./motion-source";
 import { viewHash } from "./place-view-store";
@@ -440,9 +441,46 @@ it("keeps walk checkpoint views out of the 50-view limit, the library and export
   expect((await placeViewLibrary("world", "place")).views).toEqual([]); expect(await exportPlaceViews("world")).toEqual([]);
   // A full user library does not block a checkpoint, and checkpoints have their own cap.
   for (let i = 0; i < 50; i++) store("place_views").set(`old${i}`, { _id: `old${i}`, session_id: "world", root_place_id: "place" });
-  expect(await savePlaceView("world", "place", { ...checkpoint, id: "view2" })).toEqual({ id: "view2" });
+  expect(await savePlaceView("world", "place", { ...moved(checkpoint, 1), id: "view2" })).toEqual({ id: "view2" });
   for (let i = 0; i < 238; i++) store("place_views").set(`walk${i}`, { _id: `walk${i}`, session_id: "world", root_place_id: "place", walk_checkpoint: true });
-  await expect(savePlaceView("world", "place", { ...checkpoint, id: "view3" })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/240 walk checkpoint/) });
+  await expect(savePlaceView("world", "place", { ...moved(checkpoint, 2), id: "view3" })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/240 walk checkpoint/) });
+});
+// The same request at a camera `dx` metres to the side.
+function moved<T extends { capture: ViewCapture }>(request: T, dx: number): T {
+  const copy = structuredClone(request); copy.capture.camera.world_matrix[12]! += dx; return copy;
+}
+it("reuses a current checkpoint at the same camera and size, even at the cap, but not one whose geometry changed", async () => {
+  const checkpoint = { ...await input("walk"), walk_checkpoint: true };
+  await savePlaceView("world", "place", checkpoint);
+  // Each "Make walk video" sends new ids: the same pose returns the saved view and uploads nothing.
+  expect(await savePlaceView("world", "place", { ...checkpoint, id: "view2", label: "Walk checkpoint 1/3" })).toEqual({ id: "view1" });
+  expect(memory.uploads).toBe(4); expect(store("place_views").size).toBe(1);
+  // Another camera is a new view.
+  expect(await savePlaceView("world", "place", { ...moved(checkpoint, 1), id: "view3" })).toEqual({ id: "view3" });
+  // After a geometry edit the old checkpoint is historical: the same camera saves a new one.
+  root().revision++; root().definition.objects[0].height++;
+  const fresh = structuredClone(checkpoint); fresh.capture.sources[0]!.revision = 2; fresh.capture.sources[0]!.definition = structuredClone(root().definition);
+  expect(await savePlaceView("world", "place", { ...fresh, id: "view4" })).toEqual({ id: "view4" });
+  // A full cap still reuses, and refuses only a new camera.
+  for (let i = 0; i < 237; i++) store("place_views").set(`walk${i}`, { _id: `walk${i}`, session_id: "world", root_place_id: "place", walk_checkpoint: true });
+  expect(await savePlaceView("world", "place", { ...fresh, id: "view5" })).toEqual({ id: "view4" });
+  await expect(savePlaceView("world", "place", { ...moved(fresh, 2), id: "view6" })).rejects.toMatchObject({ status: 409 });
+  expect(memory.uploads).toBe(12);
+});
+it("refuses a refresh, artwork or motion through a walk checkpoint view, so the world export stays whole", async () => {
+  const checkpoint = { ...await input("walk"), walk_checkpoint: true };
+  await savePlaceView("world", "place", checkpoint);
+  // A refresh of a checkpoint would export a history the archive does not hold.
+  await expect(savePlaceView("world", "place", { ...await input("walk"), id: "view2", refreshed_from: "view1" })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/checkpoint/) });
+  await savePlaceView("world", "place", { ...await input("walk"), id: "plain" });
+  await expect(savePlaceView("world", "place", { ...checkpoint, id: "view3", refreshed_from: "plain" })).rejects.toMatchObject({ status: 409 });
+  for (const action of [{ action: "generate", id: "art", prompt: "Inked stone", confirmed: true }, { action: "accept", id: "art", previous_id: null }])
+    await expect(illustrationAction("world", "view1", action)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/checkpoint/) });
+  await expect(illustrationLibrary("world", "view1")).rejects.toMatchObject({ status: 409 });
+  // Motion needs an orbit view with a path: a walk checkpoint never makes a study.
+  await expect(cameraMotionPreview("world", "view1")).rejects.toMatchObject({ status: 400 });
+  await expect(saveMotionStudy("world", "view1", { id: "study", label: "Walk", preparation_sha256: "x", frames: [] })).rejects.toMatchObject({ status: 400 });
+  expect(store("motion_studies").size).toBe(0); expect(store("place_views").size).toBe(2);
 });
 it("rejects singular, reflected, scaled, invalid-depth and mismatched projection metadata", async () => {
   const valid = await capture();

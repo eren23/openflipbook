@@ -22,8 +22,10 @@ it("turns in place at a corner with checkpoints at most 30 degrees apart", () =>
   expect(poses([{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -2, yaw: 0 }, { x: 0, z: -2, yaw: -40 * Math.PI / 180 }])).toEqual([[0, 0, 0], [0, -2, -30], [0, -2, -40]]);
 });
 
-it("refuses a walk that needs more than 12 checkpoints", () => {
+it("refuses a walk that needs more than 12 checkpoints, or fewer than 2", () => {
   expect(walkCheckpoints([{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -44, yaw: 0 }])).toHaveLength(12);
   expect(() => walkCheckpoints([{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -48, yaw: 0 }])).toThrow(/13 checkpoints, more than 12/);
-  expect(walkCheckpoints([])).toEqual([]);
+  // No leg to make: no route, one waypoint, or waypoints at one pose.
+  for (const route of [[], [{ x: 1, z: 2, yaw: 0 }], [{ x: 1, z: 2, yaw: 0 }, { x: 1, z: 2, yaw: 0 }]]) expect(() => walkCheckpoints(route)).toThrow(/at least 2 checkpoints/);
+  expect(walkCheckpoints([{ x: 0, z: 0, yaw: 0 }, { x: 0, z: -1, yaw: 0 }])).toHaveLength(2);
 });

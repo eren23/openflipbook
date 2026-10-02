@@ -89,12 +89,15 @@ export function WalkVideo({ sessionId, placeId, route, capture, disabled }: { se
     try {
       // A retry resends the same ids and captures, so a lost response saves nothing twice.
       const requests = pending.current ??= walkCheckpoints(route).map((pose, i, all) => ({ id: crypto.randomUUID(), label: `Walk checkpoint ${i + 1}/${all.length}`, capture: capture!(pose), walk_checkpoint: true as const }));
+      const ids: string[] = [];
       for (const body of requests) {
         const response = await fetch(`/api/world/${encodeURIComponent(sessionId)}/places/${encodeURIComponent(placeId)}/views`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const data = await response.json();
         if (!response.ok) { if (response.status < 500) pending.current = null; throw new Error(data.error || "Walk checkpoint could not be saved"); }
+        // The server reuses a current checkpoint saved at the same camera.
+        ids.push(data.id);
       }
-      pending.current = null; setViewIds(requests.map(r => r.id));
+      pending.current = null; setViewIds(ids);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }

@@ -104,6 +104,36 @@ describe("warpKeyframe", () => {
     expect(error / (count * 3)).toBeLessThan(5);
   });
 
+  it("keeps a thin pole's paint off the wall beside it, and the wall's off the pole", () => {
+    // A bright pole 1 px wide, 5 m away, in front of a dark wall at 10 m (the live halo: trees against sky).
+    const pole = new Box3(new Vector3(0, -5, -5.06), new Vector3(0.12, 5, -4.94));
+    const shoot = (cam: PerspectiveCamera) => {
+      const image = new Uint8Array(W * H * 4), depth = new Uint8Array(W * H * 4), onPole = new Uint8Array(W * H);
+      for (let p = 0; p < W * H; p++) {
+        const dir = new Vector3((p % W + 0.5) / W * 2 - 1, 1 - (Math.floor(p / W) + 0.5) / H * 2, 0.5).unproject(cam).sub(cam.position).normalize();
+        const ray = new Ray(cam.position.clone(), dir), hit = ray.intersectBox(pole, new Vector3()) ?? ray.intersectPlane(WALL, new Vector3())!;
+        onPole[p] = hit.z > -9 ? 1 : 0;
+        const b = Math.round(255 * (1 - (-hit.applyMatrix4(cam.matrixWorldInverse).z - NEAR) / (FAR - NEAR)));
+        image.set(onPole[p] ? [255, 255, 255, 255] : [20, 20, 20, 255], p * 4); depth.set([b, b, b, 255], p * 4);
+      }
+      const view: KeyframeView = { width: W, height: H, depth: { near: NEAR, far: FAR },
+        camera: { projection: "perspective", world_matrix: cam.matrixWorld.toArray(), projection_matrix: cam.projectionMatrix.toArray(), near: 0.1, far: 100 } };
+      return { view, image, depth, onPole };
+    };
+    // 5 cm to the side: the wall moves 0.2 px against the pole, so taps straddle the silhouette.
+    const a = shoot(camera(0)), b = shoot(camera(0.05));
+    const out = warpKeyframe({ view: a.view, image: a.image, depth: a.depth }, { view: b.view, render: b.image, depth: b.depth });
+    const fringe = { wall: 0, pole: 0 };
+    let besidePole = 0;
+    for (let p = 0; p < W * H; p++) {
+      if (out.hole[p]) continue;
+      if (out.rgba[p * 4] !== (b.onPole[p] ? 255 : 20)) fringe[b.onPole[p] ? "pole" : "wall"]++;
+      if (!b.onPole[p] && (b.onPole[p - 1] || b.onPole[p + 1])) besidePole++;
+    }
+    expect(fringe).toEqual({ wall: 0, pole: 0 });
+    expect(besidePole).toBeGreaterThan(H);
+  });
+
   it("drops a surface A saw at a grazing angle and B sees frontally", () => {
     // A stands 1.5 m from the wall, looking 60 degrees along it; B faces it from 5 m.
     const eyeA = new Vector3(0, 0, -8.5), a = capture(camera(0, -60, 0, 0, eyeA.z)), b = capture(camera(2, 0, 0, 0, -5));

@@ -101,19 +101,29 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
     if (!isSafeId(refreshedFrom) || refreshedFrom === input.id) throw new CreatorError("Invalid source camera view", 400);
     const source = await database.collection<PlaceViewDoc>("place_views").findOne({ _id: `${sid}:${refreshedFrom}`, session_id: sid }, session ? { session } : {});
     if (!source || source.root_place_id !== pid) throw new CreatorError("Source camera view is unavailable", 409);
+    // Checkpoints are not exported, so a refresh history through one could not be imported.
+    if (checkpoint || source.walk_checkpoint) throw new CreatorError("Walk checkpoint views cannot be refreshed", 409);
     if (source.mode !== capture.mode || source.floor_id !== capture.floor_id || source.width !== capture.width || source.height !== capture.height
       || !isDeepStrictEqual(source.camera, capture.camera) || capture.path
       || !capture.sources.some(s => s.place_id === pid && source.sources.some(old => old.place_id === pid && old.scene_id === s.scene_id))) throw new CreatorError("Refreshed view must retain the exact saved camera and framing", 409);
   };
   await validateRefresh(db);
-  if (await db.collection<PlaceViewDoc>("place_views").countDocuments({ session_id: sid, root_place_id: pid, ...kind }) >= limit) throw new CreatorError(limitMessage, 409);
   const sources = await currentSources(db, sid, pid, capture.mode);
   if (capture.path && sources.some(source => source.definition.material_pack)) throw new CreatorError("Legacy atlas camera paths require immutable atlas provenance before saving", 409);
   if (!isDeepStrictEqual([...capture.sources].sort((a, b) => a.place_id.localeCompare(b.place_id)), sources)) throw new CreatorError("View geometry changed. Capture the saved scene again.", 409);
   if (capture.floor_id && (capture.mode === "walk" || !sources.some(s => s.definition.objects.some(o => o.structure?.floors.some(f => f.id === capture.floor_id))))) throw new CreatorError("View floor is unavailable", 400);
   const ids = sources.flatMap(s => s.definition.objects.map(o => o.id)).sort();
   if (new Set(ids).size !== ids.length || !isDeepStrictEqual(capture.objects, ids.map((object_id, i) => ({ object_id, rgb: objectMaskColor(i) })))) throw new CreatorError("View object mask identities differ", 400);
-  const binding = await bindings(db, sid, sources), decoded = await decodeViewPasses(capture);
+  const binding = await bindings(db, sid, sources);
+  // Each "Make walk video" saves its checkpoints again: a current checkpoint at
+  // the same camera and size is reused, so previews do not fill the cap.
+  if (checkpoint) {
+    const same = (await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: pid, walk_checkpoint: true, width: capture.width, height: capture.height }).toArray())
+      .find(v => isDeepStrictEqual(v.camera, capture.camera) && isDeepStrictEqual({ sources: v.sources, assets: v.assets }, binding));
+    if (same) return { id: same.id };
+  }
+  if (await db.collection<PlaceViewDoc>("place_views").countDocuments({ session_id: sid, root_place_id: pid, ...kind }) >= limit) throw new CreatorError(limitMessage, 409);
+  const decoded = await decodeViewPasses(capture);
   const files = {} as PlaceViewDoc["files"];
   for (const pass of VIEW_PASSES) {
     const bytes = decoded[pass], sha256 = bytesHash(bytes), path = `${sid}/views/${input.id}/${pass}-${sha256}.png`;

@@ -147,8 +147,11 @@ it("retains private camera captures and immutable files on an owner fork only", 
   const illustration = { _id: `${SRC}:illustration_one`, id: "illustration_one", session_id: SRC, key: "immutable/view.jpg", sha256: "artwork", view_dependency: { view_id: "view", input_sha256: "source" } };
   mongo.store("illustration_assets").set(illustration._id, illustration);
   mongo.store("illustration_jobs").set(`${SRC}:pending`, { _id: `${SRC}:pending`, session_id: SRC, status: "scheduled" });
+  // Walk checkpoints serve only walk videos, which forks do not copy.
+  mongo.store("place_views").set(`${SRC}:checkpoint`, { ...view, _id: `${SRC}:checkpoint`, id: "checkpoint", walk_checkpoint: true });
   const fork = await forkSession(SRC, "root1");
   expect(mongo.store("place_views").get(`${fork!.session_id}:view`)).toEqual({ ...view, _id: `${fork!.session_id}:view`, session_id: fork!.session_id });
+  expect(mongo.store("place_views").has(`${fork!.session_id}:checkpoint`)).toBe(false);
   expect(mongo.store("illustration_assets").get(`${fork!.session_id}:illustration_one`)).toEqual({ ...illustration, _id: `${fork!.session_id}:illustration_one`, session_id: fork!.session_id });
   expect([...mongo.store("illustration_jobs").values()].some(j => j.session_id === fork!.session_id)).toBe(false);
   vi.mocked(getExistingOwnerToken).mockResolvedValueOnce("viewer");
