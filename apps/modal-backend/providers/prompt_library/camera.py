@@ -212,10 +212,15 @@ def compass_word(bearing_deg: float) -> str:
     return _WINDS[int(((bearing_deg % 360.0) / 45.0) + 0.5) % 8]
 
 
+def gaze_bearing(gaze_rad: float) -> float:
+    """Observer gaze (radians, 0=+x=east, +y=south) -> compass bearing
+    (0=N, clockwise), matching geo-tap.ts's frame."""
+    return (math.degrees(gaze_rad) + 90.0) % 360.0
+
+
 def gaze_to_compass(gaze_rad: float) -> str:
-    """Observer gaze (radians, 0=+x=east, +y=south) -> compass word.
-    bearing = (degrees(gaze) + 90) % 360, matching geo-tap.ts's frame."""
-    return compass_word((math.degrees(gaze_rad) + 90.0) % 360.0)
+    """Observer gaze (radians, 0=+x=east, +y=south) -> compass word."""
+    return compass_word(gaze_bearing(gaze_rad))
 
 
 def pitch_bucket(pitch_deg: float) -> str:
@@ -327,7 +332,7 @@ def _azimuth_fragment(
     only as a last resort (low confidence, research/08 §2)."""
     az = view.get("azimuth_deg")
     if az is None and observer is not None and observer.get("gaze") is not None:
-        az = (math.degrees(float(observer["gaze"])) + 90.0) % 360.0
+        az = gaze_bearing(float(observer["gaze"]))
     if az is None:
         return ""
     cw = compass_word(float(az))

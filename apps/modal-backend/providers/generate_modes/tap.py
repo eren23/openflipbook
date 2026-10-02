@@ -568,6 +568,21 @@ async def stream_tap(
     )
     if arrival_intent == "exterior" and view_spec is not None:
         view_spec = {**view_spec, "projection": "eye_level", "source": "policy"}
+    from providers.prompt_library import camera as camera_lib
+
+    # The observer's gaze is the place enter's facing (ENTER_OBSERVER_FACING,
+    # default ON). An angle that is already set (a re-enter rotation, a pin)
+    # wins; a top-down plan has no facing.
+    observer = body.scene_view.observer if body.scene_view else None
+    if (
+        render_mode == "place_scene"
+        and observer is not None
+        and view_spec is not None
+        and view_spec.get("azimuth_deg") is None
+        and view_spec.get("projection") != "top_down"
+        and env_flag("ENTER_OBSERVER_FACING", "true")
+    ):
+        view_spec = {**view_spec, "azimuth_deg": camera_lib.gaze_bearing(observer.gaze)}
     if view_spec is not None:
         log(
             "info",
@@ -643,8 +658,6 @@ async def stream_tap(
     # geometry placement clause — so it ELABORATES the place in finer detail
     # instead of a dumb pixel-zoom. The crop is the reference; this enhances
     # it through the world model and geometry.
-    from providers.prompt_library import camera as camera_lib
-
     # place_closeup zooms into a PERSPECTIVE scene — the cartographic wording
     # would fight the reference pixels. The register also gates the legibility
     # judge below (map zooms only).
@@ -737,6 +750,30 @@ async def stream_tap(
         interior=interior_enter,
         exterior_appearance=exterior_appearance,
     )
+    # Camera-view block layout of the world map (client role "layout"): the
+    # geometry as pixels instead of left/right words. The client draws it at
+    # eye level from outside, so it only fits an eye-level (or unstated)
+    # exterior enter, and only when every model this enter may call takes a
+    # multi-image reference. Resolved once, for the strict and judged paths.
+    enter_layout_ref = (
+        _condition_url_for_role(body, "layout") if use_enter_edit else None
+    )
+    if enter_layout_ref and not (
+        (enter_view is None or enter_view.get("projection") == "eye_level")
+        and not interior_enter
+        and all(
+            image_edit_provider.supports_identity_reference(m)
+            for m in (enter_model_slug, enter_retry_model_slug)
+            if m
+        )
+    ):
+        enter_layout_ref = None
+    if enter_layout_ref:
+        enter_instruction += "\n\n" + image_edit_provider.layout_reference_sentence(
+            [(item.color, item.label) for item in body.layout_legend]
+        )
+    if use_enter_edit:
+        log("info", "tap.layout_control", attached=enter_layout_ref is not None, legend=len(body.layout_legend))
 
     # 3. Image gen — with progressive fast-tier draft.
     #
@@ -838,6 +875,7 @@ async def stream_tap(
             rendered = await image_edit_provider.edit_image(
                 refs.source, strict_final_prompt, model_override=model,
                 identity_ref_url=refs.identity, budget=budget,
+                layout_ref_url=enter_layout_ref,
                 **({"context_ref_url": refs.context} if refs.context else {}),
                 **({"aspect_ratio": body.aspect_ratio} if arrival_intent == "exterior" and image_edit_provider.supports_aspect_ratio(model) else {}),
             )
@@ -1084,21 +1122,6 @@ async def stream_tap(
         # dispatch: explicit per-request model > the steep-aware router
         # pick (enter_model_slug, resolved above with the view).
         enter_style_ref = _condition_url_for_role(body, "style")
-        # Camera-view block layout of the world map (client role "layout"):
-        # the geometry as pixels instead of left/right words. Only when every
-        # model this enter may call takes a multi-image reference.
-        enter_layout_ref = _condition_url_for_role(body, "layout")
-        if enter_layout_ref and all(
-            image_edit_provider.supports_identity_reference(m)
-            for m in (enter_model_slug, enter_retry_model_slug)
-            if m
-        ):
-            enter_instruction += "\n\n" + image_edit_provider.layout_reference_sentence(
-                [(item.color, item.label) for item in body.layout_legend]
-            )
-        else:
-            enter_layout_ref = None
-        log("info", "tap.layout_control", attached=enter_layout_ref is not None, legend=len(body.layout_legend))
         # The render loop (VIEW_LOOP, default ON): EVERY deliberate-camera
         # enter is judged — same-place + medium floors always, conformance
         # per projection. The loop used to arm on steep projections only

@@ -76,6 +76,18 @@ async def test_exterior_intent_reaches_planner_and_overrules_indoor_classifier(s
     check.assert_awaited_once()
 
 
+async def test_strict_exterior_arrival_sends_the_block_layout(strict, monkeypatch):
+    body, edit = strict
+    body.arrival_intent = "exterior"
+    body.condition_image_urls = [*body.condition_image_urls, "data:l"]
+    body.condition_roles = [*body.condition_roles, "layout"]
+    monkeypatch.setattr(arrival, "check_exterior", AsyncMock(return_value=result()))
+    events = await _collect(_event_stream(body, "exterior-layout"))
+    assert any(e["type"] == "final" for e in events)
+    assert edit.await_args.kwargs["layout_ref_url"] == "data:l"
+    assert "LAST reference image is a flat-coloured block layout" in edit.await_args.args[1]
+
+
 @pytest.mark.parametrize("failure", [None, RuntimeError("offline"), TimeoutError()])
 async def test_physical_reference_failure_stops_before_planner_and_image(strict, monkeypatch, failure):
     body, edit = strict

@@ -5,8 +5,10 @@ values; this module never sees a request object. All wording lives in
 camera.py / instructions.py — policy emits ViewSpec dicts only.
 
 Dead signals (audited, never consulted here): entity height (constant 4 for
-every extraction seed), observer eye_height/pitch/fov (synthesized constants),
-level "street"/"building" (the height>=12 gate can never fire). The trusted
+every extraction seed), observer eye_height/pitch/fov (synthesized constants
+in /play), level "street"/"building" (the height>=12 gate can never fire).
+Observer gaze is not read here either, but it is live: tap.py stamps it as
+the place enter's azimuth_deg (ENTER_OBSERVER_FACING). The trusted
 signals, in cascade order: an explicit "eye" level pill; the click
 classifier's place_kind (locale-proof); the focus entity's kind; the
 English word tables (fallback); a REAL footprint; the scale-ladder rung.
