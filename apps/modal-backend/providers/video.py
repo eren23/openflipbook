@@ -15,6 +15,7 @@ see `ltx_stream.py`.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -100,6 +101,72 @@ def object_action_prompt(subject: str, action: str, x_pct: float, y_pct: float) 
         "The camera eases slowly toward it. The rest of the illustrated scene "
         "stays calm and keeps its drawing style, layout and colors. "
         "One continuous shot, no cuts; add nothing the action does not need."
+    )
+
+
+# Measured 2026-10-02 on the four Lantern Quay walk legs (route-video seg0-3):
+# motion fades below 0.3 MAD at 4.2-4.5 s of 5.17 s; 0.58 was the map-to-inn
+# descent clip (research 33 F4); see docs/research/36. Tunable.
+LEG_MOTION_SHARE = 0.8
+
+
+def leg_seconds(planned: float) -> int:
+    """The H3 duration to ask for so the move itself lasts `planned` seconds.
+
+    The frozen tail is trimmed afterwards (web side). fal takes whole seconds,
+    1-15 (schema checked 2026-10-02); 5 is this file's H3 floor."""
+    return max(5, min(15, math.ceil(round(planned / LEG_MOTION_SHARE, 6))))
+
+
+def _side(value: float) -> str:
+    return "right" if value > 0 else "left"
+
+
+def move_prompt(
+    *,
+    orbit_deg: float = 0,
+    turn_deg: float = 0,
+    rise_m: float = 0,
+    forward_m: float | None = None,
+    subject: str | None = None,
+) -> str:
+    """One continuous camera move, in words.
+
+    A positive orbit circles the camera to its own right around the subject; a
+    positive turn pans right; a positive rise lifts it. `forward_m=None` is a
+    walk of unknown length (the /play walk has no metres). Parts that round to
+    zero are left out.
+    """
+    subject = " ".join((subject or "").split())[:120]
+    parts: list[str] = []
+    if forward_m is None:
+        parts.append("walks forward")
+    elif round(forward_m, 1):
+        way = "forward" if forward_m > 0 else "back"
+        parts.append(f"moves {way} about {abs(round(forward_m, 1)):g} metres")
+    if round(orbit_deg):
+        around = subject or "the subject"
+        parts.append(
+            f"circles about {abs(round(orbit_deg))} degrees to its {_side(orbit_deg)} around {around}"
+        )
+    if round(turn_deg):
+        parts.append(f"turns about {abs(round(turn_deg))} degrees to the {_side(turn_deg)}")
+    if round(rise_m, 1):
+        way = "rises" if rise_m > 0 else "sinks"
+        parts.append(f"{way} about {abs(round(rise_m, 1)):g} metres")
+    if subject and parts and not round(orbit_deg):
+        parts[0] += f" toward {subject}"
+    move = (
+        "holds still"
+        if not parts
+        else parts[0]
+        if len(parts) == 1
+        else ", ".join(parts[:-1]) + " and " + parts[-1]
+    )
+    return (
+        f"One continuous shot: the camera {move}. Only the camera moves; every building, "
+        "window, roof and the ground keep their exact appearance. One unbroken shot, no cuts, "
+        "no people, no lettering."
     )
 
 

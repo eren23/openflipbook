@@ -14,11 +14,13 @@ export function worldEditorSelection(definition: PlaceSceneDefinition, objectId:
 }
 
 export function worldEditorHref(context: { session_id: string; place_id: string }, selection: WorldEditorSelection,
-  options: { map?: boolean; view?: WorldEditorView; camera?: string | null } = {}) {
+  options: { map?: boolean; view?: WorldEditorView; camera?: string | null; route?: string | null } = {}) {
   const query = new URLSearchParams({ world: context.session_id, place: context.place_id });
   if (selection.object_id) query.set("object", selection.object_id);
   if (selection.floor_id) query.set("floor", selection.floor_id);
   if (options.view) query.set("view", options.view);
   if (options.camera) query.set("camera", options.camera);
+  // A /play walk handed over (walk-position routeQuery).
+  if (options.route) query.set("route", options.route);
   return `/sketch/world${options.map ? "/map" : ""}?${query}`;
 }

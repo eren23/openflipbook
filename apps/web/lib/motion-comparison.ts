@@ -1,16 +1,22 @@
 import type { MotionStudyDoc } from "./motion-study";
 import { CreatorError } from "./creator-error";
+import { H3_CAMERA_ADAPTER_V1 } from "./camera-motion";
 
 export type MotionBounds = [number, number, number, number];
-export const MOTION_COMPARISON_VERSION = "visible-bounds-human-v1";
+// v2 compares durations as a ratio and samples the clip at its own length:
+// H3 returns about 6.6 s for a 6 s request. Plans frozen as v1 keep v1 rules.
+export const MOTION_COMPARISON_VERSION = "visible-bounds-human-v2";
+export const MOTION_COMPARISON_VERSION_V1 = "visible-bounds-human-v1";
+export const MOTION_DURATION_RATIO = .15;
 export const MOTION_VISUAL_CHECKS = ["architecture", "occlusion_order", "continuous_motion"] as const;
 export type MotionVisualCheck = typeof MOTION_VISUAL_CHECKS[number];
 export type MotionAssessment = "pass" | "fail" | "unreviewed";
 export interface MotionComparisonPlan {
-  version: typeof MOTION_COMPARISON_VERSION;
+  version: typeof MOTION_COMPARISON_VERSION | typeof MOTION_COMPARISON_VERSION_V1;
   provenance: "client_geometry_masks_human_video_bounds";
   width: number; height: number; duration: number;
-  tolerances: { position: number; relative_size: number; direction_cosine: number; motion_signal: number; seek_seconds: number; duration_seconds: number; aspect_ratio: number };
+  // v1 has duration_seconds; v2 has duration_ratio.
+  tolerances: { position: number; relative_size: number; direction_cosine: number; motion_signal: number; seek_seconds: number; duration_seconds?: number; duration_ratio?: number; aspect_ratio: number };
   landmarks: { id: string; label: string }[];
   frames: { seconds: number; bounds: (MotionBounds | null)[] }[];
   issues: string[];
@@ -29,8 +35,15 @@ const boundsValid = (value: unknown): value is MotionBounds => Array.isArray(val
   && value.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1) && value[0] < value[2] && value[1] < value[3];
 const center = (b: MotionBounds) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] as const;
 
+// The video time that matches a reference sample.
+export const motionSampleSeconds = (plan: Pick<MotionComparisonPlan, "version" | "duration">, seconds: number, mediaDuration: number) =>
+  plan.version === MOTION_COMPARISON_VERSION_V1 ? seconds : seconds * mediaDuration / plan.duration;
+export const motionDurationMatches = (plan: Pick<MotionComparisonPlan, "version" | "duration" | "tolerances">, mediaDuration: number) =>
+  plan.version === MOTION_COMPARISON_VERSION_V1 ? Math.abs(mediaDuration - plan.duration) <= plan.tolerances.duration_seconds!
+    : Math.abs(mediaDuration / plan.duration - 1) <= plan.tolerances.duration_ratio! + 1e-12;
+
 type ComparisonReference = {
-  preparation: { path: Pick<MotionStudyDoc["preparation"]["path"], "target_id">; parameters: Pick<MotionStudyDoc["preparation"]["parameters"], "duration"> };
+  preparation: { adapter: string; limit_issues?: string[] | undefined; path: Pick<MotionStudyDoc["preparation"]["path"], "target_id">; parameters: Pick<MotionStudyDoc["preparation"]["parameters"], "duration"> };
   source: { view: Pick<MotionStudyDoc["source"]["view"], "width" | "height">; definitions: Pick<MotionStudyDoc["source"]["definitions"][number], "definition">[] };
   frames: Pick<MotionStudyDoc["frames"][number], "seconds" | "measurements">[];
 };
@@ -51,7 +64,7 @@ export function motionComparisonPlan(study: ComparisonReference): MotionComparis
   const area = (id: string) => Math.min(...frames.map(frame => frame.measurements.landmarks.find(item => item.object_id === id)?.fraction ?? 0));
   const neighbors = ids.filter(id => id !== target && usable(id)).sort((a, b) => area(b) - area(a) || a.localeCompare(b)).slice(0, 2);
   const selected = [target, ...neighbors];
-  const issues: string[] = [];
+  const v1 = study.preparation.adapter === H3_CAMERA_ADAPTER_V1, issues = v1 ? [] : [...study.preparation.limit_issues ?? []];
   if (frames.length < 5 || frames[0]?.seconds !== 0 || frames.at(-1)?.seconds !== study.preparation.parameters.duration)
     issues.push("Reference must cover the complete path with at least five samples");
   if (!usable(target)) issues.push("Target must be visible, unclipped and measurable in every reference sample");
@@ -59,9 +72,10 @@ export function motionComparisonPlan(study: ComparisonReference): MotionComparis
   if (frames.some(frame => frame.measurements.unknown_pixels > study.source.view.width * study.source.view.height * .01))
     issues.push("Reference masks contain too many unknown pixels");
   const plan: MotionComparisonPlan = {
-    version: MOTION_COMPARISON_VERSION, provenance: "client_geometry_masks_human_video_bounds",
+    version: v1 ? MOTION_COMPARISON_VERSION_V1 : MOTION_COMPARISON_VERSION, provenance: "client_geometry_masks_human_video_bounds",
     width: study.source.view.width, height: study.source.view.height, duration: study.preparation.parameters.duration,
-    tolerances: { position: .03, relative_size: .2, direction_cosine: .7, motion_signal: .015, seek_seconds: .1, duration_seconds: .25, aspect_ratio: .01 },
+    tolerances: v1 ? { position: .03, relative_size: .2, direction_cosine: .7, motion_signal: .015, seek_seconds: .1, duration_seconds: .25, aspect_ratio: .01 }
+      : { position: .03, relative_size: .2, direction_cosine: .7, motion_signal: .015, seek_seconds: .1, duration_ratio: MOTION_DURATION_RATIO, aspect_ratio: .01 },
     landmarks: selected.map(id => ({ id, label: objects.get(id)?.label || id })),
     frames: frames.map(frame => ({ seconds: frame.seconds, bounds: selected.map(id => frame.measurements.landmarks.find(item => item.object_id === id)?.bounds ?? null) })), issues,
   };
@@ -102,15 +116,15 @@ export function evaluateMotionReview(plan: MotionComparisonPlan, review: MotionR
   const failures: string[] = [], incomplete = [...plan.issues], t = plan.tolerances;
   const observations = new Map(review.observations.map(item => [`${item.frame}:${item.object_id}`, item]));
   const rows: { frame: number; object_id: string; position_error: number | null; size_error: number | null }[] = [];
-  if (plan.version !== MOTION_COMPARISON_VERSION) incomplete.push("Unsupported comparison version");
+  if (plan.version !== MOTION_COMPARISON_VERSION && plan.version !== MOTION_COMPARISON_VERSION_V1) incomplete.push("Unsupported comparison version");
   if (![media.width, media.height, media.duration].every(n => Number.isFinite(n) && n > 0)) failures.push("Invalid video metadata");
-  if (Math.abs(media.duration - plan.duration) > t.duration_seconds) failures.push("Video duration differs from the frozen path");
+  if (!motionDurationMatches(plan, media.duration)) failures.push("Video duration differs from the frozen path");
   if (Math.abs((media.width / media.height) / (plan.width / plan.height) - 1) > t.aspect_ratio) failures.push("Video aspect ratio differs from the reference");
   for (const [frameIndex, frame] of plan.frames.entries()) {
     for (const [index, landmark] of plan.landmarks.entries()) {
       const key = `${frameIndex}:${landmark.id}`, observed = observations.get(key), expected = frame.bounds[index];
       if (!observed) { incomplete.push(`Missing sample ${frameIndex + 1}: ${landmark.label}`); continue; }
-      if (Math.abs(observed.observed_seconds - frame.seconds) > t.seek_seconds) { failures.push(`Wrong video time at sample ${frameIndex + 1}: ${landmark.label}`); continue; }
+      if (Math.abs(observed.observed_seconds - motionSampleSeconds(plan, frame.seconds, media.duration)) > t.seek_seconds) { failures.push(`Wrong video time at sample ${frameIndex + 1}: ${landmark.label}`); continue; }
       if (!expected) { incomplete.push(`Unmeasurable reference: ${landmark.label}`); continue; }
       if (!observed.bounds) { failures.push(`Missing visible landmark at sample ${frameIndex + 1}: ${landmark.label}`); rows.push({ frame: frameIndex, object_id: landmark.id, position_error: null, size_error: null }); continue; }
       const actual = observed.bounds, ca = center(actual), ce = center(expected);

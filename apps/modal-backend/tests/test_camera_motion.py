@@ -159,7 +159,8 @@ def test_invalid_camera_paths_reject_before_transport(change):
 
 
 def test_signed_full_turns_are_not_wrapped_or_clamped():
-    request = payload()
+    # v1 paths are unbounded; v2 caps them (below).
+    request = payload(adapter=motion.ADAPTER_V1)
     request["parameters"]["camera_trajectory"][1]["azimuth"] = -720
     assert motion.MotionInput(**request).parameters.camera_trajectory[1].azimuth == -720
     request["parameters"]["camera_trajectory"] = [
@@ -383,3 +384,143 @@ def test_rejects_source_that_would_be_auto_rotated():
     with pytest.raises(HTTPException) as error:
         motion.validate_source(motion.SourceImage(**request))
     assert error.value.status_code == 400
+
+
+# ── v2 measured adapter limits ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        {"azimuth": 31},
+        {"azimuth": -31},
+        {"elevation": 16},
+        {"elevation": -16},
+        {"distance": 0.19},
+    ],
+)
+def test_v2_paths_stay_inside_the_measured_limits(point):
+    request = payload()
+    request["parameters"]["camera_trajectory"][1].update(point)
+    with pytest.raises(ValidationError):
+        motion.MotionInput(**request)
+    # A study frozen under v1 still validates with the same path.
+    request["adapter"] = motion.ADAPTER_V1
+    motion.MotionInput(**request)
+
+
+async def test_v1_studies_still_submit(enabled, monkeypatch):
+    monkeypatch.setattr(
+        motion.httpx,
+        "AsyncClient",
+        lambda **kwargs: HTTPClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"request_id": "a"}))
+        ),
+    )
+    assert (await motion.submit(body(adapter=motion.ADAPTER_V1)))["request_id"] == "a"
+
+
+# ── first/last-frame legs ───────────────────────────────────────────────────
+
+
+def leg(**changes):
+    return motion.LegInput(
+        **{
+            "reservation": 0.48,
+            "duration": 6,
+            "move": {"orbit_deg": 20, "rise_m": 2, "subject": "The Copper Kettle"},
+            "start": source(),
+            "end": source("JPEG"),
+            **changes,
+        }
+    )
+
+
+async def test_leg_is_one_post_with_both_frames_and_the_move_prompt(enabled, monkeypatch):
+    calls = []
+    request = leg()
+
+    def handler(sent):
+        calls.append(sent)
+        assert str(sent.url) == f"https://queue.fal.run/{motion.LEG_MODEL}"
+        assert sent.headers["X-Fal-No-Retry"] == "1"
+        sent_json = json.loads(sent.content)
+        assert sent_json["image_url"] == request.start.url
+        assert sent_json["end_image_url"] == request.end.url
+        assert sent_json["duration"] == 6
+        assert "circles about 20 degrees to its right around The Copper Kettle" in sent_json["prompt"]
+        # A metric leg with no forward given does not invent a walk.
+        assert "forward" not in sent_json["prompt"]
+        return httpx.Response(200, json={"request_id": "leg-id"})
+
+    monkeypatch.setattr(
+        motion.httpx,
+        "AsyncClient",
+        lambda **kwargs: HTTPClient(transport=httpx.MockTransport(handler)),
+    )
+    result = await motion.leg(request)
+    assert result["request_id"] == "leg-id"
+    assert result["model"] == motion.LEG_MODEL
+    assert result["prompt"].startswith("One continuous shot")
+    assert len(calls) == 1
+
+
+async def test_a_lost_leg_response_is_never_reposted(enabled, monkeypatch):
+    calls = []
+
+    def handler(sent):
+        calls.append(sent)
+        raise httpx.ReadTimeout("Lost response", request=sent)
+
+    monkeypatch.setattr(
+        motion.httpx,
+        "AsyncClient",
+        lambda **kwargs: HTTPClient(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(httpx.ReadTimeout):
+        await motion.leg(leg())
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("changes", [{"reservation": 0.4}, {"duration": 7}])
+async def test_leg_rejects_a_reservation_that_does_not_match_the_rate(enabled, monkeypatch, changes):
+    monkeypatch.setattr(
+        motion.httpx, "AsyncClient", lambda **kwargs: pytest.fail("Unexpected provider connection")
+    )
+    with pytest.raises(HTTPException) as error:
+        await motion.leg(leg(**changes))
+    assert error.value.status_code == 409
+
+
+async def test_leg_frames_must_be_the_bytes_they_claim(enabled, monkeypatch):
+    monkeypatch.setattr(
+        motion.httpx, "AsyncClient", lambda **kwargs: pytest.fail("Unexpected provider connection")
+    )
+    end = source()
+    end["sha256"] = "0" * 64
+    with pytest.raises(HTTPException) as error:
+        await motion.leg(leg(end=end))
+    assert error.value.status_code == 400
+
+
+async def test_mock_mode_never_bills_a_leg(enabled, monkeypatch):
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    monkeypatch.setattr(
+        motion.httpx, "AsyncClient", lambda **kwargs: pytest.fail("Unexpected provider connection")
+    )
+    with pytest.raises(HTTPException) as error:
+        await motion.leg(leg())
+    assert error.value.status_code == 503
+
+
+async def test_leg_status_polls_the_leg_model_and_nothing_else(enabled, monkeypatch):
+    monkeypatch.setattr(
+        fal_client, "status_async", AsyncMock(return_value=fal_client.Queued(position=0))
+    )
+    assert await motion.status("saved-id", model="leg") == {"status": "queued"}
+    fal_client.status_async.assert_awaited_once_with(motion.LEG_MODEL, "saved-id")
+    fal_client.status_async.reset_mock()
+    with pytest.raises(HTTPException) as error:
+        await motion.status("saved-id", model="fal-ai/anything-billable")
+    assert error.value.status_code == 400
+    fal_client.status_async.assert_not_awaited()

@@ -3007,6 +3007,9 @@ export default function PlayPage() {
           480,
           270,
           frameParentId,
+          0,
+          // Pitched roofs, as the walk sends: flat lids read as shoeboxes.
+          true,
         );
         const url = rendered.visible.length ? layoutControlDataUrl(rendered) : null;
         if (url) {

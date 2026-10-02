@@ -57,6 +57,19 @@ export function pointInBlock(b: LayoutBlock, p: WorldVec2, margin = 0): boolean 
   return Math.abs(lx) <= b.footprint.w / 2 + margin && Math.abs(ly) <= b.footprint.d / 2 + margin;
 }
 
+/** The four ground corners of the footprint rectangle that pointInBlock tests
+ *  and the render extrudes, in world coords. */
+export function blockCorners(b: LayoutBlock): WorldVec2[] {
+  const h = headingOf(b);
+  const c = Math.cos(h);
+  const s = Math.sin(h);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+    const lx = (sx! * b.footprint.w) / 2;
+    const ly = (sy! * b.footprint.d) / 2;
+    return { x: b.pos.x + lx * c - ly * s, y: b.pos.y + lx * s + ly * c };
+  });
+}
+
 /** Signed distance from `p` to the block's footprint edge in world units:
  *  positive outside, negative (or 0) inside. Used to keep a camera off walls. */
 export function blockDistance(b: LayoutBlock, p: WorldVec2): number {

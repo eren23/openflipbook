@@ -1,5 +1,5 @@
 import {describe,expect,it,vi} from "vitest";
-import {parseWalkPose,parseWalkWrite,poseInsidePlace,poseSpaceMatches,walkSpace,wrapYaw,type WalkPose} from "./walk-position";
+import {observerToWalk,parseWalkPose,parseWalkWrite,poseInsidePlace,poseSpaceMatches,routeParam,routeQuery,walkSpace,walkToObserver,wrapYaw,type WalkPose} from "./walk-position";
 import {walkPositionClear} from "./walk-position-physics";
 import {loadPlacePhysics} from "./place-physics";
 import {placeCollider} from "./place-colliders";
@@ -56,5 +56,34 @@ describe("saved walking position",()=>{
       expect(body.translation().y).toBeGreaterThan(1.5);expect(body.translation().y).toBeLessThan(storeyHeight(b)+0.8);
       expect(walkPositionClear(R,world,body.translation(),collider)).toBe(true);
     }finally{world.free();disposePlace(built.scene);}
+  });
+});
+
+describe("/play observer to walk pose",()=>{
+  const place={pos:{x:40,y:30},unit:0.5},o={pos:{x:41,y:31.5},eye_height:1.7,gaze:0,fov:1.2};
+  // The viewport walks forward along (-sin yaw, -cos yaw) in (x, z).
+  const forward=(yaw:number)=>({x:-Math.sin(yaw),z:-Math.cos(yaw)});
+  it("maps map x to scene x and map y to scene z, in metres from the centre",()=>{
+    const w=observerToWalk(o,place);
+    expect(w.x).toBeCloseTo(2);expect(w.z).toBeCloseTo(3);
+    expect(forward(w.yaw).x).toBeCloseTo(1);expect(forward(w.yaw).z).toBeCloseTo(0);
+    const side=forward(observerToWalk({...o,gaze:Math.PI/2},place).yaw);
+    expect(side.x).toBeCloseTo(0);expect(side.z).toBeCloseTo(1);
+    expect(observerToWalk({...o,pitch:2},place).pitch).toBe(1.1);
+  });
+  it("round-trips through the inverse",()=>{
+    for(const gaze of [0,1,-2.5,3]){
+      const back=walkToObserver(observerToWalk({...o,gaze,pitch:-0.3},place),place);
+      expect(back.pos.x).toBeCloseTo(o.pos.x);expect(back.pos.y).toBeCloseTo(o.pos.y);
+      expect(wrapYaw(back.gaze-gaze)).toBeCloseTo(0);expect(back.pitch).toBeCloseTo(-0.3);
+    }
+  });
+  it("reads a route query into place-local waypoints, dropping bad points and capping at 32",()=>{
+    const d={...emptyPlaceScene(),width:20,depth:10};
+    expect(routeParam("1,2,0.5;a,1,1;1,,1;-11,0,0;0,0,7",d)).toEqual([{x:11,z:7,yaw:0.5},{x:10,z:5,yaw:wrapYaw(7)}]);
+    expect(routeParam(Array(40).fill("0,0,0").join(";"),d)).toHaveLength(32);
+    expect(routeParam("",d)).toEqual([]);
+    const points=[{x:1.234,z:-2,yaw:0.5,pitch:0}];
+    expect(routeParam(routeQuery(points),d)).toEqual([{x:11.23,z:3,yaw:0.5}]);
   });
 });

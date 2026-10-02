@@ -2,7 +2,7 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
 import { blockDistance } from "./layout-control";
-import { resample, routeFromStroke, routeShots, strokeToWorld } from "./route-line";
+import { paintableShots, resample, routeFromStroke, routeShots, strokeToWorld, type RouteShot } from "./route-line";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -265,5 +265,17 @@ describe("routeFromStroke", () => {
     }
     // the far end of the walk is past the town, looking at nothing
     expect(shots[shots.length - 1]!.worth).toBe(false);
+  });
+
+  // The backend links only index n to n+1, so a worthy shot with no worthy
+  // neighbour was paid for and never walked to ([0, 2, 4]: $0.45, 0 clips).
+  it("paints only worthy shots that have a worthy neighbour, or a lone one", () => {
+    const shots = (worth: boolean[]) => worth.map((w, index) => ({ index, worth: w }) as RouteShot);
+    const kept = (worth: boolean[]) => paintableShots(shots(worth)).map((s) => s.index);
+    expect(kept([true, false, true, false, true])).toEqual([]);
+    expect(kept([true, true, false, true])).toEqual([0, 1]);
+    expect(kept([false, true, true, false, true, true])).toEqual([1, 2, 4, 5]);
+    expect(kept([false, true, false])).toEqual([1]);
+    expect(kept([false, false])).toEqual([]);
   });
 });

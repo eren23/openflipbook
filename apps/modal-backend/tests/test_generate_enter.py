@@ -1626,9 +1626,54 @@ def test_sanitize_hint_caps_and_strips_the_injection_surface() -> None:
     assert len(_sanitize_hint(" " * 50 + "y" * 500, 240)) == 240
 
 
+def _eye_level_body(**over: Any) -> GenerateBody:
+    """An eye-level house enter from an observer facing +x (gaze 0 = east),
+    with the camera-view block layout in the condition stack."""
+    base: dict[str, Any] = {
+        "prefetched_subject": "The Weaver's House",
+        "prefetched_subject_context": "a small timber house",
+        "condition_image_urls": ["data:r", "data:p", "data:s", "data:l"],
+        "condition_roles": ["region", "parent", "style", "layout"],
+        "layout_legend": [{"color": "red", "label": "The Weaver's House"}],
+        "scene_view": {
+            "node_id": "root",
+            "level": "map",
+            "observer": {
+                "pos": {"x": 50, "y": 30},
+                "eye_height": 1.7,
+                "gaze": 0.0,
+                "fov": 60,
+            },
+        },
+    }
+    base.update(over)
+    return _tap_body(**base)
+
+
 async def test_enter_attaches_the_block_layout_with_its_legend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Eye level + observer: the layout matches the camera, so it rides last
+    # and the instruction faces the observer's gaze.
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    await _collect(_event_stream(_eye_level_body(), "t1"))
+    assert edit.await_args.args[0] == "data:r"
+    assert edit.await_args.kwargs["style_ref_url"] == "data:s"
+    assert edit.await_args.kwargs["layout_ref_url"] == "data:l"
+    instruction = edit.await_args.args[1]
+    assert "LAST reference image is a flat-coloured block layout" in instruction
+    assert "red = The Weaver's House" in instruction
+    assert "facing east" in instruction
+
+
+async def test_oblique_enter_drops_the_eye_level_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The castle enters as an oblique aerial; an eye-level block layout would
+    # contradict the text, so it is not sent and not described.
+    monkeypatch.setenv("VIEW_LOOP", "false")
     _mock_plan(monkeypatch)
     edit = _mock_edit(monkeypatch)
     _mock_fresh(monkeypatch)
@@ -1638,12 +1683,58 @@ async def test_enter_attaches_the_block_layout_with_its_legend(
         layout_legend=[{"color": "red", "label": "The Stone Castle"}],
     )
     await _collect(_event_stream(body, "t1"))
-    assert edit.await_args.args[0] == "data:r"
-    assert edit.await_args.kwargs["style_ref_url"] == "data:s"
-    assert edit.await_args.kwargs["layout_ref_url"] == "data:l"
-    instruction = edit.await_args.args[1]
-    assert "LAST reference image is a flat-coloured block layout" in instruction
-    assert "red = The Stone Castle" in instruction
+    assert "oblique aerial" in edit.await_args.args[1]
+    assert edit.await_args.kwargs["layout_ref_url"] is None
+    assert "block layout" not in edit.await_args.args[1]
+
+
+async def test_interior_enter_drops_the_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Indoors the street-level block layout shows nothing the camera sees.
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    _interior_resolution(monkeypatch, "interior")
+    body = _interior_body(
+        condition_image_urls=[_region_data_url(), "data:p", "data:s", "data:l"],
+        condition_roles=["region", "parent", "style", "layout"],
+    )
+    await _collect(_event_stream(body, "t1"))
+    assert "INDOOR" in edit.await_args.args[1]
+    assert edit.await_args.kwargs["layout_ref_url"] is None
+    assert "block layout" not in edit.await_args.args[1]
+
+
+async def test_observer_facing_flag_off_states_no_facing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    monkeypatch.setenv("ENTER_OBSERVER_FACING", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    await _collect(_event_stream(_eye_level_body(), "t1"))
+    assert "facing" not in edit.await_args.args[1]
+
+
+async def test_re_enter_angle_beats_observer_gaze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The second enter rotates to 90 (east); the observer faces south. The
+    # re-enter's deliberate angle wins.
+    monkeypatch.setenv("VIEW_LOOP", "false")
+    _mock_plan(monkeypatch)
+    edit = _mock_edit(monkeypatch)
+    _mock_fresh(monkeypatch)
+    body = _eye_level_body()
+    assert body.scene_view is not None and body.scene_view.observer is not None
+    body.scene_view.observer.gaze = 1.5707963
+    body.scene_view.enter_index = 1
+    await _collect(_event_stream(body, "t1"))
+    assert "facing east" in edit.await_args.args[1]
+    assert "facing south" not in edit.await_args.args[1]
 
 
 async def test_enter_without_layout_role_sends_no_layout(

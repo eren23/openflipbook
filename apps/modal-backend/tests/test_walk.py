@@ -12,11 +12,14 @@ import pytest
 from providers import spend, walk
 
 
-def _shot(index: int, sees: list[tuple[str, float]] | None = None) -> walk.WalkShot:
+def _shot(
+    index: int, sees: list[tuple[str, float]] | None = None, gaze: float | None = None
+) -> walk.WalkShot:
     return walk.WalkShot(
         index=index,
         control_data_url="data:image/png;base64,iVBORw0KGgo=",
         sees=sees if sees is not None else [("Bellfounder Hall", 0.2)],
+        gaze=gaze,
     )
 
 
@@ -86,12 +89,32 @@ async def test_paint_makes_a_keyframe_per_shot_and_a_clip_per_gap(
 ) -> None:
     monkeypatch.setenv("MOCK_PROVIDERS", "1")
     monkeypatch.setattr(spend, "reserve", lambda *_args, **_kw: 0.0)
-    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(2), _shot(4)])
-    assert len(result.keyframes) == 3
-    assert len(result.clips) == 2
-    assert [(c.from_shot, c.to_shot) for c in result.clips] == [(0, 2), (2, 4)]
+    result = await walk.paint(
+        session_id="s1", shots=[_shot(0), _shot(1), _shot(3), _shot(4)]
+    )
+    assert len(result.keyframes) == 4
+    # Shot 2 was skipped, so 1 -> 3 is a cut, not an unchecked turn.
+    assert [(c.from_shot, c.to_shot) for c in result.clips] == [(0, 1), (3, 4)]
     assert all(k.startswith("data:") for k in result.keyframes)
     assert result.spent_usd > 0
+
+
+@pytest.mark.asyncio
+async def test_a_shot_no_clip_reaches_is_not_painted(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review 2026-10-02: [0, 2, 4] reserved three keyframes and made no clip.
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    reserved: list[float] = []
+    monkeypatch.setattr(spend, "reserve", lambda _s, usd: reserved.append(usd) or 0.0)
+    result = await walk.paint(session_id="s1", shots=[_shot(0), _shot(1), _shot(3)])
+    assert len(result.keyframes) == 2
+    assert len(reserved) == 3  # two keyframes and one clip
+    reserved.clear()
+    with pytest.raises(ValueError, match="neighbour"):
+        await walk.paint(session_id="s1", shots=[_shot(0), _shot(2), _shot(4)])
+    assert reserved == []
+    assert walk.painted([0, 2, 4]) == []
+    assert walk.painted([0, 1, 3]) == [0, 1]
+    assert walk.painted([5]) == [0]
 
 
 @pytest.mark.asyncio
@@ -140,7 +163,7 @@ class _Req:
         self.client = type("C", (), {"host": "127.0.0.1"})()
 
 
-def _body(shots: int, **kw: object):
+def _body(shots: int | list[int], **kw: object):
     import generate
 
     return generate.WalkBody(
@@ -151,7 +174,7 @@ def _body(shots: int, **kw: object):
                 control_data_url="data:image/png;base64,iVBORw0KGgo=",
                 sees=[("Bellfounder Hall", 0.2)],
             )
-            for i in range(shots)
+            for i in (range(shots) if isinstance(shots, int) else shots)
         ],
         **kw,  # type: ignore[arg-type]
     )
@@ -270,3 +293,98 @@ async def test_a_grounded_shot_sends_the_map_and_NOT_the_box_proxy(
 
 def test_a_grounded_walk_is_quoted_at_the_enter_model_price() -> None:
     assert walk.estimate_usd(4, grounded=True) > walk.estimate_usd(4, grounded=False)
+
+
+# ── honest clips: only neighbours, priced by their seconds ──────────────────
+
+
+def test_estimate_counts_the_clip_seconds_and_the_real_links() -> None:
+    assert walk.estimate_usd(3, clip_seconds=10) > walk.estimate_usd(3, clip_seconds=5)
+    # [0, 1, 3] links once: the skipped shot is a cut that costs nothing.
+    assert walk.estimate_usd(3, links=1) < walk.estimate_usd(3)
+    assert walk.linked([0, 1, 3]) == [0]
+    assert walk.linked([0, 1, 2]) == [0, 1]
+    assert walk.linked([2, 0]) == []
+
+
+@pytest.mark.asyncio
+async def test_endpoint_quotes_only_the_links_it_will_make(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    import generate
+
+    monkeypatch.setattr(generate, "_rate_limited", lambda _req: None)
+    res = await generate.walk(_Req(), _body([0, 1, 3], estimate_only=True, clip_seconds=8))
+    payload = json.loads(bytes(res.body))
+    # Shot 3 has no neighbour, so it is not painted either.
+    assert payload["shots"] == 2
+    assert payload["estimate_usd"] == walk.estimate_usd(2, 8, links=1)
+    res = await generate.walk(_Req(), _body([0, 2, 4], estimate_only=True))
+    assert json.loads(bytes(res.body))["estimate_usd"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_clip_reserves_what_its_seconds_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import video
+
+    monkeypatch.setenv("MOCK_PROVIDERS", "1")
+    reserved: list[float] = []
+    monkeypatch.setattr(spend, "reserve", lambda _s, usd: reserved.append(usd) or 0.0)
+    await walk.paint(session_id="s1", shots=[_shot(0), _shot(1)], clip_seconds=10)
+    assert reserved[-1] == video.estimate_usd(10, descent=True)
+    assert reserved[-1] > video.estimate_usd(5, descent=True)
+
+
+def test_clip_prompt_turns_with_the_gaze_and_never_invents_metres() -> None:
+    import math
+
+    # gaze 0 faces east; +y is south on the map, so east -> south is a right turn.
+    text = walk._clip_prompt(_shot(0, gaze=0.0), _shot(1, gaze=math.pi / 2))
+    assert "turns about 90 degrees to the right" in text
+    assert "walks forward" in text and "metres" not in text
+    # across the +-pi seam the short way round wins
+    text = walk._clip_prompt(_shot(0, gaze=math.radians(170)), _shot(1, gaze=math.radians(-170)))
+    assert "turns about 20 degrees to the right" in text
+    assert "turns" not in walk._clip_prompt(_shot(0), _shot(1))
+
+
+def test_block_instruction_describes_the_block_render_actually_sent() -> None:
+    text = walk.shot_instruction([("Hall", 0.3)])
+    assert "depth" not in text.lower()
+    assert "black is sky" not in text
+    assert "pitched roof" in text
+    assert "dark-brown ground" in text and "pale-grey sky" in text
+    assert "do not paint walls in those colours" in text
+
+
+def test_map_instruction_places_the_walker_by_their_gaze() -> None:
+    text = walk.shot_instruction([("Hall", 0.3)], grounded=True, gaze=0.0)
+    assert "You stand just west of the centre of Image 1, facing east; north is up." in text
+    # without an observer the heading is not guessed
+    assert "facing east" not in walk.shot_instruction([("Hall", 0.3)], grounded=True)
+
+
+@pytest.mark.asyncio
+async def test_endpoint_hands_each_shot_its_observer_gaze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import generate
+
+    monkeypatch.setattr(generate, "_rate_limited", lambda _req: None)
+    seen: dict[str, object] = {}
+
+    async def spy(**kw: object):
+        seen.update(kw)
+        raise ValueError("stop here")
+
+    monkeypatch.setattr(walk, "paint", spy)
+    body = _body(2)
+    body.shots[0].observer = generate.ObserverPose(
+        pos=generate.WorldVec2(x=1, y=2), eye_height=1.7, gaze=0.5, fov=1.2
+    )
+    await generate.walk(_Req(), body)
+    shots = seen["shots"]
+    assert isinstance(shots, list)
+    assert [s.gaze for s in shots] == [0.5, None]

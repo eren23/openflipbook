@@ -2,7 +2,7 @@ import type { WorldEntityGeo } from "@openflipbook/config";
 import { describe, expect, it } from "vitest";
 
 import { routeToFocus } from "./click-route";
-import { blockDistance, pointInBlock, renderLayoutControl, solidBlocks } from "./layout-control";
+import { blockCorners, blockDistance, pointInBlock, renderLayoutControl, solidBlocks } from "./layout-control";
 
 const geo = (label: string, x: number, y: number, w: number, d: number, height: number, extra: Partial<WorldEntityGeo> = {}) =>
   ({ id: `geo_${label}`, entity_id: null, kind: "place", label, pos: { x, y }, footprint: { w, d }, height, visual: "", state: {}, confidence: 1, source: "extracted", updated_at: "", ...extra }) as unknown as WorldEntityGeo;
@@ -42,6 +42,18 @@ describe("solidBlocks", () => {
     const rotated = geo("Rotated", 0, 0, 10, 2, 5, { heading: Math.PI / 2 });
     expect(pointInBlock(rotated, { x: 0, y: 4 })).toBe(true);
     expect(pointInBlock(rotated, { x: 4, y: 0 })).toBe(false);
+  });
+
+  it("puts the corners on the footprint edge, in the block's own heading", () => {
+    const rotated = geo("Rotated", 3, 1, 10, 2, 5, { heading: 0.7 });
+    for (const c of blockCorners(rotated)) {
+      expect(pointInBlock(rotated, c, 1e-9)).toBe(true);
+      expect(blockDistance(rotated, c)).toBeCloseTo(0, 9);
+    }
+    // Opposite corners span the full diagonal, so the four are distinct.
+    const [a, b, c, d] = blockCorners(rotated);
+    expect(Math.hypot(a!.x - c!.x, a!.y - c!.y)).toBeCloseTo(Math.hypot(10, 2), 9);
+    expect(Math.hypot(b!.x - d!.x, b!.y - d!.y)).toBeCloseTo(Math.hypot(10, 2), 9);
   });
 });
 

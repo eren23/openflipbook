@@ -39,6 +39,11 @@ vi.mock("@/lib/creator", async (importOriginal) => ({
   requireCreator: creator.requireCreator,
 }));
 
+// The walk route measures where each clip stops moving; no ffmpeg or network here.
+const video = vi.hoisted(() => ({ download: vi.fn(), legMotion: vi.fn() }));
+vi.mock("@/lib/motion-execution", () => ({ download: video.download }));
+vi.mock("@/lib/motion-video", async (importOriginal) => ({ ...(await importOriginal<object>()), legMotion: video.legMotion }));
+
 import { POST as editEntities } from "@/app/api/world/[sessionId]/edit-entities/route";
 import { POST as walk } from "@/app/api/world/[sessionId]/walk/route";
 
@@ -131,5 +136,25 @@ describe("keeping a painted walk", () => {
     const res = await walk(post(body), inSession("s1"));
     expect(res.status).toBe(200);
     expect((await res.json()).clips).toHaveLength(1);
+  });
+});
+
+describe("marking where each painted clip stops moving", () => {
+  it("sets play_until from the clip's own motion, and leaves it unset when that fails", async () => {
+    const clip = (name: string) => ({ from_shot: 0, to_shot: 1, video_url: `https://v3.fal.media/${name}.mp4`, model: "m", seconds: 5 });
+    upstream.mockResolvedValue(new Response(JSON.stringify({ clips: [clip("moving"), clip("still"), clip("gone")], spent_usd: 1.2 }), { status: 200 }));
+    video.download.mockImplementation(async (url: string) => {
+      if (url.includes("gone")) throw new Error("expired");
+      return Buffer.from(url);
+    });
+    // 2 fps: the moving clip changes for four frames, then holds still.
+    video.legMotion.mockImplementation(async (bytes: Buffer) => ({ fps: 2, frames: [], deltas: String(bytes).includes("moving") ? [1, 1, 1, 1, 0, 0] : [0, 0, 0, 0] }));
+    const res = await walk(post({ node_id: "n1", shots: [] }), inSession("s1"));
+    expect(res.status).toBe(200);
+    const clips = (await res.json()).clips as { play_until?: number }[];
+    expect(clips[0]!.play_until).toBe(2.5);
+    expect(clips[1]).not.toHaveProperty("play_until"); // never moved: no cut point
+    expect(clips[2]).not.toHaveProperty("play_until"); // download failed: plays to its end
+    expect(mocks.setNodeWalk.mock.calls[0]![1].clips[0].play_until).toBe(2.5);
   });
 });

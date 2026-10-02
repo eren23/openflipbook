@@ -26,6 +26,9 @@ import PlaceViewLibrary from "./place-view-library";
 import type { CaptureMotion } from "./place-camera-motion";
 import type { ViewCapture, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
 import { WORLD_EDITOR_VIEWS, worldEditorSelection, worldEditorHref, type WorldEditorView } from "@/lib/world-editor-selection";
+import { routeParam, type WalkPose } from "@/lib/walk-position";
+import type { WalkWaypoint } from "@/lib/walk-route";
+import { networkView } from "@/lib/place-connections";
 const Viewport = dynamic(() => import("./place-viewport"), { ssr: false });
 interface Context {
   session_id: string; place_id: string; source_node_id: string | null; source_url: string | null;
@@ -83,7 +86,12 @@ export default function WorldEditor() {
   const [ankhDemo, setAnkhDemo] = useState(false), [mapFocused, setMapFocused] = useState(false), [tour, setTour] = useState(false);
   const position=useWalkPosition(!demo&&context?.scene?context.session_id:null);
   const skipResume=useRef(false);
-  function getWalkPose(){if(skipResume.current){skipResume.current=false;return null;}return position.getPose();}
+  // A walk handed over from /play: spawn once on its first point, then walk it.
+  const [handoff,setHandoff]=useState<WalkWaypoint[]|null>(null),handoffPose=useRef<WalkPose|null>(null);
+  function getWalkPose(){
+    const start=handoffPose.current;handoffPose.current=null;
+    if(skipResume.current){skipResume.current=false;return null;}return start??position.getPose();
+  }
   async function load() {
     setLoadView(undefined);
     generationJob.current = undefined;
@@ -129,6 +137,14 @@ export default function WorldEditor() {
     if (selection.object_id && (requestedMode === "orbit" || requestedMode === "split")) setFocusKey(k => k + 1);
     setMode(requestedMode && WORLD_EDITOR_VIEWS.includes(requestedMode) && (requestedMode !== "reference" || data.source_url) && (requestedMode !== "walk" || !connectedFailed)
       ? requestedMode : initial.material_pack ? "orbit" : "plan");
+    // A /play walk's route (walk-position routeQuery). It is taken off the URL
+    // so a later load (save, fork) does not restart it.
+    const route=data.scene&&requestedMode==="walk"&&!connectedFailed?routeParam(query.get("route")??"",data.scene.definition):[];
+    if(query.has("route")){const url=new URL(window.location.href);url.searchParams.delete("route");window.history.replaceState(null,"",url);}
+    handoffPose.current=route[0]&&data.scene?{version:1,place_id:data.place_id,scene_revision:data.scene.revision,position:{x:route[0].x,y:0.82,z:route[0].z},yaw:route[0].yaw,pitch:0}:null;
+    // The tour walks in the loaded network's coordinates; the pose stays place-local.
+    const chunk=connected&&route.length?networkView(connected,data.place_id).chunks.find(c=>c.scene.place_id===data.place_id):undefined;
+    setHandoff(route.length?route.map(p=>({...p,x:p.x+(chunk?.x??0),z:p.z+(chunk?.z??0)})):null);if(route.length)setTour(true);
   }
   useEffect(() => { void load().catch(e => setError((e as Error).message)); }, []);
   const dirty = !!definition && !!context && sceneChanges(context.scene?.definition ?? null, definition).length > 0;
@@ -393,7 +409,7 @@ export default function WorldEditor() {
         </div> : mode === "illustration" ? null : mode === "split" ? <div className={s.splitViews}>
           <section className={s.splitPane} aria-label="Live plan"><span className={s.paneLabel}>Plan</span><Viewport floorId={activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} definition={definition} mode="plan" selected={selected} onSelect={selectObject} drawing={drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} /></section>
           <section className={s.splitPane} aria-label="Live 3D"><span className={s.paneLabel}>3D</span><Viewport floorId={activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} definition={definition} mode="orbit" selected={selected} focusKey={focusKey} onSelect={selectObject} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} network={!dirty&&!networkError?network:null} loadView={!dirty ? loadView : undefined}/></section>
-        </div> : mode==="walk"&&(!position.ready||!!networkError)?<p className={s.loading}>Loading saved position...</p>:<Viewport floorId={mode === "walk" ? undefined : activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} key={walkKey} definition={definition} mode={mode} selected={selected} focusKey={focusKey} onSelect={selectObject} network={!dirty&&!networkError?network:null} placeId={context.place_id} onPlaceChange={setWalkingPlace} sceneRevision={context.scene?.revision} getWalkPose={!dirty?getWalkPose:undefined} onWalkPose={!dirty&&!demo&&context.scene?position.record:undefined} route={tour ? DRUM_APPROACH : undefined} drawing={mode === "plan" && drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} loadView={!dirty ? loadView : undefined}/>}
+        </div> : mode==="walk"&&(!position.ready||!!networkError)?<p className={s.loading}>Loading saved position...</p>:<Viewport floorId={mode === "walk" ? undefined : activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} key={walkKey} definition={definition} mode={mode} selected={selected} focusKey={focusKey} onSelect={selectObject} network={!dirty&&!networkError?network:null} placeId={context.place_id} onPlaceChange={setWalkingPlace} sceneRevision={context.scene?.revision} getWalkPose={!dirty?getWalkPose:undefined} onWalkPose={!dirty&&!demo&&context.scene?position.record:undefined} route={tour ? (handoff ?? DRUM_APPROACH) : undefined} drawing={mode === "plan" && drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} loadView={!dirty ? loadView : undefined}/>}
         <footer className={s.stageFooter}><span>{mode==="walk"&&network?`${network.chunks.length} connected places`:`${definition.width} × ${definition.depth} m · Authored dimensions`}</span><span>{mode==="walk"&&network?network.chunks.reduce((n,c)=>n+c.scene.definition.objects.length,0):definition.objects.length} objects</span></footer>
         {mode==="walk"&&!dirty&&context.scene&&<span role="status" className={s.stageFooter}>{position.state.status==="saving"?"Saving position...":position.state.status==="saved"?"Position saved":"Position not saved"}</span>}
       </section>

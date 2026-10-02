@@ -7,11 +7,13 @@ import type {
   ViewLevel,
   ViewSpec,
   WorldEntityGeo,
+  WorldVec2,
 } from "@openflipbook/config";
 import { finerTier } from "@openflipbook/config";
 
 import { clamp01 } from "./clamp";
 import { routeClick, routeToFocus, type ClickPoint } from "./click-route";
+import { blockCorners, pointInBlock } from "./layout-control";
 import {
   childrenOf,
   cropEntities,
@@ -115,7 +117,8 @@ export function describeSurroundings(
  *  left-to-right); everything else lands in `behind` — the explicit NOT-visible
  *  list the instruction bans from the backdrop. The live failure this kills: the
  *  lighthouse enter faced open sea, and the bearing-worded neighbours ("to the
- *  east, the docks") were painted into the background anyway. Pure. */
+ *  east, the docks") were painted into the background anyway. `entities`
+ *  must be in the observer's frame. Pure. */
 export function describeVisibleSurroundings(
   focusId: string,
   entities: WorldEntityGeo[],
@@ -130,25 +133,43 @@ export function describeVisibleSurroundings(
   const EDGE_PAD = 0.15;
   // Distance words scale with the focus itself (world units are scale-free).
   const unit = Math.max(focus.footprint.w, focus.footprint.d, 8);
+  const lim = half + EDGE_PAD;
+  const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+  const angleTo = (p: WorldVec2): number =>
+    wrap(Math.atan2(p.y - observer.pos.y, p.x - observer.pos.x) - observer.gaze);
   const seen: { label: string; visual: string; angle: number; dist: number }[] = [];
   const hidden: { label: string; dist: number }[] = [];
   for (const m of entities) {
     if (m.id === focusId || (m.parent_id ?? null) !== parent || !m.label.trim()) {
       continue;
     }
-    const bearing = Math.atan2(m.pos.y - observer.pos.y, m.pos.x - observer.pos.x);
-    let d = bearing - observer.gaze;
-    while (d > Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
+    const d = angleTo(m.pos);
     const dist = Math.hypot(m.pos.x - observer.pos.x, m.pos.y - observer.pos.y);
-    if (Math.abs(d) <= half + EDGE_PAD) {
-      seen.push({ label: m.label.trim(), visual: (m.visual ?? "").trim(), angle: d, dist });
+    // In sight = ANY part of the footprint is inside the frustum (the same
+    // rectangle the layout render extrudes): a house close by and to the side
+    // fills the frame edge while its centre is outside. Seen from outside, a
+    // convex footprint spans less than half a turn, so its corners, measured
+    // around the centre's bearing, bound it. The centre (0) keeps a footprint
+    // with bad numbers on the old centre rule.
+    // ponytail: no wrap past ±π/2, so this holds for fov below about 160°.
+    const spread = [0, ...blockCorners(m).map((c) => wrap(angleTo(c) - d)).filter(Number.isFinite)];
+    const inSight =
+      pointInBlock(m, observer.pos) ||
+      (d + Math.max(...spread) >= -lim && d + Math.min(...spread) <= lim);
+    if (inSight) {
+      // Centre out of frame: word it by its nearest point in frame, the edge.
+      const angle = Math.abs(d) <= lim ? d : Math.sign(d) * half;
+      seen.push({ label: m.label.trim(), visual: (m.visual ?? "").trim(), angle, dist });
     } else {
       hidden.push({ label: m.label.trim(), dist });
     }
   }
-  // Screen coords (y down): a positive gaze-relative angle is to the RIGHT.
-  seen.sort((a, b) => a.angle - b.angle);
+  // The nearest mates survive the cap, then read left to right. Screen coords
+  // (y down): a positive gaze-relative angle is to the RIGHT.
+  const shown = seen
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, max)
+    .sort((a, b) => a.angle - b.angle);
   hidden.sort((a, b) => a.dist - b.dist);
   const side = (a: number): string =>
     a < -half * 0.6
@@ -162,8 +183,7 @@ export function describeVisibleSurroundings(
             : "straight ahead";
   const distWord = (d: number): string =>
     d < unit * 3 ? "close by" : d < unit * 8 ? "in the middle distance" : "far off";
-  const visible = seen
-    .slice(0, max)
+  const visible = shown
     .map(
       (m) =>
         `${side(m.angle)} ${distWord(m.dist)}, ${m.label}${m.visual ? ` (${m.visual})` : ""}`,
@@ -303,6 +323,7 @@ export function geoTapRequest(
   // The popover's adjusted pose/level (if any) win over the synthesized ones.
   return buildSceneTap(
     map.entities,
+    candidates.entities,
     nodeId,
     route.focus_id,
     override?.observer ?? route.observer,
@@ -356,6 +377,9 @@ function buildSubmapTap(
 //     seeds from this scene's extraction (keyed on focus_id below).
 function buildSceneTap(
   allEntities: WorldEntityGeo[],
+  // The same places in the frame the observer stands in: absolute on a map
+  // tap, the entered place's local frame inside it.
+  frameEntities: WorldEntityGeo[],
   nodeId: string,
   focusId: string,
   observer: ObserverPose,
@@ -370,7 +394,7 @@ function buildSceneTap(
     kids.length > 0
       ? kids.map((k) => ({ ...k, pos: resolveAbsolutePos(k.id, byId) ?? k.pos }))
       : [];
-  const pov = describeVisibleSurroundings(focusId, allEntities, observer);
+  const pov = describeVisibleSurroundings(focusId, frameEntities, observer);
   return {
     kind: "scene",
     scene_view: {
@@ -531,6 +555,7 @@ export function geoTapForEntity(
   );
   return buildSceneTap(
     map.entities,
+    absolute,
     nodeId,
     route.focus_id,
     override?.observer ?? route.observer,

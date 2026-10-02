@@ -83,8 +83,9 @@ async function verified(file?: MotionFile) {
   const value = await getStoredBytes(file.key, AbortSignal.timeout(30_000));
   return value && value.bytes.length === file.bytes && hash(value.bytes) === file.sha256 ? value.bytes : null;
 }
-async function download(url: string) {
-  const response = await fetch(meshDownloadUrl(url), { redirect: "error", signal: AbortSignal.timeout(90_000) });
+// fal.media only, streamed under MAX_MOTION_BYTES. The walk route reuses it.
+export async function download(url: string, signal = AbortSignal.timeout(90_000)) {
+  const response = await fetch(meshDownloadUrl(url), { redirect: "error", signal });
   if (!response.ok || !response.body || Number(response.headers.get("content-length")) > MAX_MOTION_BYTES) throw new Error("Motion download unavailable or too large");
   const chunks: Uint8Array[] = [], reader = response.body.getReader(); let size = 0;
   try {
