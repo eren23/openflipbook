@@ -29,7 +29,8 @@ export async function assetBackend(kind: AssetKind | "motion", path: string, bod
   const response = await fetch(modalUrl(process.env.MODAL_API_URL, `/${kind}/${path}`), { method: body ? "POST" : "GET", redirect: "error",
     headers: { "Content-Type": "application/json", ...modalAuthHeaders() }, ...(body ? { body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(timeout), cache: "no-store" });
-  if (!response.ok) throw new Error(`3D provider returned ${response.status}`);
+  // The status lets callers tell a refusal before any provider POST from a lost response.
+  if (!response.ok) throw Object.assign(new Error(`3D provider returned ${response.status}`), { status: response.status });
   const text = await response.text(); if (text.length > limit) throw new Error("3D response too large");
   return JSON.parse(text);
 }

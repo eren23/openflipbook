@@ -7,6 +7,7 @@ import type { MotionStudy } from "@/lib/motion-study";
 import type { MotionReferenceCapture } from "./camera-motion-capture";
 import s from "./world-editor.module.css";
 import MotionGeneration from "./motion-generation";
+import PathVideo from "./path-video";
 
 export default function MotionStudyLibrary({ sessionId, view, reference, disabled }: {
   sessionId: string; view: SavedPlaceView; reference: MotionReferenceCapture | null; disabled: boolean;
@@ -59,6 +60,7 @@ export default function MotionStudyLibrary({ sessionId, view, reference, disable
         <label>Saved reference time<input aria-label="Saved motion reference time" type="range" min={0} max={study.frames.length - 1} step={1} value={index} onChange={e => setIndex(Number(e.target.value))}/></label>
         <p>{frame.seconds.toFixed(2)}s / {study.frames.at(-1)?.seconds}s</p>
         <MotionGeneration key={study.id} sessionId={sessionId} studyId={study.id} disabled={disabled} onTime={seconds => setIndex(study.frames.reduce((closest, item, i) => Math.abs(item.seconds - seconds) < Math.abs(study.frames[closest]!.seconds - seconds) ? i : closest, 0))}/>
+        <PathVideo key={`path-${study.id}`} sessionId={sessionId} studyId={study.id} disabled={disabled}/>
       </>}
     </>}
     {error && <p role="alert">{error}</p>}

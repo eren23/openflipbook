@@ -78,10 +78,11 @@ async function submit(db: Db) {
   }
   return true;
 }
-async function verified(file?: MotionFile) {
+// Stored bytes, or null when missing or changed. `bytes` is optional for pins that only kept a hash.
+export async function verified(file?: { key: string; sha256: string; bytes?: number }) {
   if (!file) return null;
   const value = await getStoredBytes(file.key, AbortSignal.timeout(30_000));
-  return value && value.bytes.length === file.bytes && hash(value.bytes) === file.sha256 ? value.bytes : null;
+  return value && (file.bytes === undefined || value.bytes.length === file.bytes) && hash(value.bytes) === file.sha256 ? value.bytes : null;
 }
 // fal.media only, streamed under MAX_MOTION_BYTES. The walk route reuses it.
 export async function download(url: string, signal = AbortSignal.timeout(90_000)) {

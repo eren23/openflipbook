@@ -42,6 +42,16 @@ currently positive hypotheses. They are NOT calibrated provider conventions.
 Elevation offsets from a tilted source and distance ratios need empirical
 verification; do not label them exact physical translations or metric controls.
 
+Adapter `h3-source-relative-v2-measured` (2026-10-02) replaces v1 for new
+studies. It uses the gains measured on 2026-09-27. Distance is sent as
+`max(0.2, 1 - (1 - r) / 0.6)`, because H3 delivers about 0.6 of a requested
+push. A pull-back (r > 1) is marked unverified. A turn over 30 degrees or a rise
+over 15 degrees is a limit issue that blocks the quote. H3 orbits a nearer
+centre, so part of a turn arrives as a pan and the target drifts. For a longer
+or wider move, use a path video (first/last-frame legs between gated keyframes,
+`PATH_VIDEO_ENABLED`). Research 36 has the live check: a push tracked the
+geometry frames, an orbit gave about half the parallax. v1 studies keep v1 maths.
+
 Signed turns are preserved without shortest-angle wrapping. Relative elevation
 outside [-90, 90], fractional durations and malformed/degenerate paths reject,
 not clamp. Existing local path constraints remain stricter than some provider

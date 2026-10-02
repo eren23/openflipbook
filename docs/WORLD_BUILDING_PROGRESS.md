@@ -4591,3 +4591,24 @@ Live evidence for the merged zoom-out fix, from a brand-new world:
 
 Spend: three takes, about $1.13 of the $1.50 cap. The geometry tail, the route
 and the walk finale cost nothing.
+
+## 2026-10-02 — Pose to keyframe to video in the product (about $8.30)
+
+Research 36 has the measurements. In short:
+- Saved-camera keyframes now use `qwen-image-edit-2511` with the 3D render and
+  the world art, and a SAM-3 gate checks each one. 7 of 7 first keyframes held
+  the camera (IoU 0.93-0.98). The old flux illustration was the render with
+  invented window holes.
+- A chained keyframe is a composite: the previous keyframe's warp where the
+  new camera sees the same surfaces, and the new camera's own gated paint
+  elsewhere. Stretched warp pixels become holes and the sky is pinned.
+- A path video (120 degree orbit, 5 checkpoints) keeps the same inn through
+  the whole move: 10.67 s, no frozen frame, 4 of 4 legs landed.
+- The camera-controls adapter v2 delivers a push as asked. An orbit
+  under-delivers, as the 2026-09-27 calibration said.
+- /play enters face the observer's gaze and send the layout image only when
+  it agrees with the text. The sight test no longer lists in-frame buildings
+  as behind the camera.
+
+Open: a fine cross-hatch shimmer on walls in the middle legs, and no check
+that separates a restyle without art from a real paint.

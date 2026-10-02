@@ -285,6 +285,7 @@ it("persists reference studies, recomputes measurements and replays without reca
   expect(study.frames).toHaveLength(5);
   expect(study.frames[0]!.measurements).not.toHaveProperty("forged");
   expect(study.frames[0]!.measurements.unknown_pixels).toBe(32 * 32);
+  expect(study.frames[0]!.depth).toEqual({ near: request.frames[0]!.capture.depth.near, far: request.frames[0]!.capture.depth.far });
   expect(await motionStudyFrame("world", "study", 0, "render")).toEqual(memory.files.get(store("motion_studies").get("world:study")!.files[0].render.key));
   expect(memory.uploads).toBe(uploads);
   expect([...memory.rows.keys()].filter(name => name.endsWith("_jobs") || name === "spend_ledger")).toEqual([]);
