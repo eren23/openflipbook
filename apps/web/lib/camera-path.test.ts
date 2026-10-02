@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
-import { insertCameraKeyframe, orbitPose, orbitPosition, sampleCameraPath } from "./camera-path";
+import { insertCameraKeyframe, orbitPose, orbitPosition, sampleCameraPath, checkpointTimes, MAX_CHECKPOINTS, CHECKPOINT_MAX_DEGREES, CHECKPOINT_MAX_DISTANCE_RATIO } from "./camera-path";
 
 describe("world-space orbit path", () => {
   it("anchors direction, height and metre distance to the supplied pivot", () => {
@@ -29,5 +29,25 @@ describe("world-space orbit path", () => {
     const full = Array.from({ length: 12 }, (_, i) => ({ ...frames[0]!, time: i / 11 }));
     expect(insertCameraKeyframe(full, 0.5)).toEqual(full);
     expect(frames).toHaveLength(2);
+  });
+});
+
+describe("keyframe checkpoints", () => {
+  const arc = (turn: number, elevation = 0, distance = 20) => [{ time: 0, azimuth: 120, elevation, distance: 20 }, { time: 1, azimuth: 120 + turn, elevation, distance }];
+  it("splits a turn into legs of at most 30 degrees on the pivot sphere", () => {
+    expect(checkpointTimes(arc(90))).toEqual([0, 1 / 3, 2 / 3, 1]);
+    expect(checkpointTimes(arc(-90))).toEqual([0, 1 / 3, 2 / 3, 1]);
+    expect(checkpointTimes(arc(15))).toEqual([0, 1]);
+    expect(checkpointTimes(arc(30))).toEqual([0, 1]);
+  });
+  it("splits on a distance ratio above 1.5 and keeps authored keyframe times", () => {
+    expect(checkpointTimes(arc(0, 0, 40))).toEqual([0, 0.5, 1]);
+    const authored = [arc(0)[0]!, { time: 0.3, azimuth: 126, elevation: 0, distance: 20 }, arc(20)[1]!];
+    expect(checkpointTimes(authored)).toEqual([0, 0.3, 1]);
+  });
+  it("refuses a path that needs more than twelve checkpoints", () => {
+    expect(checkpointTimes(arc(320))).toHaveLength(12);
+    expect(() => checkpointTimes(arc(340))).toThrow(/12/);
+    expect(MAX_CHECKPOINTS).toBe(12); expect(CHECKPOINT_MAX_DEGREES).toBe(30); expect(CHECKPOINT_MAX_DISTANCE_RATIO).toBe(1.5);
   });
 });

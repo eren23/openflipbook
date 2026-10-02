@@ -1,4 +1,5 @@
 import { Spherical, Vector3, MathUtils } from "three";
+import { CreatorError } from "./creator-error";
 
 export interface OrbitPose { azimuth: number; elevation: number; distance: number }
 export interface CameraKeyframe extends OrbitPose { time: number }
@@ -41,6 +42,30 @@ export function sampleCameraPath(frames: readonly CameraKeyframe[], time: number
   const t = (time - a.time) / (b.time - a.time);
   // Preserve authored signed turns; shortest-angle interpolation loses full orbits.
   return { azimuth: MathUtils.lerp(a.azimuth, b.azimuth, t), elevation: MathUtils.lerp(a.elevation, b.elevation, t), distance: MathUtils.lerp(a.distance, b.distance, t) };
+}
+
+// Keyframe checkpoints for path videos: each leg between two checkpoints stays
+// within these limits, so one keyframe can be warped into the next. The 30
+// degrees comes from research 34; the 1.5 distance ratio is unmeasured.
+export const CHECKPOINT_MAX_DEGREES = 30;
+export const CHECKPOINT_MAX_DISTANCE_RATIO = 1.5;
+export const MAX_CHECKPOINTS = 12;
+export function checkpointTimes(frames: readonly CameraKeyframe[]): number[] {
+  const authored = new Set([0, 1, ...frames.map(frame => frame.time)]);
+  const samples = [...new Set([...Array.from({ length: 241 }, (_, i) => i / 240), ...authored])].sort((a, b) => a - b);
+  const direction = (pose: OrbitPose) => orbitPosition(new Vector3(), { ...pose, distance: 1 });
+  const far = (a: OrbitPose, b: OrbitPose) => MathUtils.radToDeg(direction(a).angleTo(direction(b))) > CHECKPOINT_MAX_DEGREES + 1e-6
+    || Math.max(a.distance / b.distance, b.distance / a.distance) > CHECKPOINT_MAX_DISTANCE_RATIO + 1e-9;
+  const times = [0];
+  let last = sampleCameraPath(frames, 0), previous = 0;
+  for (const time of samples.slice(1)) {
+    // Close the leg at the last sample that was still within the limits.
+    if (previous !== times.at(-1) && far(last, sampleCameraPath(frames, time))) { times.push(previous); last = sampleCameraPath(frames, previous); }
+    if (authored.has(time)) { times.push(time); last = sampleCameraPath(frames, time); }
+    previous = time;
+  }
+  if (times.length > MAX_CHECKPOINTS) throw new CreatorError(`This path needs more than ${MAX_CHECKPOINTS} keyframe checkpoints; shorten the turn or the push`, 400);
+  return times;
 }
 
 export function insertCameraKeyframe(frames: readonly CameraKeyframe[], time: number): CameraKeyframe[] {

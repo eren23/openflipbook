@@ -61,6 +61,15 @@ it("rejects a seek event at the wrong timestamp and unlocks only the matching fr
   await waitFor(() => expect(props.onSave).toHaveBeenCalled());
   expect(props.onSave.mock.calls[0]![0]).toMatchObject({ review: { observations: [{ frame: 4, observed_seconds: 5.96, bounds: null }] } });
 });
+it("seeks a longer clip to the sample time scaled to its own length", async () => {
+  const ui = render(<MotionReview {...props} media={{ ...props.media, duration: 6.6 }}/>); const video = await ready(ui.container);
+  fireEvent.change(screen.getByLabelText("Comparison sample"), { target: { value: "2" } });
+  video.currentTime = 3; fireEvent.seeked(video); fireEvent.load(screen.getByAltText("Geometry sample 3"));
+  await waitFor(() => expect(screen.getByLabelText("Video sample time").textContent).toBe("3.00s / requested 3.30s"));
+  expect((screen.getByLabelText("Observed landmark visibility") as HTMLSelectElement).disabled).toBe(true);
+  video.currentTime = 3.3; fireEvent.seeked(video);
+  await waitFor(() => expect((screen.getByLabelText("Observed landmark visibility") as HTMLSelectElement).disabled).toBe(false));
+});
 it("keeps measurement disabled during continuous playback", async () => {
   const ui = render(<MotionReview {...props}/>); const video = await ready(ui.container);
   const play = vi.spyOn(video, "play").mockImplementation(async () => {

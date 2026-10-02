@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { ArrowLeft, ArrowRight, Pause, Play, Save, Trash2, X } from "lucide-react";
-import { evaluateMotionReview, MOTION_VISUAL_CHECKS, type MotionAssessment, type MotionBounds, type MotionReviewInput } from "@/lib/motion-comparison";
+import { evaluateMotionReview, motionSampleSeconds, MOTION_VISUAL_CHECKS, type MotionAssessment, type MotionBounds, type MotionReviewInput } from "@/lib/motion-comparison";
 import type { FrozenMotionComparison } from "@/lib/motion-job";
 import s from "./motion-review.module.css";
 
@@ -27,6 +27,7 @@ export default function MotionReview({ sessionId, studyId, assetId, comparison, 
   const pending = useRef<Record<string, unknown> | null>(null), saving = useRef(false), mounted = useRef(true);
   const gesture = useRef<{ pointer: number; x: number; y: number } | null>(null);
   const plan = comparison.plan, frame = plan.frames[frameIndex]!, landmark = plan.landmarks[landmarkIndex]!;
+  const sampleSeconds = motionSampleSeconds(plan, frame.seconds, media.duration);
   const selected = review.observations.find(item => item.frame === frameIndex && item.object_id === landmark.id);
   useEffect(() => { setCoordinates(selected?.bounds?.map(n => String(Number((n * 100).toFixed(2)))) ?? ["", "", "", ""]); }, [selected]);
   const blocked = busy || !!pending.current;
@@ -36,11 +37,11 @@ export default function MotionReview({ sessionId, studyId, assetId, comparison, 
   }, []);
   const seek = useCallback(() => {
     const element = video.current; if (!element || !Number.isFinite(element.duration)) return;
-    element.pause(); element.currentTime = Math.min(frame.seconds, Math.max(0, element.duration - .04));
-  }, [frame.seconds]);
+    element.pause(); element.currentTime = Math.min(sampleSeconds, Math.max(0, element.duration - .04));
+  }, [sampleSeconds]);
   const frameReady = () => {
     const element = video.current;
-    const matched = !!element && element.readyState >= 2 && element.paused && !element.seeking && Math.abs(element.currentTime - frame.seconds) <= plan.tolerances.seek_seconds;
+    const matched = !!element && element.readyState >= 2 && element.paused && !element.seeking && Math.abs(element.currentTime - sampleSeconds) <= plan.tolerances.seek_seconds;
     setReady(matched); setVideoSeconds(element?.currentTime ?? null);
   };
   async function togglePlayback() {
@@ -53,7 +54,7 @@ export default function MotionReview({ sessionId, studyId, assetId, comparison, 
   useEffect(() => { setReady(false); setDraft(null); gesture.current = null; seek(); }, [seek]);
   function observed(bounds: MotionBounds | null) {
     const element = video.current;
-    if (blocked || !ready || !referenceReady || !element || element.seeking || !element.paused || Math.abs(element.currentTime - frame.seconds) > plan.tolerances.seek_seconds) return;
+    if (blocked || !ready || !referenceReady || !element || element.seeking || !element.paused || Math.abs(element.currentTime - sampleSeconds) > plan.tolerances.seek_seconds) return;
     setReview(old => ({ ...old, observations: [...old.observations.filter(item => item.frame !== frameIndex || item.object_id !== landmark.id),
       { frame: frameIndex, object_id: landmark.id, observed_seconds: element.currentTime, bounds }] }));
   }
@@ -109,7 +110,7 @@ export default function MotionReview({ sessionId, studyId, assetId, comparison, 
     <div className={s.toolbar}>
       <button title={playing ? "Pause clip" : "Play full clip"} aria-label={playing ? "Pause clip" : "Play full clip"} disabled={blocked} onClick={() => void togglePlayback()}>{playing ? <Pause size={16}/> : <Play size={16}/>}</button>
       <button title="Return to selected sample" disabled={blocked} onClick={seek}>Return to sample</button>
-      <output aria-label="Video sample time">{videoSeconds === null ? "Loading video" : `${videoSeconds.toFixed(2)}s / requested ${frame.seconds.toFixed(2)}s`}</output>
+      <output aria-label="Video sample time">{videoSeconds === null ? "Loading video" : `${videoSeconds.toFixed(2)}s / requested ${sampleSeconds.toFixed(2)}s`}</output>
       <label>Visibility<select aria-label="Observed landmark visibility" value={selected ? selected.bounds ? "visible" : "absent" : "unreviewed"} disabled={blocked || !ready || !referenceReady} onChange={event => {
         if (event.target.value === "absent") observed(null);
         else setReview(old => ({ ...old, observations: old.observations.filter(item => item.frame !== frameIndex || item.object_id !== landmark.id) }));

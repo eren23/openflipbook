@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { motionStudyFixture } from "../tests/fixtures/motion-study";
-import { evaluateMotionReview, motionComparisonPlan, parseMotionReview, type MotionReviewInput } from "./motion-comparison";
+import { evaluateMotionReview, motionComparisonPlan, motionSampleSeconds, parseMotionReview, type MotionReviewInput } from "./motion-comparison";
+import { H3_CAMERA_ADAPTER_V1 } from "./camera-motion";
 const plan = () => motionComparisonPlan(motionStudyFixture());
 const media = { width: 1280, height: 960, duration: 6 };
 const matching = (): MotionReviewInput => {
@@ -47,6 +48,33 @@ it.each(["drift", "size", "missing", "time", "architecture", "aspect", "duration
     const shift = observation.frame * -.04; observation.bounds = observation.bounds!.map((n, i) => i % 2 === 0 ? n + shift : n) as [number, number, number, number];
   }
   expect(evaluateMotionReview(plan(), review, m).status).toBe("fail");
+});
+it("compares duration as a ratio and samples the clip at its own length", () => {
+  expect(plan().version).toBe("visible-bounds-human-v2");
+  expect(plan().tolerances).toMatchObject({ duration_ratio: .15 });
+  expect(plan().tolerances).not.toHaveProperty("duration_seconds");
+  // H3 returns about 6.6 s for a 6 s request; the samples stretch with it.
+  const long = { ...media, duration: 6.6 }, review = matching();
+  for (const item of review.observations) item.observed_seconds = motionSampleSeconds(plan(), plan().frames[item.frame]!.seconds, long.duration);
+  expect(review.observations.at(-1)!.observed_seconds).toBeCloseTo(6.6, 9);
+  expect(evaluateMotionReview(plan(), review, long).status).toBe("pass");
+  expect(evaluateMotionReview(plan(), matching(), long).status).toBe("fail");
+  expect(evaluateMotionReview(plan(), review, { ...media, duration: 7 }).status).toBe("fail");
+});
+it("keeps frozen v1 plans on the v1 duration and timing rules", () => {
+  const study = motionStudyFixture(); study.preparation.adapter = H3_CAMERA_ADAPTER_V1;
+  const v1 = motionComparisonPlan(study);
+  expect(v1.version).toBe("visible-bounds-human-v1");
+  expect(v1.tolerances).toEqual({ position: .03, relative_size: .2, direction_cosine: .7, motion_signal: .015, seek_seconds: .1, duration_seconds: .25, aspect_ratio: .01 });
+  expect(evaluateMotionReview(v1, matching(), media).status).toBe("pass");
+  expect(evaluateMotionReview(v1, matching(), { ...media, duration: 6.2 }).status).toBe("pass");
+  expect(evaluateMotionReview(v1, matching(), { ...media, duration: 6.6 }).status).toBe("fail");
+  expect(motionSampleSeconds(v1, 3, 6.6)).toBe(3);
+});
+it("carries the camera adapter's limit issues into the v2 plan", () => {
+  const study = motionStudyFixture();
+  (study.preparation as { limit_issues?: string[] }).limit_issues = ["Turn exceeds the measured limit"];
+  expect(motionComparisonPlan(study).issues).toContain("Turn exceeds the measured limit");
 });
 it("reports absent observations as incomplete and retains failures with missing data", () => {
   const review = matching(); review.observations.pop(); expect(evaluateMotionReview(plan(), review, media).status).toBe("incomplete");
