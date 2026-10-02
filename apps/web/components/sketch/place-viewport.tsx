@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PlaceNetwork, PlaceSceneDefinition, PlaceSceneSnapshot } from "@openflipbook/config";
 import { buildPlaceScene, disposePlace, THREE, OrbitControls } from "./place-scene-renderer";
 import s from "./world-editor.module.css";
-import { routeMovement, type WalkWaypoint } from "@/lib/walk-route";
+import { routeMovement, WALK_EYE_HEIGHT, type WalkWaypoint } from "@/lib/walk-route";
 import { routeWords } from "@/lib/ankh-scene";
 import { loadPlacePhysics } from "@/lib/place-physics";
 import { applyRoofMaterials, applyStreetMaterials } from "./street-materials";
@@ -19,7 +19,7 @@ import { resolveSceneObject } from "@/lib/floor-placement";
 import { roomLayoutGeometry } from "@/lib/room-layout";
 import { loadSurfaceMaterials } from "./surface-materials";
 import { capturePlaceView } from "./place-view-capture";
-import type { ViewCapture, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
+import type { CapturePlaceView, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
 import { refreshPlaceView } from "./place-view-refresh";
 import { orbitPose, orbitPosition, sampleCameraPath, type CameraRig, type CameraPathDraft } from "@/lib/camera-path";
 import { parseSavedCameraPath } from "@/lib/saved-camera-path";
@@ -32,7 +32,7 @@ import { WalkInput, walkKey } from "@/lib/walk-input";
 import WalkControls from "./walk-controls";
 import { ViewportPerformance } from "@/lib/viewport-performance";
 
-export default function PlaceViewport({ definition: localDefinition, mode, loadView, onSelect, route, selected, focusKey = 0, drawing = false, onFootprint, onCancelDrawing, assetBaseUrl, materialBaseUrl, network, placeId, onPlaceChange, sceneRevision, getWalkPose, onWalkPose, floorId, captureSnapshot, onCaptureReady, onRefreshReady }: { definition: PlaceSceneDefinition; mode: "plan" | "orbit" | "walk"; loadView?: { requestId: string; view: SavedPlaceView } | undefined; onSelect: (id: string) => void; route?: readonly WalkWaypoint[] | undefined; selected?: string | null; focusKey?: number; drawing?: boolean; onFootprint?: (start: { x: number; z: number }, end: { x: number; z: number }) => void; onCancelDrawing?: () => void; assetBaseUrl?: string | undefined; materialBaseUrl?: string | undefined; network?: PlaceNetwork | null; placeId?: string; onPlaceChange?: (id:string)=>void; sceneRevision?:number|undefined; getWalkPose?:(()=>WalkPose|null)|undefined; onWalkPose?:((pose:WalkPose)=>void)|undefined; floorId?: string | undefined; captureSnapshot?: PlaceSceneSnapshot | undefined; onCaptureReady?: ((capture: (() => ViewCapture) | null) => void) | undefined; onRefreshReady?: ((refresh: RefreshPlaceView | null) => void) | undefined }) {
+export default function PlaceViewport({ definition: localDefinition, mode, loadView, onSelect, route, selected, focusKey = 0, drawing = false, onFootprint, onCancelDrawing, assetBaseUrl, materialBaseUrl, network, placeId, onPlaceChange, sceneRevision, getWalkPose, onWalkPose, floorId, captureSnapshot, onCaptureReady, onRefreshReady }: { definition: PlaceSceneDefinition; mode: "plan" | "orbit" | "walk"; loadView?: { requestId: string; view: SavedPlaceView } | undefined; onSelect: (id: string) => void; route?: readonly WalkWaypoint[] | undefined; selected?: string | null; focusKey?: number; drawing?: boolean; onFootprint?: (start: { x: number; z: number }, end: { x: number; z: number }) => void; onCancelDrawing?: () => void; assetBaseUrl?: string | undefined; materialBaseUrl?: string | undefined; network?: PlaceNetwork | null; placeId?: string; onPlaceChange?: (id:string)=>void; sceneRevision?:number|undefined; getWalkPose?:(()=>WalkPose|null)|undefined; onWalkPose?:((pose:WalkPose)=>void)|undefined; floorId?: string | undefined; captureSnapshot?: PlaceSceneSnapshot | undefined; onCaptureReady?: ((capture: CapturePlaceView | null) => void) | undefined; onRefreshReady?: ((refresh: RefreshPlaceView | null) => void) | undefined }) {
   const host = useRef<HTMLDivElement>(null), input = useRef(new WalkInput());
   const captureRef = useRef(onCaptureReady); captureRef.current = onCaptureReady;
   const refreshRef = useRef(onRefreshReady); refreshRef.current = onRefreshReady;
@@ -427,13 +427,17 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
             if (JSON.stringify(localDefinition) !== JSON.stringify(captureSnapshot.definition)) throw new Error("Save scene changes before refreshing a view");
             return refreshPlaceView(renderer, view, captureSnapshot, network, { mesh: assetBaseUrl, material: materialBaseUrl }, abort.signal);
           });
-          captureRef.current?.(() => {
+          captureRef.current?.(pose => {
             if (stopped || disposed) throw new Error("Camera view is no longer available");
             if (JSON.stringify(localDefinition) !== JSON.stringify(captureSnapshot.definition)) throw new Error("Save scene changes before capturing a view");
+            if (pose && mode !== "walk") throw new Error("Walk checkpoints need the Walk view");
             const sources = (connected?.chunks ?? [{ scene: captureSnapshot, x: 0, z: 0 }]).map(({ scene: source, x, z }) => ({ scene_id: source.id, place_id: source.place_id, revision: source.revision, definition: source.definition, x, z }));
             const path = pathDraft ? structuredClone(pathDraft) : null;
             if (path && mode === "orbit") { emitCamera("start"); rig.write(sampleCameraPath(path.keyframes, path.time)); }
-            const captured = capturePlaceView(renderer, scene, camera, sources, mode, floorId);
+            // A walk checkpoint: the walk camera at that eye pose, level gaze. The live view does not move.
+            const eye = pose ? camera.clone() : camera;
+            if (pose) { eye.position.set(pose.x, WALK_EYE_HEIGHT, pose.z); eye.rotation.set(0, pose.yaw, 0, "YXZ"); }
+            const captured = capturePlaceView(renderer, scene, eye, sources, mode, floorId);
             return path && mode === "orbit" ? { ...captured, path } : captured;
           });
         }

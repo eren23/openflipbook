@@ -24,7 +24,8 @@ import { duplicateMesh, replaceMeshAsset } from "@/lib/mesh-placement";
 import { proposeMeshShell, removeMeshShell } from "@/lib/mesh-shell";
 import PlaceViewLibrary from "./place-view-library";
 import type { CaptureMotion } from "./place-camera-motion";
-import type { ViewCapture, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
+import type { CapturePlaceView, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
+import { WalkVideo } from "./path-video";
 import { WORLD_EDITOR_VIEWS, worldEditorSelection, worldEditorHref, type WorldEditorView } from "@/lib/world-editor-selection";
 import { routeParam, type WalkPose } from "@/lib/walk-position";
 import type { WalkWaypoint } from "@/lib/walk-route";
@@ -50,13 +51,13 @@ export default function WorldEditor() {
   const meshPending = useRef(false);
   const forkPending = useRef<{ source: string; body: { node_id: string | null; request_id: string } } | null>(null);
   const [measuringMesh, setMeasuringMesh] = useState(false);
-  const [capture, setCapture] = useState<(() => ViewCapture) | null>(null);
+  const [capture, setCapture] = useState<CapturePlaceView | null>(null);
   const [refreshView, setRefreshView] = useState<RefreshPlaceView | null>(null);
   const onRefreshReady = useCallback((next: RefreshPlaceView | null) => setRefreshView(() => next), []);
   const [loadView, setLoadView] = useState<{ requestId: string; view: SavedPlaceView } | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const loadCameraPath = (view: SavedPlaceView) => { setMode("orbit"); setFloorId(view.floor_id ?? ""); setSelected(view.path?.target_id ?? null); setLoadView({ requestId: crypto.randomUUID(), view }); };
-  const onCaptureReady = useCallback((next: (() => ViewCapture) | null) => setCapture(() => next), []);
+  const onCaptureReady = useCallback((next: CapturePlaceView | null) => setCapture(() => next), []);
   const [network,setNetwork]=useState<PlaceNetwork|null>(null),[networkError,setNetworkError]=useState("");
   const [walkingPlace,setWalkingPlace]=useState<string|null>(null);
   const creationRequest = useRef<{ request_id: string; definition: PlaceSceneDefinition } | null>(null);
@@ -425,6 +426,9 @@ export default function WorldEditor() {
           selectedObjectLabel={object?.label} onComposeSelection={mode === "walk" ? undefined : () => { if (!object || dirty || busy) return; setCapture(null); setLoadView(undefined); setMode("orbit"); setFocusKey(k => k + 1); }}
           onSelectObject={id => { if (definition.objects.some(o => o.id === id)) selectObject(id); }}/>
         }
+        {/* A /play walk's route, walked in 3D: checkpoint views along it, then one video. */}
+        {!demo && context.scene && mode === "walk" && handoff && <WalkVideo key={`walk:${context.session_id}:${context.place_id}:${context.scene.revision}`}
+          sessionId={context.session_id} placeId={context.place_id} route={handoff} capture={capture} disabled={dirty || busy}/>}
         {mode==="walk"&&network?<button onClick={()=>void openPlace(walkingPlace??context.place_id)}><Map size={16}/>Edit this place</button>:<>
         {context.scene&&!demo&&<AdjacentPlaceEditor key={`${context.scene.place_id}:${context.scene.revision}`} scene={context.scene} disabled={dirty||mode==="walk"} onSaved={async pid=>{
           const previousUrl=window.location.href;

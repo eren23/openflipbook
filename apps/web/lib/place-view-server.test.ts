@@ -9,7 +9,8 @@ import type * as CreatorModule from "./creator";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, Document>>(), files: new Map<string, Buffer>(), owner: true, uploads: 0, onUpload: (() => {}) as () => void, tail: Promise.resolve() }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
 function collection(name: string) {
-  const find = (query: Document) => [...store(name).values()].filter(row => Object.entries(query).every(([k, v]) => v && typeof v === "object" && "$in" in v ? v.$in.includes(row[k]) : row[k] === v));
+  const find = (query: Document) => [...store(name).values()].filter(row => Object.entries(query).every(([k, v]) => v && typeof v === "object" && "$in" in v ? v.$in.includes(row[k])
+    : v && typeof v === "object" && "$exists" in v ? (row[k] !== undefined) === v.$exists : row[k] === v));
   return {
     findOne: async (q: Document) => structuredClone(find(q)[0] ?? null),
     countDocuments: async (q: Document) => find(q).length,
@@ -430,6 +431,18 @@ it("validates every PNG and its dimensions before any upload", async () => {
 it("enforces the per-place limit before storage", async () => {
   for (let i = 0; i < 50; i++) store("place_views").set(`old${i}`, { _id: `old${i}`, session_id: "world", root_place_id: "place" });
   await expect(savePlaceView("world", "place", await input())).rejects.toMatchObject({ status: 409 }); expect(memory.uploads).toBe(0);
+});
+it("keeps walk checkpoint views out of the 50-view limit, the library and export, under their own cap", async () => {
+  const checkpoint = { ...await input("walk"), walk_checkpoint: true };
+  await expect(savePlaceView("world", "place", { ...checkpoint, capture: await capture("orbit") })).rejects.toMatchObject({ status: 400 });
+  expect(await savePlaceView("world", "place", checkpoint)).toEqual({ id: "view1" });
+  expect(store("place_views").get("world:view1")).toMatchObject({ walk_checkpoint: true, mode: "walk" });
+  expect((await placeViewLibrary("world", "place")).views).toEqual([]); expect(await exportPlaceViews("world")).toEqual([]);
+  // A full user library does not block a checkpoint, and checkpoints have their own cap.
+  for (let i = 0; i < 50; i++) store("place_views").set(`old${i}`, { _id: `old${i}`, session_id: "world", root_place_id: "place" });
+  expect(await savePlaceView("world", "place", { ...checkpoint, id: "view2" })).toEqual({ id: "view2" });
+  for (let i = 0; i < 238; i++) store("place_views").set(`walk${i}`, { _id: `walk${i}`, session_id: "world", root_place_id: "place", walk_checkpoint: true });
+  await expect(savePlaceView("world", "place", { ...checkpoint, id: "view3" })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/240 walk checkpoint/) });
 });
 it("rejects singular, reflected, scaled, invalid-depth and mismatched projection metadata", async () => {
   const valid = await capture();

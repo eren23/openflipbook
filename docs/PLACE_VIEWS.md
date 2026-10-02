@@ -116,6 +116,9 @@ including private-image failures, are non-cacheable and vary by owner cookie.
 The save route validates origin/content type, streams at most 20 MiB of request
 bytes, and fully decodes all four bounded PNGs before upload. There is a 50-view
 limit per place; camera-view export is bounded at 500 views and 64 MiB.
+Walk-video checkpoint views (`walk_checkpoint`, walk mode only) have a separate
+limit of 240 per place. The library list and the export do not include them.
+See [walk videos](CAMERA_MOTION.md#walk-videos).
 
 `client_rendered_saved_geometry` is deliberate provenance. The server validates
 owned geometry bindings and files; it does not independently attest that an

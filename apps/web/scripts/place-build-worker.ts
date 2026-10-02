@@ -22,7 +22,7 @@ async function main() {
   let stopping = false;
   const stop = () => { stopping = true; };
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
-  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", layout_connections: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, motion_v1: motion, motion_review_v1: motion, path_video_v1: motion, last_seen: new Date() } }, { upsert: true });
+  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", layout_connections: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, motion_v1: motion, motion_review_v1: motion, path_video_v1: motion, path_video_views_v1: motion, last_seen: new Date() } }, { upsert: true });
   await heartbeat();
   const timer = setInterval(() => { void heartbeat().catch(() => process.stderr.write("Layout worker heartbeat unavailable\n")); }, 5000);
   process.stdout.write(`Layout worker ready; mesh and material processing ${mesh ? "enabled" : "disabled"}\n`);

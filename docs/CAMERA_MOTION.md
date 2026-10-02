@@ -62,6 +62,48 @@ retain the saved projection. The first matrix is the exact saved source matrix;
 later ones follow the local path. These are evaluation inputs to be rendered,
 not additional conditioning sent to H3. Provider interpolation is unverified.
 
+## Walk Videos
+
+A path video can also use an ordered list of saved views instead of a motion
+study. This is how a walk becomes a video: an orbit study cannot show a walk,
+and camera-controls has no end frame.
+
+1. Open a /play route with **Walk it in 3D**. The editor opens the Walk view
+   and walks the route.
+2. In the inspector, select **Make walk video**. The editor shows it only when
+   `PATH_VIDEO_ENABLED=1`. The editor walks the route as the tour does: it turns
+   on the spot to each waypoint's heading, then goes straight. It sets a
+   checkpoint after each 4 m walked or 30 degrees turned (`walkCheckpoints` in
+   `walk-route.ts`), at the walker's eye (1.6 m) with a level gaze. If the route
+   needs more than 12 checkpoints, the editor refuses it. Make the route shorter.
+3. The editor captures each checkpoint and saves it as a walk view. This is free
+   and calls no model. These views have the `walk_checkpoint` mark and their own
+   limit of 240 for each place. They do not count toward the 50 saved views. The
+   library list and the world export do not include them.
+4. Read the quote, give consent and generate. The job is one path video over
+   the view ids. `GET /api/world/:sid/places/:pid/walk-videos?views=a,b,c` gives
+   the quote and `views_sha256`. `POST` to the same path with
+   `{ action: "generate", id, confirmed, view_ids, views_sha256, reservation, prompt }`.
+
+Keyframe 0 is the accepted illustration of view 0, if there is one. If not, the
+job paints keyframe 0 like a first keyframe, with the world's art. Each next
+keyframe chains from the one before it. The chain moves camera A into the frame
+of camera B by the chunk offset (`chainShift`), so views of connected chunks
+line up.
+
+The move of each leg comes from the two camera matrices. `forward_m` is the
+eye's move along the level heading of A. `turn_deg` is the signed change of
+heading (positive turns to the camera's own right). `rise_m` is the change in
+eye height, and `orbit_deg` is 0. The subject is the building that the gate of
+the end keyframe measures (the most visible one). A leg plans its length at
+1.4 m/s, and at least 1.5 s for a turn on the spot. Then the usual leg length,
+trim and retime apply.
+
+Billing, the one retry, refusals and provenance (view ids and their hash, not a
+study) are the same as for a study path video. All views must be current 3D
+views of the same place, at the same size. A geometry change during a job stops
+it before its next paid step and releases the rest.
+
 ## Next Acceptance Work
 
 1. Use the reference capture below to define a bounded calibration shot with an
