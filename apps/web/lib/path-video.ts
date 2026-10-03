@@ -23,20 +23,23 @@ import { chainShift, illustrationDependency, keyframeArt, keyframeViewPasses } f
 import { finishKeyframe, keyframeGateBody, prepareKeyframeInput, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
 import { KEYFRAME_MODEL } from "./asset-pipeline";
 import { H3_CAMERA_ADAPTER } from "./camera-motion";
-import { MAX_CHECKPOINTS, sampleCameraPath, type CameraKeyframe, type OrbitPose } from "./camera-path";
+import { CHECKPOINT_MAX_DEGREES, checkpointFar, MAX_CHECKPOINTS, sampleCameraPath, type CameraKeyframe, type OrbitPose } from "./camera-path";
+import { WALK_CHECKPOINT_METRES } from "./walk-route";
 import { cutLeg, grayFrame, joinLegs, landCheck, legMotion, motionEnd } from "./motion-video";
 import { uploadJpeg } from "./r2";
 import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionFile } from "./motion-job";
 import type { KeyframeGateDoc, MeshAssetDoc } from "./mesh-docs";
-import type { IllustrationKeyframe } from "./place-view";
+import type { IllustrationKeyframe, KeyframeGateSubject } from "./place-view";
 
 export const PATH_VIDEO_CAP_USD = 10;
 export const LEG_MODEL = "minimax/h3-max/image-to-video";
-// Mirrors LEG_MOTION_SHARE and leg_seconds() in providers/video.py: H3 moves
-// for about 0.8 of a clip, then holds. Change both together.
-export const LEG_MOTION_SHARE = .8;
-export const legSeconds = (planned: number) => Math.max(5, Math.min(15, Math.ceil(Number((planned / LEG_MOTION_SHARE).toFixed(6)))));
+// Mirrors LEG_MIN_SECONDS and leg_seconds() in providers/video.py: H3 moves
+// for the whole clip (research 37), so a leg asks for its planned length in
+// whole seconds. Change both together. A backend that does not advertise its
+// floor in /motion/capabilities (an old one) takes 5 s legs at least.
+export const LEG_MIN_SECONDS = 3;
+export const legSeconds = (planned: number, floor = LEG_MIN_SECONDS) => Math.max(floor, Math.min(15, Math.ceil(Number(planned.toFixed(6)))));
 
 const round = (n: number, places = 2) => Math.round(n * 10 ** places) / 10 ** places;
 const clamp = (n: number, limit: number) => Math.max(-limit, Math.min(limit, n));
@@ -75,12 +78,15 @@ type AttemptState = "submitting" | "submission_unknown" | "queued" | "running" |
 interface Attempt { token: string; cost: number; status: AttemptState; request_id?: string }
 export interface PathVideoKeyframe {
   frame: number; time: number; stage: "source" | "first" | "chain";
-  attempt?: Attempt; gate_object_id?: string | null; gate?: KeyframeGateDoc; file?: MotionFile;
+  attempt?: Attempt; gate_object_id?: string | null; gate_subject?: KeyframeGateSubject | null; gate?: KeyframeGateDoc; file?: MotionFile;
   result?: Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { chain?: { angle: number; hole_share: number } };
   // A failed gate is painted once more: retry is "reserved" or why not. `other` keeps the try not used.
   retry?: string; other?: KeyframeTry;
-  // The last keyframe still failing its gate is dropped: the video ends at the keyframe before it.
-  dropped?: true; drop_reason?: string;
+  // A keyframe still failing its gate is dropped: the next one chains from the
+  // last kept keyframe, and one leg spans both steps. kept_reason: why it was not.
+  dropped?: true; drop_reason?: string; kept_reason?: string;
+  // The index of the keyframe this one chains from.
+  chained_from?: number;
 }
 type KeyframeTry = Pick<PathVideoKeyframe, "attempt" | "gate" | "result" | "file">;
 export interface LegAttempt extends Attempt {
@@ -91,6 +97,7 @@ export interface PathVideoLeg {
   seconds: number; duration: number; cost: number; move: ReturnType<typeof legMove>;
   attempts: LegAttempt[]; retry?: string; chosen?: number; landed?: boolean;
   // Its end keyframe was dropped: never made, its reservation released when the job settles.
+  // A leg after a dropped middle keyframe starts at the last kept keyframe instead.
   dropped?: true;
 }
 export type PathVideoState = "scheduled" | "running" | "submission_unknown" | "ready" | "failed" | "cancelled";
@@ -119,10 +126,7 @@ export function pathVideoPlan(study: MotionStudyDoc) {
   const times = checkpoints.map(i => study.frames[i]!.time);
   return { subject, duration: prep.path.duration,
     keyframes: checkpoints.map((frame, i): PathVideoKeyframe => ({ frame, time: times[i]!, stage: i ? "chain" : study.source.image.asset_id ? "source" : "first" })),
-    legs: times.slice(1).map((to, i) => {
-      const seconds = round(prep.path.duration * (to - times[i]!), 3);
-      return { seconds, duration: legSeconds(seconds), move: legMove(prep.path.keyframes, times[i]!, to, subject) };
-    }) };
+    legs: times.slice(1).map((to, i) => ({ seconds: round(prep.path.duration * (to - times[i]!), 3), move: legMove(prep.path.keyframes, times[i]!, to, subject) })) };
 }
 type Plan = ReturnType<typeof pathVideoPlan>;
 // Camera A moved into camera B's frame (walk views draw the root place at its chunk offset).
@@ -130,15 +134,19 @@ const inFrame = <T extends Pick<PlaceViewDoc, "root_place_id" | "sources" | "cam
   const shift = chainShift(a, b)!;
   return { ...a, camera: { ...a.camera, world_matrix: a.camera.world_matrix.map((v, i) => v + (i === 12 ? shift.x : i === 14 ? shift.z : 0)) } };
 };
+// The real move from view a to view b, and how far the eye goes.
+const viewStep = (a: PlaceViewDoc, b: PlaceViewDoc) => {
+  const m = inFrame(a, b).camera.world_matrix, n = b.camera.world_matrix;
+  return { move: viewMove(m, n, null), metres: Math.hypot(n[12]! - m[12]!, n[13]! - m[13]!, n[14]! - m[14]!) };
+};
 /** Keyframes at saved views in order, and a leg between each pair; throws 409 when the views cannot make one video. */
 export function walkVideoPlan(views: readonly PlaceViewDoc[]): Plan {
   const first = views[0]!;
   if (views.some(v => v.mode === "plan" || v.width !== first.width || v.height !== first.height || !chainShift(v, first)))
     throw new CreatorError("Use 3D views of one place, saved at one size", 409);
   const legs = views.slice(1).map((b, i) => {
-    const a = inFrame(views[i]!, b).camera.world_matrix, m = b.camera.world_matrix;
-    const seconds = round(Math.max(WALK_LEG_MIN_SECONDS, Math.hypot(m[12]! - a[12]!, m[13]! - a[13]!, m[14]! - a[14]!) / WALK_SPEED_MPS), 3);
-    return { seconds, duration: legSeconds(seconds), move: viewMove(a, m, null) };
+    const { move, metres } = viewStep(views[i]!, b);
+    return { seconds: round(Math.max(WALK_LEG_MIN_SECONDS, metres / WALK_SPEED_MPS), 3), move };
   });
   const duration = round(legs.reduce((sum, leg) => sum + leg.seconds, 0), 3);
   let elapsed = 0;
@@ -192,12 +200,14 @@ async function pathVideoQuote(db: Db, sid: string, { plan, image, size, worker }
   const config = await assetBackend("illustration", "keyframe-capabilities");
   if (!config?.enabled || config.model !== KEYFRAME_MODEL || !Number.isFinite(config.reservation) || config.reservation <= 0 || !config.parameters)
     throw new CreatorError("Keyframe painting is not configured", 503);
-  const costs = new Map<number, number>();
-  for (const { duration } of plan.legs) if (!costs.has(duration)) costs.set(duration, (await motionQuote(db, duration)).reservation);
+  // An old backend refuses legs under its 5 s floor, after the keyframes are paid: size legs at the floor it advertises.
+  const advertised = (await assetBackend("motion", "capabilities"))?.leg_min_seconds, floor = Math.max(LEG_MIN_SECONDS, Number.isInteger(advertised) ? advertised : 5);
+  const legs = plan.legs.map(leg => ({ seconds: leg.seconds, duration: legSeconds(leg.seconds, floor) })), costs = new Map<number, number>();
+  for (const { duration } of legs) if (!costs.has(duration)) costs.set(duration, (await motionQuote(db, duration, floor)).reservation);
   if (!await db.collection("generation_workers").findOne({ kind: "place-layout", [worker]: true, last_seen: { $gt: new Date(Date.now() - 30_000) } }))
     throw new CreatorError("Compatible path video worker unavailable", 503);
   const micros = (n: number) => Math.round(n * 1_000_000), paid = plan.keyframes.filter(k => k.stage !== "source").length;
-  const reservation = (paid * micros(config.reservation) + plan.legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
+  const reservation = (paid * micros(config.reservation) + legs.reduce((sum, leg) => sum + micros(costs.get(leg.duration)!), 0)) / 1_000_000;
   if (reservation > PATH_VIDEO_CAP_USD) throw new CreatorError(`This path video needs $${reservation.toFixed(2)}, over the $${PATH_VIDEO_CAP_USD} cap. Shorten the path.`, 409);
   // Every keyframe is painted like a first one. When keyframe 0 is accepted
   // artwork, its own prompt is the appearance; otherwise the user words it.
@@ -205,7 +215,7 @@ async function pathVideoQuote(db: Db, sid: string, { plan, image, size, worker }
     .findOne({ _id: `${sid}:${image.asset_id}`, session_id: sid }))?.prompt.trim() ?? "" : "";
   const sourcePrompt = source.length >= 3 && source.length <= 1024 ? source : null;
   return { reservation, paid_keyframes: paid, appearance: !sourcePrompt, source_prompt: sourcePrompt, keyframe_reservation: config.reservation as number, keyframe_parameters: config.parameters as Record<string, unknown>,
-    legs: plan.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, reservation: costs.get(leg.duration)! })) };
+    legs: legs.map(leg => ({ ...leg, reservation: costs.get(leg.duration)! })) };
 }
 
 // Release the unspent part of the reservation and close the job, once.
@@ -243,13 +253,20 @@ async function jobFrames(db: Db, job: PathVideoDoc) {
     if (views.length !== found.length || viewsHash(views) !== job.views_sha256) return null;
     return { size: views[0]!, source: null, passes: (i: number) => keyframeViewPasses(views[i]!),
       chain: async (a: number, b: number) => ({ view: inFrame(views[a]!, views[b]!), depth: await stored(views[a]!.files.depth) }),
-      sources: (i: number) => assertCurrentView(db, views[i]!) };
+      sources: (i: number) => assertCurrentView(db, views[i]!),
+      span: (a: number, b: number) => {
+        const { move, metres } = viewStep(views[a]!, views[b]!);
+        return { move, far: metres > 2 * WALK_CHECKPOINT_METRES + 1e-6 || Math.abs(move.turn_deg) > 2 * CHECKPOINT_MAX_DEGREES + 1e-6 };
+      } };
   }
   const study = await db.collection<MotionStudyDoc>("motion_studies").findOne({ _id: `${job.session_id}:${job.study_id}`, session_id: job.session_id });
   if (!study || viewHash(study) !== job.study_sha256) return null;
+  const path = study.preparation.path.keyframes, time = (i: number) => study.frames[i]!.time;
   return { size: study.source.view, source: study.source.image, passes: (i: number) => framePasses(study, i),
     chain: async (a: number) => ({ view: frameView(study, a), depth: await stored(study.files[a]!.depth) }),
-    sources: async () => study.source.definitions };
+    sources: async () => study.source.definitions,
+    span: (a: number, b: number) => ({ move: legMove(path, time(a), time(b), job.subject),
+      far: checkpointFar(sampleCameraPath(path, time(a)), sampleCameraPath(path, time(b)), 2) }) };
 }
 
 // One step of one job. Returns how long to wait before its next step.
@@ -260,6 +277,8 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
   const frames = await jobFrames(db, job);
   if (!frames) return fail(job.view_ids ? "A saved view changed. Unspent reservation released." : "The motion study changed. Unspent reservation released.");
   const file = (name: string, ext: string, bytes: Buffer): MotionFile => ({ key: `${job.session_id}/path-videos/${job.id}/${name}-${hash(bytes)}.${ext}`, sha256: hash(bytes), bytes: bytes.length });
+  // The last keyframe at or before index i that was not dropped (-1 for none).
+  const kept = (i: number) => job.keyframes.slice(0, i + 1).findLastIndex(kf => !kf.dropped);
   const halt = async (attempt: Attempt, arrays: () => Partial<PathVideoDoc>) => {
     attempt.status = "submission_unknown";
     await col.updateOne(lease, { $set: arrays() });
@@ -325,8 +344,8 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       await stored({ key, sha256, bytes });
       kf.file = { key, sha256, bytes }; await save(arrays()); return 0;
     }
-    const prev = job.keyframes[k - 1], attempt = kf.attempt;
-    // Keyframe i is chained from keyframe i-1 (its camera, depth pass and image).
+    const p = kept(k - 1), prev = job.keyframes[p], attempt = kf.attempt;
+    // Keyframe i is chained from the last kept keyframe before it (its camera, depth pass and image).
     const captures = async () => ({ passes: await frames.passes(kf.frame),
       chain: prev ? { ...await frames.chain(prev.frame, kf.frame), image: await stored(prev.file) } as KeyframeChain : undefined });
     // Use a try that passed, else the one nearest the gate (IoU); the other try stays as `other`.
@@ -336,11 +355,31 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       const painted = tries.filter(t => t.file), best = painted.find(t => t.result!.passed) ?? painted.reduce((b, t) => iou(t) > iou(b) ? t : b);
       const other = tries.find(t => t !== best);
       Object.assign(kf, best, other ? { other } : {});
-      // A last keyframe that still fails would end the video on an invented
-      // picture: drop it and the leg into it.
-      if (k === job.keyframes.length - 1 && best.result!.gate === "failed") {
-        Object.assign(kf, { dropped: true, drop_reason: "The last keyframe failed its gate after one retry. The video ends at the keyframe before it." });
-        job.legs[k - 1]!.dropped = true;
+      // A failed keyframe would put an invented picture in the video.
+      const into = job.legs[k - 1], out = job.legs[k];
+      if (best.result!.gate === "failed") {
+        // Keyframe 0 starts every chain and the first leg: without it there is nothing to start from.
+        if (!into) { await save(arrays()); return fail("The first keyframe failed its gate after one retry. Unspent reservation released."); }
+        if (!out) {
+          // The last one is dropped with the leg into it: the video ends at the keyframe before it.
+          Object.assign(kf, { dropped: true, drop_reason: "The last keyframe failed its gate after one retry. The video ends at the keyframe before it." });
+          into.dropped = true;
+        } else {
+          // A middle one is skipped: the next keyframe chains from the last kept
+          // one, and one leg spans both steps, with the real move between the two.
+          // A step past twice the checkpoint limits is too far to chain, so then
+          // the failed keyframe is kept, flagged.
+          const { move, far } = frames.span(prev!.frame, job.keyframes[k + 1]!.frame);
+          if (far) kf.kept_reason = "This keyframe failed its gate after one retry. It is kept: without it, one step would pass twice the checkpoint limits.";
+          else {
+            // out.duration carries the backend's leg floor.
+            const seconds = round(into.seconds + out.seconds, 3), duration = Math.max(legSeconds(seconds), out.duration);
+            Object.assign(kf, { dropped: true, drop_reason: `This keyframe failed its gate after one retry. The next keyframe chains from keyframe ${p + 1}, and one leg spans both steps.` });
+            into.dropped = true;
+            // The quote's price per second. The unspent rest is released when the job settles.
+            Object.assign(out, { seconds, duration, cost: Math.round(out.cost * 1_000_000 / out.duration) * duration / 1_000_000, move: { ...move, subject: out.move.subject } });
+          }
+        }
       }
       await save(arrays()); return 0;
     };
@@ -348,9 +387,10 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       const sources = await frames.sources(kf.frame).catch(e => { if (e instanceof CreatorError) return null; throw e; });
       if (!sources) return fail("The walk's geometry changed. Unspent reservation released.");
       const { passes, chain } = await captures(), prepared = await prepareKeyframeInput(passes, sources, job.art ? await stored(job.art) : null, chain);
-      // A walk leg heads toward the building its end keyframe's gate measures (the most visible one).
+      // A walk leg heads toward the object its end keyframe's gate measures (the most visible building, or object).
       if (job.view_ids && k > 0 && prepared.gate_object_id) job.legs[k - 1]!.move.subject = sources.flatMap(s => s.definition.objects).find(o => o.id === prepared.gate_object_id)?.label.slice(0, 120) ?? null;
-      kf.attempt = { token: randomUUID(), cost: job.keyframe_reservation, status: "submitting" }; kf.gate_object_id = prepared.gate_object_id;
+      kf.attempt = { token: randomUUID(), cost: job.keyframe_reservation, status: "submitting" }; Object.assign(kf, { gate_object_id: prepared.gate_object_id, gate_subject: prepared.gate_subject });
+      if (prev) kf.chained_from = p;
       return post(kf.attempt, arrays, KEYFRAME_MODEL, () => assetBackend("illustration", "submit", { prompt: job.prompt, model: KEYFRAME_MODEL,
         reservation: job.keyframe_reservation, parameters: job.keyframe_parameters, inputs: prepared.inputs }));
     }
@@ -367,7 +407,7 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     // result before any download, and a "started" found later is an outage.
     if (!kf.gate) {
       kf.gate = { status: "started" }; await save(arrays());
-      const body = await keyframeGateBody(passes, kf.gate_object_id ?? null, urls);
+      const body = await keyframeGateBody(passes, kf.gate_object_id ?? null, urls, kf.gate_subject?.label);
       kf.gate = { status: body ? "outage" : "no_building" };
       if (body) try {
         const masks = (await assetBackend("illustration", "gate", body, 200_000, 2_000_000))?.masks;
@@ -396,7 +436,8 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
 
   const l = job.legs.findIndex(leg => leg.chosen === undefined && !leg.dropped);
   if (l >= 0) {
-    const leg = job.legs[l]!, arrays = () => ({ legs: job.legs }), from = job.keyframes[l]!, to = job.keyframes[l + 1]!;
+    // A leg after a dropped keyframe starts at the last kept one.
+    const leg = job.legs[l]!, arrays = () => ({ legs: job.legs }), from = job.keyframes[kept(l)]!, to = job.keyframes[l + 1]!;
     const { width, height } = frames.size, last = leg.attempts.at(-1);
     if (!last || last.status === "ready" && leg.retry === "reserved" && leg.attempts.length === 1) {
       const image = async (kf: PathVideoKeyframe) => {
@@ -481,7 +522,7 @@ const wire = (job: PathVideoDoc) => ({ id: job.id, status: job.status, reservati
   created_at: job.created_at.toISOString(), ...(job.error ? { error: job.error } : {}), ...(job.media ? { media: job.media } : {}),
   keyframes: job.keyframes.map(kf => ({ time: kf.time, stage: kf.stage, status: kf.file ? "ready" : kf.attempt?.status ?? "waiting",
     ...(kf.result ? { gate: kf.result.gate, passed: kf.result.passed } : {}), ...(kf.retry ? { retry: kf.retry } : {}),
-    ...(kf.dropped ? { dropped: true, drop_reason: kf.drop_reason } : {}) })),
+    ...(kf.dropped ? { dropped: true, drop_reason: kf.drop_reason } : {}), ...(kf.kept_reason ? { kept_reason: kf.kept_reason } : {}) })),
   legs: job.legs.map(leg => ({ seconds: leg.seconds, duration: leg.duration, ...(leg.landed === undefined ? {} : { landed: leg.landed }), ...(leg.dropped ? { dropped: true } : {}),
     attempts: leg.attempts.map(a => ({ status: a.status, ...(a.metrics ? { land: a.metrics.land, snap: a.metrics.snap, ok: a.metrics.ok } : {}) })) })) });
 const jobList = async (db: Db, sid: string, scope: Scope) =>
@@ -538,7 +579,7 @@ async function schedule(db: Db, sid: string, input: Record<string, unknown>, sco
     const job: PathVideoDoc = { _id: key, id, session_id: sid, ...source.identity,
       request_sha256: requestHash, created_at: now, status: "scheduled", prompt, reservation: quote.reservation, committed: 0, ledger_ids,
       keyframe_reservation: quote.keyframe_reservation, keyframe_parameters: quote.keyframe_parameters, art, duration: plan.duration, subject: plan.subject,
-      keyframes: plan.keyframes, legs: plan.legs.map((leg, i) => ({ ...leg, cost: quote.legs[i]!.reservation, attempts: [] })) };
+      keyframes: plan.keyframes, legs: plan.legs.map((leg, i) => ({ ...leg, duration: quote.legs[i]!.duration, cost: quote.legs[i]!.reservation, attempts: [] })) };
     await jobs.insertOne(job, options); return { job: wire(job) };
   });
 }

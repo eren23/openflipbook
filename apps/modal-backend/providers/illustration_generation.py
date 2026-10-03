@@ -42,7 +42,7 @@ EDIT_PARAMETERS = {"num_images": 1, "num_inference_steps": 28, "guidance_scale":
 # `gate` is the web gate's contract (SAM-3 on the largest building vs the
 # object pass). It is frozen into the job for provenance and never sent to fal.
 KEYFRAME_PARAMETERS = {"num_images": 2, "output_format": "jpeg", "enable_safety_checker": True,
-                       "sync_mode": False, "prompt_version": "saved-camera-qwen-keyframe-v2",
+                       "sync_mode": False, "prompt_version": "saved-camera-qwen-keyframe-v3",
                        "gate": {"crop_pad": segmenter.CROP_PAD, "centre_tolerance": 0.03, "area_ratio": [0.8, 1.2]}}
 
 
@@ -186,19 +186,24 @@ async def queue_post(model: str, payload: dict[str, object]) -> str:
 KEYFRAME_KEEP = ("Keep image 1's camera, framing and composition exactly: the same building outline, roof line "
                  "and ridge, wall corners, the windows and door where image 1 has them, the ground, the shadow "
                  "and the sky. Do not move, resize, add or remove any building mass. No text or lettering.")
+# Research 37: qwen left a well that filled the frame in the render's flat grey.
+NOT_NAMED_AS_NEAR = {"building", "tavern", "house", "mesh", "path", "pond"}
 
 
-def keyframe_prompt(appearance: str, names: list[str], reference: bool) -> str:
+def keyframe_prompt(appearance: str, names: list[str], reference: bool, near: str | None = None) -> str:
     """Research-34 prompt (p1-keyframes job A_qwen2511) with the inn's name and
-    style replaced by the saved identities and the user's words."""
+    style replaced by the saved identities and the user's words. `near` names
+    the largest visible object that is not a building or ground."""
     named = f" ({', '.join(names)})" if names else ""
     style = appearance.strip().rstrip(".") + "."
+    paint = ("Paint every surface, including large objects close to the camera"
+             f"{f' and the {near}' if near else ''}, so nothing keeps the render's flat grey or green colours.")
     if reference:
         return ("Image 1 is a 3D render of a building from an exact camera. Image 2 shows the same "
-                f"place{named} as finished artwork. Redraw image 1 in the exact art style of image 2: {style} {KEYFRAME_KEEP}")
+                f"place{named} as finished artwork. Redraw image 1 in the exact art style of image 2: {style} {paint} {KEYFRAME_KEEP}")
     # Words only: no image 2, the style is described instead.
     return (f"Image 1 is a 3D render of a building{named} from an exact camera. "
-            f"Redraw image 1 as finished artwork in this art style: {style} {KEYFRAME_KEEP}")
+            f"Redraw image 1 as finished artwork in this art style: {style} {paint} {KEYFRAME_KEEP}")
 
 
 async def submit_keyframe(body: IllustrationInput) -> dict[str, object]:
@@ -218,12 +223,15 @@ async def submit_keyframe(body: IllustrationInput) -> dict[str, object]:
     validate_identity(body)
     validate_inputs(inputs)
     names = list(dict.fromkeys(obj.label.strip() for obj in inputs.scene_identity.objects[:4] if obj.label.strip()))
+    # The identities come sorted by visible pixels, largest first.
+    near = next((obj.label.strip() for obj in inputs.scene_identity.objects
+                 if obj.kind not in NOT_NAMED_AS_NEAR and obj.label.strip()), None)
     # fal stalls on large data URLs; upload first, then make the one paid POST.
     image_urls = [await to_fal_url(inputs.image_url)]
     if inputs.reference_url is not None:
         image_urls.append(await to_fal_url(inputs.reference_url))
     arguments = {k: v for k, v in body.parameters.items() if k not in {"prompt_version", "gate"}}
-    prompt = keyframe_prompt(body.prompt, names, inputs.reference_url is not None)
+    prompt = keyframe_prompt(body.prompt, names, inputs.reference_url is not None, near)
     request_id = await queue_post(body.model, {"prompt": prompt, "image_urls": image_urls,
                                                "image_size": inputs.image_size.model_dump(), **arguments})
     return {"request_id": request_id, "model": body.model}
@@ -317,10 +325,10 @@ async def status(request_id: str, model: str = MODEL) -> dict[str, object]:
 class GateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image_urls: list[str] = Field(min_length=1, max_length=4)
-    box: tuple[int, int, int, int]  # pixels [x0, y0, x1, y1] of the largest building's object pass
+    box: tuple[int, int, int, int]  # pixels [x0, y0, x1, y1] of the gate subject in the object pass
     width: int = Field(ge=32, le=1024, strict=True)
     height: int = Field(ge=32, le=1024, strict=True)
-    label: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=80)  # "building", or the subject's kind ("well", "object")
 
 
 def fal_storage_url(url: str) -> bool:
@@ -334,7 +342,7 @@ def fal_storage_url(url: str) -> bool:
 
 @router.post("/gate")
 async def gate(body: GateInput) -> dict[str, object]:
-    """SAM-3 mask of the building inside `box` for each candidate keyframe.
+    """SAM-3 mask of `label` (the gate subject) inside `box` for each candidate keyframe.
     A null mask_png means SAM-3 found nothing; an outage is a 502, never null."""
     if env_flag("MOCK_PROVIDERS") or not os.environ.get("SHARED_TOKEN") or not os.environ.get("FAL_KEY"):
         raise HTTPException(503, "Keyframe gate unavailable")

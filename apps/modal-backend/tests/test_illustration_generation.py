@@ -309,7 +309,7 @@ async def test_keyframe_option_is_separate_floored_and_off_under_mock(monkeypatc
     config = await illustration.keyframe_capabilities()
     assert config["enabled"] and config["model"] == illustration.KEYFRAME_MODEL and config["reservation"] == 0.1
     assert config["parameters"]["num_images"] == 2
-    assert config["parameters"]["prompt_version"] == "saved-camera-qwen-keyframe-v2"
+    assert config["parameters"]["prompt_version"] == "saved-camera-qwen-keyframe-v3"
     assert illustration.configuration()["model"] == illustration.MODEL
     monkeypatch.setenv("ILLUSTRATION_KEYFRAME_RESERVATION_USD", "0.05")  # below two images plus the gate
     assert illustration.configuration(keyframe=True)["enabled"] is False
@@ -361,6 +361,25 @@ async def test_keyframe_without_art_describes_the_style_in_words(monkeypatch, ke
     assert "Hand inked stonework" in words["prompt"] and "Copper Kettle" in words["prompt"]
 
 
+async def test_keyframe_asks_for_every_surface_and_names_the_largest_object(monkeypatch, keyframes_enabled, uploads):
+    sent = []
+    def handler(request):
+        sent.append(json.loads(request.content)["prompt"])
+        return httpx.Response(200, json={"request_id": "kf-id"})
+    provider(monkeypatch, handler)
+    request = keyframe_body()
+    kettle = request.inputs.scene_identity.objects[0]
+    # Largest first: a path (ground) and a tree, then the well; the building and ground are never named.
+    request.inputs.scene_identity.objects = [kettle.model_copy(update={"id": i, "label": label, "kind": kind}) for i, label, kind in
+                                             [("street", "Main Street", "path"), ("oak", "Old Oak", "tree"), ("well", "Plaza Stone Well", "well")]] + [kettle]
+    await illustration.submit(request)
+    await illustration.submit(keyframe_body(reference=False))
+    named, plain = sent
+    assert "Paint every surface, including large objects close to the camera and the Old Oak, so nothing keeps the render's flat grey or green colours." in named
+    assert "Paint every surface, including large objects close to the camera, so nothing keeps" in plain
+    assert "Main Street" not in named.split("Paint every surface")[1]
+
+
 # "chain" is the v1 warp input; the web now composites chains and sends "first".
 @pytest.mark.parametrize("change", ["no_stage", "chain", "mask", "no_identity",
                                     "remote_reference", "garbage_reference", "jpeg_render"])
@@ -386,7 +405,7 @@ async def test_invalid_keyframe_requests_never_reach_the_provider(monkeypatch, k
 
 
 @pytest.mark.parametrize("changes", [{"reservation": 0.2}, {"parameters": illustration.PARAMETERS}, {"parameters": {
-    **illustration.KEYFRAME_PARAMETERS, "prompt_version": "saved-camera-qwen-keyframe-v1"}}])
+    **illustration.KEYFRAME_PARAMETERS, "prompt_version": "saved-camera-qwen-keyframe-v2"}}])
 async def test_keyframe_rejects_changed_configuration(keyframes_enabled, uploads, changes):
     with pytest.raises(HTTPException) as error:
         await illustration.submit(keyframe_body(**changes))
@@ -458,6 +477,15 @@ async def test_gate_rejects_foreign_images_and_bad_boxes(monkeypatch, enabled, c
         await illustration.gate(gate_body(**changes))
     assert error.value.status_code == 400
     assert candidates == []
+
+
+@pytest.mark.parametrize("label", ["well", "object"])
+async def test_gate_prompts_sam3_with_the_subjects_word(monkeypatch, enabled, candidates, label):
+    # Near a well no building is large enough: the web gates the well, by its kind.
+    sam = AsyncMock(return_value={"mask": None, "request_id": "sam", "score": None, "crop": (0, 0, 64, 32)})
+    monkeypatch.setattr(illustration.segmenter, "sam3_box_mask", sam)
+    await illustration.gate(gate_body(label=label))
+    assert [call.args[2] for call in sam.await_args_list] == [label, label]
 
 
 def test_gate_accepts_at_most_four_images():

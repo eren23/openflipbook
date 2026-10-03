@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from _env import env_flag
 
-from .video import H3_MAX_MODEL, h3_arguments, move_prompt
+from .video import H3_MAX_MODEL, LEG_MIN_SECONDS, h3_arguments, move_prompt
 
 router = APIRouter(prefix="/motion")
 MODEL = "minimax/h3-max/camera-controls"
@@ -60,6 +60,8 @@ def configuration() -> dict[str, object]:
         "resolution": "768P",
         "min_duration": 5,
         "max_duration": 15,
+        # Path video legs (/motion/leg) may be this short; the web reads it before sizing them.
+        "leg_min_seconds": LEG_MIN_SECONDS,
         "reservation_usd_per_second": float(rate) if enabled else 0,
         "reason": None
         if enabled
@@ -151,7 +153,7 @@ class LegMove(StrictInput):
 
 class LegInput(StrictInput):
     reservation: float = Field(gt=0, le=10)
-    duration: int = Field(ge=5, le=15)
+    duration: int = Field(ge=LEG_MIN_SECONDS, le=15)
     move: LegMove
     start: SourceImage
     end: SourceImage
@@ -243,6 +245,8 @@ async def leg(body: LegInput) -> dict[str, object]:
     arguments = h3_arguments(
         LEG_MODEL, body.start.url, prompt, body.duration, end_image_url=body.end.url
     )
+    # A leg asks for its planned length, under the 5 s floor of other H3 clips.
+    arguments["duration"] = body.duration
     return {"request_id": await post_once(LEG_MODEL, arguments), "model": LEG_MODEL, "prompt": prompt}
 
 

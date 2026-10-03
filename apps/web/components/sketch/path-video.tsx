@@ -66,7 +66,7 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
       <span>{job.status.replaceAll("_", " ")} / {dollars(job.committed)} of {dollars(job.reservation)} committed</span>
       {job.error && <p>{job.error}</p>}
       <ol>{job.keyframes.map((kf, i) => <li key={i}>Keyframe {i + 1}: {kf.stage === "source" ? "accepted artwork" : kf.status.replaceAll("_", " ")}{kf.gate ? ` / gate ${kf.gate}` : ""}
-        {kf.retry === "reserved" && " / painted twice"}{kf.dropped && <strong> / dropped: {kf.drop_reason}</strong>}</li>)}</ol>
+        {kf.retry === "reserved" && " / painted twice"}{kf.dropped && <strong> / dropped: {kf.drop_reason}</strong>}{kf.kept_reason && <strong> / {kf.kept_reason}</strong>}</li>)}</ol>
       <ol>{job.legs.map((leg, i) => <li key={i}>Leg {i + 1}: {leg.seconds}s ({leg.duration}s clip)
         {leg.attempts.map((a, n) => <span key={n}> / {a.status.replaceAll("_", " ")}{a.land === undefined ? "" : ` land ${a.land.toFixed(2)} snap ${a.snap!.toFixed(1)}`}</span>)}
         {leg.landed === false && <strong> / did not land</strong>}{leg.dropped && <strong> / dropped</strong>}</li>)}</ol>

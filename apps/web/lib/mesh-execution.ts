@@ -164,7 +164,7 @@ async function gateKeyframe(db: Db, job: MeshJobDoc, token: string, passes: Keyf
   if (!job.keyframe_gate) {
     // A fresh lease covers the gate call, whatever the reads before it took.
     if (!await col.findOneAndUpdate({ ...lease, keyframe_gate: { $exists: false } }, { $set: { keyframe_gate: { status: "started" }, work_until: new Date(Date.now() + WORK_LEASE_MS) } })) throw new Error("Keyframe gate lease lost");
-    const body = await keyframeGateBody(passes, job.keyframe_input!.gate_object_id, urls);
+    const body = await keyframeGateBody(passes, job.keyframe_input!.gate_object_id, urls, job.keyframe_input!.gate_subject?.label);
     if (!body) gate = { status: "no_building" };
     else try {
       // SAM-3 may take 180 s for two candidates; each mask is a small PNG.

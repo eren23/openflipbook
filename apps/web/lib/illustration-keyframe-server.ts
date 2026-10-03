@@ -9,7 +9,7 @@ import { CreatorError } from "./creator-error";
 import type { IllustrationKeyframe, ViewCapture, ViewSource } from "./place-view";
 import { registeredPixels } from "./illustration-region";
 import { illustrationIdentity } from "./illustration-identity";
-import { compositeChain, gateTruth, KEYFRAME_GATE, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
+import { compositeChain, gateSubject, gateTruth, KEYFRAME_GATE, KEYFRAME_GATE_LABEL, objectIds, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView, type KeyframeWarp } from "./illustration-keyframe";
 
 /** One capture. Pass bytes are the saved PNGs, already checked by the caller. */
 export interface KeyframePasses {
@@ -18,9 +18,6 @@ export interface KeyframePasses {
 }
 /** The accepted keyframe at camera A, with A's capture, for a chained keyframe. A's camera must be in B's world frame. */
 export interface KeyframeChain { view: KeyframeView; depth: Buffer; image: Buffer }
-
-// SAM-3 is prompted with this word inside the gate box (the bench's choice).
-export const KEYFRAME_GATE_LABEL = "building";
 
 const decode = (bytes: Buffer, view: KeyframeView, pngOnly = false) => registeredPixels(bytes, view.width, view.height, pngOnly);
 // Image 2 may be any size or format; one bounded JPEG keeps the data URL small.
@@ -31,39 +28,42 @@ async function referenceUrl(bytes: Buffer) {
     return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
   } catch { throw new CreatorError("Keyframe reference image is not readable", 409); }
 }
+// B's object pass gives each object one source in the composite (warpKeyframe).
 async function warp(passes: KeyframePasses, chain: KeyframeChain) {
-  const [render, depth, image, depthA] = await Promise.all([decode(passes.render, passes.view), decode(passes.depth, passes.view), decode(chain.image, chain.view), decode(chain.depth, chain.view)]);
-  return { render, depth, warp: warpKeyframe({ view: chain.view, image, depth: depthA }, { view: passes.view, render, depth }) };
+  const { view } = passes, [render, depth, objects, image, depthA] = await Promise.all([decode(passes.render, view), decode(passes.depth, view),
+    decode(passes.objects, view, true), decode(chain.image, chain.view), decode(chain.depth, chain.view)]);
+  const ids = objectIds(objects, view.width, view.height, view.objects);
+  return { render, ids, warp: warpKeyframe({ view: chain.view, image, depth: depthA }, { view, render, depth, objects: ids }) };
 }
 // The gate subject is chosen once, at preparation, from the saved geometry's
 // kinds; afterwards it is rebuilt from the object pass by id alone.
 const truthFor = async (passes: KeyframePasses, objectId: string) =>
-  gateTruth(await decode(passes.objects, passes.view, true), passes.view.width, passes.view.height, passes.view.objects, [{ id: objectId, kind: "building" }]);
+  gateTruth(await decode(passes.objects, passes.view, true), passes.view.width, passes.view.height, passes.view.objects, objectId);
 
 /**
- * Provider inputs for one keyframe, plus the building the gate will measure.
+ * Provider inputs for one keyframe, plus the object the gate will measure.
  * A chain sends the same first-stage inputs (the render, and the art or
  * words); its warp is checked here, before any spend, and composited at finish.
  */
 export async function prepareKeyframeInput(passes: KeyframePasses, sources: ViewSource[], art: Buffer | null, chain?: KeyframeChain) {
   const { view } = passes, objects = await decode(passes.objects, view, true);
-  const truth = gateTruth(objects, view.width, view.height, view.objects, sources.flatMap(s => s.definition.objects));
+  const subject = gateSubject(objects, view.width, view.height, view.objects, sources.flatMap(s => s.definition.objects));
   const warped = chain ? (await warp(passes, chain)).warp : undefined;
   return {
     inputs: { image_url: `data:image/png;base64,${passes.render.toString("base64")}`,
       image_size: { width: view.width, height: view.height }, scene_identity: illustrationIdentity(view, sources, objects),
       keyframe_stage: "first" as const, ...(art ? { reference_url: await referenceUrl(art) } : {}) },
-    gate_object_id: truth?.object_id ?? null,
+    gate_object_id: subject?.object_id ?? null, gate_subject: subject,
     ...(warped ? { chain: { angle: warped.angleDeg, hole_share: warped.holeShare } } : {}),
   };
 }
 
-/** Body for POST /illustration/gate, or null when no building is measurable. */
-export async function keyframeGateBody(passes: KeyframePasses, objectId: string | null, imageUrls: string[]) {
+/** Body for POST /illustration/gate, or null without a subject. `label` is the subject's word (older jobs: a building). */
+export async function keyframeGateBody(passes: KeyframePasses, objectId: string | null, imageUrls: string[], label = KEYFRAME_GATE_LABEL) {
   const truth = objectId ? await truthFor(passes, objectId) : null;
   if (!truth) return null;
   const { width, height } = passes.view, [x0, y0, x1, y1] = truth.box;
-  return { image_urls: imageUrls, box: [Math.round(x0 * width), Math.round(y0 * height), Math.round(x1 * width), Math.round(y1 * height)], width, height, label: KEYFRAME_GATE_LABEL };
+  return { image_urls: imageUrls, box: [Math.round(x0 * width), Math.round(y0 * height), Math.round(x1 * width), Math.round(y1 * height)], width, height, label };
 }
 
 // A mask that does not decode at the frame size is a failed measurement.
@@ -78,15 +78,17 @@ async function maskPixels(mask: string | null, view: KeyframeView) {
 
 /**
  * Pick and finish one candidate. `masks` is the saved gate result (null when
- * unmeasured: an outage keeps candidate 0). A chained keyframe keeps A's
+ * unmeasured: an outage keeps candidate 0). Without a subject (`objectId`
+ * null) the silhouette is skipped and the paint check alone decides. A chained keyframe keeps A's
  * warped painting and sky wherever B sees what A saw, and takes the
  * candidate (B's own painting) only in the holes, so nothing drifts from
- * camera to camera. The masks measure the raw candidates: the gate checks
+ * camera to camera. Each object in B's object pass comes from A wherever A
+ * saw it, or whole from B's painting (warpKeyframe). The masks measure the raw candidates: the gate checks
  * that B's painting is registered before its holes are used. Among chain
  * candidates, the one closest to A's warp where A was trusted wins the tie.
  */
 export async function finishKeyframe(passes: KeyframePasses, objectId: string | null, candidates: Buffer[], masks: (string | null)[] | null, chain?: KeyframeChain):
-  Promise<Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { bytes: Buffer; chain?: { angle: number; hole_share: number; composite_share: number } }> {
+  Promise<Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { bytes: Buffer; chain?: { angle: number; hole_share: number; composite_share: number; objects?: NonNullable<KeyframeWarp["objects"]> } }> {
   const { view } = passes;
   if (!candidates.length || masks && masks.length !== candidates.length) throw new Error("Each keyframe candidate needs one gate result");
   const decoded = await Promise.all(candidates.map(bytes => decode(bytes, view)));
@@ -95,14 +97,18 @@ export async function finishKeyframe(passes: KeyframePasses, objectId: string | 
   const render = warped?.render ?? await decode(passes.render, view);
   // First keyframe: every geometry pixel came from the render. Chain: the
   // composite takes the candidate only in the holes (B's sky too when A has
-  // none), so judge the candidate's own pixels there, not A's warp or the feather.
+  // none), so judge the candidate's own pixels there, not A's warp or the
+  // feather. Each object the candidate paints whole and that takes 5% of the
+  // frame is judged on its own too; an object from A, or ground, is not.
   const renderMask = warped?.warp.hole ?? (await decode(passes.depth, view)).filter((_, i) => i % 4 === 0).map(v => (v ? 1 : 0));
-  const painted = decoded.map(image => paintedDelta(render, image, renderMask));
+  const fresh = warped?.ids.map(k => (warped.warp.sources?.get(k) === "candidate" ? k : -1));
+  const painted = decoded.map(image => paintedDelta(render, image, renderMask, fresh));
   // Chain: how far each raw candidate strays from A's warp where A was trusted (not a hole, not sky).
   const trusted = warped?.warp.hole.map((h, t) => (h || warped.warp.sky[t] ? 0 : 1));
   const agreement = warped && trusted && decoded.map(image => paintedDelta(warped.warp.rgba, image, trusted));
   const truth = masks && objectId ? await truthFor(passes, objectId) : null;
-  const pick = truth && masks ? pickCandidate(truth.mask, await Promise.all(masks.map(m => maskPixels(m, view))), painted, view.width, view.height, KEYFRAME_GATE, agreement) : null;
+  const pick = truth && masks ? pickCandidate(truth.mask, await Promise.all(masks.map(m => maskPixels(m, view))), painted, view.width, view.height, KEYFRAME_GATE, agreement)
+    : objectId ? null : pickCandidate(null, [], painted, view.width, view.height, KEYFRAME_GATE, agreement);
   const chosen = pick?.index ?? 0;
   const metrics = painted.map((delta, i) => {
     const match = pick?.metrics[i]?.match ?? null;
@@ -111,5 +117,6 @@ export async function finishKeyframe(passes: KeyframePasses, objectId: string | 
   });
   const bytes = composites ? await sharp(composites[chosen]!.rgba, { raw: { width: view.width, height: view.height, channels: 4 } }).jpeg({ quality: 92 }).toBuffer() : candidates[chosen]!;
   return { bytes, gate: pick ? (pick.passed ? "passed" : "failed") : "unmeasured", candidates: metrics, chosen, passed: pick?.passed ?? false, sky_pinned: warped?.warp.sky.some(v => v) ?? false,
-    ...(warped && composites ? { chain: { angle: warped.warp.angleDeg, hole_share: warped.warp.holeShare, composite_share: composites[chosen]!.share } } : {}) };
+    ...(warped && composites ? { chain: { angle: warped.warp.angleDeg, hole_share: warped.warp.holeShare, composite_share: composites[chosen]!.share,
+      ...(warped.warp.objects ? { objects: warped.warp.objects } : {}) } } : {}) };
 }

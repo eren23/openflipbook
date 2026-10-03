@@ -1,4 +1,4 @@
-import type { PlaceSceneDefinition } from "@openflipbook/config";
+import type { PlaceSceneDefinition, PlaceSceneObject } from "@openflipbook/config";
 import type { CameraPathDraft } from "./camera-path";
 import type { IllustrationBrushStroke } from "./illustration-brush";
 
@@ -59,13 +59,17 @@ export interface SavedIllustration {
 }
 // A keyframe request: the exact render, painted from the art or words. A chain
 // also composites an accepted keyframe at another camera over it, warped by
-// depth. The gate measures one building.
+// depth. The gate measures one object: a building when one is large enough.
 export interface IllustrationKeyframeInput {
   stage: "first" | "chain"; art?: "art" | "words";
   reference?: { key: string; sha256: string };
   chain_from?: { view_id: string; illustration_id: string; sha256: string };
   gate_object_id: string | null;
+  // The gated object and the word SAM-3 is prompted with; null when nothing is
+  // large enough (the paint check alone decides). Absent on older jobs: a building.
+  gate_subject?: KeyframeGateSubject | null;
 }
+export interface KeyframeGateSubject { object_id: string; kind: PlaceSceneObject["kind"]; label: string }
 export interface IllustrationKeyframeCandidate {
   iou: number | null; centre_dx: number | null; centre_dy: number | null; area_ratio: number | null;
   painted: number | null; passed: boolean;
@@ -75,7 +79,8 @@ export interface IllustrationKeyframeCandidate {
 export interface IllustrationKeyframe extends Omit<IllustrationKeyframeInput, "chain_from" | "gate_object_id"> {
   version: 1;
   // composite_share: the fraction of the stored picture that came from the candidate (absent on older chains).
-  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number };
+  // objects: how many visible objects came whole from A, from the candidate, or count as ground (absent on older chains).
+  chain_from?: NonNullable<IllustrationKeyframeInput["chain_from"]> & { angle: number; hole_share: number; composite_share?: number; objects?: { a: number; candidate: number; ground: number } };
   object_id: string | null;
   gate: "passed" | "failed" | "unmeasured";
   candidates: IllustrationKeyframeCandidate[]; chosen: number; passed: boolean; sky_pinned: boolean;

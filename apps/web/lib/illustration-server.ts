@@ -126,8 +126,9 @@ export async function submitIllustration(sid: string, viewId: string, input: Rec
   let keyframeInput: IllustrationKeyframeInput | undefined;
   if (keyframe) {
     const request = await keyframeRequest(db, sid, view, input.chain_from as string | undefined, input.art !== false);
-    // Read and check every pinned input, and choose the gated building, before reserving.
-    keyframeInput = { ...request, gate_object_id: (await prepareKeyframeViewInput(db, sid, dependency, { ...request, gate_object_id: null })).gate_object_id };
+    // Read and check every pinned input, and choose the gate's subject, before reserving.
+    const { gate_object_id, gate_subject } = await prepareKeyframeViewInput(db, sid, dependency, { ...request, gate_object_id: null });
+    keyframeInput = { ...request, gate_object_id, gate_subject };
   }
   const quote = await checkedAssetQuote(db, "illustration", input);
   return withDbTransaction(async (db, session) => {
