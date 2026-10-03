@@ -1,7 +1,7 @@
 import { Box3, PerspectiveCamera, Plane, Ray, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
-import { compositeChain, gateTruth, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
+import { compositeChain, gateSubject, gateTruth, paintedDelta, pickCandidate, warpKeyframe, type KeyframeView } from "./illustration-keyframe";
 
 const W = 64, H = 48, NEAR = 1, FAR = 30;
 // A wall 10 m away that stops 3 m up (sky above), and a 2 m box in front of it.
@@ -326,11 +326,14 @@ describe("warpKeyframe with B's objects", () => {
   });
 });
 
-describe("gateTruth", () => {
+describe("gateSubject and gateTruth", () => {
   const table = [{ object_id: "inn", rgb: [1, 2, 3] as [number, number, number] },
     { object_id: "tree", rgb: [4, 5, 6] as [number, number, number] },
-    { object_id: "shed", rgb: [7, 8, 9] as [number, number, number] }];
-  const scene = [{ id: "inn", kind: "tavern" as const }, { id: "tree", kind: "tree" as const }, { id: "shed", kind: "mesh" as const, mesh_role: "exterior" as const }];
+    { object_id: "shed", rgb: [7, 8, 9] as [number, number, number] },
+    { object_id: "well", rgb: [10, 11, 12] as [number, number, number] },
+    { object_id: "lane", rgb: [13, 14, 15] as [number, number, number] }];
+  const scene = [{ id: "inn", kind: "tavern" as const }, { id: "tree", kind: "tree" as const }, { id: "shed", kind: "mesh" as const, mesh_role: "exterior" as const },
+    { id: "well", kind: "well" as const }, { id: "lane", kind: "path" as const }];
   const paint = (boxes: [number, number, number, number, number][]) => {
     const px = new Uint8Array(W * H * 4).fill(0);
     for (let p = 0; p < W * H; p++) px[p * 4 + 3] = 255;
@@ -338,15 +341,27 @@ describe("gateTruth", () => {
     return px;
   };
 
-  it("picks the largest visible building and ignores bigger non-buildings", () => {
-    const truth = gateTruth(paint([[1, 0, 0, 40, 40], [0, 40, 10, 50, 20], [2, 50, 30, 64, 48]]), W, H, table, scene);
-    expect(truth?.object_id).toBe("shed");
+  it("picks the largest visible building on a street, and ignores bigger non-buildings", () => {
+    const px = paint([[1, 0, 0, 40, 40], [0, 40, 10, 50, 20], [2, 50, 30, 64, 48]]);
+    expect(gateSubject(px, W, H, table, scene)).toEqual({ object_id: "shed", kind: "mesh", label: "building" });
+    const truth = gateTruth(px, W, H, table, "shed");
     expect(truth?.box).toEqual([50 / W, 30 / H, 1, 1]);
     expect(truth?.mask.reduce((s, v) => s + v, 0)).toBe(14 * 18);
   });
 
-  it("returns null when no building covers 1% of the frame", () => {
-    expect(gateTruth(paint([[1, 0, 0, 40, 40], [0, 0, 0, 5, 5]]), W, H, table, scene)).toBeNull();
+  it("close to the well, measures the well, prompted by its kind, when no building covers 3% of the frame", () => {
+    // A far house at 2% of the frame; the well fills the middle; the lane (ground) is larger still.
+    const px = paint([[4, 0, 30, 64, 48], [0, 0, 0, 8, 8], [3, 16, 4, 48, 30]]);
+    expect(gateSubject(px, W, H, table, scene)).toEqual({ object_id: "well", kind: "well", label: "well" });
+    expect(gateTruth(px, W, H, table, "well")?.box).toEqual([16 / W, 4 / H, 48 / W, 30 / H]);
+    // A prop of no nameable kind is prompted as an object.
+    expect(gateSubject(px, W, H, table, scene.map(o => (o.id === "well" ? { id: "well", kind: "mesh" as const, mesh_role: "prop" as const } : o))))
+      .toEqual({ object_id: "well", kind: "mesh", label: "object" });
+  });
+
+  it("has no subject when nothing but ground covers 3% of the frame", () => {
+    expect(gateSubject(paint([[4, 0, 30, 64, 48], [0, 0, 0, 8, 8], [3, 20, 10, 28, 18]]), W, H, table, scene)).toBeNull();
+    expect(gateTruth(paint([[4, 0, 30, 64, 48]]), W, H, table, "well")).toBeNull();
   });
 });
 
@@ -387,6 +402,13 @@ describe("pickCandidate", () => {
     const chain = pickCandidate(truth, masks, [40, 40, 40], W, H, gate, [30, 8, 2]);
     expect(chain).toMatchObject({ index: 1, passed: true });
     expect(chain.metrics.map(m => m.passed)).toEqual([true, true, false]);
+  });
+
+  it("without a subject, skips the silhouette and lets the paint check alone decide", () => {
+    const pick = pickCandidate(null, [], [5, 40], W, H, gate);
+    expect(pick).toMatchObject({ index: 1, passed: true });
+    expect(pick.metrics.map(m => [m.match, m.passed])).toEqual([[null, false], [null, true]]);
+    expect(pickCandidate(null, [], [5], W, H, gate)).toMatchObject({ index: 0, passed: false });
   });
 
   it("skips the paint check when nothing in the input was render", () => {

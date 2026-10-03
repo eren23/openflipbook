@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
 import { KEYFRAME_GATE } from "./illustration-keyframe";
-import { finishKeyframe, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
+import { finishKeyframe, keyframeGateBody, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
 
 const S = 64, f = 1 / Math.tan(25 * Math.PI / 180);
 const png = (rgba: Uint8Array, channels: 1 | 4 = 4) => sharp(Buffer.from(rgba), { raw: { width: S, height: S, channels } }).png().toBuffer();
@@ -12,6 +12,19 @@ const view = (x: number) => ({ width: S, height: S, depth: { near: 1, far: 50 },
   camera: { projection: "perspective" as const, world_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1],
     projection_matrix: [f, 0, 0, 0, 0, f, 0, 0, 0, 0, -100.1 / 99.9, -1, 0, 0, -20 / 99.9, 0], near: 0.1, far: 100 } });
 const inBuilding = (p: number) => p % S >= 16 && p % S < 48 && Math.floor(p / S) >= 16 && Math.floor(p / S) < 48;
+
+describe("keyframe gate without a subject", () => {
+  it("skips the silhouette: no gate request, and the paint check alone decides", async () => {
+    const render = solid([100, 110, 120]);
+    const passes: KeyframePasses = { view: { ...view(0), objects: [{ object_id: "well", rgb: [100, 120, 140] }], floor_id: null, mode: "walk" },
+      render: await png(render), depth: await png(solid([208, 208, 208])), objects: await png(solid([100, 120, 140])) };
+    expect(await keyframeGateBody(passes, null, ["https://fal.media/a.jpg"])).toBeNull();
+    expect((await keyframeGateBody(passes, "well", ["https://fal.media/a.jpg"], "well"))?.label).toBe("well");
+    const copy = await finishKeyframe(passes, null, [await png(render)], null);
+    expect(copy).toMatchObject({ gate: "failed", passed: false, candidates: [{ iou: null, painted: 0, passed: false }] });
+    expect(await finishKeyframe(passes, null, [await png(render), await png(solid([180, 190, 200]))], null)).toMatchObject({ gate: "passed", passed: true, chosen: 1 });
+  });
+});
 
 describe("finishKeyframe", () => {
   it("judges a chain's paint on the candidate's own hole pixels, not on the feathered composite", async () => {

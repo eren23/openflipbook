@@ -100,8 +100,14 @@ line up.
 The move of each leg comes from the two camera matrices. `forward_m` is the
 eye's move along the level heading of A. `turn_deg` is the signed change of
 heading (positive turns to the camera's own right). `rise_m` is the change in
-eye height, and `orbit_deg` is 0. The subject is the building that the gate of
-the end keyframe measures (the most visible one). A leg plans its length at
+eye height, and `orbit_deg` is 0. The subject is the object that the gate of
+the end keyframe measures. The gate measures the most visible building when it
+covers at least 3% of the frame (`GATE_MIN_SHARE`). If no building does, it
+measures the most visible object of another kind with 3% (not a path or a
+pond), and SAM-3 gets the name of its kind ("well", "tree"; else "object").
+If no object has 3%, the gate does not compare silhouettes, and the paint
+check alone decides. The keyframe records the subject (`gate_subject`: id,
+kind, label, or null). A leg plans its length at
 1.4 m/s, and at least 1.5 s for a turn on the spot. Then the usual leg length,
 trim and retime apply.
 

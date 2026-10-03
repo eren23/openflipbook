@@ -5,12 +5,12 @@
  * accepted picture at camera A is moved into camera B with both cameras'
  * saved depth, and B's own depth marks what A never saw (the holes, which
  * show B's render and are the only areas the model must invent). The gate
- * then segments the painted result and compares the largest building with
- * the exact object pass. Pure functions over decoded RGBA pixels; decoding
+ * then segments the painted result and compares its subject (see
+ * gateSubject) with the exact object pass. Pure functions over decoded RGBA pixels; decoding
  * and storage live with the caller.
  */
 import type { PlaceSceneObject } from "@openflipbook/config";
-import type { ViewCamera, ViewCapture } from "./place-view";
+import type { KeyframeGateSubject, ViewCamera, ViewCapture } from "./place-view";
 import { compareMasks, maskForVisible, type SilhouetteMatch } from "./silhouette";
 
 /** What the warp needs from a saved view or a capture. */
@@ -317,6 +317,14 @@ export interface GateTruth {
 
 const BUILDING_KINDS = new Set<PlaceSceneObject["kind"]>(["building", "tavern", "house"]);
 const isBuilding = (o: Pick<PlaceSceneObject, "kind" | "mesh_role">) => BUILDING_KINDS.has(o.kind) || (o.kind === "mesh" && o.mesh_role === "exterior");
+// SAM-3's word for a building subject (the bench's choice).
+export const KEYFRAME_GATE_LABEL = "building";
+// ponytail: tunable. The gate measures only a subject with this share of the
+// frame: a far house in a corner is a noisy measurement (walk run 3's last keyframe).
+export const GATE_MIN_SHARE = 0.03;
+const GROUND_KINDS = new Set<PlaceSceneObject["kind"]>(["path", "pond"]);
+// Kinds SAM-3 is prompted with by name; any other subject is an "object".
+const NAMED_KINDS = new Set<PlaceSceneObject["kind"]>(["well", "tree", "bench", "pergola", "wall", "barrels"]);
 
 /** Each object-pass pixel's index in the view's ID colour `table`; -1 where no object (ground, sky). */
 export function objectIds(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"]) {
@@ -326,24 +334,40 @@ export function objectIds(objects: Uint8Array, width: number, height: number, ta
 }
 
 /**
- * The gate's ground truth: the largest visible building in the object pass,
- * if it covers at least 1% of the frame. `table` is the view's ID colour
- * table; `scene` is the saved geometry's objects (for their kinds).
+ * The gate's subject, chosen once from the saved geometry's kinds: the largest
+ * visible building with GATE_MIN_SHARE of the frame; else the largest visible
+ * object of another kind with that share (not ground, such as a path or a
+ * pond), prompted by its kind; else null. `table` is the view's ID colour table.
  */
-export function gateTruth(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"],
-  scene: readonly Pick<PlaceSceneObject, "id" | "kind" | "mesh_role">[]): GateTruth | null {
-  const ids = objectIds(objects, width, height, table), buildings = new Set(scene.filter(isBuilding).map(o => o.id)), counts = new Int32Array(table.length);
+export function gateSubject(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"],
+  scene: readonly Pick<PlaceSceneObject, "id" | "kind" | "mesh_role">[]): KeyframeGateSubject | null {
+  const ids = objectIds(objects, width, height, table), kinds = new Map(scene.map(o => [o.id, o])), counts = new Int32Array(table.length);
   for (const i of ids) if (i >= 0) counts[i]!++;
-  let best = -1;
-  for (let i = 0; i < counts.length; i++) if (buildings.has(table[i]!.object_id) && (best < 0 || counts[i]! > counts[best]!)) best = i;
-  if (best < 0 || counts[best]! < 0.01 * ids.length) return null;
+  const largest = (fits: (o: Pick<PlaceSceneObject, "kind" | "mesh_role">) => boolean) => {
+    let best = -1;
+    for (let i = 0; i < counts.length; i++) {
+      const o = kinds.get(table[i]!.object_id);
+      if (o && fits(o) && counts[i]! >= GATE_MIN_SHARE * ids.length && (best < 0 || counts[i]! > counts[best]!)) best = i;
+    }
+    return best;
+  };
+  const building = largest(isBuilding), best = building >= 0 ? building : largest(o => !GROUND_KINDS.has(o.kind));
+  if (best < 0) return null;
+  const { kind } = kinds.get(table[best]!.object_id)!;
+  return { object_id: table[best]!.object_id, kind, label: building >= 0 ? KEYFRAME_GATE_LABEL : NAMED_KINDS.has(kind) ? kind : "object" };
+}
+
+/** The gate's ground truth for one object: its visible pixels in the object pass, or null when none are visible. */
+export function gateTruth(objects: Uint8Array, width: number, height: number, table: ViewCapture["objects"], objectId: string): GateTruth | null {
+  const ids = objectIds(objects, width, height, table), best = table.findIndex(o => o.object_id === objectId);
+  if (best < 0 || !ids.includes(best)) return null;
   const mask = maskForVisible(ids, best);
   let x0 = width, y0 = height, x1 = 0, y1 = 0;
   for (let p = 0; p < mask.length; p++) if (mask[p]) {
     const x = p % width, y = (p - x) / width;
     x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + 1); y1 = Math.max(y1, y + 1);
   }
-  return { object_id: table[best]!.object_id, mask, box: [x0 / width, y0 / height, x1 / width, y1 / height] };
+  return { object_id: objectId, mask, box: [x0 / width, y0 / height, x1 / width, y1 / height] };
 }
 
 export interface KeyframeGate {
@@ -363,20 +387,21 @@ export interface CandidateMetrics { match: SilhouetteMatch | null; painted: numb
  * Gate each candidate's segmenter mask against the truth and pick one. A
  * pass wins; otherwise keep the best: a painted picture over an unpainted
  * one, then the higher overlap. An empty mask is a failed measurement, and a
- * null painted delta means nothing in the input came from the render. A
+ * null painted delta means nothing in the input came from the render. With
+ * no truth (no subject), the paint check alone decides; `candidates` is unused. A
  * chain passes `agreement` (mean RGB difference from A's warp where A was
  * trusted): it replaces the overlap tie-break, and lower wins, so the chain
  * keeps the painted look of its source.
  */
-export function pickCandidate(truth: Uint8Array, candidates: Uint8Array[], painted: (number | null)[],
+export function pickCandidate(truth: Uint8Array | null, candidates: Uint8Array[], painted: (number | null)[],
   width: number, height: number, gate: KeyframeGate = KEYFRAME_GATE, agreement?: (number | null)[]) {
-  if (!candidates.length || painted.length !== candidates.length) throw new Error("Each candidate needs a mask and a painted delta");
+  if (!painted.length || truth && painted.length !== candidates.length) throw new Error("Each candidate needs a mask and a painted delta");
   let index = 0, best = -Infinity;
-  const metrics: CandidateMetrics[] = candidates.map((mask, i) => {
-    const match = compareMasks(truth, mask, width, height), delta = painted[i] ?? null;
+  const metrics: CandidateMetrics[] = painted.map((delta, i) => {
+    const match = truth && compareMasks(truth, candidates[i]!, width, height);
     const isPainted = delta === null || delta >= gate.minPainted;
-    const passed = !!match && isPainted && Math.abs(match.centreDx) <= gate.centre && Math.abs(match.centreDy) <= gate.centre
-      && match.areaRatio >= gate.area[0] && match.areaRatio <= gate.area[1];
+    const passed = isPainted && (!truth || !!match && Math.abs(match.centreDx) <= gate.centre && Math.abs(match.centreDy) <= gate.centre
+      && match.areaRatio >= gate.area[0] && match.areaRatio <= gate.area[1]);
     const agrees = agreement?.[i] ?? null;
     const score = (passed ? 10 : 0) + (isPainted ? 5 : 0) + (agrees === null ? match?.iou ?? -1 : 1 - agrees / 255);
     if (score > best) { best = score; index = i; }

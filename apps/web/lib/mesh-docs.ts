@@ -10,6 +10,7 @@ import type { IllustrationEditInput, IllustrationGeometryRefresh, IllustrationKe
 export interface ViewDependency { view_id: string; input_sha256: string; width: number; height: number }
 // "started" is saved before the gate call; finding it later means the call
 // was interrupted, which counts as an outage so SAM-3 never runs twice.
+// "no_building" (the name is older): the keyframe has no gate subject.
 export type KeyframeGateDoc = { status: "measured"; masks: (string | null)[] } | { status: "started" | "outage" | "no_building" };
 
 export interface MeshJobDoc extends MeshJob {

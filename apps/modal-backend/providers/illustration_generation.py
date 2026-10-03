@@ -325,10 +325,10 @@ async def status(request_id: str, model: str = MODEL) -> dict[str, object]:
 class GateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image_urls: list[str] = Field(min_length=1, max_length=4)
-    box: tuple[int, int, int, int]  # pixels [x0, y0, x1, y1] of the largest building's object pass
+    box: tuple[int, int, int, int]  # pixels [x0, y0, x1, y1] of the gate subject in the object pass
     width: int = Field(ge=32, le=1024, strict=True)
     height: int = Field(ge=32, le=1024, strict=True)
-    label: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=80)  # "building", or the subject's kind ("well", "object")
 
 
 def fal_storage_url(url: str) -> bool:
@@ -342,7 +342,7 @@ def fal_storage_url(url: str) -> bool:
 
 @router.post("/gate")
 async def gate(body: GateInput) -> dict[str, object]:
-    """SAM-3 mask of the building inside `box` for each candidate keyframe.
+    """SAM-3 mask of `label` (the gate subject) inside `box` for each candidate keyframe.
     A null mask_png means SAM-3 found nothing; an outage is a 502, never null."""
     if env_flag("MOCK_PROVIDERS") or not os.environ.get("SHARED_TOKEN") or not os.environ.get("FAL_KEY"):
         raise HTTPException(503, "Keyframe gate unavailable")

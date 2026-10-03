@@ -479,6 +479,15 @@ async def test_gate_rejects_foreign_images_and_bad_boxes(monkeypatch, enabled, c
     assert candidates == []
 
 
+@pytest.mark.parametrize("label", ["well", "object"])
+async def test_gate_prompts_sam3_with_the_subjects_word(monkeypatch, enabled, candidates, label):
+    # Near a well no building is large enough: the web gates the well, by its kind.
+    sam = AsyncMock(return_value={"mask": None, "request_id": "sam", "score": None, "crop": (0, 0, 64, 32)})
+    monkeypatch.setattr(illustration.segmenter, "sam3_box_mask", sam)
+    await illustration.gate(gate_body(label=label))
+    assert [call.args[2] for call in sam.await_args_list] == [label, label]
+
+
 def test_gate_accepts_at_most_four_images():
     with pytest.raises(ValidationError):
         gate_body(image_urls=[fal_url(n) for n in range(5)])

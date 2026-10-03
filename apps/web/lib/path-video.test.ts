@@ -89,7 +89,7 @@ import { KEYFRAME_MODEL } from "./asset-pipeline";
 import { motionStudyFixture } from "../tests/fixtures/motion-study";
 import { cutLeg, joinLegs } from "./motion-video";
 import sharp from "sharp";
-import { finishKeyframe, prepareKeyframeInput } from "./illustration-keyframe-server";
+import { finishKeyframe, keyframeGateBody, prepareKeyframeInput } from "./illustration-keyframe-server";
 import { keyframeArt } from "./illustration-input";
 import { legMove, legSeconds, pathVideoAction, pathVideoBytes, pathVideoLibrary, processNextPathVideo, viewMove, walkVideoAction, walkVideoBytes, walkVideoLibrary } from "./path-video";
 
@@ -200,6 +200,16 @@ it("paints chain keyframes with the world's art and the accepted artwork's own p
   expect(job().status).toBe("ready");
   expect(vi.mocked(prepareKeyframeInput).mock.calls.map(call => String(call[2]))).toEqual(["art-bytes", "art-bytes"]);
   expect([0, 1].map(n => body("/illustration/submit", n).prompt)).toEqual(["Inked stone, warm light", "Inked stone, warm light"]);
+});
+
+it("records each keyframe's gate subject and prompts the gate with its word", async () => {
+  // Near the well, no building is large enough: the gate measures the well.
+  const subject = { object_id: "well", kind: "well", label: "well" };
+  vi.mocked(prepareKeyframeInput).mockResolvedValueOnce({ inputs: { image_url: "data:image/png;base64,AA==" }, gate_object_id: "well", gate_subject: subject } as never);
+  await pathVideoAction("world", "study", await input());
+  await drain();
+  expect(job().status).toBe("ready"); expect(job().keyframes[1]).toMatchObject({ gate_object_id: "well", gate_subject: subject });
+  expect(vi.mocked(keyframeGateBody).mock.calls.map(call => call.slice(1, 2).concat(call[3]))).toEqual([["well", "well"], ["target", undefined]]);
 });
 
 it("claims once under concurrent workers", async () => {

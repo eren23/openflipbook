@@ -916,7 +916,7 @@ it("paints a first keyframe from the world's art, gates once before download and
   await Promise.all([submitIllustration("world", "view", keyframeRequest), illustrationAction("world", "view", keyframeRequest)]);
   expect(store("illustration_jobs").size).toBe(1); expect([...store("spend_ledger").values()].every(row => row.total === 0.1)).toBe(true);
   await expect(submitIllustration("world", "view", { ...keyframeRequest, art: false })).rejects.toMatchObject({ status: 409 });
-  expect(illustrationJob().keyframe_input).toEqual({ stage: "first", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) }, gate_object_id: "kettle" });
+  expect(illustrationJob().keyframe_input).toEqual({ stage: "first", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) }, gate_object_id: "kettle", gate_subject: { object_id: "kettle", kind: "building", label: "building" } });
   await processNextAssetJob(db, "illustration");
   const { inputs } = JSON.parse(submitted()[0]![1].body);
   expect(inputs).toMatchObject({ keyframe_stage: "first", image_size: { width: 256, height: 256 }, image_url: `data:image/png;base64,${blobs.get("render")!.toString("base64")}` });
@@ -930,7 +930,8 @@ it("paints a first keyframe from the world's art, gates once before download and
   state.broken = false; await illustrationAction("world", "view", { action: "refresh", id: "run1" }); await processNextAssetJob(db, "illustration");
   expect(illustrationJob().status).toBe("ready"); expect(gateCalls()).toHaveLength(1); expect(submitted()).toHaveLength(1);
   const asset = store("illustration_assets").get("world:illustration_run1")!;
-  expect(asset.keyframe).toMatchObject({ version: 1, stage: "first", art: "art", reference: { key: "art" }, object_id: "kettle", gate: "passed", chosen: 0, passed: true, sky_pinned: false });
+  expect(asset.keyframe).toMatchObject({ version: 1, stage: "first", art: "art", reference: { key: "art" }, object_id: "kettle", gate: "passed", chosen: 0, passed: true, sky_pinned: false,
+    gate_subject: { object_id: "kettle", kind: "building", label: "building" } });
   expect(asset.keyframe.candidates).toEqual([expect.objectContaining({ iou: 1, centre_dx: 0, area_ratio: 1, passed: true }), expect.objectContaining({ iou: null, passed: false })]);
   expect(asset.keyframe.candidates[0].painted).toBeGreaterThan(12);
   expect(asset.keyframe.candidates[0]).not.toHaveProperty("agreement"); // chains only
@@ -976,7 +977,7 @@ it("chains from a walk camera of a connected place into an orbit camera by compo
   expect((await illustrationLibrary("world", "view")).chain_sources).toEqual([{ view_id: "front", label: "Front", angle: expect.closeTo(2.73, 1) }]);
   await submitIllustration("world", "view", { ...keyframeRequest, chain_from: "front" });
   expect(illustrationJob().keyframe_input).toEqual({ stage: "chain", art: "art", reference: { key: "art", sha256: sha(blobs.get("art")!) },
-    chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle" });
+    chain_from: { view_id: "front", illustration_id: "illustration_prev", sha256: sha(previous) }, gate_object_id: "kettle", gate_subject: { object_id: "kettle", kind: "building", label: "building" } });
   await processNextAssetJob(db, "illustration");
   // The provider paints B like a first keyframe: B's exact render, with the world's (red) art as image 2.
   const { inputs } = JSON.parse(submitted()[0]![1].body);

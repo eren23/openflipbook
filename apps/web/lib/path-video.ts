@@ -30,7 +30,7 @@ import { uploadJpeg } from "./r2";
 import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionFile } from "./motion-job";
 import type { KeyframeGateDoc, MeshAssetDoc } from "./mesh-docs";
-import type { IllustrationKeyframe } from "./place-view";
+import type { IllustrationKeyframe, KeyframeGateSubject } from "./place-view";
 
 export const PATH_VIDEO_CAP_USD = 10;
 export const LEG_MODEL = "minimax/h3-max/image-to-video";
@@ -78,7 +78,7 @@ type AttemptState = "submitting" | "submission_unknown" | "queued" | "running" |
 interface Attempt { token: string; cost: number; status: AttemptState; request_id?: string }
 export interface PathVideoKeyframe {
   frame: number; time: number; stage: "source" | "first" | "chain";
-  attempt?: Attempt; gate_object_id?: string | null; gate?: KeyframeGateDoc; file?: MotionFile;
+  attempt?: Attempt; gate_object_id?: string | null; gate_subject?: KeyframeGateSubject | null; gate?: KeyframeGateDoc; file?: MotionFile;
   result?: Pick<IllustrationKeyframe, "gate" | "candidates" | "chosen" | "passed" | "sky_pinned"> & { chain?: { angle: number; hole_share: number } };
   // A failed gate is painted once more: retry is "reserved" or why not. `other` keeps the try not used.
   retry?: string; other?: KeyframeTry;
@@ -387,9 +387,9 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
       const sources = await frames.sources(kf.frame).catch(e => { if (e instanceof CreatorError) return null; throw e; });
       if (!sources) return fail("The walk's geometry changed. Unspent reservation released.");
       const { passes, chain } = await captures(), prepared = await prepareKeyframeInput(passes, sources, job.art ? await stored(job.art) : null, chain);
-      // A walk leg heads toward the building its end keyframe's gate measures (the most visible one).
+      // A walk leg heads toward the object its end keyframe's gate measures (the most visible building, or object).
       if (job.view_ids && k > 0 && prepared.gate_object_id) job.legs[k - 1]!.move.subject = sources.flatMap(s => s.definition.objects).find(o => o.id === prepared.gate_object_id)?.label.slice(0, 120) ?? null;
-      kf.attempt = { token: randomUUID(), cost: job.keyframe_reservation, status: "submitting" }; kf.gate_object_id = prepared.gate_object_id;
+      kf.attempt = { token: randomUUID(), cost: job.keyframe_reservation, status: "submitting" }; Object.assign(kf, { gate_object_id: prepared.gate_object_id, gate_subject: prepared.gate_subject });
       if (prev) kf.chained_from = p;
       return post(kf.attempt, arrays, KEYFRAME_MODEL, () => assetBackend("illustration", "submit", { prompt: job.prompt, model: KEYFRAME_MODEL,
         reservation: job.keyframe_reservation, parameters: job.keyframe_parameters, inputs: prepared.inputs }));
@@ -407,7 +407,7 @@ async function step(db: Db, job: PathVideoDoc, token: string): Promise<number> {
     // result before any download, and a "started" found later is an outage.
     if (!kf.gate) {
       kf.gate = { status: "started" }; await save(arrays());
-      const body = await keyframeGateBody(passes, kf.gate_object_id ?? null, urls);
+      const body = await keyframeGateBody(passes, kf.gate_object_id ?? null, urls, kf.gate_subject?.label);
       kf.gate = { status: body ? "outage" : "no_building" };
       if (body) try {
         const masks = (await assetBackend("illustration", "gate", body, 200_000, 2_000_000))?.masks;
