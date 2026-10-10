@@ -1,8 +1,8 @@
 # 42. Copy-first stills and the gate re-judge
 
 Date: 2026-10-10. World: the fantasy-town artwork from research 40 and 41.
-Spend: $0 for generation (judge tokens only). Research 40 to 42 together:
-$8.05 of a $15 cap. Receipts, judge reports, gate files and tools:
+Spend: $0.62 for generation (the start-still tries) and judge tokens. Research 40
+to 42 together: $8.67 of a $15 cap. Receipts, judge reports, gate files and tools:
 `~/Videos/openflipbook/consistency-2026-10-10/` (not in the repo).
 
 Research 41 stopped at P3'' of a new route from P1. The judges said that the
@@ -91,8 +91,37 @@ rejects the walk because the stills are not cleared.
 - Copy-first stills keep a bad start. The start still is now the limit for the
   walk.
 
+## Follow-up: a new start still
+
+The walk needs a start still that passes. Four tries, $0.62 in ledger
+reservations:
+
+| Try | Change | Judges |
+|---|---|---|
+| New P1, 2 seeds | nano-banana-pro with no prior still: map, 4 crops, route heading | route FAIL 2 of 2: a view from above, like the map |
+| Walk from P2 | no P1. Gate over P2 to P6' (5 positions) | route PASS 5 of 5. Identity UNCERTAIN at P2 and P4, so REJECTED |
+| P2, Forge repair, 2 images | qwen-image-edit-2511 in the Forge box only, source crop as image 2 | identity FAIL 2 of 2. One image copies the map crop with its label text |
+| P2, two-building repair, 2 images | Forge box and left box, labels removed from the crops, well kept | route PASS 2 of 2. Identity UNCERTAIN and FAIL |
+
+Outside the repair boxes, each repair is byte-identical to P2.
+
+The two-building repair changed the wrong building. The large teal building at
+the left of P2 is the Inn. The Bookshop is the green lean-to at the left edge.
+The agent that measured the boxes had only the Bookshop and Forge crops. It
+matched the Inn to the Bookshop. A judge before it made the same mistake.
+
+- Identify each building against all source crops before a repair. An agent
+  that gets only the target crop finds that target in the image.
+- A model can copy a reference crop with its map label. Remove the labels from
+  reference crops.
+- Judges give different verdicts on the same pixels: the conservatory and the
+  Inn roof in P2 passed in one run and were doubtful in the next.
+
+No walk is presented.
+
 ## Open
 
-- A start still that passes strict identity and the start heading.
+- A start still that passes strict identity and the start heading. Four tries
+  failed (see the follow-up).
 - Larger steps without smear: a sharpening pass, or more steps of tz 0.12.
 - The product does not use copy-first stills yet.
