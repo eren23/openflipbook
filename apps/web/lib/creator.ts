@@ -78,7 +78,7 @@ export async function listCreatorWorlds(url: URL) {
       image_key: "$content.image_key", node_count: { $ifNull: ["$content.node_count", 0] }, place_count: { $ifNull: ["$places.count", 0] },
       pinned: { $ifNull: ["$metadata.pinned", false] }, archived: { $ifNull: ["$metadata.archived", false] },
       last_opened_at: { $ifNull: ["$metadata.last_opened_at", { $ifNull: ["$content.created_at", { $toDate: "$places.updated_at" }] }] },
-      resume_node_id: { $ifNull: ["$metadata.resume_node_id", { $ifNull: ["$content.latest", null] }] },
+      resume_node_id: { $ifNull: ["$metadata.artwork_node_id", { $ifNull: ["$metadata.resume_node_id", { $ifNull: ["$content.latest", null] }] }] },
       resume_place_id: { $ifNull: ["$metadata.resume_place_id", { $cond: [{ $gt: ["$content.node_count", 0] }, null, "$places.latest"] }] },
       resume_view: "$metadata.resume_view",
     } },
@@ -106,7 +106,7 @@ export async function updateCreatorWorld(sessionId: string, body: unknown) {
     if (patch.resume_node_id || !await db.collection("place_scenes").findOne({ session_id: sessionId })) throw new CreatorError("Saved view not found", 404);
   }
   await db.collection<{ _id: string }>("creator_worlds").updateOne(
-    { _id: sessionId }, { $set: { ...patch, ...(patch.resume_node_id || patch.resume_place_id ? { last_opened_at: new Date(), resume_view:null, ...(patch.resume_node_id ? { resume_place_id: null } : { resume_node_id: null }) } : {}) } }, { upsert: true },
+    { _id: sessionId }, { $set: { ...patch, ...(patch.resume_node_id || patch.resume_place_id ? { last_opened_at: new Date(), resume_view:null, ...(patch.resume_node_id ? { resume_place_id: null, artwork_node_id: patch.resume_node_id } : { resume_node_id: null }) } : {}) } }, { upsert: true },
   );
   return { saved: true };
 }

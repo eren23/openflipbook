@@ -6,6 +6,19 @@ const world = { id: "s1", title: "Harbor", image_url: "/saved.jpg", node_count: 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("creator workspace", () => {
+  it("shows artwork beside 3D Continue without changing either saved position or starting generation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ worlds: [{ ...world, resume_place_id: "inn", resume_view: "walk", place_count: 2 }], next_cursor: null })));
+    render(<CreatorWorkspace/>); await screen.findByRole("article");
+    expect(screen.getByRole("link", { name: "Continue" }).getAttribute("href")).toBe("/sketch/world?world=s1&place=inn&view=walk");
+    expect(screen.getByRole("link", { name: "Explore artwork" }).getAttribute("href")).toBe("/play?continue=s1&node=n1");
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+  it("does not offer an artwork resume for a source-free world with no saved image nodes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ worlds: [{ ...world, node_count: 0, resume_node_id: null, resume_place_id: "inn", place_count: 1 }], next_cursor: null })));
+    render(<CreatorWorkspace/>); await screen.findByRole("article");
+    expect(screen.queryByRole("link", { name: "Explore artwork" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Continue" }).getAttribute("href")).toBe("/sketch/world?world=s1&place=inn");
+  });
   it("loads saved artwork and resume links, opens notebook, and recovers missing previews", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(json({ worlds: [world], next_cursor: null }))));
     render(<CreatorWorkspace />); await screen.findByRole("article");

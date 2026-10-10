@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, ArrowRight, BookOpen, Box, Check, Compass, ImageOff, Map, Pencil, Pin, Plus, Search, Upload, X } from "lucide-react";
-import { creatorWorldUrl, type WorldSummary } from "@/lib/creator-types";
+import { creatorArtworkUrl, creatorWorldUrl, type WorldSummary } from "@/lib/creator-types";
 import { placeScenesEnabled } from "@/lib/place-scene-enabled";
 import CreatorNotebook from "./creator-notebook";
 import WorldImporter from "./world-importer";
@@ -72,12 +72,13 @@ function WorldCard({ world, onChanged, onNotebook }: { world: WorldSummary; onCh
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const resume = creatorWorldUrl(world);
+  const artwork = creatorArtworkUrl(world);
   return <article className={s.card} aria-label={world.title}>
     {/* eslint-disable-next-line @next/next/no-img-element -- R2 cover; next/image adds a loader hop */}
     <a href={resume} className={s.cover} aria-label={`Open ${world.title}`}>{world.image_url && !imageFailed ? <img src={world.image_url} alt={world.title} loading="lazy" onError={() => setImageFailed(true)} /> : world.place_count && !world.node_count ? <Box size={40} aria-label="3D world" /> : <ImageOff size={32} aria-label="Preview unavailable" />}</a>
     <div className={s.details}>{renaming ? <form className={s.rename} onSubmit={e => { e.preventDefault(); void patch({ title }); }}><input aria-label="World title" value={title} maxLength={160} autoFocus onChange={e => setTitle(e.target.value)} /><button className={s.icon} disabled={busy || !title.trim()} title="Save title" aria-label="Save title"><Check size={17} /></button><button type="button" className={s.icon} title="Cancel rename" aria-label="Cancel rename" onClick={() => { setTitle(world.title); setRenaming(false); }}><X size={17} /></button></form> : <h2>{world.title}</h2>}
       <p className={s.meta}>{world.node_count} saved {world.node_count === 1 ? "view" : "views"}{!!world.place_count && ` / ${world.place_count} ${world.place_count === 1 ? "place" : "places"}`} &middot; {new Date(world.last_opened_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
-      <div className={s.cardfooter}><a className={s.button} href={resume}>Continue<ArrowRight size={15} /></a><button className={s.icon} aria-label="Open notebook" title="Notebook" onClick={onNotebook}><BookOpen size={17} /></button><button className={s.icon} disabled={busy} aria-label={world.pinned ? "Unpin world" : "Pin world"} title={world.pinned ? "Unpin" : "Pin"} aria-pressed={world.pinned} onClick={() => void patch({ pinned: !world.pinned })}><Pin size={16} /></button><button className={s.icon} disabled={busy} aria-label="Rename world" title="Rename" onClick={() => setRenaming(true)}><Pencil size={16} /></button><button className={s.icon} disabled={busy} aria-label={world.archived ? "Restore world" : "Archive world"} title={world.archived ? "Restore" : "Archive"} onClick={() => void patch({ archived: !world.archived })}>{world.archived ? <ArchiveRestore size={17} /> : <Archive size={17} />}</button></div>
+      <div className={s.cardfooter}><a className={s.button} href={resume}>Continue<ArrowRight size={15} /></a>{artwork && <a className={s.button} href={artwork}><Compass size={15}/>Explore artwork</a>}<button className={s.icon} aria-label="Open notebook" title="Notebook" onClick={onNotebook}><BookOpen size={17} /></button><button className={s.icon} disabled={busy} aria-label={world.pinned ? "Unpin world" : "Pin world"} title={world.pinned ? "Unpin" : "Pin"} aria-pressed={world.pinned} onClick={() => void patch({ pinned: !world.pinned })}><Pin size={16} /></button><button className={s.icon} disabled={busy} aria-label="Rename world" title="Rename" onClick={() => setRenaming(true)}><Pencil size={16} /></button><button className={s.icon} disabled={busy} aria-label={world.archived ? "Restore world" : "Archive world"} title={world.archived ? "Restore" : "Archive"} onClick={() => void patch({ archived: !world.archived })}>{world.archived ? <ArchiveRestore size={17} /> : <Archive size={17} />}</button></div>
       {error && <p role="alert" className={s.error}>{error}</p>}
     </div>
   </article>;
