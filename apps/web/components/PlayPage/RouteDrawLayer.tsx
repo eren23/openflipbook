@@ -2,61 +2,66 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 
-import type { MapCrop, ObserverPose, StoredWalk, WalkClipRow, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
+import type { MapCrop, StoredWalk, WalkClipRow, WorldEntityGeo, WorldVec2 } from "@openflipbook/config";
 
 import { useContainRect } from "@/hooks/useContainRect";
-import { canvasSource } from "@/lib/image-click";
-import { pointInBlock, renderLayoutControl } from "@/lib/layout-control";
+import { pointInBlock } from "@/lib/layout-control";
 import { placeScenesEnabled } from "@/lib/place-scene-enabled";
-import { paintableShots, ROUTE_LANE_GAP, routeFromStroke, routeShots, strokeToWorld, type Route, type RouteShot } from "@/lib/route-line";
+import { type Route } from "@/lib/route-line";
+import type { ImageLedPoint } from "@/lib/image-led-walk";
+import { ImageLedWalk } from "./ImageLedWalk";
 import { observerToWalk, routeQuery } from "@/lib/walk-position";
 import { worldEditorHref } from "@/lib/world-editor-selection";
 import { resolveAbsoluteFrame, toAbsoluteEntities } from "@/lib/world-geometry";
 
 interface Props {
-  /** World map geometry (any frame; resolved to absolute here). */
+  /** Optional geometry for the separate physical 3D walk link. */
   entities: WorldEntityGeo[];
-  /** The world rect the page's image shows. */
+  /** Image frame used for drawing and optional 3D navigation. */
   frame: MapCrop;
   /** The frame the drawn route lives in (null = the root map). */
   frameParentId?: string | null;
   imgRef?: RefObject<HTMLImageElement | null>;
   /** Keep every camera aimed at this place instead of along the line. */
   lookAt?: WorldVec2 | null;
-  /** Whose spend a painted walk lands on. Without it the walk cannot be paid
-   *  for, so Accept stays hidden and the layer is preview-only. */
+  /** Owner of durable image-led work; without a session only drawing is shown. */
   sessionId?: string | null;
   /** The world's own art, so painted keyframes keep its medium. */
   styleRefUrl?: string | null;
-  /** The page a walk is kept on -- a walk is paid for, so it outlives the tab
-   *  that made it. Without it the walk still paints, it just is not kept. */
+  /** Saved original artwork; required for durable source-bound illustrated routes. */
   nodeId?: string | null;
-  /** A walk already painted on this page, shown instead of an empty layer. */
+  /** Historical painted clips remain playable; no automatic regeneration. */
   savedWalk?: StoredWalk | null;
   onClose: () => void;
 }
 
-const PREVIEW_W = 320;
-const PREVIEW_H = 180;
-// What the model is actually given per shot. Bigger than the preview, square
-// because the edit model that holds a camera was measured square.
-const CONTROL_W = 768;
-const CONTROL_H = 768;
-// How much of the map travels with a shot: a square of world centred a little
-// ahead of the camera, so the crop holds what it is walking toward rather than
-// what is behind it.
-const SURROUNDINGS_AHEAD = 12;
-const SURROUNDINGS_SPAN = 46;
-// Fraction of the image a pointer must travel before the stroke gains a point.
 const MIN_STEP = 0.004;
 
+/** Sample the drawn source-image line, without moving points to fit proxy buildings. */
+export function imageLedCheckpoints(points: readonly ImageLedPoint[], count = 6): ImageLedPoint[] {
+  const clean = points.filter((p,i) => !i || Math.hypot(p.x-points[i-1]!.x,p.y-points[i-1]!.y)>1e-7);
+  if (clean.length < 2) return [];
+  const lengths = [0];
+  for (let i=1;i<clean.length;i++) lengths.push(lengths[i-1]!+Math.hypot(clean[i]!.x-clean[i-1]!.x,clean[i]!.y-clean[i-1]!.y));
+  const total = lengths.at(-1)!;
+  if (total < .01) return [];
+  return Array.from({length:count},(_,index)=>{
+    if(index===0)return {...clean[0]!};
+    if(index===count-1)return {...clean.at(-1)!};
+    const distance=total*index/(count-1);
+    const found=lengths.findIndex(v=>v>=distance);
+    const end=found<0?clean.length-1:Math.max(1,found);
+    const a=clean[end-1]!,b=clean[end]!;
+    const t=(distance-lengths[end-1]!)/(lengths[end]!-lengths[end-1]!);
+    return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+  });
+}
+
 /**
- * Draw a route on the map (Phase 3). The stroke becomes world positions, the
- * camera looks along it, and checkpoints mark where a new keyframe image is
- * needed. Everything here is free: the preview is the same block render the
- * enter path already uses, so a route can be judged before any spend.
+ * Draw an image-led route on the source artwork. Every checkpoint is retained;
+ * image quality and source identity are reviewed independently of optional 3D navigation.
  */
-export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, lookAt = null, sessionId = null, styleRefUrl = null, nodeId = null, savedWalk = null, onClose }: Props) {
+export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, lookAt: _lookAt = null, sessionId = null, styleRefUrl = null, nodeId = null, savedWalk = null, onClose }: Props) {
   const content = useContainRect(imgRef);
   const [stroke, setStroke] = useState<{ x: number; y: number }[]>([]);
   // A ref, not state: a burst of pointermove events inside one task would all
@@ -65,7 +70,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   const [selected, setSelected] = useState(0);
   // Which clip of a painted walk is playing; the player steps through them.
   const [clip, setClip] = useState(0);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [illustrating, setIllustrating] = useState(false);
   const [walk, setWalk] = useState<
     { state: "idle" } | { state: "painting"; shots: number } | { state: "done"; clips: Pick<WalkClipRow, "video_url" | "play_until">[]; usd: number } | { state: "failed"; why: string }
   >(savedWalk?.clips.length ? { state: "done", clips: savedWalk.clips, usd: savedWalk.spent_usd } : { state: "idle" });
@@ -76,32 +81,27 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   useEffect(() => {
     setStroke([]);
     setSelected(0);
-  }, [frame.x, frame.y, frame.w, frame.h, frameParentId]);
+    setIllustrating(false);
+    drawingRef.current = false;
+  }, [frame.x, frame.y, frame.w, frame.h, frameParentId, sessionId, nodeId, styleRefUrl]);
 
   const absolute = useMemo(() => toAbsoluteEntities(entities, entities), [entities]);
-  const routeOpts = useMemo(
-    () => ({ frameParentId, laneGap: ROUTE_LANE_GAP, ...(lookAt ? { lookAt } : {}) }),
-    [frameParentId, lookAt],
-  );
+  const points = useMemo(() => imageLedCheckpoints(stroke), [stroke]);
   const route: Route | null = useMemo(() => {
-    if (stroke.length < 2) return null;
-    return routeFromStroke(strokeToWorld(stroke, frame), absolute, { frameParentId, ...(lookAt ? { lookAt } : {}) });
-  }, [stroke, frame, absolute, frameParentId, lookAt]);
+    if (!points.length) return null;
+    const path = stroke.map(p=>({x:frame.x+p.x*frame.w,y:frame.y+p.y*frame.h}));
+    let distance=0;
+    const checkpoints=points.map((p,i)=>{
+      const pos={x:frame.x+p.x*frame.w,y:frame.y+p.y*frame.h};
+      if(i) distance+=Math.hypot((p.x-points[i-1]!.x)*frame.w,(p.y-points[i-1]!.y)*frame.h);
+      const next=points[Math.min(i+1,points.length-1)]!,prev=points[Math.max(0,i-1)]!;
+      return {observer:{pos,eye_height:1.7,gaze:Math.atan2((next.y-prev.y)*frame.h,(next.x-prev.x)*frame.w),fov:Math.PI/2,pitch:0},distance,reason:i===0?"start" as const:i===points.length-1?"end" as const:"distance" as const,moved:false,blocked:false};
+    });
+    return {path,checkpoints,length:distance};
+  },[points,stroke,frame]);
 
-
-  // What each checkpoint would be a picture OF -- free, from the same block
-  // render the preview draws, so a worthless camera never costs a generation.
-  const shots: RouteShot[] = useMemo(
-    () => (route ? routeShots(route, absolute, routeOpts) : []),
-    [route, absolute, routeOpts],
-  );
-  // Only shots a clip can reach: the backend links index n to n+1 alone.
-  const worth = useMemo(() => paintableShots(shots), [shots]);
-  const seeing = shots.filter((s) => s.worth).length;
-
-  // A route that starts inside a place built in 3D is walked there instead:
-  // the editor has the real geometry, the map only has boxes. The place is the
-  // scene's own geo, not one of its objects (they share its scene_id).
+  // Only the separate physical-walk link needs an authored scene. It cannot
+  // change the normalized route or the image-led creation flow.
   const open3d = useMemo(() => {
     const start = route?.checkpoints[0]?.observer;
     if (!sessionId || !start || !placeScenesEnabled()) return null;
@@ -115,79 +115,6 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
       { view: "walk", route: routeQuery(route.checkpoints.map((c) => observerToWalk(c.observer, metres))) });
   }, [route, entities, absolute, sessionId]);
 
-  const accept = useCallback(async () => {
-    if (!sessionId || worth.length === 0) return;
-    setWalk({ state: "painting", shots: worth.length });
-    try {
-      // The renderer is ours, so the control image for every camera is drawn
-      // here and sent; the backend only paints and links.
-      const canvas = document.createElement("canvas");
-      canvas.width = CONTROL_W;
-      canvas.height = CONTROL_H;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("This browser would not give a 2d canvas");
-      // The map around a camera is what makes a shot THIS town rather than a
-      // competent generic street with the right geometry, so crop it from the
-      // page's own image when there is one to crop.
-      // A reopened page shows its R2 url, and R2 sends no CORS header: drawing
-      // that <img> taints the canvas and toDataURL throws, which failed the
-      // whole walk before it was sent (live 2026-09-24). Crop the node's own
-      // bytes, served same-origin, instead.
-      let map = imgRef?.current ?? null;
-      if (map && canvasSource(map.src, nodeId) !== map.src) {
-        const same = new Image();
-        same.src = canvasSource(map.src, nodeId);
-        map = await same.decode().then(() => same, () => null);
-      }
-      const mapCanvas = document.createElement("canvas");
-      mapCanvas.width = CONTROL_W;
-      mapCanvas.height = CONTROL_H;
-      const mapCtx = mapCanvas.getContext("2d");
-      const surroundings = (o: ObserverPose): string | null => {
-        if (!map || !mapCtx || !map.naturalWidth) return null;
-        const cx = o.pos.x + Math.cos(o.gaze) * SURROUNDINGS_AHEAD;
-        const cy = o.pos.y + Math.sin(o.gaze) * SURROUNDINGS_AHEAD;
-        const half = SURROUNDINGS_SPAN / 2;
-        const sx = ((cx - half - frame.x) / frame.w) * map.naturalWidth;
-        const sy = ((cy - half - frame.y) / frame.h) * map.naturalHeight;
-        const sw = (SURROUNDINGS_SPAN / frame.w) * map.naturalWidth;
-        const sh = (SURROUNDINGS_SPAN / frame.h) * map.naturalHeight;
-        mapCtx.drawImage(map, sx, sy, sw, sh, 0, 0, CONTROL_W, CONTROL_H);
-        // The crop only makes a shot this town; without it the shot is still
-        // a street with the right geometry, so never fail the walk over it.
-        try {
-          return mapCanvas.toDataURL("image/png");
-        } catch {
-          return null;
-        }
-      };
-      const payload = worth.map((s) => {
-        const control = renderLayoutControl(absolute, s.observer, CONTROL_W, CONTROL_H, frameParentId, ROUTE_LANE_GAP, true);
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), CONTROL_W, CONTROL_H), 0, 0);
-        const around = surroundings(s.observer);
-        return {
-          index: s.index,
-          distance: s.distance,
-          control_data_url: canvas.toDataURL("image/png"),
-          sees: s.sees.map((v) => [v.label, v.share]),
-          observer: s.observer,
-          ...(around ? { surroundings_data_url: around } : {}),
-        };
-      });
-      const res = await fetch(`/api/world/${encodeURIComponent(sessionId)}/walk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shots: payload, style_ref_url: styleRefUrl, node_id: nodeId }),
-      });
-      const body = (await res.json()) as { clips?: Pick<WalkClipRow, "video_url" | "play_until">[]; spent_usd?: number; error?: string };
-      if (!res.ok || body.error) throw new Error(body.error || `walk failed (${res.status})`);
-      setClip(0);
-      setWalk({ state: "done", clips: body.clips ?? [], usd: body.spent_usd ?? 0 });
-    } catch (err) {
-      setWalk({ state: "failed", why: err instanceof Error ? err.message : String(err) });
-    }
-  }, [sessionId, worth, absolute, frameParentId, styleRefUrl, nodeId, imgRef, frame]);
-
   const toImage = useCallback((p: WorldVec2) => ({ x: (p.x - frame.x) / frame.w, y: (p.y - frame.y) / frame.h }), [frame]);
   const point = (event: ReactPointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -197,16 +124,6 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
   };
 
   const checkpoint = route?.checkpoints[Math.min(selected, route.checkpoints.length - 1)] ?? null;
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !checkpoint) return;
-    // Carve as the route does, or the preview would show the camera standing
-    // in a wall it was never routed through.
-    // Roofs too: the preview shows what Accept sends.
-    const control = renderLayoutControl(absolute, checkpoint.observer, PREVIEW_W, PREVIEW_H, frameParentId, ROUTE_LANE_GAP, true);
-    canvas.getContext("2d")?.putImageData(new ImageData(new Uint8ClampedArray(control.rgba), PREVIEW_W, PREVIEW_H), 0, 0);
-  }, [checkpoint, absolute, frameParentId]);
-
   const style = (p: { x: number; y: number }) =>
     content
       ? { left: `${content.offsetX + p.x * content.width}px`, top: `${content.offsetY + p.y * content.height}px` }
@@ -229,12 +146,14 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
           });
         }}
         onPointerUp={() => { drawingRef.current = false; }}
+        onPointerCancel={() => { drawingRef.current = false; }}
+        onLostPointerCapture={() => { drawingRef.current = false; }}
         onPointerLeave={() => { drawingRef.current = false; }}
       />
-      <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full">
-        {route && content && (
+      <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" viewBox={content ? undefined : "0 0 100 100"} preserveAspectRatio="none">
+        {route && (
           <polyline
-            points={route.path.map(toImage).map((p) => `${content.offsetX + p.x * content.width},${content.offsetY + p.y * content.height}`).join(" ")}
+            points={route.path.map(toImage).map((p) => content ? `${content.offsetX + p.x * content.width},${content.offsetY + p.y * content.height}` : `${p.x*100},${p.y*100}`).join(" ")}
             fill="none" stroke="#e11d48" strokeWidth={2} strokeDasharray="6 4"
           />
         )}
@@ -246,7 +165,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
             key={`${c.distance}-${i}`}
             data-checkpoint={c.reason}
             data-blocked={c.blocked ? "1" : undefined}
-            aria-label={`Checkpoint ${i + 1}, ${c.reason}, ${c.distance.toFixed(0)} units${c.blocked ? ", no clear spot" : ""}`}
+            aria-label={`Checkpoint ${i + 1}, ${c.reason}, estimated source-image position`}
             aria-pressed={i === selected}
             onClick={() => setSelected(i)}
             className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-1 text-[10px] leading-4 ${c.blocked ? "border-amber-600 bg-amber-500 text-white" : i === selected ? "border-rose-600 bg-rose-600 text-white" : "border-rose-600 bg-white/85 text-rose-700"}`}
@@ -272,18 +191,9 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
         <span data-testid="route-summary">
           {route
             ? [
-                `${route.length.toFixed(0)} units`,
-                `${route.checkpoints.length} keyframes`,
-                checkpoint ? `#${selected + 1} ${checkpoint.reason} at ${checkpoint.distance.toFixed(0)}` : null,
-                // Say it once for the whole route: a camera inside a building
-                // would render from the dark, so it steps out sideways.
-                route.checkpoints.some((c) => c.moved) ? `${route.checkpoints.filter((c) => c.moved).length} cameras stepped aside` : null,
-                // Amber marks: the line crosses a place with no standable gap.
-                route.checkpoints.some((c) => c.blocked) ? `${route.checkpoints.filter((c) => c.blocked).length} have no clear spot — redraw around the buildings` : null,
-                // A camera facing open ground is not worth a generation, so
-                // say how many of them would actually be painted.
-                shots.length > seeing ? `${shots.length - seeing} see nothing — skipped` : null,
-                seeing > worth.length ? `${seeing - worth.length} have no neighbour to walk to — skipped` : null,
+                `${route.checkpoints.length} checkpoints on the source map`,
+                checkpoint ? `Selected #${selected + 1}` : null,
+                "Positions and directions are estimated, not calibrated",
               ].filter(Boolean).join(" · ")
             : "Drag across the map to draw where the camera walks."}
         </span>
@@ -300,6 +210,7 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
           // A paid walk used to end at "2 clips · $0.69" with nothing that
           // could play it. Play its clips back to back, looping.
           <video
+            key={clip}
             data-testid="route-walk-player"
             src={walk.clips[clip % walk.clips.length]!.video_url}
             autoPlay
@@ -312,34 +223,24 @@ export function RouteDrawLayer({ entities, frame, frameParentId = null, imgRef, 
             // only from the clip this render shows: one advance per clip.
             onTimeUpdate={(e) => {
               const until = walk.clips[clip % walk.clips.length]!.play_until;
-              if (until !== undefined && e.currentTarget.currentTime >= until) setClip((i) => (i === clip ? (i + 1) % walk.clips.length : i));
+              if (until !== undefined && e.currentTarget.currentTime >= until) setClip((i) => (i === clip ? i + 1 : i));
             }}
-            onEnded={() => setClip((i) => (i === clip ? (i + 1) % walk.clips.length : i))}
+            onEnded={() => setClip((i) => (i === clip ? i + 1 : i))}
             className="h-[180px] w-[320px] rounded border border-[var(--color-edge)] bg-black"
           />
         )}
-        <canvas ref={canvasRef} width={PREVIEW_W} height={PREVIEW_H} aria-label="Checkpoint preview" className="h-[90px] w-[160px] rounded border border-[var(--color-edge)]" />
+
         <span className="flex-1" />
         <button className="rounded border border-[var(--color-edge)] px-2 py-1" onClick={() => { setStroke([]); setSelected(0); setWalk({ state: "idle" }); }}>Clear</button>
-        {open3d ? (
-          <a
-            data-testid="route-open-3d"
-            href={open3d}
-            className="rounded border border-[var(--color-edge)] bg-[var(--color-ink)] px-2 py-1 text-[var(--color-canvas)]"
-          >
-            Walk it in 3D
-          </a>
-        ) : sessionId && worth.length > 0 && walk.state !== "painting" && (
-          <button
-            data-testid="route-accept"
-            className="rounded border border-[var(--color-edge)] bg-[var(--color-ink)] px-2 py-1 text-[var(--color-canvas)]"
-            onClick={() => void accept()}
-          >
-            {`Paint ${worth.length} shot${worth.length === 1 ? "" : "s"}`}
-          </button>
-        )}
+        {sessionId && nodeId && <button
+          type="button" data-testid="route-open-illustrated"
+          className="rounded border border-[var(--color-edge)] bg-[var(--color-ink)] px-2 py-1 text-[var(--color-canvas)]"
+          onClick={() => setIllustrating(true)}
+        >{points.length ? "Create illustrated walk" : "Open saved illustrated walks"}</button>}
+        {open3d && <a data-testid="route-open-3d" href={open3d} className="rounded border border-[var(--color-edge)] px-2 py-1">Walk it in 3D</a>}
         <button className="rounded border border-[var(--color-edge)] px-2 py-1" onClick={onClose}>Done</button>
       </div>
+      {sessionId && nodeId && <ImageLedWalk key={`${sessionId}:${nodeId}`} sessionId={sessionId} nodeId={nodeId} mapFrame={{bounds:frame,parent_id:frameParentId}} points={points} sourceImageUrl={styleRefUrl ?? null} open={illustrating} onClose={()=>setIllustrating(false)}/>}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from "node:util";
 import { getStoredBytes } from "./r2";
 import sharp from "sharp";
 import { correctMapLandmarks, type MapAlignmentCorrection } from "./map-alignment-correction";
+import { placeViewLibrary, savePlaceView } from "./place-view-server";
 
 export interface MapArtworkHead { _id: string; node_id: string; session_id: string; map_root_node_id: string }
 export interface MapArtworkVersion extends MapRepaintBinding { _id: string; session_id: string; node_id: string; created_at: Date }
@@ -20,7 +21,8 @@ export async function mapArtworkContext(sid: string, pid: string) {
   const db = await requireCreator(sid);
   const scene = await db.collection<SceneDoc>("place_scenes").findOne({ session_id: sid, place_id: pid });
   if (!scene) throw new CreatorError("Save the place before repainting its map", 409);
-  if (!scene.source_node_id) throw new CreatorError("This place has no saved reference artwork", 409);
+  if (!scene.source_node_id) return { kind: "geometry_derived" as const, scene, baseline: scene, map: null, registration: null, alignment: null, alignment_stale: false,
+    views: (await placeViewLibrary(sid, pid)).views.filter(v => v.purpose === "map") };
   const reference = await db.collection<NodeDoc>("nodes").findOne({ _id: scene.source_node_id, session_id: sid });
   if (!reference) throw new CreatorError("Place reference artwork is missing", 409);
   // A root place has its own reference, not a fictitious parent map. Neither
@@ -34,11 +36,12 @@ export async function mapArtworkContext(sid: string, pid: string) {
   const baseline = await db.collection<SceneDoc>("place_scene_versions").findOne({ session_id: sid, place_id: pid, revision: previous[0]?.scene_revision ?? 1 });
   if (!baseline) throw new CreatorError("Map baseline revision is unavailable", 409);
   const alignment = await db.collection<MapAlignmentDraft>("map_alignment_drafts").findOne({_id:`${sid}:${pid}`,session_id:sid});
-  return { scene, baseline, map: { id: source._id, root_id: root._id, title: root.page_title, url: `/api/image/${encodeURIComponent(source._id)}`, reference_kind: reference.parent_id ? "parent_map" as const : "place_reference" as const }, registration: previous[0]?.registration ?? null,
+  return { kind: "reference" as const, scene, baseline, map: { id: source._id, root_id: root._id, title: root.page_title, url: `/api/image/${encodeURIComponent(source._id)}`, reference_kind: reference.parent_id ? "parent_map" as const : "place_reference" as const }, registration: previous[0]?.registration ?? null,
     alignment, alignment_stale:!!alignment && (alignment.scene_revision!==scene.revision || alignment.scene_id!==scene.id || alignment.map_node_id!==source._id) };
 }
 export async function saveMapAlignment(sid:string,pid:string,input:Record<string,unknown>) {
   const context=await mapArtworkContext(sid,pid),db=await requireCreator(sid);
+  if (context.kind !== "reference") throw new CreatorError("Geometry-derived maps use their exact saved camera, not manual alignment", 409);
   if(input.scene_revision!==context.scene.revision || input.map_node_id!==context.map.id)throw new CreatorError("Artwork or geometry changed. Reload alignment.",409);
   if(!Number.isSafeInteger(input.revision)||Number(input.revision)<0)throw new CreatorError("Invalid alignment revision",400);
   let frame,landmarks,registration;
@@ -60,13 +63,21 @@ export async function saveMapAlignment(sid:string,pid:string,input:Record<string
 export async function prepareMapAlignmentCorrection(sid: string, pid: string, input: unknown) {
   const request = input as { revision?: unknown; object_ids?: unknown; confirmed_projection?: unknown };
   if (!request || request.confirmed_projection !== true) throw new CreatorError("Review the approximate ground-plane projection first", 400);
-  const context = await mapArtworkContext(sid, pid), draft = context.alignment;
+  const context = await mapArtworkContext(sid, pid);
+  if (context.kind !== "reference") throw new CreatorError("Geometry-derived maps cannot correct structure through manual alignment", 409);
+  const draft = context.alignment;
   if (!draft || context.alignment_stale || draft.revision !== request.revision) throw new CreatorError("Alignment changed. Reload and save a current draft.", 409);
   let definition;
   try { definition = correctMapLandmarks(context.scene.definition, draft, request.object_ids); }
   catch (e) { throw new CreatorError((e as Error).message, 400); }
   const source: MapAlignmentCorrection = { projection: "manual_planar", draft, map_root_node_id: context.map.root_id, object_ids: request.object_ids as string[] };
   return { definition, source };
+}
+/** Source-free map artwork is an ordinary saved geometry camera and illustration, never a fabricated imported image. */
+export async function saveGeometryMapView(sid: string, pid: string, input: Record<string, unknown>) {
+  const context = await mapArtworkContext(sid, pid);
+  if (context.kind !== "geometry_derived") throw new CreatorError("Imported artwork keeps its reviewed map registration", 409);
+  return savePlaceView(sid, pid, { ...input, purpose: "map" });
 }
 export async function assertMapAlignmentCorrectionCurrent(db: Db, session: ClientSession, sid: string, pid: string, source: MapAlignmentCorrection) {
   const draft = await db.collection<MapAlignmentDraft>("map_alignment_drafts").findOne({ _id: `${sid}:${pid}`, session_id: sid }, { session });

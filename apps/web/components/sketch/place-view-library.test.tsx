@@ -14,6 +14,15 @@ beforeEach(() => {
 });
 const draw = (disabled = false) => render(<PlaceViewLibrary sessionId="world" placeId="place" revision={1} capture={capture} disabled={disabled}/>);
 const writes = () => fetcher.mock.calls.filter(([, options]) => options?.method === "POST").map(([, options]) => JSON.parse(options.body));
+it("refreshes and selects a newly prepared walk checkpoint without recapturing or submitting generation", async () => {
+  views = [view]; const selected = vi.fn();
+  const ui = render(<PlaceViewLibrary sessionId="world" placeId="place" revision={1} capture={capture} disabled={false} onSelectedViewChange={selected}/>);
+  await waitFor(() => expect(selected).toHaveBeenLastCalledWith("view"));
+  views = [view, { ...view, id: "first-walk", label: "Walk checkpoint 1/2", mode: "walk" }];
+  ui.rerender(<PlaceViewLibrary sessionId="world" placeId="place" revision={1} capture={capture} disabled={false} refreshKey={1} selectedViewId="first-walk" onSelectedViewChange={selected}/>);
+  await waitFor(() => expect((screen.getByRole("combobox", { name: "Saved camera view" }) as HTMLSelectElement).value).toBe("first-walk"));
+  expect(selected).toHaveBeenLastCalledWith("first-walk"); expect(capture).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+});
 it("composes the selected object explicitly without capturing or generating",async()=>{
   const compose=vi.fn();
   render(<PlaceViewLibrary sessionId="world" placeId="place" revision={1} capture={capture} disabled={false} selectedObject="inn" selectedObjectLabel="Copper Kettle" onComposeSelection={compose}/>);

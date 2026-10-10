@@ -50,7 +50,9 @@ COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/config ./packages/config
 COPY apps/web ./apps/web
-RUN pnpm --filter @openflipbook/web build
+# Reuse the prepared package manager during compilation instead of downloading
+# a separate Corepack version for the builder stage.
+RUN COREPACK_ENABLE_PROJECT_SPEC=0 pnpm --filter @openflipbook/web build
 
 # Independent queue execution uses the existing workspace tsx runtime. It does
 # not need Next, a running web process, browser cookies or client build flags.
@@ -66,6 +68,7 @@ COPY apps/web/package.json apps/web/tsconfig.json ./
 COPY apps/web/lib ./lib
 COPY apps/web/scripts/place-build-worker.ts ./scripts/place-build-worker.ts
 COPY apps/web/scripts/owner-recovery.ts ./scripts/owner-recovery.ts
+COPY apps/web/scripts/operator-backup.ts ./scripts/operator-backup.ts
 USER node
 CMD ["node", "--import", "tsx", "scripts/place-build-worker.ts"]
 

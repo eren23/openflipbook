@@ -669,7 +669,7 @@ export interface Entity {
 // projects (map + observer) → the per-frame layout below.
 
 // A point in world units (arbitrary scale; origin top-left, +x east, +y south).
-export type { PlaceComponent, PlaceSceneObject, PlaceSceneDefinition, PlaceSceneSnapshot, WorldEditProposal, BuildingSide, BuildingOpening, BuildingStructure, BuildingSurface, SurfaceMaterial, RoomLayout, PlaceConnection, PlaceBuildConnectionInput, PlaceBuildFloorTarget, PlaceNetwork, ConnectedPlaceChunk, SceneGenerationReceipt } from "./place-scene";
+export type { PlaceComponent, PlaceSceneObject, PlaceSceneDefinition, PlaceSceneSnapshot, WorldEditProposal, BuildingSide, BuildingOpening, BuildingStructure, BuildingSurface, SurfaceMaterial, RoomLayout, PlaceConnection, PlaceBuildConnectionInput, PlaceBuildFloorTarget, PlaceBuildImageReference, PlaceNetwork, ConnectedPlaceChunk, SceneGenerationReceipt, SceneTextEditReceipt } from "./place-scene";
 
 export interface WorldVec2 {
   x: number;

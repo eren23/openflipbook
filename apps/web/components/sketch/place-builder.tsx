@@ -14,15 +14,18 @@ export default function PlaceBuilder({ scene, disabled, reviewingBuildId, onPrev
   onTargetFloorChange?: (target: PlaceBuildFloorTarget | undefined) => void;
 }) {
   const [prompt, setPrompt] = useState(""), [confirmed, setConfirmed] = useState(false), [error, setError] = useState("");
+  const [useSourceImage, setUseSourceImage] = useState(false);
   const [jobs, setJobs] = useState<PlaceBuildJob[]>([]), [busy, setBusy] = useState(false);
   const [materialConfig, setMaterialConfig] = useState<AssetCapabilities | null>(null), [meshConfig, setMeshConfig] = useState<AssetCapabilities | null>(null);
-  const [config, setConfig] = useState<{ enabled: boolean; model?: string; reservation?: number; reason?: string; floor_target_version?: number } | null>(null);
+  const [config, setConfig] = useState<{ enabled: boolean; model?: string; reservation?: number; reason?: string; floor_target_version?: number; image_context_version?: number } | null>(null);
   const pending = useRef<Record<string, unknown> | null>(null);
   const floorTargets = scene.definition.objects.flatMap(building => (building.structure?.floors ?? []).map(floor => ({ building_id: building.id, floor_id: floor.id, label: `${building.label} / ${floor.label}` })));
   const scope = pending.current ? pending.current.target_floor as PlaceBuildFloorTarget | undefined : targetFloor;
   const scopeUnavailable = !!scope && config?.floor_target_version !== 1;
+  const imageChosen = pending.current ? pending.current.use_source_image === true : useSourceImage;
+  const imageUnavailable = imageChosen && config?.image_context_version !== 1;
   const targetLabel = (target: PlaceBuildFloorTarget) => floorTargets.find(f => f.building_id === target.building_id && f.floor_id === target.floor_id)?.label ?? `Saved floor ${target.floor_id}`;
-  useEffect(() => { if (!pending.current) setConfirmed(false); }, [targetFloor?.building_id, targetFloor?.floor_id]);
+  useEffect(() => { if (!pending.current) setConfirmed(false); }, [targetFloor?.building_id, targetFloor?.floor_id, useSourceImage]);
   const endpoint = `/api/world/${encodeURIComponent(scene.session_id)}/places/${encodeURIComponent(scene.place_id)}/build`;
   const call = useCallback(async (body?: unknown) => {
     const res = await fetch(endpoint, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
@@ -55,8 +58,11 @@ export default function PlaceBuilder({ scene, disabled, reviewingBuildId, onPrev
     catch (e) { setError(`${(e as Error).message}. Refresh saved status before retrying.`); }
   }
   async function generate() {
-    if (disabled || busy || !config?.enabled || !confirmed || scopeUnavailable) return;
-    pending.current ??= { action: "queue", id: crypto.randomUUID(), prompt, confirmed, model: config.model, reservation: config.reservation, base_revision: scene.revision, ...(targetFloor ? { target_floor: targetFloor } : {}) };
+    if (busy || !pending.current && (disabled || !config?.enabled || !confirmed || scopeUnavailable || imageUnavailable)) return;
+    if (!pending.current) {
+      if (!config) return;
+      pending.current = { action: "queue", id: crypto.randomUUID(), prompt, confirmed, model: config.model, reservation: config.reservation, base_revision: scene.revision, ...(targetFloor ? { target_floor: targetFloor } : {}), ...(useSourceImage ? { use_source_image: true } : {}) };
+    }
     setBusy(true); setError("");
     try {
       const { job } = await call(pending.current); merge(job); pending.current = null; setConfirmed(false);
@@ -81,16 +87,22 @@ export default function PlaceBuilder({ scene, disabled, reviewingBuildId, onPrev
       onTargetFloorChange(floor ? { building_id: floor.building_id, floor_id: floor.floor_id } : undefined);
     }}><option value="">Entire place</option>{floorTargets.map(f => <option key={f.floor_id} value={f.floor_id}>{f.label}</option>)}</select></label>}
     {scopeUnavailable && <p role="status">Floor generation requires updated backend and layout workers.</p>}
+    {!!scene.source_node_id && <>
+      <label className={s.checkbox}><input type="checkbox" checked={imageChosen} disabled={busy || !!pending.current || config?.image_context_version !== 1} onChange={e => setUseSourceImage(e.target.checked)}/>Use saved source image for layout</label>
+      <p className={s.meshMeta}>{scene.definition.width} × {scene.definition.depth} authored metres. Image-based geometry is an estimated proposal; review its layout before applying.</p>
+      {config && config.image_context_version !== 1 && <p role="status">Image layouts require updated backend and layout workers.</p>}
+    </>}
     <label>Place description<textarea aria-label="Place description" maxLength={4000} value={prompt} disabled={busy || !!pending.current} onChange={e => setPrompt(e.target.value)} placeholder="A canal-side market, eight distinct workshops, a two-storey inn and a public courtyard" /></label>
     {config?.enabled && typeof config.reservation === "number" ? <>
       <div className={s.meshMeta}>{config.model} / architecture layout</div>
-      <label className={s.checkbox}><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} />Reserve ${config.reservation.toFixed(2)} for this layout</label>
+      <label className={s.checkbox}><input type="checkbox" checked={confirmed} disabled={busy || !!pending.current} onChange={e => setConfirmed(e.target.checked)} />Reserve ${config.reservation.toFixed(2)} for this layout</label>
     </> : <p role="status">{config?.reason || "Checking layout generation availability..."}</p>}
-    <button onClick={() => void generate()} disabled={disabled || busy || planning || !config?.enabled || !confirmed || scopeUnavailable || prompt.trim().length < 3}><Sparkles size={16} />{pending.current ? "Retry saved request" : "Generate layout"}</button>
+    <button onClick={() => void generate()} disabled={busy || !pending.current && (disabled || planning || !config?.enabled || !confirmed || scopeUnavailable || imageUnavailable || prompt.trim().length < 3)}><Sparkles size={16} />{pending.current ? "Retry saved request" : "Generate layout"}</button>
     {error && <p role="alert">{error}</p>}
     <ul className={`${s.meshJobs} ${s.buildJobs}`}>{jobs.map(job => <li key={job.id}>
       <strong>{job.prompt}</strong><span>{job.status.replaceAll("_", " ")}{job.object_count !== undefined ? ` / ${job.object_count} additions` : ""}</span>
       {job.target_floor && <span>{targetLabel(job.target_floor)}</span>}
+      {job.image_input && <span>Saved image reference / {job.image_input.width} × {job.image_input.height}px / estimated geometry</span>}
       {job.base_revision !== scene.revision && <span>Based on revision {job.base_revision}; current revision is {scene.revision}</span>}
       {job.stale_connections && <span>Saved connections changed; a new layout request is required.</span>}
       {job.error && <p>{job.error}</p>}

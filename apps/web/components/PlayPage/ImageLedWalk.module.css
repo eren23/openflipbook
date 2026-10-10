@@ -1,0 +1,13 @@
+.panel { isolation: isolate; }
+.panel h3 { margin: 12px 0 8px; font-size: 1.05rem; font-weight: 600; }
+.panel button { min-height: 42px; padding: 8px 12px; border: 1px solid var(--color-edge); border-radius: 7px; background: var(--color-canvas); color: var(--color-ink); line-height: 1.35; }
+.panel button[aria-pressed="true"] { background: var(--color-ink); color: var(--color-canvas); }
+.panel button:disabled { opacity: .45; cursor: default; }
+.panel button:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible { outline: 2px solid #b47824; outline-offset: 3px; }
+.panel label { font-size: .9rem; }
+.panel input[type="checkbox"] { width: 16px; height: 16px; margin-right: 5px; accent-color: #866c37; vertical-align: middle; }
+.panel textarea { min-height: 76px; }
+.panel img { max-width: 100%; }
+
+.panel .sourceMarker { position: absolute; width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 50%; transform: translate(-50%, -50%); font-size: 13px; background: #f8d474; color: #29211a; border-color: #29211a; }
+.panel .sourceMarker[aria-pressed="true"] { background: #29211a; color: #f8d474; }

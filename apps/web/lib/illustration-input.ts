@@ -12,11 +12,13 @@ import sharp from "sharp";
 import { illustrationIdentity } from "./illustration-identity";
 import { prepareKeyframeInput, type KeyframeChain, type KeyframePasses } from "./illustration-keyframe-server";
 import type { SceneDoc } from "./place-scene-store";
+import { reviewedKeyframe } from "./illustration-verification";
+import { sourceLandmarkReferences } from "./illustration-landmarks";
 
 // Exclude ownership, storage locations and mutable review state so immutable
 // provenance remains valid after an owner fork.
 export function illustrationDependency(view: PlaceViewDoc): ViewDependency {
-  const { _id: _key, session_id: _sid, files, accepted_illustration_id: _accepted, ...capture } = view;
+  const { _id: _key, session_id: _sid, files, accepted_illustration_id: _accepted, source_use_fence: _fence, ...capture } = view;
   return { view_id: view.id, width: view.width, height: view.height, input_sha256: viewHash({ capture,
     passes: VIEW_PASSES.map(pass => ({ pass, sha256: files[pass].sha256, bytes: files[pass].bytes })) }) };
 }
@@ -88,6 +90,7 @@ export async function keyframeArt(db: Db, sid: string, placeId: string) {
 export async function keyframeChainSource(db: Db, sid: string, from: NonNullable<IllustrationKeyframeInput["chain_from"]>, current: boolean, session?: ClientSession) {
   const asset = await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${from.illustration_id}`, session_id: sid }, session ? { session } : {});
   if (!asset?.view_dependency || asset.view_dependency.view_id !== from.view_id || asset.sha256 !== from.sha256 || asset.edit_input) throw new CreatorError("The previous keyframe changed", 409);
+  if (!reviewedKeyframe(asset.keyframe, asset.sha256)) throw new CreatorError("The previous keyframe needs a passing camera check and review of its final image", 409);
   return { asset, view: current ? await illustrationSource(db, sid, asset.view_dependency, session) : await savedView(db, sid, asset.view_dependency, session) };
 }
 /**
@@ -117,5 +120,11 @@ export async function prepareKeyframeViewInput(db: Db, sid: string, dependency: 
   const view = await illustrationSource(db, sid, dependency), sources = await assertCurrentView(db, view);
   const art = input.reference ? await verifiedBytes(input.reference) : null;
   const chain = input.chain_from ? await keyframeChain(db, sid, input.chain_from, true, view) : undefined;
-  return prepareKeyframeInput(await keyframeViewPasses(view), sources, art, chain);
+  if (input.reference_profile && input.reference_profile !== "source-art-map-landmarks-v1") throw new CreatorError("Unknown source-art reference profile", 409);
+  if (input.reference_guidance && (!(["saved-camera-guides-v1", "saved-camera-controlnet-v1"] as string[]).includes(input.reference_guidance) || !input.reference_profile)) throw new CreatorError("Unknown or unbound camera guidance", 409);
+  const landmarks = input.reference_profile ? await sourceLandmarkReferences(db, sid, view.root_place_id, input.reference?.sha256 ?? "", sources.filter(s => s.place_id === view.root_place_id).flatMap(s => s.definition.objects.filter(o => ["building", "house", "tavern"].includes(o.kind)).map(o => o.label))) : undefined;
+  const prepared = await prepareKeyframeInput(await keyframeViewPasses(view), sources, art, chain, landmarks, input.reference_guidance);
+  if (input.reference_preparation && viewHash(input.reference_preparation) !== viewHash(prepared.reference_preparation))
+    throw new CreatorError("Keyframe source-art preparation changed", 409);
+  return prepared;
 }

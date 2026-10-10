@@ -499,6 +499,35 @@ async def test_leg_rejects_a_reservation_that_does_not_match_the_rate(enabled, m
 async def test_capabilities_advertise_the_leg_floor(enabled):
     # The web sizes path video legs at this floor; without it (an old backend) at 5 s.
     assert (await motion.capabilities())["leg_min_seconds"] == 3
+    assert (await motion.capabilities())["leg_move_version"] == 2
+
+
+@pytest.mark.parametrize("lateral", [4, -4])
+async def test_sideways_leg_uses_the_same_one_post_transport(enabled, monkeypatch, lateral):
+    calls = []
+
+    def handler(sent):
+        calls.append(sent)
+        prompt = json.loads(sent.content)["prompt"]
+        assert f"moves sideways about 4 metres to its {'right' if lateral > 0 else 'left'}" in prompt
+        assert "holds still" not in prompt
+        return httpx.Response(200, json={"request_id": "sideways-leg"})
+
+    monkeypatch.setattr(
+        motion.httpx, "AsyncClient", lambda **kwargs: HTTPClient(transport=httpx.MockTransport(handler))
+    )
+    assert (await motion.leg(leg(move={"lateral_m": lateral})))["request_id"] == "sideways-leg"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("lateral", [float("nan"), float("inf"), -501, 501, "4", True])
+def test_invalid_lateral_displacement_rejects_before_transport(lateral):
+    with pytest.raises(ValidationError):
+        leg(move={"lateral_m": lateral})
+
+
+def test_legacy_legs_default_to_no_lateral_displacement():
+    assert leg().move.lateral_m == 0
 
 
 @pytest.mark.parametrize(("duration", "valid"), [(2, False), (3, True), (15, True), (16, False)])

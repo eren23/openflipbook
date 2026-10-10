@@ -1,5 +1,5 @@
 import type { Document } from "mongodb";
-import type { PlaceSceneDefinition, WorldEntityGeo, PlaceConnection } from "@openflipbook/config";
+import type { PlaceSceneDefinition, WorldEntityGeo, PlaceConnection, PlaceBuildConnectionInput, SceneTextEditReceipt } from "@openflipbook/config";
 import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
 import { archiveHash, archiveList, archiveObject, invalidArchive, type WorldArchive } from "./world-import-archive";
@@ -22,6 +22,9 @@ import { remapTransition } from "./transition-context";
 import { parseWalkPose } from "./walk-position";
 import { validateImportedMapArtwork } from "./world-import-map";
 import { importWorldMotion } from "./world-import-motion";
+import { importWorldPathVideos } from "./world-import-path-video";
+import { importWorldImageLedWalks } from "./image-led-walk-archive";
+import { assertGeometryMapCapture } from "./geometry-map";
 import type { WorldImportPlan } from "./world-import-plan";
 export type { WorldImportPlan } from "./world-import-plan";
 
@@ -117,8 +120,28 @@ export async function prepareWorldImport(archive: WorldArchive, sid: string): Pr
     const normalized = parsePlaceScene(s.definition);
     if (!isDeepStrictEqual(normalized, s.definition) || normalized.material_pack) invalidArchive("Scene definition requires explicit migration before restore");
     const definition = s.definition as PlaceSceneDefinition;
+    const editSources = s.edit_sources === undefined ? undefined : archiveList(s.edit_sources, 500).map((value): SceneTextEditReceipt => {
+      const receipt = archiveObject(value), connectionInput = archiveObject(receipt.connection_input);
+      if (receipt.version !== 1 || !finite(receipt.reserved_usd, 100) || Number(receipt.reserved_usd) < 0 || !Number.isSafeInteger(receipt.base_revision) || Number(receipt.base_revision) < 1
+        || ![receipt.input_sha256, receipt.output_sha256, receipt.connections_sha256].every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))
+        || archiveHash(JSON.stringify(connectionInput)) !== receipt.connections_sha256) invalidArchive("Invalid historical text edit receipt");
+      if (connectionInput.version !== 1 || connectionInput.place_id !== s.place_id) invalidArchive("Text edit connection input refers to another place");
+      for (const value of archiveList(connectionInput.connections, 256)) {
+        const connection = archiveObject(value), a = archiveObject(connection.a), b = archiveObject(connection.b);
+        id(connection.id); id(a.place_id); id(b.place_id); date(connection.created_at);
+        if (connection.version !== 1 || connection.kind !== "boundary" || a.place_id === b.place_id || !["north", "south", "east", "west"].includes(String(a.side))
+          || !["north", "south", "east", "west"].includes(String(b.side)) || !finite(a.offset) || !finite(b.offset) || !finite(connection.width, 20) || Number(connection.width) < 1.2) invalidArchive("Invalid historical text edit connection");
+      }
+      const objectIds = archiveList(receipt.object_ids, 2000).map(id), selectedIds = archiveList(receipt.selected_object_ids, 2000).map(id);
+      if (new Set(objectIds).size !== objectIds.length || new Set(selectedIds).size !== selectedIds.length) invalidArchive("Duplicate text edit receipt object identities");
+      return { version: 1, job_id: id(receipt.job_id), model: string(receipt.model, 500), request_id: receipt.request_id === null ? null : string(receipt.request_id, 2000),
+        prompt: string(receipt.prompt, 8000), base_revision: Number(receipt.base_revision), input_sha256: String(receipt.input_sha256), output_sha256: String(receipt.output_sha256),
+        object_ids: objectIds, selected_object_ids: selectedIds, reserved_usd: Number(receipt.reserved_usd), created_at: date(receipt.created_at).toISOString(),
+        connection_input: connectionInput as unknown as PlaceBuildConnectionInput, connections_sha256: String(receipt.connections_sha256) };
+    });
     const key = `${id(s.place_id)}:${integer(s.revision)}`; if (versions.has(key)) invalidArchive("Duplicate scene revision");
-    const doc = { ...s, _id: `${sid}:${key}`, id: id(s.id), session_id: sid, place_id: id(s.place_id), revision: integer(s.revision), definition,
+    const { text_edit_fence: _fence, ...sceneMetadata } = s;
+    const doc = { ...sceneMetadata, ...(editSources ? { edit_sources: editSources } : {}), _id: `${sid}:${key}`, id: id(s.id), session_id: sid, place_id: id(s.place_id), revision: integer(s.revision), definition,
       source_node_id: node(s.source_node_id), source_image_key: imageKey(s.source_image_key), updated_at: date(s.updated_at).toISOString() } as SceneDoc;
     versions.set(key, doc); add("place_scene_versions", doc);
   }
@@ -178,6 +201,7 @@ export async function prepareWorldImport(archive: WorldArchive, sid: string): Pr
   }
   for (const entry of rows(archive, "place-views.json", 500)) {
     const capture = archiveObject(entry.capture_metadata), vid = id(capture.id);
+    if (capture.walk_checkpoint !== undefined && (capture.walk_checkpoint !== true || capture.mode !== "walk")) invalidArchive("Invalid walk checkpoint capture");
     if (["_id", "session_id", "files", "accepted_illustration_id", "historical"].some(key => key in capture)) invalidArchive("Invalid camera recovery fields");
     if (records.place_views?.some(v => v.id === vid)) invalidArchive("Duplicate saved camera");
     const sources = archiveList(capture.sources, 16).map(archiveObject).map(s => {
@@ -185,7 +209,11 @@ export async function prepareWorldImport(archive: WorldArchive, sid: string): Pr
       if (!scene || scene.id !== s.scene_id || archiveHash(JSON.stringify(scene.definition)) !== s.definition_sha256) return invalidArchive("Saved camera geometry binding is incomplete");
       return { scene_id: scene.id, place_id: scene.place_id, revision: scene.revision, definition: scene.definition, x: s.x, z: s.z };
     });
-    parseCaptureMetadata({ ...capture, sources, passes: Object.fromEntries(VIEW_PASSES.map(pass => [pass, ""])) });
+    const parsedCapture = parseCaptureMetadata({ ...capture, sources, passes: Object.fromEntries(VIEW_PASSES.map(pass => [pass, ""])) });
+    if (capture.purpose !== undefined) {
+      if (capture.purpose !== "map") invalidArchive("Invalid saved camera purpose");
+      try { assertGeometryMapCapture(parsedCapture); } catch { invalidArchive("Saved map camera does not frame its complete place"); }
+    }
     if (capture.provenance !== "client_rendered_saved_geometry" || !sources.some(s => s.place_id === capture.root_place_id)) invalidArchive("Camera source place is missing");
     const expectedAssets = [];
     for (const kind of ["mesh", "material"] as const) {
@@ -221,6 +249,8 @@ export async function prepareWorldImport(archive: WorldArchive, sid: string): Pr
   }
   for (const view of records.place_views ?? []) if (view.refreshed_from && !(records.place_views ?? []).some(source => source.id === view.refreshed_from && source.root_place_id === view.root_place_id)) invalidArchive("Saved camera refresh history is missing");
   await importWorldMotion(archive, sid, records, uploads);
+  await importWorldPathVideos(archive, sid, records, uploads);
+  await importWorldImageLedWalks(archive, sid, records, uploads, nodeIds);
   const workspaceRaw = archive.json("workspace.json"), workspace = workspaceRaw ? archiveObject(workspaceRaw) : {};
   const title = string(workspace.title ?? scenes[0]?.definition.label ?? nodes[0]?.title ?? "Imported world", 160);
   let walk_position;
@@ -236,5 +266,6 @@ export async function prepareWorldImport(archive: WorldArchive, sid: string): Pr
     imported_from: { session_id: sourceSid, archive_sha256: archive.sha256, provenance: "user_supplied_archive" } });
   return { session_id: sid, title, records, uploads, preview: { title, source_session_id: sourceSid, pages: nodes.length, places: scenes.length,
     objects: scenes.reduce((n, s) => n + s.definition.objects.length, 0), meshes: records.mesh_assets?.length ?? 0, materials: records.material_assets?.length ?? 0,
-    views: records.place_views?.length ?? 0, illustrations: records.illustration_assets?.length ?? 0, motion_studies: records.motion_studies?.length ?? 0, clips: records.motion_assets?.length ?? 0 } };
+    views: records.place_views?.length ?? 0, illustrations: records.illustration_assets?.length ?? 0, motion_studies: records.motion_studies?.length ?? 0, clips: records.motion_assets?.length ?? 0,
+    path_videos: records.path_videos?.length ?? 0, image_led_walks: records.image_led_walks?.length ?? 0 } };
 }

@@ -166,4 +166,4 @@ it.skipIf(!await motionVideoToolsAvailable())("round-trips exact synthetic video
       await expect(prepareWorldImport(archive, "destination")).rejects.toThrow();
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
-});
+}, 30_000);

@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import {
+  connectorFrame,
   fitAllCamera,
   fitCamera,
   layoutPages,
@@ -70,6 +71,7 @@ export default function WorldMap({
     );
     return { laid: result.pages, connectors: result.connectors };
   }, [pages]);
+  const edgeFrame = useMemo(() => connectorFrame(connectors), [connectors]);
 
   // A connector's CHILD relation → so a zoom-in (descend) reads distinctly from
   // an expanded neighbour, instead of every edge looking the same.
@@ -211,14 +213,14 @@ export default function WorldMap({
         {connectors.length > 0 && (
           <svg
             className="pointer-events-none absolute"
-            style={{
-              left: -100000,
-              top: -100000,
-              width: 200000,
-              height: 200000,
-              overflow: "visible",
-            }}
-            viewBox="-100000 -100000 200000 200000"
+              style={{
+                left: edgeFrame.x,
+                top: edgeFrame.y,
+                width: edgeFrame.w,
+                height: edgeFrame.h,
+                overflow: "visible",
+              }}
+            viewBox={`${edgeFrame.x} ${edgeFrame.y} ${edgeFrame.w} ${edgeFrame.h}`}
           >
             <defs>
               <marker
@@ -385,4 +387,3 @@ export default function WorldMap({
     </div>
   );
 }
-

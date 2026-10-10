@@ -46,6 +46,8 @@ import type { MotionStudyDoc } from "./motion-study";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { objectMaskColor, VIEW_PASSES, type ViewCapture } from "./place-view";
+import { mapArtworkContext, saveGeometryMapView, saveMapAlignment } from "./map-artwork-server";
+import { geometryMapCamera } from "../components/sketch/geometry-map-capture";
 
 function savedScene(id = "place"): PlaceSceneSnapshot {
   return { id: `scene_${id}`, place_id: id, session_id: "world", revision: 1, source_node_id: null, source_image_key: null, updated_at: new Date(0).toISOString(),
@@ -64,6 +66,52 @@ const input = async (mode?: ViewCapture["mode"]) => ({ id: "view1", label: "Cour
 beforeEach(() => {
   memory.rows.clear(); memory.files.clear(); memory.owner = true; memory.uploads = 0; memory.onUpload = () => {}; memory.tail = Promise.resolve();
   store("place_scenes").set("world:place", { ...savedScene(), _id: "world:place" });
+});
+it("opens only an explicit owned place's walk checkpoint while preserving the ordinary camera listing", async () => {
+  await savePlaceView("world", "place", { ...await input("walk"), walk_checkpoint: true });
+  expect((await placeViewLibrary("world", "place")).views).toEqual([]);
+  expect((await placeViewLibrary("world", "place", "view1")).views).toMatchObject([{ id: "view1", walk_checkpoint: true, historical: false }]);
+  root().revision++;
+  expect((await placeViewLibrary("world", "place", "view1")).views[0]!.historical).toBe(true);
+  store("place_scenes").set("world:other", { ...savedScene("other"), _id: "world:other" });
+  await expect(placeViewLibrary("world", "other", "view1")).rejects.toMatchObject({ status: 404 });
+  await expect(placeViewLibrary("world", "place", "foreign:view1")).rejects.toMatchObject({ status: 400 });
+  memory.owner = false;
+  await expect(placeViewLibrary("world", "place", "view1")).rejects.toMatchObject({ status: 403 });
+});
+it("creates a source-free exterior map camera without inventing reference nodes or registration", async () => {
+  const map = geometryMapCamera(root() as PlaceSceneSnapshot), plan = await capture("plan"); plan.camera = map.camera;
+  const body = { id: "map1", label: "District map", capture: plan };
+  await saveGeometryMapView("world", "place", body); await saveGeometryMapView("world", "place", body);
+  expect(memory.uploads).toBe(4); expect(store("place_views").size).toBe(1); expect(store("nodes").size).toBe(0);
+  expect(root().source_node_id).toBeNull(); expect(root().revision).toBe(1);
+  expect(await mapArtworkContext("world", "place")).toMatchObject({ kind: "geometry_derived", map: null, registration: null,
+    views: [{ id: "map1", purpose: "map", mode: "plan", floor_id: null, historical: false }] });
+  await expect(saveMapAlignment("world", "place", {})).rejects.toMatchObject({ status: 409 });
+  root().revision++;
+  expect(await mapArtworkContext("world", "place")).toMatchObject({ views: [{ id: "map1", historical: true }] });
+});
+it("refuses a tilted or cropped map camera and does not relabel an existing capture", async () => {
+  const plan = await capture("plan");
+  await expect(saveGeometryMapView("world", "place", { id: "tilted", label: "Map", capture: plan })).rejects.toThrow(/straight down/);
+  plan.camera = geometryMapCamera(root() as PlaceSceneSnapshot).camera;
+  plan.camera.projection_matrix[0] = 10;
+  await expect(saveGeometryMapView("world", "place", { id: "cropped", label: "Map", capture: plan })).rejects.toThrow(/whole place/);
+  expect(memory.uploads).toBe(0);
+  const ordinary = await input(); await savePlaceView("world", "place", ordinary);
+  await expect(savePlaceView("world", "place", { ...ordinary, purpose: "map" })).rejects.toMatchObject({ status: 400 });
+});
+it("round-trips map purpose and its camera fingerprint through ordinary saved-view archives", async () => {
+  root().definition.entrance = { x: 10, z: 18, yaw: 0 };
+  const plan = await capture("plan"); plan.camera = geometryMapCamera(root() as PlaceSceneSnapshot).camera;
+  await saveGeometryMapView("world", "place", { id: "map1", label: "District map", capture: plan });
+  const original = store("place_views").get("world:map1")! as PlaceViewDoc, scene = root();
+  const zip = await buildWorldZip([], { entities: [], bounds: { x: 0, y: 0, w: 0, h: 0 }, updated_at: new Date(0) }, { entities: [] }, [], [scene], [], undefined, [], [], [], await exportPlaceViews("world"), {
+    session_id: "world", captured_at: new Date(0).toISOString(), visibility: "owner", scene_heads: [scene], entity_registry: null, workspace: null, external_resources: [],
+  });
+  const restored = (await prepareWorldImport(await readWorldArchive(Buffer.from(zip)), "restored")).records.place_views![0] as PlaceViewDoc;
+  expect(restored.purpose).toBe("map"); expect(restored.camera).toEqual(JSON.parse(JSON.stringify(original.camera)));
+  expect(illustrationDependency(restored)).toEqual(illustrationDependency(original));
 });
 it("downloads the captured view snapshot without re-reading newly changed cameras or geometry", async () => {
   await savePlaceView("world", "place", await input());

@@ -10,6 +10,8 @@ import { CreatorError } from "@/lib/creator-error";
 import { snapshotWorldExport } from "@/lib/world-export-snapshot";
 import { downloadPlaceViewExports } from "@/lib/place-view-server";
 import { downloadMotionArchive } from "@/lib/motion-archive";
+import { downloadPathVideoArchive } from "@/lib/path-video-archive";
+import { downloadImageLedWalkArchive } from "@/lib/image-led-walk-archive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +51,7 @@ export async function GET(_req: Request, { params }: Params) {
         transition_context: doc.transition_context ?? null, content_type: stored.contentType, bytes: stored.bytes,
         metadata: { ...metadata, geo_extracted_at: geo_extracted_at?.toISOString() ?? null } });
     }
-    const scenes = snapshot.scenes.map(({ _id: _unused, ...scene }) => scene);
+    const scenes = snapshot.scenes.map(({ _id: _unused, text_edit_fence: _fence, ...scene }) => scene);
     const referenceKeys = [...new Set([
       ...snapshot.worldMap.entities.flatMap(e => e.identity_anchor ? [e.identity_anchor.image_key] : []),
       ...scenes.flatMap(s => s.source_image_key ? [s.source_image_key] : []),
@@ -92,12 +94,14 @@ export async function GET(_req: Request, { params }: Params) {
     const views = await downloadPlaceViewExports(snapshot.views);
     for (const view of views) { for (const pass of view.passes) account(pass.bytes); for (const illustration of view.illustrations ?? []) account(illustration.bytes); }
     const motion = await downloadMotionArchive(snapshot.motion, required);
+    const pathVideos = await downloadPathVideoArchive(snapshot.pathVideos ?? [], snapshot.motion.studies, snapshot.views.map(view => view.doc), required);
+    const imageLedWalks = await downloadImageLedWalkArchive(snapshot.imageLedWalks ?? [], required);
     const bytes = await buildWorldZip(nodes, snapshot.worldMap, snapshot.entities, references, scenes, packs,
       snapshot.artwork, meshes, snapshot.connections, materials, views, {
         session_id: sessionId, captured_at: snapshot.captured_at, visibility: snapshot.privateOwner ? "owner" : "shared",
-        scene_heads: snapshot.sceneHeads.map(({ _id: _unused, ...s }) => s), entity_registry: snapshot.registry, workspace: snapshot.workspace,
+        scene_heads: snapshot.sceneHeads.map(({ _id: _unused, text_edit_fence: _fence, ...s }) => s), entity_registry: snapshot.registry, workspace: snapshot.workspace,
         external_resources: snapshot.nodes.flatMap(n => n.descent_video_url ? [{ kind: "arrival_video", node_id: n._id, url: n.descent_video_url }] : []),
-      }, motion);
+      }, motion, pathVideos, imageLedWalks);
     return new Response(Buffer.from(bytes), { headers: { ...privateHeaders, "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="openflipbook-world-${sessionId.slice(0, 8)}.zip"` } });
   } catch (e) {

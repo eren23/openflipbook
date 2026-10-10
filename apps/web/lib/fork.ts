@@ -17,6 +17,10 @@ import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionReviewDoc } from "./motion-job";
 import { viewHash } from "./place-view-store";
 import type { MapAlignmentDraft } from "./map-alignment";
+import type { PathVideoDoc } from "./path-video";
+import { assertPathReceiptSource, inertPathVideoReceipt, pathVideoReceipt } from "./path-video-archive";
+import { imageLedWalkReceipt, inertImageLedWalkReceipt } from "./image-led-walk-archive";
+import type { ImageLedWalkDoc } from "./image-led-walk";
 
 // Fork a session: deep-copy its world into a fresh session_id so anyone with
 // a share link gets their OWN world to extend instead of write access to the
@@ -37,6 +41,7 @@ import type { MapAlignmentDraft } from "./map-alignment";
 //             map_artwork_heads / map_artwork_versions (all node refs remapped)
 //   OWNER     camera views, illustrations, motion studies/assets/reviews/selections
 //             map alignment drafts (unaccepted annotation evidence)
+//             image-led walk media/route/reviews as inert history
 //   SKIPPED   generation jobs, provider leases and spend reservations
 //   CREATED   session_owners / fork_receipts (atomic ownership and retry identity)
 //   SKIPPED   original owner tokens and original fork receipts
@@ -118,8 +123,10 @@ async function copySession(
   if (sourceNodes.length === 0 && !ownsSource) throw new CreatorError("This world is not owned by this browser", 403);
   if (sourceNodeId && !sourceNodes.some(n => n._id === sourceNodeId)) throw new CreatorError("Fork source node is outside this world", 400);
   const viewCol = db.collection<PlaceViewDoc>("place_views");
-  // Walk checkpoints serve only walk videos, which a fork does not copy.
-  const privateViews = ownsSource ? (await viewCol.find({ session_id: sourceSessionId }, options).toArray()).filter(view => !view.walk_checkpoint) : [];
+  const pathReceipts = ownsSource ? (await db.collection<PathVideoDoc>("path_videos").find({ session_id: sourceSessionId }, options).toArray())
+    .flatMap(job => { const receipt = pathVideoReceipt(job); return receipt ? [receipt] : []; }) : [];
+  const checkpointIds = new Set(pathReceipts.flatMap(receipt => receipt.view_ids ?? []));
+  const privateViews = ownsSource ? (await viewCol.find({ session_id: sourceSessionId }, options).toArray()).filter(view => !view.walk_checkpoint || checkpointIds.has(view.id)) : [];
   const privateIllustrations = privateViews.length ? await db.collection<MeshAssetDoc>("illustration_assets").find({ session_id: sourceSessionId, "view_dependency.view_id": { $in: privateViews.map(v => v.id) } }, options).toArray() : [];
   const meshAssets = db.collection<MeshAssetDoc>("mesh_assets");
   const savedMeshes = await meshAssets.find({ session_id: sourceSessionId }, options).toArray();
@@ -217,7 +224,7 @@ async function copySession(
   for (const name of ["place_scenes", "place_scene_versions"]) {
     const col = db.collection<SceneDoc>(name);
     const scenes = await col.find({ session_id: sourceSessionId }, options).toArray();
-    if (scenes.length) await col.insertMany(scenes.map(scene => ({
+    if (scenes.length) await col.insertMany(scenes.map(({ text_edit_fence: _fence, ...scene }) => ({
       ...scene, _id: `${newSessionId}:${scene.place_id}${name === "place_scene_versions" ? `:${scene.revision}` : ""}`,
       session_id: newSessionId, source_node_id: scene.source_node_id ? idMap.get(scene.source_node_id) ?? scene.source_node_id : null,
     })), options);
@@ -272,6 +279,16 @@ async function copySession(
         && !reviews.some(review => review.id === selection.review_id && review.asset_id === selection.asset_id))
         throw new CreatorError("Motion selection binding is invalid; fork was not created", 409);
       await selections.insertOne({ ...selection, _id: `${newSessionId}:${study.id}` }, options);
+    }
+    for (const receipt of pathReceipts) {
+      assertPathReceiptSource(receipt, studies, privateViews);
+      const copied = inertPathVideoReceipt(receipt, newSessionId);
+      if (copied.study_id) copied.study_sha256 = copiedStudyHashes.get(copied.study_id)!;
+      await db.collection<PathVideoDoc>("path_videos").insertOne(copied, options);
+    }
+    const imageLed = db.collection<ImageLedWalkDoc>("image_led_walks");
+    for (const walk of await imageLed.find({ session_id: sourceSessionId }, options).toArray()) {
+      await imageLed.insertOne(inertImageLedWalkReceipt(imageLedWalkReceipt(walk), newSessionId, idMap), options);
     }
   }
   const versions = await artwork.find({ session_id: sourceSessionId }, options).toArray();

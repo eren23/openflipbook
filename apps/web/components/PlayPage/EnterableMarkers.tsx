@@ -15,14 +15,14 @@ interface Props {
   currentView: SceneView | null;
   /** The rendered <img>; markers track the object-contain content rect. */
   imgRef?: RefObject<HTMLImageElement | null>;
-  /** Flag-gated (NEXT_PUBLIC_ENTER_COACH): a louder, ping-animated ring. The
+  /** Flag-gated (NEXT_PUBLIC_ENTER_COACH): a larger, brighter steady ring. The
    *  default subtle ring is lost next to the bold DOM labels — the blind UX
    *  bench saw labels but not the rings the coach copy points at. */
   prominent?: boolean;
 }
 
 /**
- * Idle-state enter affordance (W3). A soft pulsing ring on every ENTERABLE
+ * Idle-state enter affordance (W3). A steady glowing ring on every ENTERABLE
  * place of the current map frame, so "tap = enter a place" is discoverable
  * before the first click — previously only revealed by ⌘-tap. Pure
  * decoration: pointer events pass through to the image's own tap handler,
@@ -78,14 +78,13 @@ export function EnterableMarkers({
             style={{ left, top }}
           >
             {prominent ? (
-              // Louder affordance: an expanding ping ring + a solid glowing
-              // core so "tap a glowing place" has something that visibly glows.
+              // Stronger affordance keeps its glow without repeatedly flashing.
               <span className="relative flex h-7 w-7">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/50" />
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/50" />
                 <span className="relative inline-flex h-7 w-7 rounded-full border-2 border-emerald-500 bg-emerald-400/20 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
               </span>
             ) : (
-              <span className="block h-5 w-5 animate-pulse rounded-full border-2 border-emerald-600/60 shadow-[0_0_8px_rgba(16,185,129,0.45)]" />
+              <span className="block h-5 w-5 rounded-full border-2 border-emerald-600/60 shadow-[0_0_8px_rgba(16,185,129,0.45)]" />
             )}
           </span>
         );

@@ -15,6 +15,7 @@ import { currentSources, bindings, type PlaceViewDoc } from "./place-view-store"
 import { wireIllustration } from "./illustration-server";
 import type { MeshAssetDoc } from "./mesh-execution";
 import { parseSavedCameraPath } from "./saved-camera-path";
+import { assertGeometryMapCapture } from "./geometry-map";
 export type { PlaceViewDoc } from "./place-view-store";
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const bytesHash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -79,7 +80,7 @@ export async function decodeViewPasses(c: ViewCapture) {
   return result;
 }
 export const wirePlaceView = (doc: PlaceViewDoc, historical: boolean): SavedPlaceView => {
-  const { _id: _key, session_id: _sid, request_sha256: _request, files: _files, ...view } = doc;
+  const { _id: _key, session_id: _sid, request_sha256: _request, files: _files, source_use_fence: _fence, ...view } = doc;
   return { ...view, historical };
 };
 export async function savePlaceView(sid: string, pid: string, input: Record<string, unknown>) {
@@ -87,6 +88,10 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
   if (!placeScenesEnabled()) throw new CreatorError("World scenes are not enabled", 404);
   if (!isSafeId(input.id) || typeof input.label !== "string" || input.label.trim().length < 1 || input.label.length > 120) throw new CreatorError("Give this view a name and valid identity", 400);
   const capture = parseCaptureMetadata(input.capture), request_sha256 = hash(input), key = `${sid}:${input.id}`;
+  if (input.purpose !== undefined) {
+    if (input.purpose !== "map") throw new CreatorError("Unknown camera purpose", 400);
+    try { assertGeometryMapCapture(capture); } catch (error) { throw new CreatorError((error as Error).message, 400); }
+  }
   // Walk-video checkpoints are saved views with their own cap, outside the
   // user's 50 views, the library list and the export (walk videos are not exported).
   const checkpoint = input.walk_checkpoint === true;
@@ -103,6 +108,7 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
     if (!source || source.root_place_id !== pid) throw new CreatorError("Source camera view is unavailable", 409);
     // Checkpoints are not exported, so a refresh history through one could not be imported.
     if (checkpoint || source.walk_checkpoint) throw new CreatorError("Walk checkpoint views cannot be refreshed", 409);
+    if (source.purpose !== input.purpose) throw new CreatorError("Refreshed view must retain its map purpose", 409);
     if (source.mode !== capture.mode || source.floor_id !== capture.floor_id || source.width !== capture.width || source.height !== capture.height
       || !isDeepStrictEqual(source.camera, capture.camera) || capture.path
       || !capture.sources.some(s => s.place_id === pid && source.sources.some(old => old.place_id === pid && old.scene_id === s.scene_id))) throw new CreatorError("Refreshed view must retain the exact saved camera and framing", 409);
@@ -131,7 +137,7 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
   }
   const { sources: _sources, passes: _passes, ...metadata } = capture;
   const doc: PlaceViewDoc = { ...metadata, ...binding, _id: key, id: input.id as string, session_id: sid, root_place_id: pid,
-    label: input.label.trim(), request_sha256, created_at: new Date().toISOString(), files, provenance: "client_rendered_saved_geometry", ...(checkpoint ? { walk_checkpoint: true as const } : {}), ...(typeof refreshedFrom === "string" ? { refreshed_from: refreshedFrom } : {}) };
+    label: input.label.trim(), request_sha256, created_at: new Date().toISOString(), files, provenance: "client_rendered_saved_geometry", ...(input.purpose === "map" ? { purpose: "map" as const } : {}), ...(checkpoint ? { walk_checkpoint: true as const } : {}), ...(typeof refreshedFrom === "string" ? { refreshed_from: refreshedFrom } : {}) };
   return withDbTransaction(async (db, session) => {
     const col = db.collection<PlaceViewDoc>("place_views"), options = { session };
     const existing = await col.findOne({ _id: key }, options);
@@ -146,8 +152,16 @@ export async function savePlaceView(sid: string, pid: string, input: Record<stri
     await col.insertOne(doc, options); return { id: doc.id };
   });
 }
-export async function placeViewLibrary(sid: string, pid: string) {
+export async function placeViewLibrary(sid: string, pid: string, selectedViewId?: string | null) {
   const db = await access(sid, pid), docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: pid, walk_checkpoint: { $exists: false } }).sort({ created_at: -1 }).limit(50).toArray();
+  // Walk checkpoints stay outside the ordinary camera library's limit. An
+  // explicit owner-scoped selection makes the first artwork review reachable.
+  if (selectedViewId) {
+    if (!isSafeId(selectedViewId)) throw new CreatorError("Invalid saved view", 400);
+    const selected = await db.collection<PlaceViewDoc>("place_views").findOne({ _id: `${sid}:${selectedViewId}`, session_id: sid, root_place_id: pid });
+    if (!selected) throw new CreatorError("Saved view not found", 404);
+    if (!docs.some(doc => doc.id === selected.id)) docs.push(selected);
+  }
   const cache = new Map<string, Awaited<ReturnType<typeof bindings>> | null>(), views: SavedPlaceView[] = [];
   for (const doc of docs) {
     if (!cache.has(doc.mode)) {
@@ -178,9 +192,14 @@ export interface PlaceViewExportSnapshot {
 
 // Capture metadata in the caller's snapshot. Immutable object downloads happen
 // after the transaction, so slow storage cannot hold a database snapshot open.
-export async function snapshotPlaceViewExports(db: Db, sid: string, session: ClientSession): Promise<PlaceViewExportSnapshot[]> {
+export async function snapshotPlaceViewExports(db: Db, sid: string, session: ClientSession, checkpointIds: readonly string[] = []): Promise<PlaceViewExportSnapshot[]> {
   const options = { session };
   const docs = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, walk_checkpoint: { $exists: false } }, options).sort({ created_at: 1 }).limit(501).toArray();
+  if (checkpointIds.length) {
+    const checkpoints = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, id: { $in: checkpointIds }, walk_checkpoint: true }, options).limit(501).toArray();
+    if (checkpoints.length !== checkpointIds.length) throw new CreatorError("Walk video references a missing checkpoint camera", 409);
+    docs.push(...checkpoints);
+  }
   if (docs.length > 500 || docs.reduce((sum, d) => sum + VIEW_PASSES.reduce((n, pass) => n + d.files[pass].bytes, 0), 0) > 64 * 1024 * 1024) throw new CreatorError("Camera view export exceeds 500 views or 64 MiB", 413);
   const cache = new Map<string, Awaited<ReturnType<typeof bindings>> | null>(), result: PlaceViewExportSnapshot[] = [];
   for (const doc of docs) {

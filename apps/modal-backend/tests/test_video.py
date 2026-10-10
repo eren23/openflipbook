@@ -449,6 +449,20 @@ def test_move_prompt_words_each_component_with_its_sign() -> None:
     assert "to its left" in left and "sinks about 2 metres" in left and "back about 1.5" in left
 
 
+@pytest.mark.parametrize(("lateral", "side"), [(4, "right"), (-2.5, "left")])
+def test_sideways_walk_is_worded_as_translation_not_a_stationary_camera(lateral, side) -> None:
+    text = video.move_prompt(forward_m=0, lateral_m=lateral)
+    assert f"moves sideways about {abs(lateral):g} metres to its {side}" in text
+    assert "holds still" not in text
+    assert "walks forward" not in text
+
+
+def test_zero_lateral_keeps_legacy_camera_move_wording() -> None:
+    assert video.move_prompt(forward_m=4, turn_deg=20) == video.move_prompt(
+        forward_m=4, turn_deg=20, lateral_m=0
+    )
+
+
 def test_move_prompt_omits_zero_parts_and_keeps_the_fixed_tail() -> None:
     text = video.move_prompt(turn_deg=30, forward_m=0)
     assert "circles" not in text and "rises" not in text and "forward" not in text

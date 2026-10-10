@@ -681,6 +681,40 @@ async def test_fal_subscribe_require_images_retries_empty_result(
     assert result["images"]
 
 
+@pytest.mark.parametrize("failure", ["transient", "empty"])
+async def test_fal_subscribe_one_submission_preserves_failure(monkeypatch, failure):
+    monkeypatch.setenv("IMAGE_SUBMIT_MAX_ATTEMPTS", "1")
+    calls = 0
+
+    async def fake_subscribe(model, arguments, with_logs):
+        nonlocal calls
+        calls += 1
+        if failure == "transient":
+            raise _fal_http_error(503)
+        return {"images": []}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    with pytest.raises((image.fal_client.FalClientHTTPError, image._EmptyFalResult)):
+        await image._fal_subscribe("fal-ai/nano-banana", {}, require_images=True)
+    assert calls == 1
+
+
+@pytest.mark.parametrize("value", ["0", "4", "invalid"])
+async def test_fal_subscribe_rejects_invalid_attempt_limit_before_submit(monkeypatch, value):
+    monkeypatch.setenv("IMAGE_SUBMIT_MAX_ATTEMPTS", value)
+    calls = 0
+
+    async def fake_subscribe(model, arguments, with_logs):
+        nonlocal calls
+        calls += 1
+        return {"images": [{"url": "unused"}]}
+
+    monkeypatch.setattr(image.fal_client, "subscribe_async", fake_subscribe)
+    with pytest.raises(ValueError):
+        await image._fal_subscribe("fal-ai/nano-banana", {}, require_images=True)
+    assert calls == 0
+
+
 async def test_fal_subscribe_require_images_accepts_bria_singular_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -32,8 +32,9 @@ import { WalkInput, walkKey } from "@/lib/walk-input";
 import WalkControls from "./walk-controls";
 import { ViewportPerformance } from "@/lib/viewport-performance";
 
-export default function PlaceViewport({ definition: localDefinition, mode, loadView, onSelect, route, selected, focusKey = 0, drawing = false, onFootprint, onCancelDrawing, assetBaseUrl, materialBaseUrl, network, placeId, onPlaceChange, sceneRevision, getWalkPose, onWalkPose, floorId, captureSnapshot, onCaptureReady, onRefreshReady }: { definition: PlaceSceneDefinition; mode: "plan" | "orbit" | "walk"; loadView?: { requestId: string; view: SavedPlaceView } | undefined; onSelect: (id: string) => void; route?: readonly WalkWaypoint[] | undefined; selected?: string | null; focusKey?: number; drawing?: boolean; onFootprint?: (start: { x: number; z: number }, end: { x: number; z: number }) => void; onCancelDrawing?: () => void; assetBaseUrl?: string | undefined; materialBaseUrl?: string | undefined; network?: PlaceNetwork | null; placeId?: string; onPlaceChange?: (id:string)=>void; sceneRevision?:number|undefined; getWalkPose?:(()=>WalkPose|null)|undefined; onWalkPose?:((pose:WalkPose)=>void)|undefined; floorId?: string | undefined; captureSnapshot?: PlaceSceneSnapshot | undefined; onCaptureReady?: ((capture: CapturePlaceView | null) => void) | undefined; onRefreshReady?: ((refresh: RefreshPlaceView | null) => void) | undefined }) {
+export default function PlaceViewport({ definition: localDefinition, mode, loadView, onSelect, route, selected, focusKey = 0, drawing = false, onFootprint, onCancelDrawing, assetBaseUrl, materialBaseUrl, network, placeId, onPlaceChange, sceneRevision, getWalkPose, onWalkPose, floorId, captureSnapshot, onCaptureReady, onRefreshReady, interactionPaused = false }: { interactionPaused?: boolean; definition: PlaceSceneDefinition; mode: "plan" | "orbit" | "walk"; loadView?: { requestId: string; view: SavedPlaceView } | undefined; onSelect: (id: string) => void; route?: readonly WalkWaypoint[] | undefined; selected?: string | null; focusKey?: number; drawing?: boolean; onFootprint?: (start: { x: number; z: number }, end: { x: number; z: number }) => void; onCancelDrawing?: () => void; assetBaseUrl?: string | undefined; materialBaseUrl?: string | undefined; network?: PlaceNetwork | null; placeId?: string; onPlaceChange?: (id:string)=>void; sceneRevision?:number|undefined; getWalkPose?:(()=>WalkPose|null)|undefined; onWalkPose?:((pose:WalkPose)=>void)|undefined; floorId?: string | undefined; captureSnapshot?: PlaceSceneSnapshot | undefined; onCaptureReady?: ((capture: CapturePlaceView | null) => void) | undefined; onRefreshReady?: ((refresh: RefreshPlaceView | null) => void) | undefined }) {
   const host = useRef<HTMLDivElement>(null), input = useRef(new WalkInput());
+  const interactionPausedRef = useRef(interactionPaused); interactionPausedRef.current = interactionPaused;
   const captureRef = useRef(onCaptureReady); captureRef.current = onCaptureReady;
   const refreshRef = useRef(onRefreshReady); refreshRef.current = onRefreshReady;
   const loadRef = useRef(loadView); loadRef.current = loadView;
@@ -182,7 +183,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
         return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
       };
       const down = (e: PointerEvent) => {
-        if (!e.isPrimary || e.button !== 0) return;
+        if (interactionPausedRef.current || !e.isPrimary || e.button !== 0) return;
         pointer = { x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moved: false }; renderer.domElement.setPointerCapture(e.pointerId);
         if (mode === "plan" && drawRef.current.drawing) {
           const p = groundPoint(e), rect = renderer.domElement.getBoundingClientRect();
@@ -190,6 +191,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
         }
       };
       const move = (e: PointerEvent) => {
+        if (interactionPausedRef.current) { pointer = null; footprintStart = null; return; }
         if (!pointer) return;
         const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
         if (Math.abs(e.clientX - pointer.startX) + Math.abs(e.clientY - pointer.startY) > 2) pointer.moved = true;
@@ -202,6 +204,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
         pointer.x = e.clientX; pointer.y = e.clientY;
       };
       const up = (e: PointerEvent) => {
+        if (interactionPausedRef.current) { pointer = null; footprintStart = null; setDraft(null); return; }
         if (mode === "plan" && drawRef.current.drawing) {
           const p = groundPoint(e);
           if (footprintStart && p && pointer?.moved) drawRef.current.onFootprint?.(footprintStart, p);
@@ -218,7 +221,7 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
         pointer = null; footprintStart = null; setDraft(null);
       };
       const cancel = () => { pointer = null; footprintStart = null; setDraft(null); };
-      const keydown = (e: KeyboardEvent) => { if (e.key === "Escape" && drawRef.current.drawing) { cancel(); drawRef.current.onCancelDrawing?.(); return; } if (mode !== "walk" || (e.target as HTMLElement)?.closest("input,select,textarea,[contenteditable=true]")) return; const key = walkKey(e.key); if (key) { walkInput.hold(key, `keyboard:${key}`); e.preventDefault(); } };
+      const keydown = (e: KeyboardEvent) => { if (interactionPausedRef.current) { walkInput.clear(); return; } if (e.key === "Escape" && drawRef.current.drawing) { cancel(); drawRef.current.onCancelDrawing?.(); return; } if (mode !== "walk" || (e.target as HTMLElement)?.closest("input,select,textarea,[contenteditable=true]")) return; const key = walkKey(e.key); if (key) { walkInput.hold(key, `keyboard:${key}`); e.preventDefault(); } };
       const keyup = (e: KeyboardEvent) => { const key = walkKey(e.key); if (key) walkInput.release(`keyboard:${key}`); };
       const blur = () => walkInput.clear();
       const visibility = () => { performanceStats.reset(); delete container.dataset.performance; if (document.hidden) blur(); };
@@ -294,6 +297,8 @@ export default function PlaceViewport({ definition: localDefinition, mode, loadV
         world.step();
         let verticalSpeed = 0,poseElapsed=0;
         step = dt => {
+          // A map dialog pauses input and route following without rebuilding the body.
+          if (interactionPausedRef.current) { walkInput.clear(); return; }
           if (guiding && walkInput.active) endRoute("cancelled");
           const pressed = walkInput.sample(dt);
           yaw += (pressed("ArrowLeft") - pressed("ArrowRight")) * dt * 1.5;

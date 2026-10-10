@@ -24,6 +24,16 @@ jobs:
         run: pnpm lint --max-warnings=12
       - name: No circular web dependencies
         run: pnpm --filter @openflipbook/web check:circular
+      - name: Isolated selfhost configuration safety
+        run: node --test scripts/selfhost/check.test.mjs
+      - name: Install offline motion sample test tools
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Offline quality pilot quote and receipt guards
+        run: node --test scripts/selfhost/quality-pilot.test.mjs apps/web/scripts/quality-pilot-*.test.mjs apps/web/scripts/run-quality-pilot.test.mjs
       - name: No demo artifacts tracked
         run: |
           hits=$(git ls-files | grep -E 'scripts/record-demo/(artifacts.*/|[^/]*\.(mp4|webm)|geo-storyboard\.png)' || true)
@@ -61,6 +71,12 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install video test tools
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
       - name: Vitest (with the coverage ratchet — thresholds in vitest.config)
         run: pnpm --filter @openflipbook/web test -- --coverage
       - name: Config package tests
@@ -203,6 +219,38 @@ jobs:
           path: |
             apps/web/playwright-report
             apps/web/test-results
+
+  e2e-selfhost:
+    # Every-PR release workflow gate: real Mongo/private S3, independent worker,
+    # desktop/mobile authoring, creator ZIP restore, publication and operator
+    # recovery. Providers and keys are replaced with isolated fixtures.
+    runs-on: ubuntu-latest
+    needs: [build, test-web, python-check]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Fresh isolated production stack and recorded workflows
+        env:
+          E2E_SELFHOST_VIDEO: "1"
+        run: node scripts/selfhost/check.mjs
+      - name: Upload fixture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfhost-release-evidence
+          path: apps/web/test-results/selfhost-*
+          retention-days: 7
 
   e2e-mock:
     if: always()

@@ -20,7 +20,7 @@ beforeEach(() => {
       created_at: new Date(1), geo_extracted_at: new Date(2), descent_video_url: "https://foreign.example/saved.mp4" }],
     scenes: [], sceneHeads: [], worldMap: { session_id: "world", entities: [], bounds: { x: 0, y: 0, w: 0, h: 0 }, schema_version: 1, updated_at: new Date(0) }, entities: { session_id: "world", entities: [], updated_at: new Date(0) },
     registry: { _id: "world", entities: [{ id: "gone", deleted_at: new Date(3) }] }, workspace: { title: "World", archived: false, resume_node_id: "node", resume_place_id: null, resume_view: null, walk_position: null },
-    meshes: [], materials: [], artwork: { heads: [], versions: [], drafts: [] }, connections: [], views: [], motion: { studies: [], assets: [], reviews: [], selections: [] },
+    meshes: [], materials: [], artwork: { heads: [], versions: [], drafts: [] }, connections: [], views: [], motion: { studies: [], assets: [], reviews: [], selections: [] }, pathVideos: [], imageLedWalks: [],
   } as Awaited<ReturnType<typeof snapshotWorldExport>>;
   mocks.snapshot.mockImplementation(async () => structuredClone(snapshot));
 });

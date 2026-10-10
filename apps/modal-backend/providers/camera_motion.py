@@ -62,6 +62,8 @@ def configuration() -> dict[str, object]:
         "max_duration": 15,
         # Path video legs (/motion/leg) may be this short; the web reads it before sizing them.
         "leg_min_seconds": LEG_MIN_SECONDS,
+        # v2 adds sideways translation; old callers may continue omitting it.
+        "leg_move_version": 2,
         "reservation_usd_per_second": float(rate) if enabled else 0,
         "reason": None
         if enabled
@@ -148,6 +150,7 @@ class LegMove(StrictInput):
     rise_m: float = Field(0, ge=-500, le=500)
     # Absent means no forward move; null asks for a walk of unknown length.
     forward_m: float | None = Field(0, ge=-500, le=500)
+    lateral_m: float = Field(0, ge=-500, le=500)
     subject: str | None = Field(None, max_length=120)
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import math
 import os
@@ -30,6 +31,8 @@ from typing import TYPE_CHECKING, Any, TypedDict
 import httpx
 
 if TYPE_CHECKING:
+    from PIL import Image
+
     from .detector import Detection
 
 
@@ -71,6 +74,188 @@ def _sam_model() -> str:
 # be visible; tight enough that a neighbour does not win the crop.
 CROP_PAD = 1.6
 
+# Explicit experimental profile; the existing crop-and-text call stays unchanged.
+SAM3_VISUAL_PROFILE = "sam3-visual-full-frame-v1"
+SAM3_VISUAL_SIZE = (688, 384)
+SAM3_VISUAL_IMAGE_MAX_BYTES = 4 * 1024 * 1024
+SAM3_VISUAL_OBJECTS_MAX_BYTES = 2 * 1024 * 1024
+SAM3_VISUAL_POINT_MARGIN = 8
+
+
+class Sam3VisualPromptError(RuntimeError):
+    """An acknowledged SAM request failed during free polling or mask retrieval."""
+
+    def __init__(self, request_id: str, proof: dict[str, Any]) -> None:
+        super().__init__("Acknowledged visual SAM request did not return a usable result")
+        self.request_id = request_id
+        self.proof = proof
+
+
+def _visual_rgb(value: Sequence[int]) -> tuple[int, int, int]:
+    if len(value) != 3 or any(type(channel) is not int or not 0 <= channel <= 255 for channel in value):
+        raise ValueError("Visual prompts require byte RGB identifiers")
+    rgb = (value[0], value[1], value[2])
+    if rgb == (0, 0, 0):
+        raise ValueError("Background is not an object identifier")
+    return rgb
+
+
+def _visual_interior(mask: Image.Image) -> Image.Image:
+    from PIL import ImageFilter
+
+    radius = SAM3_VISUAL_POINT_MARGIN
+    interior = mask.filter(ImageFilter.MinFilter(2 * radius + 1))
+    w, h = mask.size
+    # Pillow extends edge pixels during filtering; frame edges are not safe interior.
+    for border in ((0, 0, w, radius), (0, h - radius, w, h),
+                   (0, 0, radius, h), (w - radius, 0, w, h)):
+        interior.paste(0, border)
+    return interior
+
+
+def _visual_point(mask: Image.Image, y0: int, y1: int) -> tuple[int, int] | None:
+    """Actual interior pixel nearest its region's centroid, with deterministic ties."""
+    w, _ = mask.size
+    values = mask.tobytes()
+    points = [(x, y) for y in range(y0, y1) for x in range(w) if values[y * w + x]]
+    if not points:
+        return None
+    count = len(points)
+    sx, sy = sum(p[0] for p in points), sum(p[1] for p in points)
+    return min(points, key=lambda p: ((p[0] * count - sx) ** 2 + (p[1] * count - sy) ** 2, p[1], p[0]))
+
+
+def sam3_visual_prompts(
+    objects_bytes: bytes, box: Sequence[int], subject_rgb: Sequence[int],
+    other_building_rgbs: Sequence[Sequence[int]], road_rgb: Sequence[int],
+) -> dict[str, Any]:
+    """Derive visual prompts from the saved canonical pass, never from candidate pixels.
+
+    This private profile requires three other building IDs and one known road ID.
+    Occluded or thin objects contribute no negative point. Road points must also
+    lie in the bottom fifth and outside every building mask. No returned SAM mask
+    is intersected with these inputs: overflow must remain visible to the gate.
+    """
+    from PIL import Image
+
+    if (len(box) != 4 or any(type(v) is not int for v in box)
+            or not (0 <= box[0] < box[2] <= 688 and 0 <= box[1] < box[3] <= 384)):
+        raise ValueError("Visual subject box must use exact registered pixel corners")
+    if not 0 < len(objects_bytes) <= SAM3_VISUAL_OBJECTS_MAX_BYTES:
+        raise ValueError("Visual objects pass exceeds its byte limit")
+    subject, road = _visual_rgb(subject_rgb), _visual_rgb(road_rgb)
+    if len(other_building_rgbs) != 3:
+        raise ValueError("Visual profile requires all four building identifiers")
+    others = [_visual_rgb(rgb) for rgb in other_building_rgbs]
+    colors = [subject, *others, road]
+    if len(set(colors)) != 5:
+        raise ValueError("Visual object and road identifiers must be distinct")
+    with Image.open(io.BytesIO(objects_bytes)) as image:
+        if (image.format != "PNG" or image.size != SAM3_VISUAL_SIZE or image.mode not in {"RGB", "RGBA"}
+                or getattr(image, "n_frames", 1) != 1 or image.getexif().get(274, 1) != 1):
+            raise ValueError("Visual objects pass must be the upright registered PNG")
+        image.load()
+        if image.mode == "RGBA" and image.getchannel("A").getextrema() != (255, 255):
+            raise ValueError("Visual objects pass must be opaque")
+        pixels = image.convert("RGB").tobytes()
+    masks = [Image.frombytes("L", SAM3_VISUAL_SIZE,
+                            bytes(255 if tuple(pixels[n:n + 3]) == rgb else 0
+                                  for n in range(0, len(pixels), 3))) for rgb in colors]
+    if masks[0].getbbox() != tuple(box):
+        raise ValueError("Visual subject box differs from the saved object mask")
+    w, h = SAM3_VISUAL_SIZE
+    interior = _visual_interior(masks[0])
+    middle = (box[1] + box[3]) // 2
+    regions = [_visual_point(interior, box[1], middle), _visual_point(interior, middle, box[3])]
+    positives = [p for p in regions if p is not None]
+    if not positives:
+        raise ValueError("Visual subject has no safe interior point")
+    point_prompts = [{"x": x, "y": y, "label": 1, "object_id": 1} for x, y in positives]
+    for mask in masks[1:4]:
+        point = _visual_point(_visual_interior(mask), 0, h)
+        if point is not None:
+            point_prompts.append({"x": point[0], "y": point[1], "label": 0, "object_id": 1})
+    # A road RGB identifies the path, even when its nonzero ID fills the ground plane.
+    # Explicitly exclude all four buildings before erosion; no sky/zero-RGB fallback.
+    road_pixels = masks[4].tobytes()
+    building_pixels = [mask.tobytes() for mask in masks[:4]]
+    road_mask = Image.frombytes("L", (w, h), bytes(
+        road_pixels[n] if not any(building[n] for building in building_pixels) else 0
+        for n in range(w * h)))
+    road_point = _visual_point(_visual_interior(road_mask), math.ceil(h * 0.8), h)
+    if road_point is not None:
+        point_prompts.append({"x": road_point[0], "y": road_point[1], "label": 0, "object_id": 1})
+    return {
+        "box_prompts": [{"x_min": box[0], "y_min": box[1], "x_max": box[2], "y_max": box[3], "object_id": 1}],
+        "point_prompts": point_prompts,
+        "proof": {"version": SAM3_VISUAL_PROFILE, "objects_sha256": hashlib.sha256(objects_bytes).hexdigest(),
+                  "width": w, "height": h, "subject_rgb": subject, "other_building_rgbs": others,
+                  "road_rgb": road, "point_margin": SAM3_VISUAL_POINT_MARGIN},
+    }
+
+
+async def sam3_visual_full_frame_mask(
+    image_bytes: bytes, objects_bytes: bytes, box: Sequence[int], subject_rgb: Sequence[int],
+    other_building_rgbs: Sequence[Sequence[int]], road_rgb: Sequence[int],
+) -> dict[str, Any]:
+    """One nonretrying paid visual request, preserving the exact full-frame JPEG.
+
+    Fal's documented box/point object IDs refine the same object. Empty prompt
+    explicitly disables the default text prompt. This does not promise detection;
+    no detection is null, and a failed acknowledged request retains its queue ID.
+    """
+    import fal_client
+    from PIL import Image
+
+    from providers.image import _fetch_url_bytes
+
+    if _sam_model() != "fal-ai/sam-3/image":
+        raise ValueError("Visual profile is pinned to fal-ai/sam-3/image")
+    if not 0 < len(image_bytes) <= SAM3_VISUAL_IMAGE_MAX_BYTES:
+        raise ValueError("Visual candidate exceeds its JPEG byte limit")
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        if (image.format != "JPEG" or image.size != SAM3_VISUAL_SIZE or getattr(image, "n_frames", 1) != 1
+                or image.getexif().get(274, 1) != 1):
+            raise ValueError("Visual candidate must be the exact upright registered JPEG")
+        image.verify()
+    prompts = sam3_visual_prompts(objects_bytes, box, subject_rgb, other_building_rgbs, road_rgb)
+    proof = {**prompts["proof"], "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
+             "box_prompts": prompts["box_prompts"], "point_prompts": prompts["point_prompts"]}
+    async with httpx.AsyncClient(timeout=60, follow_redirects=False,
+                                 transport=httpx.AsyncHTTPTransport(retries=0)) as client:
+        response = await client.post(
+            "https://queue.fal.run/fal-ai/sam-3/image",
+            headers={"Authorization": f"Key {os.environ['FAL_KEY']}", "X-Fal-No-Retry": "1"},
+            json={"image_url": "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode(),
+                  "prompt": "", "box_prompts": prompts["box_prompts"], "point_prompts": prompts["point_prompts"],
+                  "apply_mask": False, "include_scores": True, "include_boxes": True,
+                  "return_multiple_masks": False, "max_masks": 1, "output_format": "png"},
+        )
+        response.raise_for_status()
+    request_id = str(response.json()["request_id"])
+    try:
+        result = await fal_client.result_async("fal-ai/sam-3/image", request_id)
+        scores = result.get("scores") or []
+        out: dict[str, Any] = {"mask": None, "request_id": request_id,
+                               "score": float(scores[0]) if scores else None, "visual_prompt_proof": proof}
+        masks = result.get("masks") or []
+        url = masks[0].get("url") if masks and isinstance(masks[0], dict) else None
+        if url:
+            data, _ = await _fetch_url_bytes(url)
+            if not 0 < len(data) <= SAM3_VISUAL_IMAGE_MAX_BYTES:
+                raise ValueError("Visual output mask exceeds its byte limit")
+            with Image.open(io.BytesIO(data)) as image:
+                if (image.width * image.height > 4 * 1024 * 1024 or getattr(image, "n_frames", 1) != 1
+                        or image.getexif().get(274, 1) != 1):
+                    raise ValueError("Invalid visual output mask")
+                full = image.convert("L").resize(SAM3_VISUAL_SIZE, Image.Resampling.NEAREST)
+            mask = full.convert("1", dither=Image.Dither.NONE)
+            out["mask"] = mask if mask.getbbox() else None
+        return out
+    except (Exception, asyncio.CancelledError) as error:
+        # Also preserve the known ID if the enclosing gate deadline cancels polling.
+        raise Sam3VisualPromptError(request_id, proof) from error
+
 
 def box_crop(box: Sequence[float], w: int, h: int, pad: float = CROP_PAD) -> tuple[int, int, int, int]:
     """The pixel box [x0, y0, x1, y1] grown `pad` times around its centre and
@@ -86,10 +271,10 @@ async def sam3_box_mask(
 ) -> dict[str, Any]:
     """SAM-3 mask of `label` inside the pixel `box`, in full-frame pixels.
 
-    fal-ai/sam-3 ignores `box_prompts` on the image endpoint (asked for a
-    building on the right, it returned a barrel on the far left with 0.94
-    confidence), so the box scopes the call by CROPPING, at CROP_PAD. `size`
-    resizes the image first so the box is in the saved view's pixels.
+    An earlier text-plus-box probe returned an unrelated barrel at 0.94
+    confidence. This compatibility profile therefore scopes the text call by
+    CROPPING, at CROP_PAD. The separate visual profile uses the currently
+    documented box and point fields. `size` resizes into saved-view pixels.
 
     Paid: one queue POST without retries; only the free polling may retry.
     Returns {"mask": a 1-bit frame-size image, or None when nothing was found,

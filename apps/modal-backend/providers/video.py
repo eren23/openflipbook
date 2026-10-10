@@ -15,9 +15,11 @@ see `ltx_stream.py`.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from ._common import to_fal_url
 from .image import _fal_subscribe
@@ -130,12 +132,14 @@ def move_prompt(
     turn_deg: float = 0,
     rise_m: float = 0,
     forward_m: float | None = None,
+    lateral_m: float = 0,
     subject: str | None = None,
 ) -> str:
     """One continuous camera move, in words.
 
     A positive orbit circles the camera to its own right around the subject; a
-    positive turn pans right; a positive rise lifts it. `forward_m=None` is a
+    positive turn pans right; a positive rise lifts it; a positive lateral
+    move translates to the camera's right. `forward_m=None` is a
     walk of unknown length (the /play walk has no metres). Parts that round to
     zero are left out.
     """
@@ -146,6 +150,8 @@ def move_prompt(
     elif round(forward_m, 1):
         way = "forward" if forward_m > 0 else "back"
         parts.append(f"moves {way} about {abs(round(forward_m, 1)):g} metres")
+    if round(lateral_m, 1):
+        parts.append(f"moves sideways about {abs(round(lateral_m, 1)):g} metres to its {_side(lateral_m)}")
     if round(orbit_deg):
         around = subject or "the subject"
         parts.append(
@@ -201,6 +207,7 @@ class AnimatedClip:
     content_type: str
     model: str
     duration_seconds: float
+    provider_request_id: str | None = None
 
 
 def _resolve_video_tier(tier: str | None) -> str:
@@ -242,6 +249,112 @@ def estimate_usd(
     fixed = descent or action
     resolution = "768P" if fixed else TIER_VIDEO_RESOLUTIONS[_resolve_video_tier(tier)]
     return spend.estimate_video(model, seconds, resolution)
+
+
+StreetWalkDirection = Literal["forward", "left", "right"]
+
+
+class StreetWalkProviderError(RuntimeError):
+    """A known paid request that must be recovered instead of submitted again."""
+
+    def __init__(self, request_id: str, message: str) -> None:
+        super().__init__(f"Street walk request {request_id}: {message}; do not submit another")
+        self.provider_request_id = request_id
+
+
+def street_walk_prompt(direction: StreetWalkDirection) -> str:
+    """A source-image walk or turn, without inferring a metric world pose."""
+    if direction == "forward":
+        move = (
+            "Walk forward along the visible street at a natural walking pace. "
+            "The camera physically translates through the lane at a steady eye height: "
+            "nearby facade corners pass relative to distant buildings, with real depth "
+            "parallax and new cobblestone ground revealed ahead. Keep facing along the lane. "
+        )
+    elif direction in ("left", "right"):
+        move = (
+            f"Standing in the same spot, turn gradually to the {direction} at eye height. "
+            f"Rotate the first-person view to the {direction} in one smooth movement, "
+            "revealing that side of the same street without walking forward. "
+        )
+    else:
+        raise ValueError("Unknown street walking direction")
+    return (
+        "Begin exactly at the supplied street image, the sole visual reference. "
+        "First-person view from within this illustrated fantasy street. "
+        + move
+        + "Preserve the existing facades, roof colours, windows, doors, signs, materials, "
+        "lighting, weather and illustration style. Only the viewer moves. "
+        "One continuous grounded shot. No zoom or lens change, no aerial view, no rising "
+        "camera, no cut, no teleport, no new buildings, and no change of art style."
+    )
+
+
+def street_walk_estimate_usd() -> float:
+    """The fixed non-promotional H3 Max 768P five-second reservation."""
+    from . import spend
+
+    return spend.estimate_video(H3_MAX_MODEL, 5, "768P")
+
+
+async def animate_street_walk(
+    *, image_data_url: str, direction: StreetWalkDirection
+) -> AnimatedClip:
+    """Use the current street only; ambient/descent env overrides never apply."""
+    from obs import span
+
+    from . import mock
+    from .camera_motion import post_once
+
+    # Imported at call time: camera_motion consumes this module's common H3
+    # arguments. Its transport posts exactly once, then only reads the queue.
+    prompt = street_walk_prompt(direction)
+    if mock.on():
+        return AnimatedClip(
+            video_url=mock.mock_video_data_url(),
+            content_type="video/mp4",
+            model="mock/street-walk",
+            duration_seconds=1.0,
+        )
+    if not os.environ.get("FAL_KEY"):
+        raise RuntimeError("FAL_KEY is not set")
+    if not os.environ.get("SHARED_TOKEN"):
+        raise RuntimeError("SHARED_TOKEN is required to recover the street walking request")
+    arguments = h3_arguments(
+        H3_MAX_MODEL, await to_fal_url(image_data_url), prompt, 5, resolution="768P"
+    )
+    async with span("video.street_walk", model=H3_MAX_MODEL, duration=5, direction=direction):
+        request_id = await post_once(H3_MAX_MODEL, arguments)
+        return await recover_street_walk(provider_request_id=request_id)
+
+
+async def recover_street_walk(*, provider_request_id: str) -> AnimatedClip:
+    """Read one retained H3 request; this function cannot submit or reserve spend."""
+    from . import mock
+    from .camera_motion import status, valid_request_id
+
+    if not valid_request_id(provider_request_id):
+        raise ValueError("Invalid street walking provider request ID")
+    if mock.on() or not os.environ.get("FAL_KEY") or not os.environ.get("SHARED_TOKEN"):
+        raise RuntimeError("Street walking recovery requires the configured provider and shared token")
+    try:
+        async with asyncio.timeout(240):
+            while True:
+                state = await status(provider_request_id, model="leg")
+                if state["status"] == "failed":
+                    raise StreetWalkProviderError(provider_request_id, "provider failed")
+                if state["status"] == "ready":
+                    media = cast(dict[str, str], state["video"])
+                    return AnimatedClip(
+                        video_url=media["url"], content_type="video/mp4",
+                        model=H3_MAX_MODEL, duration_seconds=5,
+                        provider_request_id=provider_request_id,
+                    )
+                await asyncio.sleep(1)
+    except StreetWalkProviderError:
+        raise
+    except Exception as exc:
+        raise StreetWalkProviderError(provider_request_id, "result remains unresolved") from exc
 
 
 async def animate_image(

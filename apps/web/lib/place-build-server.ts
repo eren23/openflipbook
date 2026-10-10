@@ -11,6 +11,7 @@ import { assetBuildDefinition, readBuildMaterialStage, readBuildAssetStage } fro
 import { meshLibrary } from "./mesh-server";
 import { buildConnectionsMatch, readBuildConnections, requireBuildConnections } from "./place-build-connections";
 import { matchBuildRequest, parseBuildRequest, prepareBuildReservation, reservePlaceBuild, wireBuild as wire } from "./place-build-reservation";
+import { pinBuildImage, requireBuildImageCurrent } from "./place-build-image";
 
 export type { BuildDoc } from "./place-build-execution";
 async function access(sid: string, pid: string) {
@@ -31,6 +32,7 @@ export async function placeBuildLibrary(sid: string, pid: string) {
   }
   catch { capabilities = { enabled: false, reason: "Layout generation backend unavailable" }; }
   if (capabilities.floor_target_version === 1 && !await placeBuildWorkerAvailable(db, false, true)) capabilities = { ...capabilities, floor_target_version: 0 };
+  if (capabilities.image_context_version === 1 && !await placeBuildWorkerAvailable(db, false, false, true)) capabilities = { ...capabilities, image_context_version: 0 };
   const result: PlaceBuildJob[] = [];
   for (const job of jobs) {
     const material_stage = await readBuildMaterialStage(db, job);
@@ -47,7 +49,8 @@ export async function queuePlaceBuild(sid: string, pid: string, input: Record<st
   const old = await db.collection<BuildDoc>("place_build_jobs").findOne({ _id: `${sid}:${pid}:${request.id}` });
   if (old) return { job: wire(matchBuildRequest(old, request)) };
   const config = await prepareBuildReservation(db, request);
-  return withDbTransaction(async (db, session) => ({ job: wire(await reservePlaceBuild(db, session, sid, pid, request, config)) }));
+  const imageInput = request.use_source_image ? await pinBuildImage(db, sid, pid, request.base_revision) : undefined;
+  return withDbTransaction(async (db, session) => ({ job: wire(await reservePlaceBuild(db, session, sid, pid, request, config, false, imageInput)) }));
 }
 export async function runPlaceBuild(sid: string, pid: string, id: unknown) {
   await access(sid, pid);
@@ -61,6 +64,7 @@ export async function runPlaceBuild(sid: string, pid: string, id: unknown) {
     const scene = await db.collection<SceneDoc>("place_scenes").findOne({ _id: sceneKey(sid, pid) }, options);
     if (!scene || scene.revision !== job.base_revision || hash(scene.definition) !== job.input_sha256) throw new CreatorError("Place changed before generation. Cancel this queued job.", 409);
     await requireBuildConnections(db, job, session);
+    if (job.image_input) await requireBuildImageCurrent(db, sid, pid, job.image_input, session);
     await jobs.updateOne({ _id: key, status: "queued" }, { $set: { status: "scheduled" } }, options);
     return { job: wire({ ...job, status: "scheduled" }) };
   });
@@ -93,6 +97,7 @@ export async function revalidatePlaceBuild(sid: string, pid: string, id: unknown
     if (!scene || scene.revision !== job.base_revision || hash(scene.definition) !== job.input_sha256)
       throw new CreatorError("Place changed; the saved response cannot be rebased", 409);
     await requireBuildConnections(db, job, session);
+    if (job.image_input) await requireBuildImageCurrent(db, sid, pid, job.image_input, session);
     const next = { ...job, status: "validating" as const, execution_token: randomUUID() };
     // Only deterministic validation is scheduled. Raw response, reservation and
     // original provider receipt remain intact; this never authorizes submission.

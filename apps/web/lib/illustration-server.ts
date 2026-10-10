@@ -8,16 +8,20 @@ import { placeScenesEnabled } from "./place-scene-enabled";
 import { checkedAssetQuote, reserveAssetJob } from "./asset-reservation";
 import { assetBackend, assetWorkerAvailable, wireMesh, type MeshAssetDoc, type MeshJobDoc } from "./mesh-execution";
 import { meshBytes, meshLibrary, refreshMesh, cancelMesh } from "./mesh-server";
-import { chainShift, illustrationDependency, illustrationEditSource, illustrationSource, keyframeArt, prepareIllustrationInput, prepareKeyframeViewInput } from "./illustration-input";
+import { chainShift, illustrationDependency, illustrationEditSource, illustrationSource, keyframeArt, keyframeChainSource, prepareIllustrationInput, prepareKeyframeViewInput } from "./illustration-input";
 import { assertCurrentView, fenceViewSources, type PlaceViewDoc } from "./place-view-store";
 import type { IllustrationEditInput, IllustrationKeyframeInput, SavedIllustration } from "./place-view";
 import { composeIllustrationRegion } from "./illustration-region-server";
 import { registeredPixels, selectedObjectIds } from "./illustration-region";
-import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL } from "./asset-pipeline";
+import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL, KEYFRAME_NANO_MODEL, KEYFRAME_FLUX_REFERENCE_MODEL, isKeyframeModel, isMapReferenceKeyframeModel, validFluxReferenceQuote } from "./asset-pipeline";
 import { checkGeometryRefreshBase, composeIllustrationRefresh } from "./illustration-refresh-server";
 import { usesIllustrationIdentity } from "./illustration-identity";
 import { eyeAngle } from "./illustration-keyframe";
 import type { SceneDoc } from "./place-scene-store";
+import { reviewedKeyframe, verifiedKeyframe } from "./illustration-verification";
+import { createHash } from "node:crypto";
+import { getStoredBytes } from "./r2";
+import { MATERIAL_MAX_BYTES } from "./asset-pipeline";
 
 async function access(sid: string, viewId: string) {
   if (!isSafeId(viewId)) throw new CreatorError("Invalid camera view", 400);
@@ -27,6 +31,21 @@ async function access(sid: string, viewId: string) {
   // Checkpoints serve walk videos only and are not exported: their artwork would be lost.
   if (view.walk_checkpoint) throw new CreatorError("Walk checkpoint views cannot be illustrated", 409);
   return { db, view };
+}
+/** Immutable original provider bytes, including incompatible drafts; owner read only. */
+export async function illustrationRawBytes(sid: string, viewId: string, jobId: string, index: string) {
+  const { db } = await access(sid, viewId);
+  if (!isSafeId(jobId) || index !== "0") throw new CreatorError("Invalid raw keyframe image", 400);
+  const job = await db.collection<MeshJobDoc>("illustration_jobs").findOne({ _id: `${sid}:${jobId}`, session_id: sid, "view_dependency.view_id": viewId });
+  const file = job?.keyframe_raw_downloads?.[0];
+  if (!job || !isMapReferenceKeyframeModel(job.model) || job.keyframe_raw_downloads?.length !== 1 || !file) throw new CreatorError("Raw keyframe image not found", 404);
+  const format = job.model === KEYFRAME_NANO_MODEL ? "image/png" : "image/jpeg";
+  if (!/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.bytes) || file.bytes < 1 || file.bytes > MATERIAL_MAX_BYTES
+    || ![format, "application/octet-stream"].includes(file.content_type)
+    || file.key !== `${sid}/illustrations/raw/${jobId}/${file.sha256}.${file.content_type === "image/png" ? "png" : file.content_type === "image/jpeg" ? "jpg" : "bin"}`) throw new CreatorError("Raw keyframe ownership receipt is invalid", 503);
+  const saved = await getStoredBytes(file.key, AbortSignal.timeout(30_000));
+  if (!saved || saved.bytes.length !== file.bytes || createHash("sha256").update(saved.bytes).digest("hex") !== file.sha256) throw new CreatorError("Raw keyframe bytes failed verification", 503);
+  return { bytes: saved.bytes, sha256: file.sha256, content_type: file.content_type };
 }
 export function wireIllustration(asset: MeshAssetDoc, view: PlaceViewDoc, historical: boolean): SavedIllustration {
   if (!asset.view_dependency || !asset.request_id) throw new CreatorError("Illustration provenance is missing", 503);
@@ -48,8 +67,11 @@ export async function illustrationLibrary(sid: string, viewId: string) {
   let keyframeCapabilities;
   try {
     keyframeCapabilities = await assetBackend("illustration", "keyframe-capabilities");
-    if (keyframeCapabilities.model !== KEYFRAME_MODEL || !Number.isFinite(keyframeCapabilities.reservation) || keyframeCapabilities.reservation <= 0) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "Keyframe painting is not configured." };
-    if (keyframeCapabilities.enabled && !await assetWorkerAvailable(db, "illustration", false, false, false, false, true)) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "A compatible keyframe worker is unavailable." };
+    if (!isKeyframeModel(keyframeCapabilities.model) || !Number.isFinite(keyframeCapabilities.reservation) || keyframeCapabilities.reservation <= 0) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "Keyframe painting is not configured." };
+    if (keyframeCapabilities.model === KEYFRAME_FLUX_REFERENCE_MODEL && (!keyframeCapabilities.parameters || !validFluxReferenceQuote(keyframeCapabilities))) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "The structural keyframe capability is incompatible." };
+    if (isMapReferenceKeyframeModel(keyframeCapabilities.model) && (view.width !== 688 || view.height !== 384)) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: `Capture a compatible 688 × 384 camera before ${keyframeCapabilities.model === KEYFRAME_NANO_MODEL ? "Nano" : "Flux reference"} keyframe painting.` };
+    if (keyframeCapabilities.enabled && !await assetWorkerAvailable(db, "illustration", false, false, false, false, true, keyframeCapabilities.model,
+      keyframeCapabilities.parameters?.structural_guidance === "saved-camera-guides-v1")) keyframeCapabilities = { ...keyframeCapabilities, enabled: false, reason: "A compatible keyframe worker is unavailable." };
   } catch { keyframeCapabilities = { enabled: false, model: KEYFRAME_MODEL, reservation: 0, parameters: {}, reason: "Keyframe backend unavailable." }; }
   // Cameras of the same place whose accepted artwork a keyframe can continue from, nearest first.
   // The angle is the warp's eye angle, taken about the place's ground centre instead of
@@ -61,8 +83,16 @@ export async function illustrationLibrary(sid: string, viewId: string) {
     const root = v.sources.find(s => s.place_id === v.root_place_id)!, m = v.camera.world_matrix;
     return [m[12]! - root.x - (place?.width ?? 0) / 2, m[13]!, m[14]! - root.z - (place?.depth ?? 0) / 2];
   };
-  const chainSources = (await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: view.root_place_id, accepted_illustration_id: { $exists: true } }).sort({ created_at: -1 }).limit(50).toArray())
-    .filter(v => v.id !== viewId && chainShift(v, view)).map(v => ({ view_id: v.id, label: v.label, angle: eyeAngle(eye(v), eye(view)) })).sort((a, b) => a.angle - b.angle);
+  const acceptedCameras = await db.collection<PlaceViewDoc>("place_views").find({ session_id: sid, root_place_id: view.root_place_id, accepted_illustration_id: { $exists: true } }).sort({ created_at: -1 }).limit(50).toArray();
+  const eligible = await Promise.all(acceptedCameras.map(async v => {
+    if (v.id === viewId || !chainShift(v, view)) return null;
+    const asset = await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${v.accepted_illustration_id}`, session_id: sid });
+    if (!asset || !reviewedKeyframe(asset.keyframe, asset.sha256)) return null;
+    try { await keyframeChainSource(db, sid, { view_id: v.id, illustration_id: asset.id, sha256: asset.sha256 }, true); }
+    catch (error) { if (error instanceof CreatorError && error.status === 409) return null; throw error; }
+    return { view_id: v.id, label: v.label, angle: eyeAngle(eye(v), eye(view)) };
+  }));
+  const chainSources = eligible.filter((v): v is NonNullable<typeof v> => v !== null).sort((a, b) => a.angle - b.angle);
   const jobs = await db.collection<MeshJobDoc>("illustration_jobs").find({ session_id: sid, "view_dependency.view_id": viewId }).sort({ created_at: -1 }).limit(50).toArray();
   const assets = await db.collection<MeshAssetDoc>("illustration_assets").find({ session_id: sid, "view_dependency.view_id": viewId }).sort({ created_at: -1 }).limit(50).toArray();
   let historical = false, reason: string | undefined;
@@ -89,7 +119,9 @@ async function keyframeRequest(db: Db, sid: string, view: PlaceViewDoc, chainFro
   if (!chainShift(from, view)) throw new CreatorError("The camera to continue from cannot be lined up with this one", 409);
   const asset = from.accepted_illustration_id ? await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${from.accepted_illustration_id}`, session_id: sid }) : null;
   if (!asset) throw new CreatorError("Accept an illustration at that camera before continuing from it", 409);
-  return { stage: "chain", ...style, chain_from: { view_id: from.id, illustration_id: asset.id, sha256: asset.sha256 } };
+  const chain_from = { view_id: from.id, illustration_id: asset.id, sha256: asset.sha256 };
+  await keyframeChainSource(db, sid, chain_from, true);
+  return { stage: "chain", ...style, chain_from };
 }
 export async function submitIllustration(sid: string, viewId: string, input: Record<string, unknown>) {
   const { db, view } = await access(sid, viewId);
@@ -98,8 +130,10 @@ export async function submitIllustration(sid: string, viewId: string, input: Rec
   const region = input.action === "generate_region", keyframe = input.action === "generate_keyframe";
   if ((input.model === ILLUSTRATION_EDIT_MODEL) !== region) throw new CreatorError("Masked generation requires explicit region intent", 400);
   // `art: false` paints from words only; a chained keyframe uses the art when the world has it.
-  if ((input.model === KEYFRAME_MODEL) !== keyframe || !keyframe && (input.chain_from !== undefined || input.art !== undefined)
+  if (isKeyframeModel(input.model) !== keyframe || input.reference_profile !== undefined || input.reference_guidance !== undefined || !keyframe && (input.chain_from !== undefined || input.art !== undefined)
     || input.chain_from !== undefined && !isSafeId(input.chain_from) || input.art !== undefined && (input.art !== false || input.chain_from !== undefined)) throw new CreatorError("Keyframe painting requires explicit keyframe intent", 400);
+  if (isMapReferenceKeyframeModel(input.model) && input.art === false) throw new CreatorError("The map-landmark profile requires the owned source artwork", 400);
+  if (input.model === KEYFRAME_FLUX_REFERENCE_MODEL && input.chain_from !== undefined) throw new CreatorError("The Flux reference profile paints the exact saved camera without a warped chain", 400);
   const objectIds = region ? selectedObjectIds(input.object_ids, view.objects) : undefined;
   const strokes = brushStrokes(input.brush_strokes, view.width, view.height);
   if (!region && strokes !== undefined) throw new CreatorError("Brush strokes require explicit masked generation intent", 400);
@@ -115,6 +149,10 @@ export async function submitIllustration(sid: string, viewId: string, input: Rec
   if (!placeScenesEnabled()) throw new CreatorError("World scenes are not enabled", 404);
   const dependency = illustrationDependency(view);
   await illustrationSource(db, sid, dependency);
+  // Only the current server capability selects a reference profile. No client
+  // reference/profile field can change the model's registered camera contract.
+  const quote = await checkedAssetQuote(db, "illustration", input);
+  if (isMapReferenceKeyframeModel(quote.model) && (view.width !== 688 || view.height !== 384)) throw new CreatorError("Map-reference keyframes need a compatible 688 × 384 saved camera", 409);
   let edit: IllustrationEditInput | undefined;
   if (region) {
     const base = input.base_id ? await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${input.base_id}`, session_id: sid }) : null;
@@ -125,17 +163,20 @@ export async function submitIllustration(sid: string, viewId: string, input: Rec
   }
   let keyframeInput: IllustrationKeyframeInput | undefined;
   if (keyframe) {
-    const request = await keyframeRequest(db, sid, view, input.chain_from as string | undefined, input.art !== false);
+    const request = { ...await keyframeRequest(db, sid, view, input.chain_from as string | undefined, input.art !== false),
+      ...(isMapReferenceKeyframeModel(quote.model) ? { reference_profile: "source-art-map-landmarks-v1" as const,
+        ...(quote.model === KEYFRAME_FLUX_REFERENCE_MODEL ? { reference_guidance: "saved-camera-controlnet-v1" as const }
+          : quote.parameters.structural_guidance === "saved-camera-guides-v1" ? { reference_guidance: "saved-camera-guides-v1" as const } : {}) } : {}) };
     // Read and check every pinned input, and choose the gate's subject, before reserving.
-    const { gate_object_id, gate_subject } = await prepareKeyframeViewInput(db, sid, dependency, { ...request, gate_object_id: null });
-    keyframeInput = { ...request, gate_object_id, gate_subject };
+    const { gate_object_id, gate_subject, reference_preparation } = await prepareKeyframeViewInput(db, sid, dependency, { ...request, gate_object_id: null });
+    keyframeInput = { ...request, gate_object_id, gate_subject, ...(reference_preparation ? { reference_preparation } : {}) };
   }
-  const quote = await checkedAssetQuote(db, "illustration", input);
   return withDbTransaction(async (db, session) => {
     const jobs = db.collection<MeshJobDoc>("illustration_jobs"), options = { session };
     const old = await jobs.findOne({ _id: key }, options); if (old) return same(old);
     const current = await illustrationSource(db, sid, dependency, session);
     if (edit) await illustrationEditSource(db, sid, current, edit, session);
+    if (keyframeInput?.chain_from) await keyframeChainSource(db, sid, keyframeInput.chain_from, true, session);
     const regionCount = await db.collection<MeshAssetDoc>("illustration_assets").countDocuments({ session_id: sid, "view_dependency.view_id": viewId, $or: [{ region_edit: { $exists: true } }, { geometry_refresh: { $exists: true } }] }, options);
     if (await jobs.countDocuments({ session_id: sid, "view_dependency.view_id": viewId }, options) + regionCount >= 50) throw new CreatorError("This camera view already has 50 illustration requests or edits", 409);
     await fenceViewSources(db, current, session);
@@ -165,6 +206,10 @@ export async function illustrationAction(sid: string, viewId: string, input: Rec
     const asset = await db.collection<MeshAssetDoc>("illustration_assets").findOne({ _id: `${sid}:${id}`, session_id: sid }, options);
     if (!asset?.view_dependency || asset.view_dependency.view_id !== viewId) throw new CreatorError("Illustration does not belong to this camera view", 409);
     if (asset.edit_input) throw new CreatorError("Preview the protected region composite before accepting a masked model result", 409);
+    if (asset.keyframe) {
+      if (!verifiedKeyframe(asset.keyframe, asset.sha256)) throw new CreatorError("This keyframe needs a passing camera check and verified final image before acceptance", 409);
+      if (!reviewedKeyframe(asset.keyframe, asset.sha256) && input.reviewed_sha256 !== asset.sha256) throw new CreatorError("Review the final illustration content before accepting it", 409);
+    }
     const view = await illustrationSource(db, sid, asset.view_dependency, session);
     if (view.accepted_illustration_id !== id && (view.accepted_illustration_id ?? null) !== input.previous_id) throw new CreatorError("Accepted illustration changed. Review the saved selection.", 409);
     if (asset.region_edit && view.accepted_illustration_id !== id && asset.region_edit.base_id !== (view.accepted_illustration_id ?? null)) throw new CreatorError("This region edit uses older accepted artwork. Preview it again on the current base.", 409);
@@ -173,6 +218,8 @@ export async function illustrationAction(sid: string, viewId: string, input: Rec
       await checkGeometryRefreshBase(db, sid, view, asset.geometry_refresh, session);
     }
     await fenceViewSources(db, view, session);
+    if (asset.keyframe && !reviewedKeyframe(asset.keyframe, asset.sha256)) await db.collection<MeshAssetDoc>("illustration_assets").updateOne({ _id: asset._id }, { $set: { keyframe: { ...asset.keyframe,
+      content_approval: { version: 1, method: "owner_review", sha256: asset.sha256, reviewed_at: new Date().toISOString() } } } }, options);
     await views.updateOne({ _id: view._id }, { $set: { accepted_illustration_id: id } }, options);
     return { accepted_id: id };
   });

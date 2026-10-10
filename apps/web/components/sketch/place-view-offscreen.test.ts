@@ -4,13 +4,15 @@ import { refreshPlaceViewOffscreen } from "./place-view-refresh";
 import { capturePlaceView } from "./place-view-capture";
 import { loadGeneratedMeshes } from "./generated-mesh";
 import { emptyPlaceScene } from "@/lib/place-scene";
+import { geometryMapCamera } from "./geometry-map-capture";
+import { buildPlaceScene } from "./place-scene-renderer";
 import type { PlaceSceneSnapshot } from "@openflipbook/config";
 import type { SavedPlaceView } from "@/lib/place-view";
 import type * as SceneRenderer from "./place-scene-renderer";
 
 vi.mock("./place-scene-renderer", async importOriginal => {
   const actual = await importOriginal<typeof SceneRenderer>();
-  return { ...actual, THREE: { ...actual.THREE, WebGLRenderer: vi.fn() } };
+  return { ...actual, buildPlaceScene: vi.fn(actual.buildPlaceScene), THREE: { ...actual.THREE, WebGLRenderer: vi.fn() } };
 });
 vi.mock("./place-view-capture", () => ({ capturePlaceView: vi.fn() }));
 vi.mock("./generated-mesh", () => ({ loadGeneratedMeshes: vi.fn().mockResolvedValue(undefined) }));
@@ -34,4 +36,12 @@ it("does not allocate a WebGL context for a cancelled refresh", async () => {
   const abort = new AbortController(); abort.abort();
   await expect(refreshPlaceViewOffscreen({} as SavedPlaceView, {} as PlaceSceneSnapshot, null, {}, abort.signal)).rejects.toThrow();
   expect(THREE.WebGLRenderer).not.toHaveBeenCalled();
+});
+it("renders exterior roofs for map captures while keeping ordinary plans as cutaways", async () => {
+  const snapshot = { id: "scene", place_id: "place", revision: 1, definition: emptyPlaceScene() } as PlaceSceneSnapshot, map = geometryMapCamera(snapshot);
+  await refreshPlaceViewOffscreen(map, snapshot, null, {}, new AbortController().signal);
+  expect(buildPlaceScene).toHaveBeenLastCalledWith(snapshot.definition, { cutaway: false, floorId: undefined });
+  const { purpose: _purpose, ...ordinary } = map;
+  await refreshPlaceViewOffscreen(ordinary, snapshot, null, {}, new AbortController().signal);
+  expect(buildPlaceScene).toHaveBeenLastCalledWith(snapshot.definition, { cutaway: true, floorId: undefined });
 });

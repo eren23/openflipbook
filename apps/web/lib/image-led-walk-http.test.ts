@@ -1,0 +1,17 @@
+// @vitest-environment node
+import { beforeEach, expect, it, vi } from "vitest";
+const state=vi.hoisted(()=>({owner:vi.fn(),walk:vi.fn(),source:vi.fn(),get:vi.fn()}));
+vi.mock("./creator",async()=>({...await vi.importActual<Record<string,unknown>>("./creator"),requireCreator:state.owner}));
+vi.mock("./image-led-walk-server",()=>({readImageLedWalk:state.walk}));
+vi.mock("./image-led-walk-source",async()=>({...await vi.importActual<Record<string,unknown>>("./image-led-walk-source"),imageLedSourceContext:state.source}));
+vi.mock("./r2",()=>({getStoredBytes:state.get}));
+import { imageLedMedia, imageLedSourceMedia, readImageLedJson } from "./image-led-walk-http";
+import { imageLedBytesHash } from "./image-led-walk-source";
+import { CreatorError } from "./creator-error";
+const bytes=Buffer.from("owned original immutable media"),file={key:"world/walk/video.mp4",sha256:imageLedBytesHash(bytes),bytes:bytes.length,content_type:"video/mp4" as const};
+beforeEach(()=>{vi.clearAllMocks();state.owner.mockResolvedValue({});state.walk.mockResolvedValue({source:{image:{...file,key:"world/map.png",content_type:"image/png"}},landmarks:[],frames:[],legs:[{video:file}]});state.get.mockResolvedValue({bytes});state.source.mockResolvedValue({source:{image:{...file,key:"world/map.png",content_type:"image/png"}}});});
+it("authorizes the owner before any image or video byte read",async()=>{state.owner.mockRejectedValue(new CreatorError("Not owned",403));await expect(imageLedMedia(new Request("http://local/video"),"foreign","walk","video-0")).rejects.toMatchObject({status:403});await expect(imageLedSourceMedia(new Request("http://local/source"),"foreign","node")).rejects.toMatchObject({status:403});expect(state.get).not.toHaveBeenCalled();expect(state.walk).not.toHaveBeenCalled();});
+it("returns exact saved source bytes from the actual library preview route",async()=>{const response=await imageLedSourceMedia(new Request("http://local/source"),"world","node");expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);expect(response.headers.get("content-type")).toBe("image/png");expect(state.source).toHaveBeenCalledWith({},"world","node");expect(response.headers.get("cache-control")).toBe("private, no-store");});
+it("verifies full video hash before serving exact ranges",async()=>{const response=await imageLedMedia(new Request("http://local/video",{headers:{range:"bytes=6-13"}}),"world","walk","video-0");expect(response.status).toBe(206);expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes.subarray(6,14));state.get.mockResolvedValue({bytes:Buffer.from("changed")});await expect(imageLedMedia(new Request("http://local/video",{headers:{range:"bytes=0-1"}}),"world","walk","video-0")).rejects.toThrow("changed");});
+it("rejects missing indices and attacker-controlled file keys",async()=>{for(const name of ["video-01","video-1","../world/map.png","source/key"])await expect(imageLedMedia(new Request("http://local/media"),"world","walk",name)).rejects.toMatchObject({status:404});expect(state.get).not.toHaveBeenCalled();});
+it("bounds streamed JSON even without content-length and refuses primitive requests",async()=>{const req=(text:string)=>new Request("http://local/",{method:"POST",body:text});await expect(readImageLedJson(req(JSON.stringify({prompt:"x".repeat(33*1024)})))).rejects.toMatchObject({status:413});await expect(readImageLedJson(req("[]"))).rejects.toMatchObject({status:400});expect(await readImageLedJson(req('{"action":"review"}'))).toEqual({action:"review"});});

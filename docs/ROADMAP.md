@@ -4,6 +4,33 @@ Updated September 14, 2026. This replaces the experiment-led execution queue.
 The full accepted objective is [WORLD_BUILDING_GOAL.md](WORLD_BUILDING_GOAL.md).
 Historical experiments remain evidence, not competing priorities.
 
+October 3 implementation: durable consistency and recovery, image-bound layout,
+geometry-derived maps, saved text edits, private media, portable video archives,
+selected publication and operator recovery are implemented locally. The
+[implementation record](RELEASE_INTEGRATION_2026-10-03.md) separates free checks
+from the still-required fresh paid integrated quality pilot. The milestone
+table below remains the release-quality baseline rather than claiming that
+authored fixtures complete generative acceptance.
+
+October 4 priority correction: the [accepted goal](WORLD_BUILDING_GOAL.md)
+preserves image-first exploration alongside connected 3D. The next product slice
+is the existing rich fantasy map/artwork → image-led exploration → generated walk
+video retaining place identity → expansion of the same persistent world. The
+[637 m walk and full-world export](FULL_MAP_LONG_WALK_2026-10-04.md) are supporting
+geometry/traversal diagnostics; they do not complete illustrated-world or
+generated-video acceptance. Further geometry scale and modeling work are deferred
+behind this connected image/video workflow.
+
+Preserve and reopen the actual [Mended Drum image-first artwork/edit](research/26-mended-drum-image-first.md)
+and the [September 17 progress receipts](WORLD_BUILDING_PROGRESS.md): the rich
+Copper Kettle arrival-led town walk and `/play` sign-swing/steam action clip.
+Their original media paths and recorded identity/style drift remain preserved.
+The October 2 [pose/path video](research/36-pose-to-video-in-product.md) and
+[town-walk study](research/37-walk-video-through-the-town.md) establish geometry
+and camera subsets; visually generic painted blockouts and passing gates do not
+establish rich fantasy quality. Historical replay requires no regeneration and
+does not establish a fresh complete release.
+
 ## Direction
 
 Create a world through exploration, drawing and editing. Maps, illustrations,

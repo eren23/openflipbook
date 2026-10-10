@@ -5,7 +5,7 @@ import type { AssetKind } from "./asset-pipeline";
 import type { MeshImportProvenance, MeshJob } from "./mesh-asset";
 import type { MeshDimensions } from "./mesh-dimensions";
 import type { MeshSourceDoc } from "./mesh-source";
-import type { IllustrationEditInput, IllustrationGeometryRefresh, IllustrationKeyframe, IllustrationKeyframeInput, IllustrationRegionEdit } from "./place-view";
+import type { IllustrationEditInput, IllustrationGeometryRefresh, IllustrationKeyframe, IllustrationKeyframeInput, IllustrationRegionEdit, KeyframeProviderOutput } from "./place-view";
 
 export interface ViewDependency { view_id: string; input_sha256: string; width: number; height: number }
 // "started" is saved before the gate call; finding it later means the call
@@ -18,11 +18,14 @@ export interface MeshJobDoc extends MeshJob {
   request_id?: string; parameters?: Record<string, unknown>; ledger_ids?: string[];
   submission_token?: string; submission_deadline?: Date; submission_started_at?: Date;
   work_token?: string; work_until?: Date; next_check?: Date;
-  provider_result?: { status: "ready"; model_glb?: { url: string }; image?: { url: string }; images?: { url: string }[]; seed?: number }; refresh_result?: boolean;
+  provider_result?: { status: "ready"; model_glb?: { url: string }; image?: { url: string }; images?: { url: string }[]; seed?: number;
+    raw_image?: { valid: boolean; bytes: number; sha256: string }; normalization?: { compatible: boolean; reason?: string } }; refresh_result?: boolean;
   download?: { key: string; sha256: string; bytes: number };
   view_dependency?: ViewDependency;
   edit_input?: IllustrationEditInput;
   keyframe_input?: IllustrationKeyframeInput; keyframe_gate?: KeyframeGateDoc; keyframe_result?: IllustrationKeyframe;
+  keyframe_raw_downloads?: { key: string; sha256: string; bytes: number; content_type: "image/png" | "image/jpeg" | "application/octet-stream" }[];
+  keyframe_provider_outputs?: KeyframeProviderOutput[];
   image_input?: MeshSourceDoc;
   dependency?: { kind?: AssetKind; place_id: string; revision: number; input_sha256: string; build_key: string; result_sha256: string; plan_sha256: string; connections_sha256?: string };
 }

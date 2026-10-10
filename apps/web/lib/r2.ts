@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { readServerEnv, requireR2 } from "./env";
 import { requireStoredImageRead } from "./stored-image-access";
 import { r2ClientConfig } from "./r2-client-config";
@@ -17,6 +17,15 @@ function r2Client(): { s3: S3Client; bucket: string; publicBaseUrl: string } {
     bucket: r2.bucket,
     publicBaseUrl: r2.publicBaseUrl.replace(/\/$/, ""),
   };
+}
+
+/** Read-only bounded probe; configured credentials do not prove reachability. */
+export async function storedBucketReachable(): Promise<boolean> {
+  try {
+    const { s3, bucket } = r2Client();
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }), { abortSignal: AbortSignal.timeout(4000) });
+    return true;
+  } catch { return false; }
 }
 
 export interface UploadedObject {

@@ -671,8 +671,8 @@ async def _fal_subscribe(
 ) -> dict:
     """fal_client.subscribe_async with bounded exponential backoff.
 
-    Three attempts max. Doesn't retry on auth/4xx-other so a misconfigured
-    key fails fast. Wider safety net would mask real bugs.
+    Three attempts by default; IMAGE_SUBMIT_MAX_ATTEMPTS=1 disables automatic
+    retries for a quoted one-submission run. Auth/4xx-other always fails fast.
 
     `require_images=True` (the image-shaped endpoints) raises _EmptyFalResult
     INSIDE the retried block when the result carries no images — fal sometimes
@@ -691,8 +691,11 @@ async def _fal_subscribe(
         deadline_s = max(30.0, float(os.environ.get("FAL_CALL_TIMEOUT_S", "") or 240.0))
     except ValueError:
         deadline_s = 240.0
+    max_attempts = int(os.environ.get("IMAGE_SUBMIT_MAX_ATTEMPTS", "3"))
+    if not 1 <= max_attempts <= 3:
+        raise ValueError("IMAGE_SUBMIT_MAX_ATTEMPTS must be between 1 and 3")
     async for attempt in AsyncRetrying(
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
         retry=retry_if_exception(_is_retryable),
         reraise=True,

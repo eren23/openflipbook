@@ -3,12 +3,21 @@
 #   cp .env.example .env   # add FAL_KEY (+ OPENROUTER_API_KEY)
 #   make demo              # → http://localhost:3000/play
 #
-.PHONY: demo demo-world demo-mock demo-local demo-down demo-clean demo-logs
+.PHONY: demo demo-world demo-mock demo-local demo-down demo-clean demo-logs release selfhost-check
 
 # Local stores (Mongo + a local S3 store, RustFS) + backend + web, with cloud AI.
 # Needs FAL_KEY + OPENROUTER_API_KEY in .env (see .env.example).
 demo:
 	docker compose up --build
+
+# Full first-release authoring shell, private assets and independent workers.
+# Set SHARED_TOKEN in .env. Provider generation still requires priced opt-ins.
+release:
+	docker compose -f docker-compose.yml -f docker-compose.release.yml --profile world-build up --build
+
+# Fresh isolated fixture stack; never mounts existing data or loads user keys.
+selfhost-check:
+	node scripts/selfhost/check.mjs
 
 # Same stack with World Mode + scale-ladder nav on (tap to ENTER places, go
 # deeper, ascend back out, pan to neighbours). Same two keys; rebuilds the web

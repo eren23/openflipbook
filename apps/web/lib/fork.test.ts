@@ -182,11 +182,59 @@ it("forks owned motion evidence with new study bindings but identical immutable 
   const nextStudy = mongo.store("motion_studies").get(`${again.session_id}:study`)!;
   expect(mongo.store("motion_assets").get(`${again.session_id}:clip`)).toMatchObject({ study_sha256: viewHash(nextStudy), silent: source.asset.silent });
 });
+it("copies finalized path receipts and bound walk checkpoints as inert owner-only evidence", async () => {
+  seed(); const source = seedMotion(), study = source.study;
+  const file = { key: "immutable/frame.png", sha256: "a".repeat(64), bytes: 3 };
+  const checkpoint = { _id: `${SRC}:checkpoint`, id: "checkpoint", session_id: SRC, root_place_id: "place", walk_checkpoint: true,
+    width: 64, height: 32, sources: [], files: Object.fromEntries(["render", "depth", "normals", "objects"].map(pass => [pass, file])) };
+  const second = { ...checkpoint, _id: `${SRC}:checkpoint2`, id: "checkpoint2" };
+  mongo.store("place_views").set(checkpoint._id, checkpoint); mongo.store("place_views").set(second._id, second);
+  const { illustrationDependency } = await import("./illustration-input");
+  const base = { session_id: SRC, created_at: new Date(0), status: "needs_review", prompt: "Synthetic receipt", reservation: 1, committed: .5,
+    ledger_ids: ["private-ledger"], work_token: "private-work", request_sha256: "request", keyframe_reservation: .1, keyframe_parameters: {}, art: null, duration: 6, subject: null,
+    keyframes: [{ frame: 0, time: 0, stage: "source", file }, { frame: 1, time: 1, stage: "chain", file }], legs: [{ seconds: 6, duration: 6, cost: .5, move: {}, attempts: [] }] };
+  mongo.store("path_videos").set(`${SRC}:path`, { ...base, _id: `${SRC}:path`, id: "path", study_id: study.id, study_sha256: viewHash(study), preparation_sha256: study.preparation_sha256 });
+  mongo.store("path_videos").set(`${SRC}:walk`, { ...base, _id: `${SRC}:walk`, id: "walk", place_id: "place", view_ids: [checkpoint.id, second.id], views_sha256: viewHash([checkpoint, second].map(view => illustrationDependency(view as never))) });
+  mongo.store("path_videos").set(`${SRC}:active`, { ...base, _id: `${SRC}:active`, id: "active", status: "running" });
+  const fork = (await forkSession(SRC, "root1"))!, copied = mongo.store("path_videos").get(`${fork.session_id}:path`)!;
+  expect(copied).toMatchObject({ status: "cancelled", reservation: 0, committed: 0, ledger_ids: [], archive_provenance: { original_status: "needs_review", committed: .5, source_session_id: SRC } });
+  expect(copied).not.toHaveProperty("work_token"); expect(copied.keyframes).toEqual(base.keyframes);
+  expect(copied.study_sha256).toBe(viewHash(mongo.store("motion_studies").get(`${fork.session_id}:study`)));
+  expect(mongo.store("place_views").has(`${fork.session_id}:checkpoint`)).toBe(true);
+  expect(mongo.store("path_videos").has(`${fork.session_id}:walk`)).toBe(true);
+  expect(mongo.store("path_videos").has(`${fork.session_id}:active`)).toBe(false);
+  vi.mocked(getExistingOwnerToken).mockResolvedValueOnce("viewer");
+  const viewer = (await forkSession(SRC, "root1"))!;
+  expect([...mongo.store("path_videos").values()].some(row => row.session_id === viewer.session_id)).toBe(false);
+});
 it("does not expose private motion evidence to a public-world viewer fork", async () => {
   seed(); seedMotion(); vi.mocked(getExistingOwnerToken).mockResolvedValueOnce("viewer");
   const fork = (await forkSession(SRC, "root1"))!;
   for (const name of ["motion_studies", "motion_assets", "motion_reviews", "motion_jobs"]) expect([...mongo.store(name).values()].some(doc => doc.session_id === fork.session_id)).toBe(false);
   expect(mongo.store("motion_selections").has(`${fork.session_id}:study`)).toBe(false);
+});
+it("keeps image-led origins and original artwork on owner forks as inert content without paid claims", async () => {
+  seed();
+  const image = { key: "k/root.jpg", sha256: "a".repeat(64), bytes: 100, content_type: "image/jpeg", width: 64, height: 64 };
+  const walk = { _id: `${SRC}:illustrated`, id: "illustrated", session_id: SRC, profile: "image-led-v1", status: "active", created_at: new Date(0), updated_at: new Date(1),
+    request_sha256: "b".repeat(64), prompt: "Original book bay", revision: 1,
+    source: { node_id: "root1", image_key: image.key, image, map_frame: { bounds: { x: 0, y: 0, w: 64, h: 64 }, parent_id: null }, source_projection: "illustrated_oblique_or_unknown", binding_sha256: "c".repeat(64) },
+    landmarks: [], route: { frame: "original-image-normalized", map_sha256: image.sha256, sha256: "d".repeat(64), points: [{ x: .5, y: .9 }, { x: .5, y: .7 }] },
+    frames: [{ index: 0, status: "ready", job_id: "original-job", raw: image, image, review: { identity: "approved", route: "approved", spatial: "unmeasured", sha256: image.sha256, reviewed_at: new Date(0).toISOString() } },
+      { index: 1, status: "submitting", job_id: "pending-job", review: { identity: "pending", route: "pending", spatial: "unmeasured" } }],
+    legs: [{ index: 0, from: 0, to: 1, status: "empty", review: { temporal: "pending" } }] };
+  mongo.store("image_led_walks").set(walk._id, walk);
+  mongo.store("image_led_walk_steps").set("pending-job", { _id: "pending-job", session_id: SRC, status: "submitting", reservation: .15 });
+  const fork = (await forkSession(SRC, "root1"))!, copied = mongo.store("image_led_walks").get(`${fork.session_id}:illustrated`)!;
+  expect(copied).toMatchObject({ status: "archived", source: { node_id: expect.any(String), image }, archive_provenance: { original_status: "active", source_session_id: SRC } });
+  expect((copied.source as {node_id:string}).node_id).not.toBe("root1");
+  expect(mongo.store("nodes").get((copied.source as {node_id:string}).node_id)).toMatchObject({ session_id: fork.session_id, image_key: image.key });
+  expect((copied.frames as {raw?:unknown;status:string}[])[0]!.raw).toEqual(image); expect((copied.frames as {status:string}[])[1]!.status).toBe("empty");
+  expect(JSON.stringify(copied)).not.toMatch(/original-job|pending-job/);
+  expect([...mongo.store("image_led_walk_steps").values()].some(row => row.session_id === fork.session_id)).toBe(false);
+  vi.mocked(getExistingOwnerToken).mockResolvedValueOnce("viewer");
+  const viewer = (await forkSession(SRC, "root1"))!;
+  expect([...mongo.store("image_led_walks").values()].some(row => row.session_id === viewer.session_id)).toBe(false);
 });
 it.each(["camera", "study", "video", "review", "selection"])("rejects a broken motion %s binding atomically", async kind => {
   seed(); const source = seedMotion();

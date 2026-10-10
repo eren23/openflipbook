@@ -10,6 +10,19 @@
 .status { flex:1; color:#61716a; font-size:12px; }
 .body { display:grid; grid-template-columns:minmax(0,1fr) 290px; flex:1; min-height:0; }
 .stage { display:flex; flex-direction:column; min-height:0; min-width:0; }
+.illustratedWalkStage { overflow:auto; }
+.illustratedWalkStage > .viewportWrap { flex:0 0 440px; min-height:440px; }
+.illustratedWalkStage > .illustrationStage { flex:0 0 440px; min-height:440px; }
+.illustratedWalkFlow { padding:20px; display:grid; gap:12px; }
+.illustratedWalkFlow h1,.illustratedWalkFlow p,.illustratedWalkFlow figure { margin:0; }
+.illustratedWalkFlow h1 { font-size:22px; }
+.illustratedWalkFlow figure { display:grid; gap:5px; }
+.illustratedWalkFlow figure img { width:100%; max-height:300px; object-fit:contain; background:#e6ece8; }
+.illustratedWalkFlow figcaption { color:#61716a; font-size:12px; }
+.illustratedWalkFlow label { display:grid; gap:5px; }
+.illustratedWalkFlow .checkbox { display:flex; gap:8px; }
+.savedWalkActions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.illustratedWalkFlow textarea { width:100%; min-height:70px; font:inherit; padding:8px; }
 .viewTabs { display:flex; gap:5px; padding:10px 16px; border-bottom:1px solid #d7deda; background:#fff; flex-wrap:wrap; }
 .viewTabs button[aria-pressed=true] { background:#daeae3; border-color:#54927d; }
 .viewportWrap { position:relative; flex:1; min-height:0; display:flex; flex-direction:column; }

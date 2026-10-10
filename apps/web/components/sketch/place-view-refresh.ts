@@ -53,7 +53,7 @@ export async function withPlaceViewScene<T>(view: SavedPlaceView, snapshot: Plac
   if (view.root_place_id !== snapshot.place_id || !view.sources.some(s => s.place_id === snapshot.place_id && s.scene_id === snapshot.id)) throw new Error("Saved camera belongs to a different place");
   if (view.floor_id && !snapshot.definition.objects.some(o => o.structure?.floors.some(f => f.id === view.floor_id))) throw new Error("The saved camera floor no longer exists");
   const connected = view.mode === "walk" && network ? buildConnectedPlaces(network, snapshot.place_id) : null;
-  const { scene, solids } = connected ?? buildPlaceScene(snapshot.definition, { cutaway: view.mode === "plan", floorId: view.floor_id ?? undefined });
+  const { scene, solids } = connected ?? buildPlaceScene(snapshot.definition, { cutaway: view.mode === "plan" && view.purpose !== "map", floorId: view.floor_id ?? undefined });
   try {
     for (const part of connected?.parts ?? [{ scene, definition: snapshot.definition }]) {
       if (part.definition.material_pack === "ankh-street-v1") await applyStreetMaterials(part.scene, signal);

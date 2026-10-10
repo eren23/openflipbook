@@ -10,6 +10,8 @@ import { ankhStreetScene, ANKH_MAP, DRUM_MAP_ANCHOR, DRUM_APPROACH } from "@/lib
 import { alignedDrumScene, type AlignmentProfile } from "@/lib/drum-alignment";
 import MeshGenerator from "./mesh-generator";
 import PlaceBuilder from "./place-builder";
+import WorldPublication from "./world-publication";
+import PlaceSceneEdits from "./place-scene-edits";
 import type { MeshJob } from "@/lib/mesh-asset";
 import BuildingInspector from "./building-inspector";
 import AdjacentPlaceEditor from "./adjacent-place-editor";
@@ -26,10 +28,11 @@ import PlaceViewLibrary from "./place-view-library";
 import type { CaptureMotion } from "./place-camera-motion";
 import type { CapturePlaceView, SavedPlaceView, RefreshPlaceView } from "@/lib/place-view";
 import { WalkVideo } from "./path-video";
-import { WORLD_EDITOR_VIEWS, worldEditorSelection, worldEditorHref, type WorldEditorView } from "@/lib/world-editor-selection";
+import { WORLD_EDITOR_VIEWS, worldEditorSelection, worldEditorHref, walkVideoViewIds, type WorldEditorView } from "@/lib/world-editor-selection";
 import { routeParam, type WalkPose } from "@/lib/walk-position";
 import type { WalkWaypoint } from "@/lib/walk-route";
 import { networkView } from "@/lib/place-connections";
+import ConnectedWorldMap from "./connected-world-map";
 const Viewport = dynamic(() => import("./place-viewport"), { ssr: false });
 interface Context {
   session_id: string; place_id: string; source_node_id: string | null; source_url: string | null;
@@ -56,10 +59,21 @@ export default function WorldEditor() {
   const onRefreshReady = useCallback((next: RefreshPlaceView | null) => setRefreshView(() => next), []);
   const [loadView, setLoadView] = useState<{ requestId: string; view: SavedPlaceView } | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
+  const [walkViewsRefresh, setWalkViewsRefresh] = useState(0), [walkFirstView, setWalkFirstView] = useState<string | null>(null);
+  const [preparedWalkViews, setPreparedWalkViews] = useState<string[]>([]);
+  const [walkQuoteRefresh, setWalkQuoteRefresh] = useState(0), [cameraPending, setCameraPending] = useState(false);
+  const onArtworkAccepted = useCallback(() => setWalkQuoteRefresh(k => k + 1), []);
+  const [illustratedWalk, setIllustratedWalk] = useState(false);
+  const onWalkPrepared = useCallback((ids: string[]) => {
+    setPreparedWalkViews(ids); setWalkFirstView(ids[0] ?? null); setWalkViewsRefresh(k => k + 1);
+    const url = new URL(window.location.href); url.searchParams.set("walk_views", ids.join(",")); url.searchParams.delete("route"); window.history.replaceState(null, "", url);
+  }, []);
   const loadCameraPath = (view: SavedPlaceView) => { setMode("orbit"); setFloorId(view.floor_id ?? ""); setSelected(view.path?.target_id ?? null); setLoadView({ requestId: crypto.randomUUID(), view }); };
   const onCaptureReady = useCallback((next: CapturePlaceView | null) => setCapture(() => next), []);
   const [network,setNetwork]=useState<PlaceNetwork|null>(null),[networkError,setNetworkError]=useState("");
   const [walkingPlace,setWalkingPlace]=useState<string|null>(null);
+  const [worldMapOpen, setWorldMapOpen] = useState(false), [mapWalkPose, setMapWalkPose] = useState<WalkPose | null>(null);
+  const worldMapOpenRef = useRef(false); worldMapOpenRef.current = worldMapOpen;
   const creationRequest = useRef<{ request_id: string; definition: PlaceSceneDefinition } | null>(null);
   const generationJob = useRef<string | undefined>(undefined);
   const [selected, setSelected] = useState<string | null>(null), [mode, setMode] = useState<WorldEditorView>("plan");
@@ -81,11 +95,17 @@ export default function WorldEditor() {
   const [focusKey, setFocusKey] = useState(0);
   const [proposal, setProposal] = useState<WorldEditProposal | null>(null), [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [demo, setDemo] = useState(false), [confirmedScale, setConfirmedScale] = useState(false);
+  const [sceneEditPending, setSceneEditPending] = useState(false);
+  const savedIdentity = `${context?.session_id}:${context?.place_id}:${context?.scene?.id}:${context?.scene?.revision}`;
+  const liveSavedIdentity = useRef(savedIdentity); liveSavedIdentity.current = savedIdentity;
+  useEffect(() => { setSceneEditPending(false); }, [savedIdentity]);
   const [kind, setKind] = useState<PlaceComponent>("bench"), [shape, setShape] = useState("");
   const [undoStack, setUndoStack] = useState<PlaceSceneDefinition[]>([]), [walkKey, setWalkKey] = useState(0);
   const [template, setTemplate] = useState("garden");
   const [ankhDemo, setAnkhDemo] = useState(false), [mapFocused, setMapFocused] = useState(false), [tour, setTour] = useState(false);
   const position=useWalkPosition(!demo&&context?.scene?context.session_id:null);
+  const recordPosition = position.record;
+  const recordWalkPose = useCallback((pose: WalkPose) => { recordPosition(pose); if (worldMapOpenRef.current) setMapWalkPose(pose); }, [recordPosition]);
   const skipResume=useRef(false);
   // A walk handed over from /play: spawn once on its first point, then walk it.
   const [handoff,setHandoff]=useState<WalkWaypoint[]|null>(null),handoffPose=useRef<WalkPose|null>(null);
@@ -140,12 +160,15 @@ export default function WorldEditor() {
       ? requestedMode : initial.material_pack ? "orbit" : "plan");
     // A /play walk's route (walk-position routeQuery). It is taken off the URL
     // so a later load (save, fork) does not restart it.
-    const route=data.scene&&requestedMode==="walk"&&!connectedFailed?routeParam(query.get("route")??"",data.scene.definition):[];
-    if(query.has("route")){const url=new URL(window.location.href);url.searchParams.delete("route");window.history.replaceState(null,"",url);}
-    handoffPose.current=route[0]&&data.scene?{version:1,place_id:data.place_id,scene_revision:data.scene.revision,position:{x:route[0].x,y:0.82,z:route[0].z},yaw:route[0].yaw,pitch:0}:null;
+    const imageLed = !!data.scene && !connectedFailed && query.get("workflow") === "illustrated-walk";
+    const route=data.scene&&(requestedMode==="walk"||imageLed)&&!connectedFailed?routeParam(query.get("route")??"",data.scene.definition):[];
+    const savedWalkViews = walkVideoViewIds(query.get("walk_views"));
+    setIllustratedWalk(imageLed); setPreparedWalkViews(savedWalkViews); setWalkFirstView(imageLed ? savedWalkViews[0] ?? null : null);
+    if(!imageLed&&query.has("route")){const url=new URL(window.location.href);url.searchParams.delete("route");window.history.replaceState(null,"",url);}
+    handoffPose.current=!imageLed&&route[0]&&data.scene?{version:1,place_id:data.place_id,scene_revision:data.scene.revision,position:{x:route[0].x,y:0.82,z:route[0].z},yaw:route[0].yaw,pitch:0}:null;
     // The tour walks in the loaded network's coordinates; the pose stays place-local.
     const chunk=connected&&route.length?networkView(connected,data.place_id).chunks.find(c=>c.scene.place_id===data.place_id):undefined;
-    setHandoff(route.length?route.map(p=>({...p,x:p.x+(chunk?.x??0),z:p.z+(chunk?.z??0)})):null);if(route.length)setTour(true);
+    setHandoff(route.length?route.map(p=>({...p,x:p.x+(chunk?.x??0),z:p.z+(chunk?.z??0)})):null);setTour(!imageLed && route.length > 0);
   }
   useEffect(() => { void load().catch(e => setError((e as Error).message)); }, []);
   const dirty = !!definition && !!context && sceneChanges(context.scene?.definition ?? null, definition).length > 0;
@@ -194,17 +217,17 @@ export default function WorldEditor() {
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   const endpoint = context ? `/api/world/${context.session_id}/places/${context.place_id}/scene` : "";
-  async function openPlace(pid:string,nextMode:typeof mode="plan"){
+  async function openPlace(pid:string,nextMode:typeof mode="plan",objectId:string|null=null){
     if(!context||dirty||busy)return;
     const previousUrl=window.location.href;
-    window.history.replaceState(null,"",`/sketch/world?${new URLSearchParams({world:context.session_id,place:pid})}`);
+    window.history.replaceState(null,"",worldEditorHref({session_id:context.session_id,place_id:pid},{object_id:objectId,floor_id:null},{view:nextMode}));
     setSelected(null);setBusy(true);setError("");
     try{await load();setMode(nextMode);}catch(e){window.history.replaceState(null,"",previousUrl);setError((e as Error).message);}finally{setBusy(false);}
   }
   function switchView(next:typeof mode){
     position.flush();
     setTour(false);setDrawFootprint(false);
-    if(mode==="walk"&&next!=="walk"&&network&&walkingPlace&&walkingPlace!==context?.place_id){void openPlace(walkingPlace,next);return;}
+    if(!illustratedWalk&&mode==="walk"&&next!=="walk"&&network&&walkingPlace&&walkingPlace!==context?.place_id){void openPlace(walkingPlace,next);return;}
     setMode(next);
   }
   useEffect(()=>{
@@ -374,24 +397,39 @@ export default function WorldEditor() {
       <strong>World editor</strong><span className={s.status} role="status">{mode==="walk"&&network?`Connected walk · ${network.chunks.length} places`:demo ? "Local preview" : context?.scene ? `Revision ${context.scene.revision}${dirty ? " · Unsaved changes" : " · Saved"}` : "Unpublished place"}</span>
       {context?.scene && !dirty && <>
         <a href={`/api/export/session/${encodeURIComponent(context.session_id)}`} title="Export world" aria-label="Export world"><Download size={17} /></a>
-        <button title="Fork world" aria-label="Fork world" disabled={busy} onClick={() => void forkWorld()}><GitFork size={17} /></button>
+        <button title="Fork world" aria-label="Fork world" disabled={busy || sceneEditPending} onClick={() => void forkWorld()}><GitFork size={17} /></button>
       </>}
-      {context?.scene && context.source_node_id && !dirty && <a href={worldEditorHref(context, {object_id:selected, floor_id:floorId || null}, {map:true, view:mode, camera:selectedCamera})} title="Repaint map artwork" aria-label="Repaint map artwork"><Map size={18} /></a>}
+      {context?.scene && !dirty && !sceneEditPending && <a href={worldEditorHref(context, {object_id:selected, floor_id:floorId || null}, {map:true, view:mode, camera:selectedCamera})} title={context.source_node_id ? "Repaint map artwork" : "Create map artwork"} aria-label={context.source_node_id ? "Repaint map artwork" : "Create map artwork"}><Map size={18} /></a>}
+      {context?.scene && <button disabled={dirty || busy || sceneEditPending || !!networkError} onClick={() => { setMapWalkPose(position.getPose()); setWorldMapOpen(true); }}><Map size={18}/>World map</button>}
       {context?.scene && context.source_node_id && !dirty && <a href={`/play?continue=${encodeURIComponent(context.session_id)}&node=${encodeURIComponent(context.requested_source_node_id ?? context.source_node_id)}`} title="Explore world" aria-label="Explore world"><Compass size={18} /></a>}
-      <button title="Undo draft edit" aria-label="Undo draft edit" disabled={!undoStack.length || busy} onClick={() => { const last = undoStack.at(-1); if (last) {
+      <button title="Undo draft edit" aria-label="Undo draft edit" disabled={!undoStack.length || busy || sceneEditPending} onClick={() => { const last = undoStack.at(-1); if (last) {
         setDefinition(last); setUndoStack(old => old.slice(0, -1)); setProposal(null); setError("");
         const restored = last.objects.find(o => o.id === selected);
         if (!restored) setSelected(null);
         else if (restored.placement) setFloorId(restored.placement.floor_id);
       } }}><RotateCcw size={17} /></button>
-      <button disabled={!definition || !dirty || busy || (!context?.scene && !confirmedScale)} onClick={() => void preview()}><Eye size={16} />Preview</button>
+      <button disabled={!definition || !dirty || busy || sceneEditPending || (!context?.scene && !confirmedScale)} onClick={() => void preview()}><Eye size={16} />Preview</button>
     </header>
     {measuringMesh && <p className={s.loading} role="status">Measuring saved mesh...</p>}
     {error && <div role="alert" className={s.error}>{error}{creationRequest.current ? <button disabled={busy} onClick={() => void apply()}>Retry save</button> : <button onClick={() => { setError(""); void load().catch(e => setError((e as Error).message)); }}>Reload</button>}</div>}
     {networkError&&<div role="alert" className={s.error}>{networkError}<button onClick={()=>void load().catch(e=>setError((e as Error).message))}>Reload connections</button></div>}
     {position.state.status==="error"&&<div role="alert" className={s.error}>{position.state.message}{position.state.conflict?<button onClick={()=>window.location.reload()}>Reload saved position</button>:<button onClick={position.retry}>Retry position save</button>}</div>}
     {definition && context ? <div className={s.body}>
-      <section className={s.stage} inert={busy}>
+      <section className={`${s.stage} ${illustratedWalk ? s.illustratedWalkStage : ""}`} inert={busy || sceneEditPending}>
+        {illustratedWalk && context.scene && <section className={s.illustratedWalkFlow} aria-label="Illustrated walk workspace">
+          <h1>Illustrated walk</h1>
+          <p>Save free camera checkpoints from your route, review the artwork, then approve a quoted walk video.</p>
+          {context.source_url && <figure>
+            {/* eslint-disable-next-line @next/next/no-img-element -- owner-authorized saved artwork */}
+            <img src={context.source_url} alt="Saved world artwork"/>
+            <figcaption>World artwork · Camera views use the saved place geometry.</figcaption>
+          </figure>}
+          <WalkVideo key={`walk:${context.session_id}:${context.place_id}:${context.scene.revision}`}
+            sessionId={context.session_id} placeId={context.place_id} route={handoff ?? undefined} capture={mode === "walk" ? capture : null} disabled={dirty || busy || cameraPending}
+            illustrated initialViewIds={preparedWalkViews} onPrepared={onWalkPrepared} refreshKey={walkQuoteRefresh}/>
+          {walkFirstView && <button onClick={() => switchView("illustration")}><ImageIcon size={16}/>Review first checkpoint artwork</button>}
+          <button onClick={() => { setIllustratedWalk(false); const url = new URL(window.location.href); url.searchParams.delete("workflow"); window.history.replaceState(null, "", url); switchView("walk"); }}>Explore in 3D</button>
+        </section>}
         <nav className={s.viewTabs} aria-label="Place view">{([
           ["plan", Map, "Plan"], ["illustration", ImageIcon, "Illustration"], ["orbit", Orbit, "3D"], ["split", Columns2, "Plan + 3D"], ["walk", Footprints, "Walk"], ["reference", ImageIcon, "Reference"],
         ] as const).filter(([value]) => value !== "reference" || context.source_url).map(([value, Icon, label]) => <button key={value} disabled={value==="walk"&&(!position.ready||!!networkError||dirty&&(!!network||definition.objects.some(o=>o.kind==="building"&&o.asset_id)))} title={value==="walk"&&dirty?"Save validated geometry before walking":label} aria-pressed={mode === value} onClick={() => switchView(value)}><Icon size={16} />{label}</button>)}
@@ -410,15 +448,29 @@ export default function WorldEditor() {
         </div> : mode === "illustration" ? null : mode === "split" ? <div className={s.splitViews}>
           <section className={s.splitPane} aria-label="Live plan"><span className={s.paneLabel}>Plan</span><Viewport floorId={activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} definition={definition} mode="plan" selected={selected} onSelect={selectObject} drawing={drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} /></section>
           <section className={s.splitPane} aria-label="Live 3D"><span className={s.paneLabel}>3D</span><Viewport floorId={activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} definition={definition} mode="orbit" selected={selected} focusKey={focusKey} onSelect={selectObject} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} network={!dirty&&!networkError?network:null} loadView={!dirty ? loadView : undefined}/></section>
-        </div> : mode==="walk"&&(!position.ready||!!networkError)?<p className={s.loading}>Loading saved position...</p>:<Viewport floorId={mode === "walk" ? undefined : activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} key={walkKey} definition={definition} mode={mode} selected={selected} focusKey={focusKey} onSelect={selectObject} network={!dirty&&!networkError?network:null} placeId={context.place_id} onPlaceChange={setWalkingPlace} sceneRevision={context.scene?.revision} getWalkPose={!dirty?getWalkPose:undefined} onWalkPose={!dirty&&!demo&&context.scene?position.record:undefined} route={tour ? (handoff ?? DRUM_APPROACH) : undefined} drawing={mode === "plan" && drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} loadView={!dirty ? loadView : undefined}/>}
+        </div> : mode==="walk"&&(!position.ready||!!networkError)?<p className={s.loading}>Loading saved position...</p>:<Viewport interactionPaused={worldMapOpen || illustratedWalk} floorId={mode === "walk" ? undefined : activeFloor?.floor.id} assetBaseUrl={meshBase} materialBaseUrl={materialBase} key={walkKey} definition={definition} mode={mode} selected={selected} focusKey={focusKey} onSelect={selectObject} network={!dirty&&!networkError?network:null} placeId={context.place_id} onPlaceChange={setWalkingPlace} sceneRevision={context.scene?.revision} getWalkPose={!dirty?getWalkPose:undefined} onWalkPose={!dirty&&!demo&&context.scene&&!illustratedWalk?recordWalkPose:undefined} route={tour ? (handoff ?? DRUM_APPROACH) : undefined} drawing={mode === "plan" && drawFootprint} onFootprint={placeFootprint} onCancelDrawing={() => setDrawFootprint(false)} captureSnapshot={context.scene ?? undefined} onCaptureReady={onCaptureReady} onRefreshReady={onRefreshReady} loadView={!dirty ? loadView : undefined}/>}
         <footer className={s.stageFooter}><span>{mode==="walk"&&network?`${network.chunks.length} connected places`:`${definition.width} × ${definition.depth} m · Authored dimensions`}</span><span>{mode==="walk"&&network?network.chunks.reduce((n,c)=>n+c.scene.definition.objects.length,0):definition.objects.length} objects</span></footer>
         {mode==="walk"&&!dirty&&context.scene&&<span role="status" className={s.stageFooter}>{position.state.status==="saving"?"Saving position...":position.state.status==="saved"?"Position saved":"Position not saved"}</span>}
       </section>
       <aside className={s.inspector} inert={busy || !!creationRequest.current}>
+        {!demo && context.scene && <PlaceSceneEdits key={`edit:${savedIdentity}`} sessionId={context.session_id} placeId={context.place_id}
+          baseRevision={context.scene.revision} selectedObjectId={selected} {...(object?.label ? { selectedObjectLabel: object.label } : {})} disabled={dirty || busy || mode === "walk"}
+          onPendingChange={value => { if (liveSavedIdentity.current === savedIdentity) setSceneEditPending(value); }} onProposal={p => {
+            if (liveSavedIdentity.current !== savedIdentity) return;
+            if (p.scene_id !== context.scene!.id || p.base_revision !== context.scene!.revision) { setError("Saved edit belongs to another scene revision. Refresh its saved status."); return; }
+            const selection = worldEditorSelection(p.definition, selected, floorId || null);
+            generationJob.current = undefined; change(p.definition); setProposal(p); setMode("split");
+            setSelected(selection.object_id); setFloorId(selection.floor_id ?? ""); setFocusKey(k => k + 1);
+          }}/>}
+        <div inert={sceneEditPending} data-testid="world-edit-controls">
+        {!demo && context.scene && <WorldPublication key={`publication:${context.session_id}`} sessionId={context.session_id}/>}
         {network&&<label>Place<select aria-label="Connected place" disabled={dirty} value={mode==="walk"?walkingPlace??context.place_id:context.place_id} onChange={e=>void openPlace(e.target.value)}>{network.chunks.map(c=><option key={c.scene.place_id} value={c.scene.place_id}>{c.scene.definition.label}</option>)}</select></label>}
         {!demo && context.scene && <PlaceViewLibrary
           key={`${context.session_id}:${context.place_id}`} onLoadPath={loadCameraPath}
+          refreshKey={walkViewsRefresh} selectedViewId={walkFirstView}
+          onArtworkAccepted={onArtworkAccepted} onPendingChange={setCameraPending}
           sessionId={context.session_id} placeId={context.place_id} revision={context.scene.revision}
+          sourceArtworkUrl={context.source_url} landmarkLabels={context.scene.definition.objects.filter(o => o.kind === "building").map(o => o.label)}
           capture={capture} refreshView={mode === "illustration" ? refreshIllustration : refreshView} captureMotion={captureMotion}
           disabled={dirty || busy || mode === "reference"}
           surfaceTarget={mode === "illustration" ? illustrationTarget : null}
@@ -427,8 +479,8 @@ export default function WorldEditor() {
           onSelectObject={id => { if (definition.objects.some(o => o.id === id)) selectObject(id); }}/>
         }
         {/* A /play walk's route, walked in 3D: checkpoint views along it, then one video. */}
-        {!demo && context.scene && mode === "walk" && handoff && <WalkVideo key={`walk:${context.session_id}:${context.place_id}:${context.scene.revision}`}
-          sessionId={context.session_id} placeId={context.place_id} route={handoff} capture={capture} disabled={dirty || busy}/>}
+        {!demo && context.scene && !illustratedWalk && <WalkVideo key={`walk:${context.session_id}:${context.place_id}:${context.scene.revision}`}
+          sessionId={context.session_id} placeId={context.place_id} route={mode === "walk" ? handoff ?? undefined : undefined} capture={mode === "walk" ? capture : null} disabled={dirty || busy || cameraPending} initialViewIds={preparedWalkViews} refreshKey={walkQuoteRefresh}/>}
         {mode==="walk"&&network?<button onClick={()=>void openPlace(walkingPlace??context.place_id)}><Map size={16}/>Edit this place</button>:<>
         {context.scene&&!demo&&<AdjacentPlaceEditor key={`${context.scene.place_id}:${context.scene.revision}`} scene={context.scene} disabled={dirty||mode==="walk"} onSaved={async pid=>{
           const previousUrl=window.location.href;
@@ -475,7 +527,13 @@ export default function WorldEditor() {
         {context.history.length > 1 && <label>Restore revision<select aria-label="Restore revision" value="" onChange={e => { const old = context.history.find(h => h.revision === Number(e.target.value)); if (old) { change(old.definition); void preview(old.definition); } }}><option value="">Select revision</option>{context.history.filter(h => h.revision !== context.scene?.revision).map(h => <option key={h.revision} value={h.revision}>Revision {h.revision}</option>)}</select></label>}
         {proposal && <section className={s.proposal} aria-label="World change preview"><h2>Review changes</h2><ul>{[...proposal.changes, ...(!context.scene && definition.material_pack ? sceneChanges(context.initial, proposal.definition) : [])].map((text, i) => <li key={i}>{text}</li>)}</ul><p>{proposal.affected_node_ids.length} saved illustrations remain historical.</p><button className={s.apply} disabled={busy || demo} onClick={() => void apply()}><Check size={17} />Apply to world</button><button onClick={() => setProposal(null)}>Cancel preview</button></section>}
         </>}
+        </div>
       </aside>
     </div> : !error && <p className={s.loading}>Loading place...</p>}
+    {worldMapOpen && context?.scene && <ConnectedWorldMap network={network ?? { chunks: [{ scene: context.scene, x: 0, z: 0 }], connections: [] }} placeId={context.place_id} selectedObject={selected} walkPose={mapWalkPose} assetBaseUrl={meshBase} materialBaseUrl={materialBase} onClose={() => setWorldMapOpen(false)} canWalk={position.ready && !dirty && !busy && !networkError} onWalk={() => { setWorldMapOpen(false); switchView("walk"); }} onOpenPlace={(pid, objectId) => {
+      setWorldMapOpen(false); position.flush(); setTour(false); setDrawFootprint(false);
+      if (pid === context.place_id) { setMode("plan"); if (objectId) selectObject(objectId); else { setSelected(null); setFloorId(""); } }
+      else void openPlace(pid, "plan", objectId);
+    }}/>}
   </main>;
 }

@@ -49,6 +49,14 @@ async function currentBuild(db: Db, sid: string, pid: string, id: string, sessio
   return build;
 }
 
+function buildDependencyMatches(dependency: MeshJobDoc["dependency"], build: BuildDoc, kind: AssetKind) {
+  return !!build.result && !!plans(build, kind) && !!dependency && (dependency.kind ?? "material") === kind && dependency.place_id === build.place_id
+    && dependency.revision === build.base_revision && dependency.input_sha256 === build.input_sha256
+    && dependency.build_key === build._id && dependency.result_sha256 === buildInputHash(build.result)
+    && dependency.plan_sha256 === buildInputHash(plans(build, kind))
+    && dependency.connections_sha256 === build.connections_sha256;
+}
+
 export async function readBuildAssetStage(db: Db, build: BuildDoc, kind: AssetKind): Promise<BuildMaterialStage | undefined> {
   const plan = plans(build, kind);
   const stage = await db.collection<BuildAssetDoc>("place_build_assets").findOne({ _id: stageKey(build._id, kind), session_id: build.session_id });
@@ -56,10 +64,14 @@ export async function readBuildAssetStage(db: Db, build: BuildDoc, kind: AssetKi
   const jobs = await db.collection<MeshJobDoc>(`${kind}_jobs`).find({ session_id: build.session_id, id: { $in: stage.items.map(i => i.job_id) } }).toArray();
   const items = stage.items.map(item => {
     const job = jobs.find(j => j.id === item.job_id);
-    return { plan_id: item.plan_id, job: job ? wireMesh(job) : { id: item.job_id, prompt: "Missing saved asset job", model: stage.quote.model, reservation: 0, status: "failed" as const, error: "Saved job is missing; no automatic regeneration." } };
+    const expected = plan?.find(p => p.id === item.plan_id);
+    const verified = job && job._id === `${build.session_id}:${item.job_id}` && job.prompt === expected?.prompt && buildDependencyMatches(job.dependency, build, kind);
+    return { plan_id: item.plan_id, job: verified ? wireMesh(job) : { id: item.job_id, prompt: expected?.prompt ?? "Missing saved asset job", model: stage.quote.model, reservation: 0, status: "failed" as const,
+      error: job ? "Saved job does not match this build dependency. Restore its records; no automatic regeneration." : "Saved job is missing; no automatic regeneration." } };
   });
-  const invalid = !build.result || !plan || (stage.kind ?? "material") !== kind || buildInputHash(build.result) !== stage.result_sha256 || buildInputHash(plan) !== stage.plan_sha256
+  const invalid = !build.result || !plan || stage.place_id !== build.place_id || stage.build_id !== build.id || (stage.kind ?? "material") !== kind || buildInputHash(build.result) !== stage.result_sha256 || buildInputHash(plan) !== stage.plan_sha256
     || stage.items.length !== plan?.length || new Set(stage.items.map(i => i.plan_id)).size !== stage.items.length
+    || new Set(stage.items.map(i => i.job_id)).size !== stage.items.length
     || stage.items.some(i => !plan?.some(p => p.id === i.plan_id));
   const status = stage.cancelled ? "cancelled" : invalid || items.some(i => ["failed", "cancelled", "storage_failed", "submission_unknown"].includes(i.job.status)) ? "blocked"
     : items.every(i => i.job.status === "ready") ? "ready" : "generating";
@@ -213,22 +225,34 @@ export async function assetBuildDefinition(db: Db, build: BuildDoc, kind: AssetK
   const stage = await readBuildAssetStage(db, build, kind);
   if (!stage) {
     if (build.appearance_approval && plans(build, kind)?.length) throw new CreatorError("A saved appearance stage is missing. Restore its records or explicitly preview layout only.", 409);
+    if (plans(build, kind)?.length) throw new CreatorError(`Proposed ${kind} assets are not ready. Approve appearance or explicitly preview layout only.`, 409);
     return definition;
   }
   if (stage.status !== "ready") throw new CreatorError(`${kind} assets are not ready. Resolve their jobs or explicitly preview layout only.`, 409);
+  const savedAssets = new Map<string, MeshAssetDoc>();
+  for (const item of stage.items) {
+    const job = await db.collection<MeshJobDoc>(`${kind}_jobs`).findOne({ _id: `${build.session_id}:${item.job.id}`, session_id: build.session_id });
+    const asset = item.job.asset_id && await db.collection<MeshAssetDoc>(`${kind}_assets`).findOne({ _id: `${build.session_id}:${item.job.asset_id}`, session_id: build.session_id });
+    if (!asset) throw new CreatorError(`A saved ${kind} dependency is missing`, kind === "mesh" ? 404 : 409);
+    if (!job || job.status !== "ready" || job.asset_id !== asset.id || !buildDependencyMatches(job.dependency, build, kind)
+      || !buildDependencyMatches(asset.dependency, build, kind) || asset.model !== job.model || asset.prompt !== job.prompt
+      || asset.request_id !== job.request_id || !isDeepStrictEqual(asset.parameters, job.parameters))
+      throw new CreatorError(`A saved ${kind} asset does not match its build receipt. Restore its records or explicitly preview layout only.`, 409);
+    savedAssets.set(item.plan_id, asset);
+  }
   if (kind === "mesh") {
     const meshes = new Map<string, { id: string; size: Awaited<ReturnType<typeof savedMeshDimensions>> }>();
     for (const item of stage.items) {
-      if (!item.job.asset_id) throw new CreatorError("A mesh dependency is missing", 409);
-      meshes.set(item.plan_id, { id: item.job.asset_id, size: await savedMeshDimensions(db, build.session_id, item.job.asset_id) });
+      const asset = savedAssets.get(item.plan_id)!;
+      meshes.set(item.plan_id, { id: asset.id, size: await savedMeshDimensions(db, build.session_id, asset.id) });
     }
     try { return bindPlannedMeshes(definition, build.mesh_plan!, meshes); }
     catch (error) { throw new CreatorError((error as Error).message, 422); }
   }
   const assets = new Map<string, string>();
   for (const item of stage.items) {
-    const asset = await db.collection<MeshAssetDoc>("material_assets").findOne({ _id: `${build.session_id}:${item.job.asset_id}`, session_id: build.session_id });
-    if (!asset?.image || asset.image.channel !== "base_color") throw new CreatorError("A saved material dependency is missing", 409);
+    const asset = savedAssets.get(item.plan_id)!;
+    if (!asset.image || asset.image.channel !== "base_color") throw new CreatorError("A saved material dependency is missing", 409);
     assets.set(item.plan_id, asset.id);
   }
   return bindPlannedMaterials(definition, build.material_plan!, assets);

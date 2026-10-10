@@ -7,18 +7,18 @@ import JSZip from "jszip";
 import { fixtureTexturedGlb } from "./fixtures/mesh-glb";
 import { fixtureMaterial } from "./fixtures/material-jpeg";
 import { waitForStableImage } from "./helpers";
+import { assertSelfhostReceipt, type SelfhostReceipt } from "./selfhost-environment";
 
 test.skip(process.env.E2E_SELFHOST !== "1", "Run scripts/selfhost/check.mjs for an isolated, credential-free production stack");
 test.describe.configure({ mode: "serial" });
 const recording = process.env.E2E_SELFHOST_VIDEO === "1";
 test.use(recording ? { video: { mode: "on", size: { width: 1280, height: 900 } }, viewport: { width: 1280, height: 900 }, launchOptions: { slowMo: 180 } } : {});
 let client: MongoClient;
-let receipt: { project: string; compose_file: string; origin: string; mongo: string; database: string; fixture_providers: boolean };
+let receipt: SelfhostReceipt;
 const exec = promisify(execFile);
 test.beforeAll(async ({ request, baseURL }) => {
   receipt = JSON.parse(await readFile(process.env.E2E_SELFHOST_RECEIPT!, "utf8"));
-  if (!/^ofb-check-[a-f0-9]{12}$/.test(receipt.project) || receipt.origin !== baseURL || !receipt.fixture_providers
-    || new URL(receipt.mongo).hostname !== "127.0.0.1" || receipt.database !== "selfhost_check") throw new Error("Expected an isolated self-host receipt");
+  assertSelfhostReceipt(receipt, baseURL);
   await expect.poll(async () => { try { return (await request.get("/api/status")).status(); } catch { return 0; } }, { timeout: 120_000 }).toBe(200);
   client = new MongoClient(receipt.mongo); await client.connect();
   const db = client.db(receipt.database);

@@ -18,6 +18,11 @@ test("isolates stores, credentials and ports without mutating the source Compose
   assert.equal(isolated.services.backend.environment.SHARED_TOKEN, options.token);
   assert.equal(isolated.services.web.environment.MONGODB_DB, "selfhost_check");
   assert.equal(isolated.services.web.environment.R2_PUBLIC_BASE_URL, "/api/blobs");
+  assert.equal(isolated.services.minio.environment.RUSTFS_ACCESS_KEY, "selfhost-check");
+  assert.equal(isolated.services.minio.environment.RUSTFS_SECRET_KEY, options.password);
+  assert.equal(isolated.services["minio-setup"].environment.AWS_ACCESS_KEY_ID, "selfhost-check");
+  assert.equal(isolated.services["minio-setup"].environment.AWS_SECRET_ACCESS_KEY, options.password);
+  assert.equal(isolated.services["place-worker"].stop_grace_period, "10s");
   assert.deepEqual(isolated.services.web.ports, [{ target: 3000, published: "19001", host_ip: "127.0.0.1", protocol: "tcp" }]);
   assert.deepEqual(isolated.services.mongo.ports, [{ target: 27017, published: "19002", host_ip: "127.0.0.1", protocol: "tcp" }]);
   assert.deepEqual(isolated.services.backend.ports, []); assert.equal(isolated.services.web.image, "openflipbook-selfhost-web:test");

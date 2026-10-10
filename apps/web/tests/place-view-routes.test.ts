@@ -15,6 +15,11 @@ it("keeps successful view lists and image bytes private and non-cacheable", asyn
   expect(image.headers.get("content-type")).toBe("image/png"); expect(image.headers.get("x-content-type-options")).toBe("nosniff");
   expect(new Uint8Array(await image.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
 });
+it("forwards an explicit saved view selection while retaining private response headers", async () => {
+  const result = await GET(new Request("http://localhost/api/world/world/places/place/views?view=first-walk"), params);
+  expect(mocks.placeViewLibrary).toHaveBeenCalledWith("world", "place", "first-walk");
+  expect(result.headers.get("cache-control")).toBe("private, no-store");expect(result.headers.get("vary")).toBe("Cookie");
+});
 it("rejects foreign origin, wrong content type and invalid JSON before storage", async () => {
   expect((await POST(req("{}", { origin: "https://elsewhere.test" }), params)).status).toBe(403);
   expect((await POST(req("{}", { "Content-Type": "text/plain" }), params)).status).toBe(415);
