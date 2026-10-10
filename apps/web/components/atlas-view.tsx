@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   arcPath,
+  connectorFrame,
   depthTint,
   fitAllCamera,
   fitCamera,
@@ -255,6 +256,7 @@ export default function AtlasView({
     [laid, viewport.w, viewport.h]
   );
   const lodOn = lodActive && fitZoom > 0 && Number.isFinite(fitZoom);
+  const edgeFrame = useMemo(() => connectorFrame(connectors), [connectors]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -483,13 +485,13 @@ export default function AtlasView({
             <svg
               className="pointer-events-none absolute"
               style={{
-                left: -100000,
-                top: -100000,
-                width: 200000,
-                height: 200000,
+                left: edgeFrame.x,
+                top: edgeFrame.y,
+                width: edgeFrame.w,
+                height: edgeFrame.h,
                 overflow: "visible",
               }}
-              viewBox="-100000 -100000 200000 200000"
+              viewBox={`${edgeFrame.x} ${edgeFrame.y} ${edgeFrame.w} ${edgeFrame.h}`}
             >
               <defs>
                 <marker

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArchiveRestore, Check, Upload, X } from "lucide-react";
 import s from "./creator-workspace.module.css";
 
-interface Preview { request_id: string; sha256: string; status: "preview" | "applied"; session_id: string; preview: { title: string; pages: number; places: number; objects: number; meshes: number; materials: number; views: number; illustrations: number; motion_studies?: number; clips?: number } }
+interface Preview { request_id: string; sha256: string; status: "preview" | "applied"; session_id: string; preview: { title: string; pages: number; places: number; objects: number; meshes: number; materials: number; views: number; illustrations: number; motion_studies?: number; clips?: number; path_videos?: number } }
 const PENDING = "ofb_world_import_pending";
 export default function WorldImporter({ onImported }: { onImported: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null), input = useRef<HTMLInputElement>(null), pending = useRef<{ file: File; id: string } | null>(null), active = useRef(false);
@@ -54,6 +54,7 @@ export default function WorldImporter({ onImported }: { onImported: () => void }
         <h3 className={s.importTitle}>{preview.preview.title}</h3>
         <dl className={s.importCounts}>{(["pages", "places", "objects", "meshes", "materials", "views", "illustrations"] as const).map(key => <div key={key}><dt>{key}</dt><dd>{preview.preview[key]}</dd></div>)}</dl>
         {Boolean(preview.preview.motion_studies || preview.preview.clips) && <dl className={s.importCounts}><div><dt>motion studies</dt><dd>{preview.preview.motion_studies ?? 0}</dd></div><div><dt>clips</dt><dd>{preview.preview.clips ?? 0}</dd></div></dl>}
+        {Boolean(preview.preview.path_videos) && <dl className={s.importCounts}><div><dt>saved route videos</dt><dd>{preview.preview.path_videos}</dd></div></dl>}
         <div className={s.importFooter}>{preview.status === "applied" ? <p role="status"><Check size={16} />Private world saved</p> : <button className={`${s.button} ${s.primary}`} disabled={busy} onClick={() => void apply()}><ArchiveRestore size={16} />Import as private world</button>}
           <button className={s.button} disabled={busy} onClick={() => dialog.current?.close()}>{preview.status === "applied" ? "Done" : "Cancel"}</button></div>
       </>}

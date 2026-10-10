@@ -8,6 +8,9 @@ import s from "./world-editor.module.css";
 import IllustrationRegionPicker from "./illustration-region-picker";
 import type { IllustrationBrushStroke } from "@/lib/illustration-brush";
 import IllustrationSurface from "./illustration-surface";
+import { reviewedKeyframe, verifiedKeyframe } from "@/lib/illustration-verification";
+import { KEYFRAME_NANO_MODEL, KEYFRAME_FLUX_REFERENCE_MODEL, isMapReferenceKeyframeModel } from "@/lib/asset-pipeline";
+import identityStyles from "./place-illustrations.module.css";
 
 interface Library {
   jobs: MeshJob[]; assets: SavedIllustration[]; historical: boolean; accepted_id: string | null;
@@ -19,18 +22,22 @@ const active = (job: MeshJob) => ["scheduled", "submitting", "queued", "running"
 const signed = (n: number) => `${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}%`;
 function gateSummary(k: IllustrationKeyframe) {
   const m = k.candidates[k.chosen], kind = k.stage === "chain" ? "Chained keyframe" : k.art === "words" ? "Keyframe from words" : "Keyframe from art";
-  const gate = `${kind} / gate ${k.gate}`;
+  const gate = `${kind} / ${k.object_id ? "camera/paint check" : "paint check"} ${k.gate}`;
   return m?.iou == null || m.centre_dx == null || m.centre_dy == null || m.area_ratio == null ? gate : `${gate} / IoU ${m.iou.toFixed(3)} / centre ${signed(m.centre_dx)}, ${signed(m.centre_dy)} / area ${m.area_ratio.toFixed(2)}`;
 }
-export default function PlaceIllustrations({ sessionId, view, previousView, disabled, surfaceTarget, selectedObject, onSelectObject, onPendingChange }: {
+export default function PlaceIllustrations({ sessionId, view, previousView, disabled, surfaceTarget, selectedObject, onSelectObject, onPendingChange, onAcceptedChange, sourceArtworkUrl, landmarkLabels = [] }: {
   sessionId: string; view: SavedPlaceView; previousView?: SavedPlaceView | undefined; disabled: boolean;
   surfaceTarget?: HTMLElement | null | undefined; selectedObject?: string | null | undefined;
   onSelectObject?: ((id: string) => void) | undefined; onPendingChange?: ((pending: boolean) => void) | undefined;
+  onAcceptedChange?: (() => void) | undefined;
+  sourceArtworkUrl?: string | null | undefined; landmarkLabels?: string[] | undefined;
 }) {
   const [library, setLibrary] = useState<Library | null>(null), [prompt, setPrompt] = useState("");
   const [consent, setConsent] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [selected, setSelected] = useState(""), [comparison, setComparison] = useState<"illustration" | "source" | "previous" | "overlay">("illustration"), [loadedKey, setLoadedKey] = useState("");
   const [sourceOpacity, setSourceOpacity] = useState(50);
+  const [identityReview, setIdentityReview] = useState<{ key: string; checked: string[] }>({ key: "", checked: [] });
+  const [identityImages, setIdentityImages] = useState<string[]>([]);
   const [editingRegion, setEditingRegion] = useState(false), [regionIds, setRegionIds] = useState<string[]>([]), [maskReady, setMaskReady] = useState(false);
   const [strokes, setStrokes] = useState<IllustrationBrushStroke[] | undefined>();
   const [chainFrom, setChainFrom] = useState<string | null>(null);
@@ -39,17 +46,20 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const [regionMode, setRegionMode] = useState<"proposal" | "generate">("proposal"), [changePrompt, setChangePrompt] = useState(""), [editConsent, setEditConsent] = useState(false);
   const pending = useRef<Record<string, unknown> | null>(null), epoch = useRef({ value: 0 }), mounted = useRef(true);
   const quotation = useRef("");
+  const lastAccepted = useRef<string | null | undefined>(undefined);
   const endpoint = `/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(view.id)}/illustrations`;
   const reload = useCallback(async () => {
     const read = ++epoch.current.value, response = await fetch(endpoint, { cache: "no-store" }), data = await response.json();
     if (!mounted.current || read !== epoch.current.value) return;
     if (!response.ok) throw new Error(data.error || "Illustrations unavailable");
     if (!Array.isArray(data.jobs) || !Array.isArray(data.assets) || !data.capabilities) throw new Error("Invalid illustration library response");
+    if (lastAccepted.current !== undefined && lastAccepted.current !== data.accepted_id) onAcceptedChange?.();
+    lastAccepted.current = data.accepted_id;
     const quote = JSON.stringify([data.capabilities, data.keyframe_capabilities]);
     if (quotation.current !== quote && !pending.current) setConsent(false);
     quotation.current = quote;
     setLibrary(data); setSelected(old => data.assets.some((a: SavedIllustration) => a.id === old) ? old : data.accepted_id ?? data.assets[0]?.id ?? "");
-  }, [endpoint]);
+  }, [endpoint, onAcceptedChange]);
   useEffect(() => { const state = epoch.current; mounted.current = true; void reload().catch(e => { if (mounted.current) setError(e.message); }); return () => { mounted.current = false; state.value++; }; }, [reload, view.historical]);
   const polling = library?.jobs.some(active) ?? false;
   useEffect(() => {
@@ -90,14 +100,14 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   useEffect(() => { onPendingChange?.(frozen); }, [frozen, onPendingChange]);
   const editConfig = library?.region_capabilities;
   // When keyframes are on they replace the full-view flux generation; flux jobs and region edits stay.
-  const keyframeConfig = library?.keyframe_capabilities, keyframes = !!keyframeConfig?.enabled, quote = keyframes ? keyframeConfig : config;
+  const keyframeConfig = library?.keyframe_capabilities, keyframes = !!keyframeConfig?.enabled || isMapReferenceKeyframeModel(keyframeConfig?.model), quote = keyframes ? keyframeConfig : config;
   // Chained keyframes keep the building's identity, so the nearest accepted camera is the
   // default (the library sorts nearest first). "" paints a first keyframe from the render.
   const sources = library?.chain_sources ?? [];
-  const chain = chainFrom === null ? sources[0]?.view_id ?? "" : sources.some(v => v.view_id === chainFrom) ? chainFrom : "";
+  const chain = keyframeConfig?.model === KEYFRAME_FLUX_REFERENCE_MODEL ? "" : chainFrom === null ? sources[0]?.view_id ?? "" : sources.some(v => v.view_id === chainFrom) ? chainFrom : "";
   const paint = (text: string, extra: Record<string, unknown>) => void action({ action: "generate_keyframe", id: crypto.randomUUID(), prompt: text, confirmed: true, model: keyframeConfig?.model, parameters: keyframeConfig?.parameters, reservation: keyframeConfig?.reservation, ...extra }, "generation");
   // The retry ladder: a first keyframe painted from art retries from words; a chain retries once.
-  const kf = asset?.keyframe, rung = kf?.gate !== "failed" ? null : kf.stage === "first" ? kf.art === "art" ? { label: "Retry with words only", extra: { art: false } } : null
+  const kf = asset?.keyframe, rung = isMapReferenceKeyframeModel(asset?.model) || isMapReferenceKeyframeModel(keyframeConfig?.model) || kf?.gate !== "failed" ? null : kf.stage === "first" ? kf.art === "art" ? { label: "Retry with words only", extra: { art: false } } : null
     : kf.chain_from && (library?.assets.filter(a => a.keyframe?.chain_from?.illustration_id === kf.chain_from!.illustration_id).length ?? 0) < 2 ? { label: "Retry chain once", extra: { chain_from: kf.chain_from.view_id } } : null;
   const imageUrl = (id: string) => `/api/world/${encodeURIComponent(sessionId)}/illustrations/${encodeURIComponent(id)}`;
   const renderUrl = `/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(view.id)}/render`;
@@ -112,16 +122,26 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   const shownKey = `${view.id}:${selected}`, loaded = loadedKey === shownKey;
   const imageLoaded = () => setLoadedKey(shownKey);
   const imageFailed = () => { setLoadedKey(""); setError("Saved illustration image unavailable."); };
+  const labels = kf?.reference_preparation?.landmarks?.map(l => l.label) ?? landmarkLabels;
+  const identityRequired = !!kf && !!sourceArtworkUrl && labels.length > 0;
+  const identityKey = JSON.stringify([view.id, asset?.id, asset?.sha256, sourceArtworkUrl, labels]);
+  const identityChecked = identityReview.key === identityKey ? identityReview.checked : [];
+  const identityUrls = asset && sourceArtworkUrl ? [sourceArtworkUrl, renderUrl, imageUrl(asset.id)] : [];
+  const identityReady = !identityRequired || identityChecked.length === labels.length && identityUrls.every(url => identityImages.includes(url));
+  const identityImageLoaded = (url: string) => setIdentityImages(old => old.includes(url) ? old : [...old, url]);
+  const identityImageFailed = (url: string) => { setIdentityImages(old => old.filter(value => value !== url)); setError("An identity comparison image is unavailable."); };
   return <div className={s.illustrationGenerator} aria-label="Camera illustrations">
     <div className={s.sectionHeading}><h3>Illustrations</h3><button title="Refresh illustrations" aria-label="Refresh illustrations" disabled={busy} onClick={() => void reload().catch(e => setError(e.message))}><RefreshCw size={16}/></button></div>
     {!editingRegion && <><label>Appearance<textarea aria-label="Illustration appearance" value={prompt} maxLength={1024} disabled={frozen} onChange={e => setPrompt(e.target.value)} placeholder="Hand-inked stonework, mossy roofs, warm window light"/></label>
-    {keyframes && !!library?.chain_sources?.length && <label>Continue from<select aria-label="Continue from camera" value={chain} disabled={frozen} onChange={e => setChainFrom(e.target.value)}><option value="">3D render (first keyframe)</option>{library.chain_sources.map(v => <option key={v.view_id} value={v.view_id}>{v.label} ({Math.round(v.angle)}°)</option>)}</select></label>}
+    {keyframes && keyframeConfig?.model !== KEYFRAME_FLUX_REFERENCE_MODEL && !!library?.chain_sources?.length && <label>Continue from<select aria-label="Continue from camera" value={chain} disabled={frozen} onChange={e => setChainFrom(e.target.value)}><option value="">3D render (first keyframe)</option>{library.chain_sources.map(v => <option key={v.view_id} value={v.view_id}>{v.label} ({Math.round(v.angle)}°)</option>)}</select></label>}
     {quote?.enabled && <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || !!pending.current} onChange={e => setConsent(e.target.checked)}/>Reserve {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(quote.reservation)} for this {keyframes ? "keyframe" : "illustration"}</label>}
     {quote && !quote.enabled && <p role="status">{quote.reason}</p>}
-    {keyframes ? <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !consent || prompt.trim().length < 3))} onClick={() => paint(prompt, chain ? { chain_from: chain } : {})}><Sparkles size={16}/>{pending.current ? "Retry keyframe request" : "Paint keyframe"}</button>
+    {keyframes && keyframeConfig?.model === KEYFRAME_NANO_MODEL && <p role="status">Nano Banana Pro / exact saved camera with source map and named landmarks. Building identity needs your review.</p>}
+    {keyframes && keyframeConfig?.model === KEYFRAME_FLUX_REFERENCE_MODEL && <p role="status">Flux / saved-camera depth and outlines with the source map. Building identity needs your review.</p>}
+    {keyframes ? <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !keyframeConfig?.enabled || !consent || prompt.trim().length < 3))} onClick={() => paint(prompt, chain ? { chain_from: chain } : {})}><Sparkles size={16}/>{pending.current ? "Retry keyframe request" : "Paint keyframe"}</button>
     : <button disabled={busy || !!regionPending.current || !!maskedPending.current || (!pending.current && (disabled || historical || !config?.enabled || !consent || prompt.trim().length < 3))} onClick={() => void action({ action: "generate", id: crypto.randomUUID(), prompt, confirmed: true, model: config?.model, parameters: config?.parameters, reservation: config?.reservation }, "generation")}><Sparkles size={16}/>{pending.current ? "Retry illustration request" : "Generate illustration"}</button>}</>}
     {library?.jobs.map(job => <div key={job.id} className={s.illustrationJob}>
-      <span>{job.prompt}</span><span role="status">{job.status.replaceAll("_", " ")}</span>
+      <span>{job.prompt}</span><span role="status">{job.status === "ready" ? "draft ready for review" : job.status.replaceAll("_", " ")}</span>
       {job.error && <p>{job.error}</p>}
       {job.asset_id && <button disabled={frozen} onClick={() => { setSelected(job.asset_id!); setComparison("illustration"); }}>Review result</button>}
       {job.status === "storage_failed" && <button disabled={busy} onClick={() => void action({ action: "refresh", id: job.id })}><RefreshCw size={14}/>Retry storage</button>}
@@ -129,6 +149,17 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
     </div>)}
     {!!library?.assets.length && <label>Illustration<select aria-label="Saved illustration" value={selected} disabled={frozen} onChange={e => { setSelected(e.target.value); setComparison("illustration"); }}>{library.assets.map(a => <option key={a.id} value={a.id}>{a.geometry_refresh ? " / protected refresh" : a.region_edit ? " / selected edit" : a.edit_input ? " / masked proposal" : a.keyframe ? " / keyframe" : ""}{a.accepted ? " / accepted" : " / draft"}{a.historical ? " / historical" : ""}</option>)}</select></label>}
     {asset && <>
+      {!editingRegion && sourceArtworkUrl && <section aria-label="World identity review" className={identityStyles.identityReview}>
+        <h4>Compare the same world</h4>
+        <p>Check each building against the map and camera: its street side, near/far order, roof, entrances and spacing. The camera check measures framing; it does not certify building identity.</p>
+        <div className={identityStyles.identityImages}>
+          <figure><figcaption>Original world map</figcaption><Image unoptimized src={sourceArtworkUrl} alt="Original world artwork for identity review" width={1024} height={1024} onLoad={() => identityImageLoaded(sourceArtworkUrl)} onError={() => identityImageFailed(sourceArtworkUrl)}/></figure>
+          <figure><figcaption>Exact saved camera</figcaption><Image unoptimized src={renderUrl} alt="Exact saved camera for identity review" width={view.width} height={view.height} onLoad={() => identityImageLoaded(renderUrl)} onError={() => identityImageFailed(renderUrl)}/></figure>
+          <figure><figcaption>Candidate / {kf?.gate ?? "unmeasured"} camera check</figcaption><Image unoptimized src={imageUrl(asset.id)} alt="Candidate artwork for identity review" width={view.width} height={view.height} onLoad={() => identityImageLoaded(imageUrl(asset.id))} onError={() => identityImageFailed(imageUrl(asset.id))}/></figure>
+        </div>
+        {identityRequired && labels.map((label, index) => { const token = `${index}:${label}`; return <label key={token} className={s.checkbox}><input type="checkbox" checked={identityChecked.includes(token)} disabled={frozen || historical || !verifiedKeyframe(kf!, asset.sha256)} onChange={event => setIdentityReview({ key: identityKey, checked: event.target.checked ? [...identityChecked, token] : identityChecked.filter(value => value !== token) })}/>I checked {label}: identity, street side and near/far order match.</label>; })}
+        {kf && !verifiedKeyframe(kf, asset.sha256) && <p role="status">This failed or unverified draft stays blocked. Comparing its identity cannot override the camera gate.</p>}
+      </section>}
       {!editingRegion && <div className={s.viewPasses} role="group" aria-label="Illustration comparison"><button aria-pressed={comparison === "illustration"} onClick={() => setComparison("illustration")}>Illustration</button><button aria-pressed={comparison === "source"} onClick={() => setComparison("source")}>Source render</button><button aria-pressed={comparison === "overlay"} onClick={() => setComparison("overlay")}>Overlay</button>{previous && <button aria-pressed={comparison === "previous"} onClick={() => setComparison("previous")}>Previous artwork</button>}</div>}
       {!editingRegion && comparison === "overlay" && <label className={s.comparisonOpacity}>Source opacity <output>{sourceOpacity}%</output><input type="range" aria-label="Source render opacity" aria-valuetext={`${sourceOpacity}% source render`} min={0} max={100} step={5} value={sourceOpacity} onChange={e => setSourceOpacity(Number(e.target.value))}/></label>}
       {editingRegion && <div className={s.viewPasses} role="group" aria-label="Region edit mode"><button aria-pressed={regionMode === "proposal"} disabled={frozen} onClick={() => setRegionMode("proposal")}>Apply draft</button><button aria-pressed={regionMode === "generate"} disabled={frozen} onClick={() => setRegionMode("generate")}>Generate change</button></div>}
@@ -142,7 +173,8 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
       {!editingRegion && rung && <button disabled={frozen || disabled || historical || !keyframes || !consent} onClick={() => paint(asset.prompt, rung.extra)}><Sparkles size={16}/>{rung.label}</button>}
       {!editingRegion && asset.geometry_refresh && <p>{asset.geometry_refresh.changed_pixels.toLocaleString()} refreshed pixels / {asset.geometry_refresh.protected_pixels.toLocaleString()} protected pixels</p>}
       {!editingRegion && previousView && previousView.id === view.refreshed_from && !asset.edit_input && !asset.region_edit && !asset.geometry_refresh && <button disabled={busy || (!retryRefresh && (frozen || disabled || historical || !loaded))} onClick={() => void action({ action: "compose_refresh", id: crypto.randomUUID(), proposal_id: asset.id, base_id: previousView.accepted_illustration_id ?? null, previous_id: library?.accepted_id ?? null }, "region")}><RefreshCw size={16}/>{retryRefresh ? "Retry artwork refresh" : "Preview protected refresh"}</button>}
-      {!editingRegion && (asset.edit_input ? <button disabled={busy || (!regionPending.current && (frozen || disabled || historical || !loaded))} onClick={() => void action({ action: "compose", id: crypto.randomUUID(), proposal_id: asset.id, base_id: asset.edit_input!.base_id, object_ids: asset.edit_input!.object_ids, ...(asset.edit_input!.brush_strokes ? { brush_strokes: asset.edit_input!.brush_strokes } : {}) }, "region")}><SquareDashedMousePointer size={16}/>{regionPending.current ? "Retry selected edit" : "Preview protected result"}</button> : <button disabled={frozen || disabled || historical || asset.accepted || !loaded} onClick={() => void action({ action: "accept", id: asset.id, previous_id: library?.accepted_id ?? null })}><Check size={16}/>{asset.accepted ? "Accepted illustration" : "Accept illustration"}</button>)}
+      {!editingRegion && asset.keyframe && <p role="status" aria-label="Illustration content review">{!verifiedKeyframe(asset.keyframe, asset.sha256) ? "This draft needs a passing camera check and final-image verification before acceptance." : reviewedKeyframe(asset.keyframe, asset.sha256) ? "Content reviewed for this image." : "Review the building, openings, landmarks and visual style before accepting. Camera/paint checks do not verify this content."}</p>}
+      {!editingRegion && (asset.edit_input ? <button disabled={busy || (!regionPending.current && (frozen || disabled || historical || !loaded))} onClick={() => void action({ action: "compose", id: crypto.randomUUID(), proposal_id: asset.id, base_id: asset.edit_input!.base_id, object_ids: asset.edit_input!.object_ids, ...(asset.edit_input!.brush_strokes ? { brush_strokes: asset.edit_input!.brush_strokes } : {}) }, "region")}><SquareDashedMousePointer size={16}/>{regionPending.current ? "Retry selected edit" : "Preview protected result"}</button> : <button disabled={frozen || disabled || historical || asset.accepted || !loaded || !identityReady || !!asset.keyframe && !verifiedKeyframe(asset.keyframe, asset.sha256)} onClick={() => void action({ action: "accept", id: asset.id, previous_id: library?.accepted_id ?? null, ...(asset.keyframe ? { reviewed_sha256: asset.sha256 } : {}) })}><Check size={16}/>{asset.accepted ? "Accepted illustration" : asset.keyframe ? "Review and accept illustration" : "Accept illustration"}</button>)}
       {!!view.objects?.length && <button aria-pressed={editingRegion} disabled={frozen || disabled || historical || !loaded} onClick={() => { setEditingRegion(!editingRegion); setRegionIds(surfaceTarget && selectedObject && view.objects.some(o => o.object_id === selectedObject) ? [selectedObject] : []); setStrokes(undefined); setMaskReady(false); }}>{editingRegion ? <X size={16}/> : <SquareDashedMousePointer size={16}/>}{editingRegion ? "Close region edit" : "Edit selected objects"}</button>}
       {editingRegion && regionMode === "proposal" && <>
         <button disabled={busy || (!regionPending.current && (disabled || historical || !maskReady || !regionIds.length))} onClick={() => void action({ action: "compose", id: crypto.randomUUID(), proposal_id: asset.id, base_id: library?.accepted_id ?? null, object_ids: regionIds, ...(strokes ? { brush_strokes: strokes } : {}) }, "region")}><SquareDashedMousePointer size={16}/>{regionPending.current ? "Retry selected edit" : "Preview selected edit"}</button>

@@ -7,6 +7,8 @@ import { readServerEnv, requireR2 } from "../lib/env";
 import { MongoServerError } from "mongodb";
 import { processNextMotionJob } from "../lib/motion-execution";
 import { processNextPathVideo } from "../lib/path-video";
+import { processNextImageLedWalk } from "../lib/image-led-walk-execution";
+import { processNextSceneEdit } from "../lib/scene-text-edit-server";
 import { motionVideoToolsAvailable } from "../lib/motion-video";
 
 // Configuration is explicit: Docker supplies environment variables; local
@@ -22,9 +24,14 @@ async function main() {
   let stopping = false;
   const stop = () => { stopping = true; };
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
-  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", layout_connections: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, motion_v1: motion, motion_review_v1: motion, path_video_v1: motion, path_video_views_v1: motion, last_seen: new Date() } }, { upsert: true });
+  const heartbeat = () => workers.updateOne({ _id: id }, { $set: { kind: "place-layout", scene_edits: true, layout_connections: true, layout_image_context: true, layout_floor_targets: true, mesh, mesh_image: mesh, material: mesh, illustration: mesh, illustration_region: mesh, illustration_brush: mesh, illustration_identity: mesh, illustration_keyframe: mesh, illustration_keyframe_nano: mesh, illustration_keyframe_nano_guides: mesh, illustration_keyframe_flux_reference: mesh, motion_v1: motion, motion_review_v1: motion, path_video_v1: motion, path_video_views_v1: motion, path_video_v2: motion, path_video_views_v2: motion, path_video_accepted_only: motion && process.env.PATH_VIDEO_ENABLED === "1", path_video_accepted_route: motion && process.env.PATH_VIDEO_ENABLED === "1", image_led_walk_v1: mesh, image_led_walk_v2: mesh, image_led_walk_v3: mesh, image_led_walk_v4: mesh, image_led_walk_v4_canvas_v1: mesh, image_led_walk_video_v3: motion && process.env.PATH_VIDEO_ENABLED === "1", image_led_walk_video_v2: motion && process.env.PATH_VIDEO_ENABLED === "1", image_led_walk_video_v1: motion && process.env.PATH_VIDEO_ENABLED === "1", last_seen: new Date() } }, { upsert: true });
   await heartbeat();
-  const timer = setInterval(() => { void heartbeat().catch(() => process.stderr.write("Layout worker heartbeat unavailable\n")); }, 5000);
+  let pendingHeartbeat: Promise<unknown> | null = null;
+  const timer = setInterval(() => {
+    if (pendingHeartbeat) return;
+    pendingHeartbeat = heartbeat().catch(() => process.stderr.write("Layout worker heartbeat unavailable\n"))
+      .finally(() => { pendingHeartbeat = null; });
+  }, 5000);
   process.stdout.write(`Layout worker ready; mesh and material processing ${mesh ? "enabled" : "disabled"}\n`);
   try {
     const loop = async (next: () => Promise<boolean>) => {
@@ -36,11 +43,13 @@ async function main() {
     };
     // Independent layout, mesh and material lanes keep long layout calls from
     // delaying retrieval of already-paid assets before their URLs expire.
-    await Promise.all([loop(() => processNextPlaceBuild(db)), ...(mesh ? [loop(() => processNextMeshJob(db)), loop(() => processNextAssetJob(db, "material")), loop(() => processNextAssetJob(db, "illustration"))] : []), ...(motion ? [loop(() => processNextMotionJob(db)), loop(() => processNextPathVideo(db))] : [])]);
+    await Promise.all([loop(() => processNextPlaceBuild(db)), loop(() => processNextSceneEdit(db)), ...(mesh ? [loop(() => processNextMeshJob(db)), loop(() => processNextAssetJob(db, "material")), loop(() => processNextAssetJob(db, "illustration")), loop(() => processNextImageLedWalk(db, motion))] : []), ...(motion ? [loop(() => processNextMotionJob(db)), loop(() => processNextPathVideo(db))] : [])]);
   } finally {
     clearInterval(timer);
+    process.off("SIGINT", stop); process.off("SIGTERM", stop);
     // SIGTERM drains the in-flight operations. SIGKILL leaves a paid claim
     // ambiguous; another worker must not resubmit it.
+    await pendingHeartbeat;
     await workers.deleteOne({ _id: id });
   }
 }
@@ -50,4 +59,10 @@ catch (e) {
     : e instanceof Error && e.message.startsWith("Layout worker requires") ? e.message : "check database connectivity and worker configuration";
   process.stderr.write(`Layout worker failed to initialize: ${reason}\n`); process.exitCode = 1;
 }
-finally { await globalThis.__endlessCanvasMongo?.client.close(); }
+finally {
+  try { await globalThis.__endlessCanvasMongo?.client.close(); }
+  catch { process.stderr.write("Layout worker database close failed\n"); process.exitCode = 1; }
+  // This standalone CLI has drained every lane, heartbeat and Mongo write.
+  // SDK or tsx helper handles must not hold an idle container open after SIGTERM.
+  process.exit(process.exitCode ?? 0);
+}

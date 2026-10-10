@@ -20,6 +20,12 @@ export interface KeyframeView {
   depth: { near: number; far: number };
 }
 
+/** One saved view's capture passes: the render, its depth and its object-colour pass. */
+export interface KeyframePasses {
+  view: KeyframeView & Pick<ViewCapture, "objects" | "floor_id" | "mode">;
+  render: Buffer; depth: Buffer; objects: Buffer;
+}
+
 export interface KeyframeWarp {
   /** B-sized RGBA: A's picture where B sees what A saw, B's render in the holes, A's sky gradient in B's sky. */
   rgba: Uint8Array;
@@ -442,15 +448,16 @@ export function paintedDelta(render: Uint8Array, candidate: Uint8Array, renderMa
  * render, a grey rim), and a `pure` pixel is A's alone. `share` is the
  * fraction of the picture that came from the candidate.
  */
-export function compositeChain(warp: Pick<KeyframeWarp, "rgba" | "hole" | "pure">, candidate: Uint8Array, width: number, height: number) {
+export function compositeChain(warp: Pick<KeyframeWarp, "rgba" | "hole" | "pure"> & Partial<Pick<KeyframeWarp, "sky">>, candidate: Uint8Array, width: number, height: number) {
   rgba(warp.rgba, width, height, "Keyframe warp"); rgba(candidate, width, height, "Keyframe candidate");
   const holes = boxSum(warp.hole, width, height, 2), window = boxSum(new Uint8Array(width * height).fill(1), width, height, 2);
-  const out = new Uint8Array(candidate.length);
+  const out = new Uint8Array(candidate.length), protectedPixels = new Uint8Array(width * height);
   let share = 0;
   for (let t = 0; t < holes.length; t++) {
-    const a = warp.hole[t] ? 1 : warp.pure?.[t] ? 0 : holes[t]! / window[t]!;
+    const a = warp.sky?.[t] ? 0 : warp.hole[t] ? 1 : warp.pure?.[t] ? 0 : holes[t]! / window[t]!;
+    if (a === 0) protectedPixels[t] = 1;
     share += a;
     for (let c = 0; c < 4; c++) out[t * 4 + c] = Math.round(warp.rgba[t * 4 + c]! * (1 - a) + candidate[t * 4 + c]! * a);
   }
-  return { rgba: out, share: share / holes.length };
+  return { rgba: out, share: share / holes.length, protected: protectedPixels };
 }

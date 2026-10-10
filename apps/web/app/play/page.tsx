@@ -104,6 +104,7 @@ import { buildBreadcrumb } from "@/lib/breadcrumb";
 import { EntityHoverOverlay } from "@/components/PlayPage/EntityHoverOverlay";
 import { EnterableMarkers } from "@/components/PlayPage/EnterableMarkers";
 import { RouteDrawLayer } from "@/components/PlayPage/RouteDrawLayer";
+import StreetWalkPlayer, { STREET_WALK_ENABLED } from "@/components/PlayPage/StreetWalkPlayer";
 import { MapLabelOverlay } from "@/components/PlayPage/MapLabelOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/PlayPage/ContextMenu";
 import { rasterToPngBlob } from "@/lib/image-export";
@@ -4597,6 +4598,10 @@ export default function PlayPage() {
             </>
           )}
         </div>
+      )}
+
+      {STREET_WALK_ENABLED && page?.nodeId && page.imageDataUrl && page.sceneView?.level === "street" && (
+        <StreetWalkPlayer key={page.nodeId} nodeId={page.nodeId} imageUrl={page.imageDataUrl} title={page.title} disabled={phase === "generating" || spatialPending}/>
       )}
 
       {page?.nodeId && (

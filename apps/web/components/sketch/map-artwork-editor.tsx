@@ -5,14 +5,16 @@ import type { PlaceSceneSnapshot, WorldEditProposal } from "@openflipbook/config
 import { mapChanges, mapObject, mapRepaintState, type MapRegistration } from "@/lib/map-artwork";
 import { worldEditorSelection, worldEditorHref, WORLD_EDITOR_VIEWS, type WorldEditorView } from "@/lib/world-editor-selection";
 import { fitMapLandmarks, landmarkErrors, type MapAlignmentDraft, type MapLandmark } from "@/lib/map-alignment";
+import GeometryMapArtwork, { type GeometryMapContext } from "./geometry-map-artwork";
 import s from "./world-editor.module.css";
 import m from "./map-artwork.module.css";
-interface Context { scene: PlaceSceneSnapshot; baseline: PlaceSceneSnapshot; map: { id: string; root_id: string; title: string; url: string; reference_kind?: "parent_map" | "place_reference" }; registration: MapRegistration | null; alignment?: MapAlignmentDraft|null; alignment_stale?:boolean }
+interface Context { kind?: "reference"; scene: PlaceSceneSnapshot; baseline: PlaceSceneSnapshot; map: { id: string; root_id: string; title: string; url: string; reference_kind?: "parent_map" | "place_reference" }; registration: MapRegistration | null; alignment?: MapAlignmentDraft|null; alignment_stale?:boolean }
 async function request(url: string, body?: unknown, method="POST") {
   const response = await fetch(url, body ? { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not load map artwork"); return data;
 }
 export default function MapArtworkEditor() {
+  const [derived, setDerived] = useState<GeometryMapContext | null>(null);
   const [context, setContext] = useState<Context | null>(null), [endpoint, setEndpoint] = useState(""), [source, setSource] = useState("");
   const [registration, setRegistration] = useState<MapRegistration>({ x: 50, y: 50, width: 20, rotation: 0 });
   const [frame, setFrame] = useState<{ width: number; height: number } | null>(null), [confirmed, setConfirmed] = useState(false);
@@ -34,8 +36,9 @@ export default function MapArtworkEditor() {
     void (async () => {
       if (!src && !query.get("world")) throw new Error("Open map artwork from a saved world");
       const place = await request(`/api/world/scene-context?${query}`);
-      const path = `/api/world/${place.session_id}/places/${place.place_id}/map-artwork`, data: Context = await request(path);
+      const path = `/api/world/${place.session_id}/places/${place.place_id}/map-artwork`, data: Context | GeometryMapContext = await request(path);
       if (controller.signal.aborted) return;
+      if (data.kind === "geometry_derived") { setDerived(data); return; }
       setEndpoint(path); setContext(data); setSource(src || data.scene.source_node_id || ""); if (data.registration) setRegistration(data.registration);
       if(data.alignment&&!data.alignment_stale){setLandmarks(data.alignment.landmarks);setDraftSaved(true);if(!data.registration)setRegistration(data.alignment.registration);}
       const selection = worldEditorSelection(data.scene.definition, query.get("object"), query.get("floor"));
@@ -94,6 +97,7 @@ export default function MapArtworkEditor() {
       location.assign(`/sketch?id=${encodeURIComponent(data.sketch.id)}`);
     } catch (e) { setError((e as Error).message); setBusy(false); }
   }
+  if (derived) return <GeometryMapArtwork initial={derived}/>;
   return <main className={s.editor}>
     <header className={s.header}><a href={context ? worldEditorHref(context.scene, {object_id:selected, floor_id:floor}, {view:returnView, camera}) : backHref} title="World editor"><ArrowLeft size={18} />World</a><strong>Map artwork</strong><span className={s.status}>{context ? `${context.map.title} / geometry r${context.scene.revision}` : error ? "Artwork unavailable" : "Loading map..."}</span><button aria-label="Show geometry overlay" title="Show geometry overlay" aria-pressed={overlay} onClick={() => setOverlay(v => !v)}><Eye size={18} /></button></header>
     {error && <div className={s.error} role="alert">{error}</div>}

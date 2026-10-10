@@ -3,8 +3,9 @@ import { placeViewLibrary, savePlaceView } from "@/lib/place-view-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 interface Params { params: Promise<{ sessionId: string; geoId: string }> }
-export async function GET(_req: Request, { params }: Params) {
-  const p = await params; return creatorRoute(() => placeViewLibrary(p.sessionId, p.geoId));
+export async function GET(req: Request, { params }: Params) {
+  const p = await params, selectedView = new URL(req.url).searchParams.get("view");
+  return creatorRoute(() => selectedView ? placeViewLibrary(p.sessionId, p.geoId, selectedView) : placeViewLibrary(p.sessionId, p.geoId));
 }
 export async function POST(req: Request, { params }: Params) {
   const p = await params;

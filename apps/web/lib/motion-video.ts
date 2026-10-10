@@ -3,21 +3,25 @@ import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 const run = promisify(execFile);
 export const MAX_MOTION_BYTES = 150 * 1024 * 1024;
+export const MAX_MOTION_SECONDS = 20;
+export const MAX_PATH_VIDEO_SECONDS = 60;
+export const MAX_PATH_VIDEO_LEGS = 11;
 const limits = { timeout: 90_000, maxBuffer: 128 * 1024, killSignal: "SIGKILL" as const };
 export async function motionVideoToolsAvailable() {
   try { await run("ffmpeg", ["-version"], limits); await run("ffprobe", ["-version"], limits); return true; } catch { return false; }
 }
 interface Probe { format?: { format_name?: string; duration?: string }; streams?: { codec_type?: string; codec_name?: string; width?: number; height?: number; duration?: string }[] }
-async function inspect(path: string) {
+async function inspect(path: string, maxSeconds = MAX_MOTION_SECONDS) {
   const { stdout } = await run("ffprobe", ["-v", "error", "-protocol_whitelist", "file,pipe", "-f", "mov", "-show_format", "-show_streams", "-of", "json", path], limits);
   const probe: Probe = JSON.parse(stdout), videos = probe.streams?.filter(s => s.codec_type === "video") ?? [];
   const video = videos[0], duration = Number(video?.duration ?? probe.format?.duration);
   if (!probe.format?.format_name?.split(",").includes("mp4") || videos.length !== 1 || video?.codec_name !== "h264"
     || !Number.isInteger(video.width) || !Number.isInteger(video.height) || video.width! < 32 || video.height! < 32
     || video.width! > 4096 || video.height! > 4096 || video.width! * video.height! > 8_400_000
-    || !Number.isFinite(duration) || duration <= 0 || duration > 20) throw new Error("Unsupported motion video format, size or duration");
+    || !Number.isFinite(duration) || duration <= 0 || duration > maxSeconds) throw new Error("Unsupported motion video format, size or duration");
   return { width: video.width!, height: video.height!, duration, audio_streams: probe.streams!.filter(s => s.codec_type === "audio").length };
 }
 // Validate an archived derivative without remuxing it: replay and review hashes
@@ -39,28 +43,33 @@ export async function inspectMotionArchiveVideos(original: Buffer, silent: Buffe
     return { ...media, source_audio_streams: sourceInfo.audio_streams, derivative: "silent_streamcopy_v1" as const };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
-export async function silentMotionVideo(original: Buffer) {
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+async function silentVideo(original: Buffer, maxSeconds: number) {
   if (!original.length || original.length > MAX_MOTION_BYTES) throw new Error("Motion video exceeds its storage limit");
   const directory = await mkdtemp(join(tmpdir(), "ofb-motion-")), source = join(directory, "source.mp4"), output = join(directory, "silent.mp4");
   try {
     await writeFile(source, original, { mode: 0o600 });
-    const sourceInfo = await inspect(source);
+    const sourceInfo = await inspect(source, maxSeconds);
     // Stream-copy preserves the encoded video. No audio, subtitles, chapters,
     // attachments or provider metadata enter the silent playback derivative.
     await run("ffmpeg", ["-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", "mov", "-i", source,
       "-map", "0:v:0", "-c:v", "copy", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1",
       "-movflags", "+faststart", "-f", "mp4", output], limits);
     if ((await stat(output)).size > MAX_MOTION_BYTES) throw new Error("Silent video exceeds its storage limit");
-    const media = await inspect(output);
+    const media = await inspect(output, maxSeconds);
     if (media.audio_streams !== 0 || media.width !== sourceInfo.width || media.height !== sourceInfo.height
       || Math.abs(media.duration - sourceInfo.duration) > .1) throw new Error("Silent derivative differs from its source");
     // A valid container can still contain corrupt frames. Decode every frame
     // without opening network protocols before making the clip replayable.
     await run("ffmpeg", ["-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", "mov", "-i", output,
       "-map", "0:v:0", "-f", "null", "-"], limits);
-    return { bytes: await readFile(output), media: { ...media, source_audio_streams: sourceInfo.audio_streams, derivative: "silent_streamcopy_v1" as const } };
+    const bytes = await readFile(output);
+    return { bytes, hashes: { original_sha256: sha256(original), playback_sha256: sha256(bytes) },
+      media: { ...media, source_audio_streams: sourceInfo.audio_streams, derivative: "silent_streamcopy_v1" as const } };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+// Provider clips and imported camera-control clips retain their shorter bound.
+export const silentMotionVideo = (original: Buffer) => silentVideo(original, MAX_MOTION_SECONDS);
 
 // Leg checks. Every frame and keyframe is reduced to 64x36 grey (0-255) by the
 // same ffmpeg filter, so these thresholds keep their calibrated meaning.
@@ -131,27 +140,49 @@ export function landCheck(input: { cutFrame: Uint8Array; nextKeyframe: Uint8Arra
 // rate and size so joinLegs can stream-copy the parts.
 export async function cutLeg(bytes: Buffer, endSeconds: number, factor: number, scale?: { width: number; height: number }) {
   const valid = (n: number) => Number.isInteger(n) && n % 2 === 0 && n >= 32 && n <= 4096;
-  if (!Number.isFinite(endSeconds) || endSeconds <= 0 || !Number.isFinite(factor) || scale && !(valid(scale.width) && valid(scale.height)))
+  if (!Number.isFinite(endSeconds) || endSeconds <= 0 || !Number.isFinite(factor) || scale && !(valid(scale.width) && valid(scale.height) && scale.width * scale.height <= 8_400_000))
     throw new Error("Invalid leg cut");
   const stretch = Math.min(2, Math.max(.5, factor));
   const filter = `trim=end=${endSeconds},setpts=(PTS-STARTPTS)*${stretch},fps=${LEG_FPS}${scale ? `,scale=${scale.width}:${scale.height}` : ""}`;
   return inTemp({ "leg.mp4": bytes }, async path => {
-    await inspect(path("leg.mp4"));
+    const source = await inspect(path("leg.mp4"));
+    if (endSeconds > source.duration + 1 / LEG_FPS) throw new Error("Leg cut exceeds its source duration");
     await run("ffmpeg", ["-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", "mov", "-i", path("leg.mp4"),
       "-map", "0:v:0", "-vf", filter, "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-sn", "-dn", "-map_metadata", "-1",
       "-movflags", "+faststart", "-f", "mp4", path("cut.mp4")], limits);
+    if ((await stat(path("cut.mp4"))).size > MAX_MOTION_BYTES) throw new Error("Cut video exceeds its storage limit");
+    const media = await inspect(path("cut.mp4"), MAX_PATH_VIDEO_SECONDS);
+    const expected = Math.min(endSeconds, source.duration) * stretch;
+    if (media.audio_streams !== 0 || media.width !== (scale?.width ?? source.width) || media.height !== (scale?.height ?? source.height)
+      || Math.abs(media.duration - expected) > 2 / LEG_FPS + .001) throw new Error("Cut video differs from its plan");
     return readFile(path("cut.mp4"));
   });
 }
 // Concatenate cutLeg outputs without re-encoding, then validate the result as
 // a silent playback video.
-export async function joinLegs(legs: readonly Buffer[]) {
+export async function joinLegs(legs: readonly Buffer[], plannedSeconds?: number) {
   if (!legs.length) throw new Error("No legs to join");
+  if (legs.reduce((total, bytes) => total + bytes.length, 0) > MAX_MOTION_BYTES) throw new Error("Joined video exceeds its storage limit");
+  if (legs.length > MAX_PATH_VIDEO_LEGS || plannedSeconds !== undefined && (!Number.isFinite(plannedSeconds) || plannedSeconds <= 0 || plannedSeconds > MAX_PATH_VIDEO_SECONDS))
+    throw new Error("Path video exceeds its duration or leg limit");
+  // Each 24 fps cut may differ from its plan by a frame. A joined walk has a
+  // separate limit from a provider clip, bounded further by its frozen plan.
+  const allowance = Math.max(.1, legs.length / LEG_FPS), maximum = (plannedSeconds ?? MAX_PATH_VIDEO_SECONDS) + allowance;
   const files = Object.fromEntries(legs.map((bytes, i) => [`leg${i}.mp4`, bytes]));
   const joined = await inTemp({ ...files, "list.txt": Buffer.from(legs.map((_, i) => `file 'leg${i}.mp4'\n`).join("")) }, async path => {
+    const media = await Promise.all(legs.map((_, i) => inspect(path(`leg${i}.mp4`), MAX_PATH_VIDEO_SECONDS)));
+    if (media.some(info => info.audio_streams !== 0 || info.width !== media[0]!.width || info.height !== media[0]!.height))
+      throw new Error("Path video legs differ in size or contain audio");
+    const seconds = media.reduce((sum, info) => sum + info.duration, 0);
+    if (seconds > maximum || plannedSeconds !== undefined && Math.abs(seconds - plannedSeconds) > allowance)
+      throw new Error("Path video duration differs from its plan");
     await run("ffmpeg", ["-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", "concat", "-i", path("list.txt"),
       "-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", path("joined.mp4")], limits);
+    if ((await stat(path("joined.mp4"))).size > MAX_MOTION_BYTES) throw new Error("Joined video exceeds its storage limit");
     return readFile(path("joined.mp4"));
   });
-  return silentMotionVideo(joined);
+  const result = await silentVideo(joined, maximum);
+  if (plannedSeconds !== undefined && Math.abs(result.media.duration - plannedSeconds) > allowance)
+    throw new Error("Path video duration differs from its plan");
+  return result;
 }

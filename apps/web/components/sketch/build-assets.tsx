@@ -22,15 +22,15 @@ export default function BuildAssets({ job, config, disabled, stale, call, refres
   const quoteKey = JSON.stringify([config?.model, config?.reservation, config?.parameters]);
   useEffect(() => { setConfirmed(false); setReplacement(null); }, [quoteKey]);
   async function action(body: Record<string, unknown>, paid = false) {
-    if (busy || disabled) return;
+    if (busy || disabled && !(paid && pending.current)) return;
     if (paid) pending.current ??= { ...body, id: job.id, request_id: crypto.randomUUID(), confirmed: true, model: config?.model, reservation: cost, parameters: config?.parameters };
     setBusy(true); setError("");
     try {
       await call(paid ? pending.current : { ...body, id: job.id });
-      if (paid) { pending.current = null; setConfirmed(false); setReplacement(null); }
       await refresh();
+      if (paid) { pending.current = null; setConfirmed(false); setReplacement(null); }
     } catch (e) {
-      if ([400, 403, 404, 409, 413, 429].includes((e as Error & { status?: number }).status ?? 0)) pending.current = null;
+      if ([400, 403, 404, 409, 413, 429].includes((e as Error & { status?: number }).status ?? 0)) { pending.current = null; setConfirmed(false); setReplacement(null); }
       setError((e as Error).message);
     } finally { setBusy(false); }
   }
@@ -57,7 +57,7 @@ export default function BuildAssets({ job, config, disabled, stale, call, refres
       <label className={s.checkbox}><input type="checkbox" checked={confirmed} disabled={locked || stale} onChange={e => setConfirmed(e.target.checked)}/>Reserve ${(cost * plan.length).toFixed(2)} for {plan.length} {plan.length === 1 ? kind : plural}</label>
       <button disabled={locked || stale || !confirmed} onClick={() => void action({ action: plural }, true)}><Sparkles size={16}/>Generate build {plural}</button>
     </> : <p role="status">{config?.reason || `Checking ${kind} availability...`}</p>)}
-    {pending.current && <button disabled={disabled || busy} onClick={() => void action(pending.current!, true)}><RefreshCw size={16}/>Retry saved {kind} request</button>}
+    {pending.current && <button disabled={busy} onClick={() => void action(pending.current!, true)}><RefreshCw size={16}/>Retry saved {kind} request</button>}
     {!managed && stage?.status === "ready" && <button disabled={locked || stale} onClick={() => preview(false)}><Eye size={16}/>{kind === "mesh" ? "Preview generated meshes" : "Preview textured layout"}</button>}
     {stage && stage.status !== "cancelled" && stage.status !== "ready" && <button disabled={locked} title={`Cancel remaining ${plural} (submitted work may be billable)`} aria-label={`Cancel build ${plural}`} onClick={() => void action({ action: `cancel-${plural}` })}><X size={16}/></button>}
     {!managed && <button disabled={locked || stale} onClick={() => preview(true)}><Eye size={16}/>Preview layout only</button>}

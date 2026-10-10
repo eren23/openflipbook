@@ -70,8 +70,9 @@ and camera-controls has no end frame.
 
 1. Open a /play route with **Walk it in 3D**. The editor opens the Walk view
    and walks the route.
-2. In the inspector, select **Make walk video**. The editor shows it only when
-   `PATH_VIDEO_ENABLED=1`. The editor walks the route as the tour does: it turns
+2. In the inspector, select **Make walk video**. New generation requires
+   `PATH_VIDEO_ENABLED=1`; the saved-video library remains available without a
+   route and with generation disabled. The editor walks the route as the tour does: it turns
    on the spot to each waypoint's heading, then goes straight. It sets a
    checkpoint after each 4 m walked or 30 degrees turned (`walkCheckpoints` in
    `walk-route.ts`), at the walker's eye (1.6 m) with a level gaze. If the route
@@ -81,7 +82,8 @@ and camera-controls has no end frame.
 3. The editor captures each checkpoint and saves it as a walk view. This is free
    and calls no model. These views have the `walk_checkpoint` mark and their own
    limit of 240 for each place. They do not count toward the 50 saved views. The
-   library list, the world export and forks do not include them. If a current
+   ordinary camera library does not include them. Version-4 world exports and
+   forks retain checkpoints bound to finalized path/walk receipts. If a current
    checkpoint view of the place has the same camera and size, the server gives
    back that view and saves nothing new. Thus a second "Make walk video" on the
    same route does not use the limit. A checkpoint view cannot be refreshed or
@@ -99,7 +101,8 @@ line up.
 
 The move of each leg comes from the two camera matrices. `forward_m` is the
 eye's move along the level heading of A. `turn_deg` is the signed change of
-heading (positive turns to the camera's own right). `rise_m` is the change in
+heading (positive turns to the camera's own right). `lateral_m` is translation
+along that right vector and requires backend `leg_move_version: 2`. `rise_m` is the change in
 eye height, and `orbit_deg` is 0. The subject is the object that the gate of
 the end keyframe measures. The gate measures the most visible building when it
 covers at least 3% of the frame (`GATE_MIN_SHARE`). If no building does, it
@@ -127,33 +130,40 @@ views of the same place, at the same size. A geometry change during a job stops
 it before its next paid step and releases the rest. A place has at most 20 walk
 videos that are active or ready. Failed and cancelled jobs do not count.
 
-In study and walk path videos, a keyframe that fails its gate is painted once
-more. The job reserves this retry on its own, as it does for a leg retry. If
-the retry passes, the job uses it. If it fails again, the job drops the
-keyframe, so that the video does not show an invented picture:
+### October 3 reliability contract
 
-- A failed keyframe 0 fails the job, because no chain or leg can start without
-  it. The job releases the unspent reservation. (Accepted artwork at keyframe 0
-  has no gate, because the job does not paint it.)
-- The job skips a failed middle keyframe. The next keyframe chains from the
-  last kept keyframe, and one leg goes from that keyframe to the next one. The
-  leg's move is the real move between those two cameras. The leg adds the two
-  planned lengths, and costs its own length.
-  The job releases the rest of the two legs' reservation.
-- The job drops a failed last keyframe and the leg into it. The video then
-  ends at the keyframe before it, and the job releases the reservation of that
-  leg.
+New version-2 jobs quote both expected cost and the maximum including one retry
+per eligible painting or motion step. The server reserves that maximum
+atomically before scheduling. It never increases the approved amount on its
+own. Legacy jobs without a retry allowance cannot acquire one automatically.
 
-The job does not drop a middle keyframe when the step from the last kept
-keyframe to the next one is more than two checkpoint steps. For a study, the
-view direction turns more than 60 degrees (orbit and elevation together), or
-the distance changes by more than 1.5 x 1.5 = 2.25 times. For a walk, the eye
-moves more than 8 m, or turns more than 60 degrees. A chain that long is not
-reliable. Then the
-job keeps the try that is nearer the gate (IoU) and flags it (`kept_reason`).
-The job record shows the retry (`retry`), the drop (`dropped`, `drop_reason`)
-on the keyframe, and the keyframe that each chain started from
-(`chained_from`).
+Each generated keyframe records the SHA-256 of its final stored bytes, selected
+candidate and measured invariants. Protected chain pixels remain lossless PNG.
+Accepted source artwork must have this receipt and an explicit owner review of
+the same final hash. A geometry/silhouette gate is separate from human content
+approval; legacy artwork remains visible but cannot silently become a verified
+new chain source. Workers recheck pinned geometry, images, assets and lease
+ownership transactionally before every paid claim.
+
+A failed, refused or unmeasured keyframe pauses the job as `needs_review`, after
+its approved retry when applicable. Candidates and receipts remain available
+for review. No failed checkpoint is dropped, bridged or used to condition the
+next image. A leg must satisfy both landing and bounded timing checks. Clips
+that cannot fit the plan pause; an older backend's incompatible minimum clip
+length rejects the quote before painting or reservation. Provider clips remain
+limited to 20 seconds, while silent assembled path videos may reach 60 seconds.
+
+Resuming requires a new explicit quote bound to source and job hashes. Completed
+checkpoints and independent completed legs are reused. Lost raw/cut bytes quote
+only the necessary regeneration; missing cuts with valid originals rebuild
+locally. Completed assembly/storage recovery quotes $0 and works with new
+generation disabled, without another provider submission. Unread paid provider
+results retain their original request ID and back off rather than resubmit.
+Cancellation and pausing release unused funds once.
+
+Portable version-4 world archives preserve finalized videos, partial evidence,
+raw/cut media and their bound ordered checkpoints. Imported receipts are inert
+playback records and do not recreate executable paid jobs or inferred approval.
 
 ## Next Acceptance Work
 

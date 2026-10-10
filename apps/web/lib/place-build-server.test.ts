@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ClientSession, Db, Document } from "mongodb";
+import sharp from "sharp";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, Document>>(), owner: true, tail: Promise.resolve(), failFinalization: false, failAppearance: false }));
+const images = vi.hoisted(() => ({ bytes: null as Buffer | null, beforeRead: null as (() => void) | null }));
+vi.mock("./r2", () => ({ getStoredBytes: vi.fn(async () => { images.beforeRead?.(); return images.bytes ? { bytes: images.bytes, contentType: "image/png" } : null; }), uploadJpeg: vi.fn() }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
 function collection(name: string) {
   const matches = (row: Document, query: Document) => Object.entries(query).every(([k, v]) => v && typeof v === "object" && "$in" in v ? v.$in.includes(row[k]) : v && typeof v === "object" && "$lt" in v ? row[k] < v.$lt : v && typeof v === "object" && "$gt" in v ? row[k] > v.$gt : v && typeof v === "object" && "$exists" in v ? (k in row) === v.$exists : row[k] === v);
@@ -43,12 +46,65 @@ async function runAndWork() {
 }
 const provider = vi.fn(), input = { id: "job1", prompt: "A pair of workshops", confirmed: true, reservation: 0.2, model: "test-model", base_revision: 1 };
 const planCalls = () => provider.mock.calls.filter(([url]) => url.endsWith("/plan"));
-beforeEach(() => {
+beforeEach(async () => {
   memory.rows.clear(); memory.owner = true; memory.tail = Promise.resolve(); memory.failFinalization = false; memory.failAppearance = false; provider.mockReset(); vi.stubGlobal("fetch", provider);
   vi.stubEnv("MODAL_API_URL", "https://backend.test"); vi.stubEnv("PLACE_BUILD_DAILY_CAP_USD", "1"); vi.stubEnv("MAX_DAILY_SPEND", "0"); vi.stubEnv("MAX_SESSION_SPEND", "0");
-  store("place_scenes").set("world:place", { _id: "world:place", revision: 1, definition: emptyPlaceScene() });
-  store("generation_workers").set("worker", { _id: "worker", kind: "place-layout", layout_connections: true, layout_floor_targets: true, last_seen: new Date() });
-  provider.mockImplementation(async (url: string) => Response.json(url.endsWith("capabilities") ? { enabled: true, model: "test-model", reservation: 0.2, connection_context_version: 1, floor_target_version: 1 } : { status: "ready", model: "test-model", request_id: "provider-job", result: { objects: [newComponent("building", 20, 15)] } }));
+  images.bytes = await sharp({ create: { width: 64, height: 32, channels: 3, background: "#789abc" } }).png().toBuffer(); images.beforeRead = null;
+  store("place_scenes").set("world:place", { _id: "world:place", id: "scene", session_id: "world", revision: 1, definition: emptyPlaceScene() });
+  store("generation_workers").set("worker", { _id: "worker", kind: "place-layout", layout_connections: true, layout_floor_targets: true, layout_image_context: true, last_seen: new Date() });
+  provider.mockImplementation(async (url: string) => Response.json(url.endsWith("capabilities") ? { enabled: true, model: "test-model", reservation: 0.2, connection_context_version: 1, floor_target_version: 1, image_context_version: 1 } : { status: "ready", model: "test-model", request_id: "provider-job", result: { objects: [newComponent("building", 20, 15)] } }));
+});
+function bindLayoutImage() {
+  Object.assign(store("place_scenes").get("world:place")!, { source_node_id: "reference", source_image_key: "world/reference.png" });
+  store("nodes").set("reference", { _id: "reference", session_id: "world", image_key: "world/reference.png" });
+  return { ...input, use_source_image: true };
+}
+it("pins image bytes and authored metric registration through one layout submission, receipt and lost-response replay", async () => {
+  const request = bindLayoutImage(), before = structuredClone(store("place_scenes"));
+  const queued = await queuePlaceBuild("world", "place", request);
+  expect(queued.job.image_input).toMatchObject({ source_node_id: "reference", width: 64, height: 32, bytes: images.bytes!.length,
+    registration: { scene_id: "scene", base_revision: 1, width_metres: 40, depth_metres: 40, coordinate_frame: "authored_metres", geometry: "estimated_proposal" } });
+  expect(queued.job.image_input).not.toHaveProperty("source_image_key");
+  await expect(queuePlaceBuild("world", "place", input)).rejects.toMatchObject({ status: 409 });
+  await runAndWork();
+  const body = JSON.parse(planCalls()[0]![1].body), saved = store("place_build_jobs").get("world:place:job1")!;
+  expect(body.image_input).toEqual({ ...queued.job.image_input, data_url: `data:image/png;base64,${images.bytes!.toString("base64")}` });
+  expect(saved.receipt.image_input).toEqual(queued.job.image_input); expect(saved.receipt.image_input).not.toHaveProperty("source_image_key");
+  expect(saved.status).toBe("ready"); expect(planCalls()).toHaveLength(1); expect(store("place_scenes")).toEqual(before);
+  const recordsBefore = records(); provider.mockRejectedValue(new Error("offline")); images.bytes = null;
+  expect(await queuePlaceBuild("world", "place", request)).toMatchObject({ job: { status: "ready" } });
+  expect(records()).toEqual(recordsBefore);
+});
+it("requires supported image context, ownership and a saved source before reserving image layout work", async () => {
+  const request = bindLayoutImage();
+  for (const value of ["true", null, {}, 1]) await expect(queuePlaceBuild("world", "place", { ...request, use_source_image: value })).rejects.toMatchObject({ status: 400 });
+  expect(provider).not.toHaveBeenCalled();
+  store("generation_workers").get("worker")!.layout_image_context = false;
+  await expect(queuePlaceBuild("world", "place", request)).rejects.toMatchObject({ status: 503 });
+  expect((await placeBuildLibrary("world", "place")).capabilities.image_context_version).toBe(0);
+  store("generation_workers").get("worker")!.layout_image_context = true;
+  provider.mockResolvedValue(Response.json({ enabled: true, model: "test-model", reservation: 0.2 }));
+  await expect(queuePlaceBuild("world", "place", request)).rejects.toMatchObject({ status: 503 });
+  expect(store("spend_ledger").size).toBe(0); expect(store("place_build_jobs").size).toBe(0);
+});
+it.each(["source", "owner", "bytes"])("does not reserve an image layout with a missing or invalid %s binding", async change => {
+  const request = bindLayoutImage();
+  if (change === "source") store("place_scenes").get("world:place")!.source_image_key = null;
+  if (change === "owner") store("nodes").get("reference")!.session_id = "foreign";
+  if (change === "bytes") images.bytes = Buffer.from("not an image");
+  await expect(queuePlaceBuild("world", "place", request)).rejects.toMatchObject({ status: change === "bytes" ? 400 : 409 });
+  expect(store("spend_ledger").size).toBe(0); expect(store("place_build_jobs").size).toBe(0); expect(planCalls()).toHaveLength(0);
+});
+it.each(["missing", "corrupt", "registration-race", "connection-race"])("preserves and refunds an unsubmitted image job when its %s source fails verification", async change => {
+  const request = bindLayoutImage(); await queuePlaceBuild("world", "place", request); await runPlaceBuild("world", "place", "job1");
+  if (change === "missing") images.bytes = null;
+  if (change === "corrupt") images.bytes = await sharp({ create: { width: 64, height: 32, channels: 3, background: "#abcdef" } }).png().toBuffer();
+  if (change === "registration-race") images.beforeRead = () => { store("place_scenes").get("world:place")!.source_image_key = "new-reference.png"; };
+  if (change === "connection-race") images.beforeRead = () => { connect(); };
+  await processNextPlaceBuild(db); await processNextPlaceBuild(db);
+  const saved = store("place_build_jobs").get("world:place:job1")!;
+  expect(saved.status).toBe("cancelled"); expect(saved.image_input).toBeDefined(); expect(saved.submission_started_at).toBeUndefined();
+  expect([...store("spend_ledger").values()].every(row => row.total === 0)).toBe(true); expect(planCalls()).toHaveLength(0);
 });
 function furnishInput() {
   const building = newComponent("building", 20, 15); building.height = 7.8;
@@ -200,6 +256,13 @@ const materialStage = () => store("place_build_assets").get("world:place:job1")!
 const appearanceRequest = { request_id: "appearance1", confirmed: true, total_reservation: 4.2, quotes: { material: materialQuote, mesh: meshQuote } };
 const appearance = (body: Record<string, unknown> = appearanceRequest) => queueBuildAppearance("world", "place", "job1", body);
 const records = () => structuredClone(new Map([...memory.rows].filter(([, rows]) => rows.size)));
+it("requires an explicit layout-only preview before proposed appearance has been approved", async () => {
+  const build = await materialBuild(true), before = records();
+  await expect(previewPlaceBuild("world", "place", "job1")).rejects.toMatchObject({ status: 409 });
+  await previewPlaceBuild("world", "place", "job1", true);
+  expect(vi.mocked(previewPlaceScene).mock.lastCall![2].definition).toEqual(build.result);
+  expect(records()).toEqual(before); expect(store("material_jobs").size).toBe(0); expect(store("mesh_jobs").size).toBe(0);
+});
 it("reserves all appearance once with a durable parent approval and shared immutable child dependencies", async () => {
   const build = await materialBuild(true), result = structuredClone(build.result);
   const [a, b] = await Promise.all([appearance(), appearance()]); expect(a).toEqual(b);
@@ -277,6 +340,7 @@ it("assembles both stages using measured bounds, preserving building structure a
   for (const kind of ["material", "mesh"]) for (const row of store(`${kind}_jobs`).values()) {
     row.status = "ready"; row.asset_id = `${kind}_${row.id}`;
     store(`${kind}_assets`).set(`world:${row.asset_id}`, { _id: `world:${row.asset_id}`, id: row.asset_id, session_id: "world", sha256: "verified",
+      model: row.model, prompt: row.prompt, request_id: row.request_id, parameters: row.parameters, dependency: structuredClone(row.dependency),
       ...(kind === "material" ? { image: { channel: "base_color" } } : { geometry: { sha256: "verified", size: { width: 2, height: 4, depth: 3 } } }) });
   }
   await previewPlaceBuild("world", "place", "job1");
@@ -345,7 +409,8 @@ it("assembles a textured preview only from all ready owned dependencies, keeping
   await expect(materialBuildDefinition(db, build)).rejects.toMatchObject({ status: 409 });
   for (const row of store("material_jobs").values()) {
     row.status = "ready"; row.asset_id = `material_${row.id}`;
-    store("material_assets").set(`world:${row.asset_id}`, { _id: `world:${row.asset_id}`, id: row.asset_id, session_id: "world", image: { channel: "base_color" } });
+    store("material_assets").set(`world:${row.asset_id}`, { _id: `world:${row.asset_id}`, id: row.asset_id, session_id: "world", image: { channel: "base_color" },
+      model: row.model, prompt: row.prompt, request_id: row.request_id, parameters: row.parameters, dependency: structuredClone(row.dependency) });
   }
   const bound = await materialBuildDefinition(db, build);
   expect(Object.keys(bound.objects[0]!.materials!)).toEqual(["wall", "roof"]);
@@ -356,6 +421,48 @@ it("assembles a textured preview only from all ready owned dependencies, keeping
   await previewPlaceBuild("world", "place", "job1", true);
   expect(vi.mocked(previewPlaceScene).mock.lastCall![2].definition).toEqual(original);
   store("material_assets").clear(); await expect(materialBuildDefinition(db, build)).rejects.toMatchObject({ status: 409 });
+});
+it.each(["material", "mesh"] as const)("blocks substituted %s jobs and assets while preserving ready siblings and layout-only recovery", async kind => {
+  const build = await materialBuild(true), original = structuredClone(build.result);
+  await queueBuildAssets("world", "place", "job1", kind === "material" ? materialRequest : meshRequest, kind);
+  const stage = store("place_build_assets").get(kind === "material" ? "world:place:job1" : "world:place:job1:mesh")!;
+  for (const row of store(`${kind}_jobs`).values()) {
+    row.status = "ready"; row.asset_id = `${kind}_${row.id}`; row.request_id = `provider_${row.id}`;
+    store(`${kind}_assets`).set(`world:${row.asset_id}`, { _id: `world:${row.asset_id}`, id: row.asset_id, session_id: "world", sha256: "verified",
+      model: row.model, prompt: row.prompt, request_id: row.request_id, parameters: structuredClone(row.parameters), dependency: structuredClone(row.dependency),
+      ...(kind === "material" ? { image: { channel: "base_color" } } : { geometry: { sha256: "verified", size: { width: 2, height: 4, depth: 3 } } }) });
+  }
+  expect((await readBuildAssetStage(db, build, kind))!.status).toBe("ready");
+  const first = store(`${kind}_jobs`).get(`world:${stage.items[0].job_id}`)!, savedJob = structuredClone(first);
+  for (const patch of [{ prompt: "Another build's prompt" }, { dependency: { ...savedJob.dependency, build_key: "world:place:other" } }, { dependency: { ...savedJob.dependency, input_sha256: "changed" } }, { dependency: { ...savedJob.dependency, connections_sha256: "other-link" } }]) {
+    Object.assign(first, patch);
+    expect((await readBuildAssetStage(db, build, kind))!.status).toBe("blocked");
+    await expect(assetBuildDefinition(db, build, kind)).rejects.toMatchObject({ status: 409 });
+    Object.assign(first, savedJob);
+  }
+  const asset = store(`${kind}_assets`).get(`world:${first.asset_id}`)!, savedAsset = structuredClone(asset);
+  for (const patch of [{ request_id: "other-provider-receipt" }, { model: "other-model" }, { parameters: { unapproved: true } }, { dependency: { ...savedAsset.dependency, plan_sha256: "other-plan" } }, { dependency: undefined }]) {
+    Object.assign(asset, patch);
+    await expect(assetBuildDefinition(db, build, kind)).rejects.toMatchObject({ status: 409 });
+    Object.assign(asset, savedAsset);
+  }
+  await assetBuildDefinition(db, build, kind);
+  // Corruption is visible, never permission to regenerate or lose accepted work.
+  asset.request_id = "other-receipt";
+  const before = records(), submissions = provider.mock.calls.length;
+  await previewPlaceBuild("world", "place", "job1", true);
+  expect(vi.mocked(previewPlaceScene).mock.lastCall![2].definition).toEqual(original);
+  expect(records()).toEqual(before); expect(provider.mock.calls).toHaveLength(submissions);
+});
+it("blocks duplicate child identity and swapped plan jobs instead of marking the appearance ready", async () => {
+  const build = await materialBuild(); await queueBuildMaterials("world", "place", "job1", materialRequest);
+  const stage = materialStage(), items = structuredClone(stage.items);
+  for (const job of store("material_jobs").values()) job.status = "ready";
+  stage.items[1].job_id = stage.items[0].job_id;
+  expect((await readBuildAssetStage(db, build, "material"))!.status).toBe("blocked");
+  stage.items = items.map((item: Document, index: number) => ({ ...item, job_id: items[1 - index].job_id }));
+  expect((await readBuildAssetStage(db, build, "material"))!.status).toBe("blocked");
+  expect(build.result).toBeDefined(); expect(planCalls()).toHaveLength(1);
 });
 it("replaces one failed material with new consent, never repeats siblings or ambiguous work", async () => {
   await materialBuild(); await queueBuildMaterials("world", "place", "job1", materialRequest);

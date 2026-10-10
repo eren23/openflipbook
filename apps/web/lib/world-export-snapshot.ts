@@ -14,6 +14,10 @@ import { snapshotPlaceViewExports } from "./place-view-server";
 import type { MotionStudyDoc } from "./motion-study";
 import type { MotionAssetDoc, MotionReviewDoc } from "./motion-job";
 import type { MapAlignmentDraft } from "./map-alignment";
+import type { PathVideoDoc } from "./path-video";
+import { pathVideoReceipt } from "./path-video-archive";
+import { imageLedWalkReceipt } from "./image-led-walk-archive";
+import type { ImageLedWalkDoc } from "./image-led-walk";
 
 export const WORLD_EXPORT_NODE_CAP = 500;
 const RECORD_CAP = 5000;
@@ -68,7 +72,10 @@ export async function snapshotWorldExport(sid: string) {
     if (meshIds.some(id => !meshes.some(m => m.id === id)) || materialIds.some(id => !materials.some(m => m.id === id))) throw new CreatorError("World references a missing mesh or material asset", 409);
     const artwork = { heads: await rows<MapArtworkHead>("map_artwork_heads"), versions: await rows<MapArtworkVersion>("map_artwork_versions"), drafts: privateOwner ? await rows<MapAlignmentDraft>("map_alignment_drafts") : [] };
     const connections = account(await readConnectionGraph(db, sid, session));
-    const views = privateOwner ? account(await snapshotPlaceViewExports(db, sid, session)) : [];
+    const pathVideos = privateOwner ? (await rows<PathVideoDoc>("path_videos")).flatMap(job => { const receipt = pathVideoReceipt(job); return receipt ? [receipt] : []; }) : [];
+    const imageLedWalks = privateOwner ? (await rows<ImageLedWalkDoc>("image_led_walks")).map(imageLedWalkReceipt) : [];
+    const checkpointIds = [...new Set(pathVideos.flatMap(receipt => receipt.view_ids ?? []))];
+    const views = privateOwner ? account(await snapshotPlaceViewExports(db, sid, session, checkpointIds)) : [];
     const motion = { studies: privateOwner ? await rows<MotionStudyDoc>("motion_studies") : [],
       assets: privateOwner ? await rows<MotionAssetDoc>("motion_assets") : [],
       reviews: privateOwner ? await rows<MotionReviewDoc>("motion_reviews") : [],
@@ -84,6 +91,6 @@ export async function snapshotWorldExport(sid: string) {
       resume_node_id: metadata.resume_node_id, resume_place_id: metadata.resume_place_id, resume_view: metadata.resume_view,
       walk_position: metadata.walk_position }) : null;
     return { session_id: sid, captured_at: new Date().toISOString(), privateOwner, nodes, scenes, sceneHeads: heads,
-      worldMap, entities, registry: privateOwner ? registry : null, workspace, meshes, materials, artwork, connections, views, motion };
+      worldMap, entities, registry: privateOwner ? registry : null, workspace, meshes, materials, artwork, connections, views, motion, pathVideos, imageLedWalks };
   }, { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } });
 }

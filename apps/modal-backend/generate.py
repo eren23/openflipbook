@@ -40,14 +40,16 @@ if TYPE_CHECKING:
     from providers.view_estimator import ViewEstimate
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from _env import env_flag
 from providers.camera_motion import router as motion_router
 from providers.illustration_generation import router as illustration_router
+from providers.image_led_walk import router as image_led_walk_router
 from providers.material_generation import router as material_router
 from providers.mesh_generation import router as mesh_router
 from providers.place_build import router as place_build_router
+from providers.scene_edit import router as scene_edit_router
 
 APP_NAME = "openflipbook-generate"
 
@@ -76,8 +78,10 @@ fastapi_app = FastAPI(title="Endless Canvas — generate")
 fastapi_app.include_router(mesh_router)
 fastapi_app.include_router(material_router)
 fastapi_app.include_router(illustration_router)
+fastapi_app.include_router(image_led_walk_router)
 fastapi_app.include_router(motion_router)
 fastapi_app.include_router(place_build_router)
+fastapi_app.include_router(scene_edit_router)
 
 # ── Public-deploy safety (Wave 5; all default OFF) ───────────────────────────
 SHARED_TOKEN_HEADER = "x-openflipbook-token"
@@ -1324,6 +1328,11 @@ class AnimateFocus(BaseModel):
     action: str = Field(default="", max_length=500)
 
 
+class StreetWalkIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    direction: Literal["forward", "left", "right"]
+
+
 class AnimateBody(BaseModel):
     image_data_url: str
     prompt: str
@@ -1339,6 +1348,17 @@ class AnimateBody(BaseModel):
     # Object action clip: the tapped object (and the user's optional action)
     # is the subject of the motion. Ignored when end_image_data_url is set.
     focus: AnimateFocus | None = None
+    # Image-led movement within the current street, never an aerial arrival.
+    street_walk: StreetWalkIntent | None = None
+
+    @model_validator(mode="after")
+    def validate_street_walk(self) -> AnimateBody:
+        if self.street_walk is not None:
+            if self.end_image_data_url is not None or self.focus is not None:
+                raise ValueError("Street walking requires only the current street image")
+            if self.duration != 5 or self.video_tier not in (None, "balanced"):
+                raise ValueError("Street walking is fixed to five seconds at balanced 768P")
+        return self
 
 
 @fastapi_app.post("/animate")
@@ -1362,7 +1382,7 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
     img_size_kb = len(body.image_data_url) // 1024
     # A descent request keeps its own brief even if a focus rides along.
     focus = None if body.end_image_data_url else body.focus
-    estimate = video_provider.estimate_usd(
+    estimate = video_provider.street_walk_estimate_usd() if body.street_walk else video_provider.estimate_usd(
         body.duration,
         body.video_tier,
         descent=bool(body.end_image_data_url),
@@ -1388,7 +1408,11 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
             status_code=502,
             headers={"X-Trace-Id": trace_id},
         )
-    if focus is not None:
+    if body.street_walk is not None:
+        # The current street image is the only visual source; neither the
+        # ambient rewriter nor the overhead-to-street descent brief applies.
+        motion_prompt = video_provider.street_walk_prompt(body.street_walk.direction)
+    elif focus is not None:
         # The tapped object carries its own brief — the page-level rewriter
         # would pull attention back to the whole scene.
         motion_prompt = video_provider.object_action_prompt(
@@ -1417,14 +1441,20 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
                 new_len=len(motion_prompt),
             )
     try:
-        clip = await video_provider.animate_image(
-            image_data_url=body.image_data_url,
-            prompt=motion_prompt or body.prompt,
-            duration=body.duration,
-            tier=body.video_tier,
-            end_image_data_url=body.end_image_data_url,
-            object_action=focus is not None,
-        )
+        if body.street_walk is not None:
+            clip = await video_provider.animate_street_walk(
+                image_data_url=body.image_data_url,
+                direction=body.street_walk.direction,
+            )
+        else:
+            clip = await video_provider.animate_image(
+                image_data_url=body.image_data_url,
+                prompt=motion_prompt or body.prompt,
+                duration=body.duration,
+                tier=body.video_tier,
+                end_image_data_url=body.end_image_data_url,
+                object_action=focus is not None,
+            )
     except Exception as exc:
         record_error("animate", exc, image_kb=img_size_kb)
         return JSONResponse(
@@ -1433,6 +1463,8 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
                 "stage": "fal_animate",
                 "image_data_url_kb": img_size_kb,
                 "trace_id": trace_id,
+                **({"provider_request_id": exc.provider_request_id}
+                   if isinstance(exc, video_provider.StreetWalkProviderError) else {}),
             },
             status_code=502,
             headers={"X-Trace-Id": trace_id},
@@ -1444,7 +1476,41 @@ async def animate(req: Request, body: AnimateBody) -> JSONResponse:
             "model": clip.model,
             "duration_seconds": clip.duration_seconds,
             "trace_id": trace_id,
+            **({"provider_request_id": clip.provider_request_id}
+               if body.street_walk is not None and clip.provider_request_id else {}),
         },
+        headers={"X-Trace-Id": trace_id},
+    )
+
+
+class StreetWalkRecoveryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    provider_request_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+@fastapi_app.post("/street-walk/recover")
+async def recover_street_walk(req: Request, body: StreetWalkRecoveryBody) -> JSONResponse:
+    """Free read of an already-paid H3 street walk; never starts a new request."""
+    from obs import TRACE_HEADER, bind_trace, record_error
+    from providers import video as video_provider
+
+    limited = _rate_limited(req)
+    if limited is not None:
+        return limited
+    trace_id = bind_trace(req.headers.get(TRACE_HEADER))
+    try:
+        clip = await video_provider.recover_street_walk(provider_request_id=body.provider_request_id)
+    except Exception as exc:
+        record_error("street_walk_recovery", exc)
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}", "stage": "fal_street_walk_recovery",
+             "provider_request_id": body.provider_request_id, "trace_id": trace_id},
+            status_code=502, headers={"X-Trace-Id": trace_id},
+        )
+    return JSONResponse(
+        {"video_url": clip.video_url, "content_type": clip.content_type, "model": clip.model,
+         "duration_seconds": clip.duration_seconds, "provider_request_id": clip.provider_request_id,
+         "trace_id": trace_id},
         headers={"X-Trace-Id": trace_id},
     )
 

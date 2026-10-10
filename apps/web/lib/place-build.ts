@@ -1,4 +1,4 @@
-import type { PlaceBuildConnectionInput, PlaceBuildFloorTarget, PlaceSceneDefinition, PlaceSceneObject, RoomLayout } from "@openflipbook/config";
+import type { PlaceBuildConnectionInput, PlaceBuildFloorTarget, PlaceBuildImageReference, PlaceSceneDefinition, PlaceSceneObject, RoomLayout } from "@openflipbook/config";
 import { parsePlaceScene } from "./place-scene";
 import { FURNISHINGS, footprintsOverlap, placementFloor } from "./floor-placement";
 import { reachableFloor, validateRoomCirculation } from "./room-circulation";
@@ -18,6 +18,7 @@ export interface PlaceBuildJob {
   error?: string;
   stale_connections?: boolean;
   target_floor?: PlaceBuildFloorTarget;
+  image_input?: PlaceBuildImageReference;
   object_count?: number;
   material_plan?: PlannedMaterial[];
   material_stage?: BuildMaterialStage;

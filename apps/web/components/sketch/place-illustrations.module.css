@@ -1,0 +1,16 @@
+.identityReview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 8px;
+}
+.identityReview h4, .identityReview p, .identityImages figure { margin: 0; }
+.identityImages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 10px;
+}
+.identityImages figure { min-width: 0; }
+.identityImages figcaption { font-size: 12px; margin-bottom: 5px; }
+.identityImages img { display: block; width: 100%; height: auto; border-radius: 5px; }

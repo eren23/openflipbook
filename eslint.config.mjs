@@ -9,10 +9,13 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/.next/**",
+      "**/.next-*/**",
       "**/dist/**",
       "**/build/**",
       "**/.venv/**",
       "**/coverage/**",
+      "**/test-results/**",
+      "**/playwright-report/**",
       "apps/web/next-env.d.ts",
       "apps/web/public/**",
       "scripts/perfbudget/report.json",

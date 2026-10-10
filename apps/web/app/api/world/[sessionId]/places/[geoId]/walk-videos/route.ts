@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 interface Params { params: Promise<{ sessionId: string; geoId: string }> }
 // ?views=a,b,c quotes a walk video over those saved views, in order.
 export async function GET(req: Request, { params }: Params) {
-  const p = await params, views = new URL(req.url).searchParams.get("views");
-  return creatorRoute(() => walkVideoLibrary(p.sessionId, p.geoId, views ? views.split(",").slice(0, 13) : null));
+  const p = await params, query = new URL(req.url).searchParams, views = query.get("views");
+  return creatorRoute(() => walkVideoLibrary(p.sessionId, p.geoId, views ? views.split(",").slice(0, 13) : null, query.get("keyframe_policy") ?? undefined));
 }
 export async function POST(req: Request, { params }: Params) {
   const p = await params;

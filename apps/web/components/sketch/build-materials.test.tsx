@@ -69,6 +69,18 @@ it("replays the exact mesh request after a lost response with changed configurat
   await waitFor(() => expect(p.call).toHaveBeenCalledTimes(2));
   expect(p.call.mock.calls[1]![0]).toEqual(p.call.mock.calls[0]![0]);
 });
+it("preserves an approved asset request through a failed status read and allows recovery beside changed geometry", async () => {
+  const p = props(); p.refresh.mockRejectedValueOnce(new Error("Saved status unavailable"));
+  const view = render(<BuildMaterials {...p} job={meshJob} kind="mesh" config={meshConfig}/>);
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Generate build meshes" }));
+  await screen.findByText("Saved status unavailable");
+  view.rerender(<BuildMaterials {...p} job={meshJob} kind="mesh" stale disabled config={{ enabled: false, reason: "Offline" }}/>);
+  const retry = screen.getByRole("button", { name: "Retry saved mesh request" }) as HTMLButtonElement;
+  expect(retry.disabled).toBe(false); fireEvent.click(retry);
+  await waitFor(() => expect(p.call).toHaveBeenCalledTimes(2));
+  expect(p.call.mock.calls[1]![0]).toEqual(p.call.mock.calls[0]![0]);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Retry saved mesh request" })).toBeNull());
+});
 it("replaces only an explicitly approved failed mesh and leaves successful siblings alone", async () => {
   const p = props();
   const staged: PlaceBuildJob = { ...meshJob, mesh_stage: { id: "meshstage", status: "blocked", reservation: 4, items: [

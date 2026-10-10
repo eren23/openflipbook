@@ -87,8 +87,25 @@ export interface PlaceSceneSnapshot {
   definition: PlaceSceneDefinition;
   updated_at: string;
   generation_sources?: SceneGenerationReceipt[];
+  edit_sources?: SceneTextEditReceipt[];
+}
+export interface SceneTextEditReceipt {
+  version: 1; job_id: string; model: string; request_id: string | null; prompt: string;
+  base_revision: number; input_sha256: string; output_sha256: string; object_ids: string[]; selected_object_ids: string[];
+  reserved_usd: number; created_at: string;
+  connection_input: PlaceBuildConnectionInput; connections_sha256: string;
 }
 export interface PlaceBuildFloorTarget { building_id: string; floor_id: string }
+export interface PlaceBuildImageReference {
+  source_node_id: string;
+  sha256: string;
+  bytes: number;
+  width: number;
+  height: number;
+  content_type: "image/png" | "image/jpeg" | "image/webp";
+  registration: { scene_id: string; base_revision: number; width_metres: number; depth_metres: number;
+    coordinate_frame: "authored_metres"; geometry: "estimated_proposal" };
+}
 export interface SceneGenerationReceipt {
   job_id: string;
   model: string;
@@ -99,6 +116,7 @@ export interface SceneGenerationReceipt {
   connection_input?: PlaceBuildConnectionInput;
   connections_sha256?: string;
   target_floor?: PlaceBuildFloorTarget;
+  image_input?: PlaceBuildImageReference;
   object_ids: string[];
   reserved_usd: number;
   created_at: string;

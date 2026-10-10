@@ -20,6 +20,9 @@ describe("geometry-driven map artwork", () => {
     expect(state.scene.elements.filter(e => e.customData?.role === "remove")).toHaveLength(1);
     expect(mapChanges(before, after)).toHaveLength(2);
     expect(before.objects).toHaveLength(21);
+    expect(state.prompt).toContain("source's visual medium");
+    expect(state.prompt).toContain("Honor the requested material and roof colors");
+    expect(state.prompt).not.toMatch(/antique|sepia|parchment|muted.*washes/i);
   });
   it("covers a moved object's old and new locations without relocating unrelated objects", () => {
     const before = ankhStreetScene(), after = structuredClone(before), o = after.objects.find(o => o.kind === "tavern")!; o.x += 5;

@@ -281,7 +281,8 @@ describe("warpKeyframe with B's objects", () => {
     const { b, box, out, candidate, composite, capped } = run(camera(1.3), camera(3, 20, 0, 0, -2));
     expect(out.objects).toEqual({ a: 1, candidate: 0, ground: 0 });
     const side = box.filter(p => Math.abs(b.hits[p]!.x - 1) < 1e-6), front = box.filter(p => Math.abs(b.hits[p]!.z + 4) < 1e-6);
-    expect(side.filter(p => !capped(Infinity).hole[p]).length).toBeGreaterThan(side.length / 2); // A did see most of it
+    const uncapped = capped(Infinity);
+    expect(side.filter(p => !uncapped.hole[p]).length).toBeGreaterThan(side.length / 2); // A did see most of it
     for (const p of side) expect(rgbEqual(composite, candidate, p)).toBe(true);
     expect(front.filter(p => out.pure![p] && !out.hole[p]).length).toBeGreaterThan(front.length * 0.95);
   });
@@ -468,6 +469,13 @@ describe("compositeChain", () => {
     // A pure pixel is A's alone, next to a hole or not.
     const pure = new Uint8Array(W * H).map((_, p) => (p % W === 20 ? 1 : 0));
     expect(compositeChain({ rgba, hole, pure }, candidate, W, H).rgba.subarray(20 * 4, 20 * 4 + 4)).toEqual(rgba.subarray(20 * 4, 20 * 4 + 4));
+    // Pinned sky stays unchanged even directly beside the hole's feather.
+    const sky = new Uint8Array(W * H).map((_, p) => (p % W === 20 && p < W * 10 ? 1 : 0));
+    const pinned = compositeChain({ rgba, hole, sky }, candidate, W, H);
+    for (let p = 0; p < W * H; p++) if (sky[p]) {
+      expect(pinned.rgba.subarray(p * 4, p * 4 + 4)).toEqual(rgba.subarray(p * 4, p * 4 + 4));
+      expect(pinned.protected[p]).toBe(1);
+    }
     expect(rgba[0]).toBe(99); // the inputs are not modified
   });
 });

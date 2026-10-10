@@ -301,6 +301,27 @@ export function arcPath(
   return `M ${from.x} ${from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.x} ${to.y}`;
 }
 
+/** Bound the curves and arrowheads in world coordinates, keeping their SVG
+ * surface proportional to the actual map instead of a giant GPU layer. A
+ * cubic curve stays inside the convex hull of its endpoints/control points. */
+export function connectorFrame(connectors: readonly Connector[]): WorldRect {
+  if (!connectors.length) return { x: 0, y: 0, w: 1, h: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const { from, to } of connectors) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    for (const point of [from, to,
+      { x: from.x + dx * .33 - dy * .18, y: from.y + dy * .33 + dx * .18 },
+      { x: from.x + dx * .67 + dy * .18, y: from.y + dy * .67 - dx * .18 },
+    ]) {
+      minX = Math.min(minX, point.x); minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
+    }
+  }
+  // Six stroke-width marker units at an 8px stroke, plus the source dot.
+  const padding = 64;
+  return { x: minX - padding, y: minY - padding, w: maxX - minX + padding * 2, h: maxY - minY + padding * 2 };
+}
+
 /**
  * Per-depth visual tint that lets the atlas read as a layered scene without
  * any per-node colorimetry: deeper nodes are slightly less saturated and

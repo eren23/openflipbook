@@ -9,6 +9,7 @@ import { acceptMaterialPlan, type PlannedMaterial } from "./place-build-material
 import { acceptMeshPlan, type PlannedMesh } from "./place-build-meshes";
 import { buildConnectionsCurrent } from "./place-build-connections";
 import type { AssetQuote } from "./asset-pipeline";
+import { prepareBuildImage, requireBuildImageCurrent, wireBuildImage, type BuildImageInput } from "./place-build-image";
 
 export interface PlannerResponse {
   status: "ready" | "invalid";
@@ -22,12 +23,13 @@ export interface BuildDoc extends PlaceBuildJob {
   input: PlaceSceneDefinition; input_sha256: string;
   connection_input?: PlaceBuildConnectionInput; connections_sha256?: string;
   expansion?: { source_place_id: string; proposal_id: string };
+  image_input?: BuildImageInput;
   appearance_approval?: NonNullable<PlaceBuildJob["appearance_approval"]> & { quotes: Partial<Record<"material" | "mesh", AssetQuote>> };
   ledger_ids: string[]; deadline?: Date; execution_token?: string; received_at?: string; submission_started_at?: Date;
   provider_response?: PlannerResponse;
   result?: PlaceSceneDefinition; receipt?: SceneGenerationReceipt;
 }
-export interface PlaceBuildWorkerDoc { _id: string; kind: "place-layout"; last_seen: Date; mesh?: boolean; material?: boolean; illustration?: boolean; motion_v1?: boolean; motion_review_v1?: boolean; layout_connections?: boolean; layout_floor_targets?: boolean }
+export interface PlaceBuildWorkerDoc { _id: string; kind: "place-layout"; last_seen: Date; mesh?: boolean; material?: boolean; illustration?: boolean; illustration_keyframe_nano?: boolean; illustration_keyframe_nano_guides?: boolean; illustration_keyframe_flux_reference?: boolean; motion_v1?: boolean; motion_review_v1?: boolean; image_led_walk_v1?: boolean; image_led_walk_v2?: boolean; image_led_walk_v3?: boolean; image_led_walk_v4?: boolean; image_led_walk_v4_canvas_v1?: boolean; image_led_walk_video_v3?: boolean; image_led_walk_video_v2?: boolean; image_led_walk_video_v1?: boolean; path_video_accepted_only?: boolean; layout_connections?: boolean; layout_floor_targets?: boolean; layout_image_context?: boolean }
 export const buildInputHash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const interruptedBuild = "Planning was interrupted. It may be billable; no automatic retry will be submitted.";
 
@@ -43,9 +45,9 @@ export async function placeBuildBackend(path: string, body?: unknown) {
   return JSON.parse(text);
 }
 
-export async function placeBuildWorkerAvailable(db: Db, connections = false, floorTargets = false) {
+export async function placeBuildWorkerAvailable(db: Db, connections = false, floorTargets = false, imageContext = false) {
   const workers = await db.collection<PlaceBuildWorkerDoc>("generation_workers").find({ kind: "place-layout", last_seen: { $gt: new Date(Date.now() - 30_000) } }).toArray();
-  return workers.length > 0 && (!connections || workers.every(w => w.layout_connections === true)) && (!floorTargets || workers.every(w => w.layout_floor_targets === true));
+  return workers.length > 0 && (!connections || workers.every(w => w.layout_connections === true)) && (!floorTargets || workers.every(w => w.layout_floor_targets === true)) && (!imageContext || workers.every(w => w.layout_image_context === true));
 }
 
 export async function expirePlaceBuilds(db: Db, scope: { session_id?: string; place_id?: string } = {}) {
@@ -61,7 +63,9 @@ export async function claimPlaceBuild() {
     const job = await col.findOne({ status: "scheduled" }, { ...options, sort: { created_at: 1, _id: 1 } });
     if (!job) return null;
     const scene = await db.collection<SceneDoc>("place_scenes").findOne({ _id: `${job.session_id}:${job.place_id}` }, options);
-    if (!scene || scene.revision !== job.base_revision || buildInputHash(scene.definition) !== job.input_sha256 || !await buildConnectionsCurrent(db, job, session)) {
+    let imageCurrent = true;
+    if (job.image_input) try { await requireBuildImageCurrent(db, job.session_id, job.place_id, job.image_input, session); } catch { imageCurrent = false; }
+    if (!scene || !imageCurrent || scene.revision !== job.base_revision || buildInputHash(scene.definition) !== job.input_sha256 || !await buildConnectionsCurrent(db, job, session)) {
       for (const ledgerId of job.ledger_ids) await db.collection<{ _id: string; total: number }>("spend_ledger").updateOne({ _id: ledgerId }, { $inc: { total: -job.reservation } }, options);
       await col.updateOne({ _id: job._id, status: "scheduled" }, { $set: { status: "cancelled", error: "Place or connections changed before submission; reservation released." } }, options);
       return null;
@@ -84,7 +88,7 @@ export async function finalizePlaceBuild(db: Db, job: BuildDoc) {
   const response = job.provider_response;
   const receipt: SceneGenerationReceipt = { job_id: job.id, model: job.model, request_id: typeof response.request_id === "string" ? response.request_id.slice(0, 200) : null,
     prompt: job.prompt, base_revision: job.base_revision, input_sha256: job.input_sha256, object_ids: [], reserved_usd: job.reservation, created_at: job.received_at ?? job.created_at,
-    ...(job.connection_input && job.connections_sha256 ? { connection_input: job.connection_input, connections_sha256: job.connections_sha256 } : {}), ...(job.target_floor ? { target_floor: job.target_floor } : {}) };
+    ...(job.connection_input && job.connections_sha256 ? { connection_input: job.connection_input, connections_sha256: job.connections_sha256 } : {}), ...(job.target_floor ? { target_floor: job.target_floor } : {}), ...(job.image_input ? { image_input: wireBuildImage(job.image_input) } : {}) };
   let result: PlaceSceneDefinition | undefined, error: string | undefined;
   let material_plan: PlannedMaterial[] = [];
   let mesh_plan: PlannedMesh[] = [];
@@ -107,14 +111,45 @@ export async function finalizePlaceBuild(db: Db, job: BuildDoc) {
 
 export async function executePlaceBuild(db: Db, job: BuildDoc) {
   if (!job.execution_token) return;
+  const token = job.execution_token;
   const col = db.collection<BuildDoc>("place_build_jobs");
-  const authorized = await col.findOneAndUpdate({ _id: job._id, execution_token: job.execution_token, status: "planning",
-    deadline: { $gt: new Date() }, submission_started_at: { $exists: false } },
-  { $set: { submission_started_at: new Date() } }, { returnDocument: "after" });
+  let imageInput: Awaited<ReturnType<typeof prepareBuildImage>> | undefined;
+  if (job.image_input) {
+    try { imageInput = await prepareBuildImage(db, job.session_id, job.place_id, job.image_input); }
+    catch (error) {
+      // Image validation happens before the paid submission marker. Release only
+      // this unsubmitted claim; a competing executor may already own its POST.
+      await withDbTransaction(async (database, session) => {
+        const jobs = database.collection<BuildDoc>("place_build_jobs"), options = { session };
+        const current = await jobs.findOne({ _id: job._id, execution_token: token, status: "planning", submission_started_at: { $exists: false } }, options);
+        if (!current) return;
+        for (const ledgerId of current.ledger_ids) await database.collection<{ _id: string; total: number }>("spend_ledger").updateOne({ _id: ledgerId }, { $inc: { total: -current.reservation } }, options);
+        await jobs.updateOne({ _id: current._id, execution_token: token, status: "planning" },
+          { $set: { status: "cancelled", error: `${(error as Error).message} Reservation released.`.slice(0, 500) } }, options);
+      });
+      return;
+    }
+  }
+  const authorized = await withDbTransaction(async (database, session) => {
+    const jobs = database.collection<BuildDoc>("place_build_jobs"), options = { session };
+    const filter = { _id: job._id, execution_token: token, status: "planning" as const,
+      deadline: { $gt: new Date() }, submission_started_at: { $exists: false } };
+    const current = await jobs.findOne(filter, options);
+    if (!current) return null;
+    const scene = await database.collection<SceneDoc>("place_scenes").findOne({ _id: `${job.session_id}:${job.place_id}` }, options);
+    let imageCurrent = JSON.stringify(current.image_input) === JSON.stringify(job.image_input);
+    if (current.image_input) try { await requireBuildImageCurrent(database, current.session_id, current.place_id, current.image_input, session); } catch { imageCurrent = false; }
+    if (!scene || !imageCurrent || scene.revision !== current.base_revision || buildInputHash(scene.definition) !== current.input_sha256 || !await buildConnectionsCurrent(database, current, session)) {
+      for (const ledgerId of current.ledger_ids) await database.collection<{ _id: string; total: number }>("spend_ledger").updateOne({ _id: ledgerId }, { $inc: { total: -current.reservation } }, options);
+      await jobs.updateOne(filter, { $set: { status: "cancelled", error: "Place, image or connections changed before submission; reservation released." } }, options);
+      return null;
+    }
+    return jobs.findOneAndUpdate(filter, { $set: { submission_started_at: new Date() } }, { ...options, returnDocument: "after" });
+  });
   if (!authorized) return;
   try {
     const response = await placeBuildBackend("plan", { prompt: job.prompt, model: job.model, reservation: job.reservation, definition: job.input,
-      ...(job.connection_input ? { connection_input: job.connection_input } : {}), ...(job.target_floor ? { target_floor: job.target_floor } : {}) });
+      ...(job.connection_input ? { connection_input: job.connection_input } : {}), ...(job.target_floor ? { target_floor: job.target_floor } : {}), ...(imageInput ? { image_input: imageInput } : {}) });
     if (!response || response.model !== job.model || !["ready", "invalid"].includes(response.status)) throw new Error("Unrecognized planner response");
     const received_at = new Date().toISOString();
     // Persist the provider result before geometry validation. Cancellation is

@@ -1,6 +1,6 @@
 # Structured Place Builds
 
-Local implementation, updated September 13, 2026. This is the architecture stage
+Local implementation, updated October 3, 2026. This is the architecture stage
 of generative creation, not a finished district generator. Explicit adjoining
 creation schedules its layout atomically; one later appearance approval can reserve
 all remaining materials and meshes. Fresh model quality and automatic derived-view
@@ -29,9 +29,55 @@ paths and existing parametric prop types. It can propose material requests for
 its new buildings and mesh requests for reserved volumes; these run only after
 explicit appearance approval as described below. It supports bounded orthogonal compound
 footprints, stable wall references and positioned cardinal stair flights through
-the same scene validators as manual editing. It does not reconstruct source artwork.
+the same scene validators as manual editing. Image-conditioned proposals estimate
+structure from reference artwork; they do not reconstruct unseen geometry.
 Independent mesh and
 [material generators](GENERATED_MATERIALS.md) remain available too.
+
+## Image-Conditioned Layout Proposals
+
+For an image-bound place, save its authored dimensions first, then explicitly
+select **Use saved source image for layout** and confirm the layout reservation.
+Changing this selection clears consent. Text-only planning remains the default;
+source-free places and adjoining areas do not inherit another place's image.
+
+The web tier pins the source node/key, exact SHA-256 and byte count, image dimensions
+and format, saved scene/revision, and authored width/depth. The registration is
+explicitly `authored_metres` / `estimated_proposal`: image pixels do not establish
+real-world scale, perspective-free mapping or observed interior detail. The same
+addition-only geometry validator, Plan + 3D preview and explicit Apply enforce
+the saved dimensions, existing IDs, floors, openings and connections.
+
+The backend advertises `image_context_version: 1`; every live layout worker must
+also advertise `layout_image_context: true` before a new image job can reserve
+spend. Update both before exposing this control, and configure a model that
+supports the standard text-and-image chat input. The existing operator reservation
+must cover that model's image input as well as its bounded output; this change
+does not discover current provider pricing or submit a paid compatibility test.
+
+Image inputs are private inline PNG/JPEG/WebP bytes, one frame, 32–4096 pixels on
+each axis, at most 16 megapixels and 12 MiB, with no EXIF rotation. The worker
+rechecks the binding and decodes/verifies the exact saved bytes before the paid
+submission marker. Missing, changed or invalid input cancels that unsubmitted
+claim and refunds its reservation once; the saved request and image receipt remain.
+The backend independently verifies the hash, size, format and authored metric
+registration, then makes exactly one multimodal SDK completion. It uses the same
+no-retry/no-repair policy as text layouts.
+
+Jobs and accepted generation receipts expose the image fingerprint and registration
+without private storage keys or inline image data. A lost acknowledgement replays
+the original job even after a backend outage; selecting another input under the
+same job identity conflicts. Reload, preview, revalidation, export and fork never
+submit another model call. Ready layout previews with proposed material or mesh
+plans require ready appearance stages; **Preview layout only** is the explicit
+alternative before approval or while a stage is blocked.
+
+Each appearance stage now verifies that its distinct child jobs match the saved
+build, source/connection and plan hashes, and exact planned prompts. Assembling a
+complete preview additionally verifies each asset's original job/model/parameters,
+provider request receipt and build dependency. Missing or substituted records
+block the preview and retain the layout and completed siblings; they never authorize
+automatic regeneration.
 
 ## Adjoining-Area Generation
 

@@ -112,7 +112,7 @@ class LTXStreamingEngine:
         ).to("cuda")
         # Memory-efficient attention where available.
         with contextlib.suppress(Exception):
-            self._pipeline.enable_model_cpu_offload()  # type: ignore[attr-defined]
+            self._pipeline.enable_model_cpu_offload()
 
     @modal.method()
     def generate_clip(

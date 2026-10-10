@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- schemaless test doubles (in-memory Mongo rows, page JSON) */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 const memory = vi.hoisted(() => ({ rows: new Map<string, Map<string, any>>(), owner: true, fail: "" }));
 const store = (name: string) => { if (!memory.rows.has(name)) memory.rows.set(name, new Map()); return memory.rows.get(name)!; };
 function collection(name: string) {
@@ -102,6 +103,58 @@ it("retains generated origins through preview edits, later revisions and history
   expect((await readPlaceScene(sid, pid)).history.filter(s => s.revision > 1).every(s => s.generation_sources?.[0]?.request_id === "provider")).toBe(true);
   await expect(previewPlaceScene(sid, pid, { base_revision: 3, definition, generation_job_id: "generated" })).rejects.toMatchObject({ status: 409 });
   await expect(previewPlaceScene(sid, pid, { base_revision: 3, definition, generation_job_id: "foreign" })).rejects.toMatchObject({ status: 409 });
+});
+it("reuses one saved text proposal and its accepted receipt across preview, apply and later manual edits", async () => {
+  const first = await createPlaceWorld(createInput()), sid = first.session_id, pid = first.place_id;
+  const definition = structuredClone(first.scene.definition); definition.objects[0]!.color = "#123456";
+  const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const connection_input = { version: 1 as const, place_id: pid, connections: [] };
+  const receipt = { version: 1 as const, job_id: "one-edit", model: "test-model", request_id: "provider", prompt: "Paint the building", base_revision: 1,
+    input_sha256: hash([first.scene.definition, [], connection_input, []]), output_sha256: hash(definition), object_ids: [definition.objects[0]!.id], selected_object_ids: [], reserved_usd: 0.2,
+    created_at: "2026-10-03T00:00:00Z", connection_input, connections_sha256: connectionInputHash(connection_input) };
+  const origin = { id: "saved_text_proposal", receipt }, input = { base_revision: 1, definition };
+  const a = await previewPlaceScene(sid, pid, input, undefined, undefined, origin);
+  expect(await previewPlaceScene(sid, pid, input, undefined, undefined, origin)).toEqual(a);
+  expect([...store("world_edit_proposals").values()].filter(p => p.edit_source)).toHaveLength(1);
+  const applied = await applyPlaceScene(sid, pid, a.proposal.id); expect(applied.scene.edit_sources).toEqual([receipt]);
+  expect(await applyPlaceScene(sid, pid, a.proposal.id)).toEqual(applied);
+  expect((await previewPlaceScene(sid, pid, input, undefined, undefined, origin)).proposal.applied_revision).toBe(2);
+  const renamed = { ...applied.scene.definition, label: "Renamed place" };
+  const manual = await previewPlaceScene(sid, pid, { base_revision: 2, definition: renamed, edit_sources: [{ model: "forged" }] });
+  expect((await applyPlaceScene(sid, pid, manual.proposal.id)).scene.edit_sources).toEqual([receipt]);
+  expect((await readPlaceScene(sid, pid)).history.filter(s => s.revision > 1).every(s => s.edit_sources?.[0]?.request_id === "provider")).toBe(true);
+  await expect(previewPlaceScene(sid, pid, { ...input, definition: { ...definition, label: "Tampered" } }, undefined, undefined, origin)).rejects.toMatchObject({ status: 409 });
+});
+it("refuses altered final text edit bytes before any geometry writes", async () => {
+  const first = await createPlaceWorld(createInput()), sid = first.session_id, pid = first.place_id;
+  const definition = structuredClone(first.scene.definition); definition.objects[0]!.color = "#123456";
+  const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const connection_input = { version: 1 as const, place_id: pid, connections: [] };
+  const receipt = { version: 1 as const, job_id: "one-edit", model: "test-model", request_id: null, prompt: "Paint the building", base_revision: 1,
+    input_sha256: "a".repeat(64), output_sha256: hash(definition), object_ids: [definition.objects[0]!.id], selected_object_ids: [], reserved_usd: 0.2,
+    created_at: "2026-10-03T00:00:00Z", connection_input, connections_sha256: connectionInputHash(connection_input) };
+  const result = await previewPlaceScene(sid, pid, { base_revision: 1, definition }, undefined, undefined, { id: "saved_text_proposal", receipt });
+  store("world_edit_proposals").get(result.proposal.id).definition.objects[0].color = "#654321";
+  const before = structuredClone(memory.rows);
+  await expect(applyPlaceScene(sid, pid, result.proposal.id)).rejects.toMatchObject({ status: 409 }); expect(memory.rows).toEqual(before);
+});
+it("can review saved text bytes again after unrelated world context changes without rebasing geometry", async () => {
+  const first = await createPlaceWorld(createInput()), sid = first.session_id, pid = first.place_id;
+  const definition = structuredClone(first.scene.definition); definition.objects[0]!.color = "#123456";
+  const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const connection_input = { version: 1 as const, place_id: pid, connections: [] };
+  const receipt = { version: 1 as const, job_id: "one-edit", model: "test-model", request_id: "provider", prompt: "Paint the building", base_revision: 1,
+    input_sha256: "a".repeat(64), output_sha256: hash(definition), object_ids: [definition.objects[0]!.id], selected_object_ids: [], reserved_usd: 0.2,
+    created_at: "2026-10-03T00:00:00Z", connection_input, connections_sha256: connectionInputHash(connection_input) };
+  const original = await previewPlaceScene(sid, pid, { base_revision: 1, definition }, undefined, undefined, { id: "original_review", receipt });
+  store("world_state").get(sid).updated_at = new Date(Date.now() + 1000);
+  const before = structuredClone(memory.rows);
+  await expect(applyPlaceScene(sid, pid, original.proposal.id)).rejects.toMatchObject({ status: 409 }); expect(memory.rows).toEqual(before);
+  const refreshed = await previewPlaceScene(sid, pid, { base_revision: 1, definition }, undefined, undefined, { id: "refreshed_review", receipt });
+  expect(refreshed.proposal.definition).toEqual(original.proposal.definition);
+  const applied = await applyPlaceScene(sid, pid, refreshed.proposal.id); expect(applied.scene.edit_sources).toEqual([receipt]);
+  expect(applied.scene.definition.objects[0]!.id).toBe(first.scene.definition.objects[0]!.id); expect(applied.scene.revision).toBe(2);
+  expect(store("world_edit_proposals").get(original.proposal.id).applied_revision).toBeUndefined();
 });
 it("previews and atomically connects a new place without revising the existing scene",async()=>{
   const first=await createPlaceWorld(createInput()),before=structuredClone(first.scene);

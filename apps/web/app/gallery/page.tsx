@@ -5,6 +5,7 @@ import TourButton from "@/components/tour-button";
 import { galleryStats, listPublishedSessions } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import { countMapEntities } from "@/lib/world-map";
+import { listWorldPublications } from "@/lib/world-publication";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export default async function GalleryPage() {
       </main>
     );
   }
-  const rows = await listPublishedSessions(60);
+  const [rows, worlds] = await Promise.all([listPublishedSessions(60), listWorldPublications()]);
   const ids = rows.map((r) => r.session_id);
   const [stats, places] = await Promise.all([
     galleryStats(ids),
@@ -38,6 +39,14 @@ export default async function GalleryPage() {
           ← back to the canvas
         </Link>
       </div>
+      {worlds.length > 0 && <section aria-label="Published structured worlds"><h2 className="my-4 text-lg">World snapshots</h2>
+        <ul className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">{worlds.map(world => <li key={world.id} className="overflow-hidden rounded-xl border p-4">
+          <Link href={{ pathname: `/w/${world.id}` }}>
+            {world.poster && <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/publications/${world.id}/files/${world.poster}`} alt={world.title} className="aspect-video w-full object-cover" /></>}
+            <h3>{world.title}</h3><p>{world.places} places · {world.views} views · {world.videos} videos</p>
+          </Link></li>)}</ul></section>}
       {rows.length === 0 ? (
         <p className="opacity-70">
           Nothing published yet. In a session, right-click a page and choose

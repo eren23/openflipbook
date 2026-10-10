@@ -1,9 +1,13 @@
+import base64
+import hashlib
+import io
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image
 
 from providers import place_build as build
 
@@ -28,6 +32,56 @@ def fixture(monkeypatch, content='{"objects":[{"id":"proposed"}]}', finish="stop
     create = AsyncMock(return_value=response)
     monkeypatch.setattr(build.llm, "_client", lambda: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
     return create, build.PlanInput(prompt="Build a workshop", model="configured-model", reservation=0.1, definition={"objects": []})
+
+
+def image_reference() -> build.LayoutImage:
+    output = io.BytesIO()
+    Image.new("RGB", (64, 32), (120, 150, 160)).save(output, format="PNG")
+    data = output.getvalue()
+    return build.LayoutImage(source_node_id="reference", sha256=hashlib.sha256(data).hexdigest(),
+        bytes=len(data), width=64, height=32, content_type="image/png",
+        registration=build.ImageRegistration(scene_id="scene", base_revision=1,
+            width_metres=40, depth_metres=40, coordinate_frame="authored_metres", geometry="estimated_proposal"),
+        data_url="data:image/png;base64," + base64.b64encode(data).decode())
+
+
+@pytest.mark.asyncio
+async def test_image_reference_and_metric_registration_use_one_multimodal_call(monkeypatch):
+    create, body = fixture(monkeypatch)
+    body.definition.update(width=40, depth=40)
+    body.image_input = image_reference()
+    assert (await build.plan(body))["status"] == "ready"
+    create.assert_awaited_once()
+    content = create.call_args.kwargs["messages"][1]["content"]
+    assert content[1] == {"type": "image_url", "image_url": {"url": body.image_input.data_url}}
+    context = json.loads(content[0]["text"])
+    assert context["image_input"] == body.image_input.model_dump(exclude={"data_url"})
+    instructions = create.call_args.kwargs["messages"][0]["content"]
+    assert "ESTIMATED" in instructions and "unseen interiors" in instructions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("sha256", "0" * 64), ("bytes", 1), ("width", 65),
+    ("data_url", "https://remote.invalid/image.png"), ("content_type", "image/jpeg")])
+async def test_invalid_or_substituted_layout_image_never_calls_provider(monkeypatch, field, value):
+    create, body = fixture(monkeypatch)
+    body.definition.update(width=40, depth=40)
+    body.image_input = image_reference().model_copy(update={field: value})
+    with pytest.raises(HTTPException) as error:
+        await build.plan(body)
+    assert error.value.status_code == 400
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registration_cannot_change_saved_place_dimensions(monkeypatch):
+    create, body = fixture(monkeypatch)
+    body.definition.update(width=80, depth=40)
+    body.image_input = image_reference()
+    with pytest.raises(HTTPException) as error:
+        await build.plan(body)
+    assert error.value.status_code == 400
+    create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

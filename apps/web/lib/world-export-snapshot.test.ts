@@ -36,7 +36,7 @@ it("captures an owned source-free world, registry tombstones and workspace witho
   expect(memory.options.readConcern).toEqual({ level: "snapshot" });
   expect(result.privateOwner).toBe(true); expect(result.entities.entities).toEqual([{ id: "live" }]); expect(result.registry?.entities).toHaveLength(2);
   expect(result.workspace).toMatchObject({ title: "City", walk_position: { x: 1, z: 2 } }); expect(result.workspace).not.toHaveProperty("notes");
-  expect(JSON.stringify(result)).not.toContain("owner_token"); expect(memory.views).toHaveBeenCalledWith(expect.anything(), "world", memory.session);
+  expect(JSON.stringify(result)).not.toContain("owner_token"); expect(memory.views).toHaveBeenCalledWith(expect.anything(), "world", memory.session, []);
 });
 it("does not mix a concurrent structural edit into an earlier world snapshot", async () => {
   memory.afterRead = name => { if (name === "place_scenes") { memory.rows.get("place_scenes")![0]!.revision = 2; memory.rows.get("place_scene_versions")![0]!.revision = 2; } };
@@ -81,6 +81,16 @@ it("captures owner motion records and selections in the same snapshot, never run
   expect(result.motion.studies).toHaveLength(1); expect(result.motion.assets).toHaveLength(1); expect(result.motion.reviews).toHaveLength(1);
   expect(result.motion.selections).toEqual([{ _id: "world:study", asset_id: "clip", review_id: "review" }]);
   expect(memory.reads).not.toContain("motion_jobs");
+});
+it("exports completed terminal path receipts and requests their bound walk cameras, never leases or active submissions", async () => {
+  const job = { _id: "world:walk", id: "walk", session_id: "world", status: "needs_review", created_at: new Date(0), place_id: "place", view_ids: ["a", "b"], views_sha256: "views",
+    prompt: "Preserve work", reservation: 1, committed: .5, ledger_ids: ["private-ledger"], work_token: "private-lease", duration: 6, subject: null, art: null,
+    keyframes: [{ frame: 0, time: 0, stage: "source", file: { key: "frame.png", sha256: "pixels", bytes: 3 } }], legs: [] };
+  memory.rows.set("path_videos", [job, { ...job, id: "active", status: "running" }]);
+  const result = await snapshotWorldExport("world");
+  expect(result.pathVideos).toHaveLength(1); expect(result.pathVideos[0]!.original_spend.committed).toBe(.5);
+  expect(memory.views).toHaveBeenCalledWith(expect.anything(), "world", memory.session, ["a", "b"]);
+  expect(JSON.stringify(result.pathVideos)).not.toMatch(/private-ledger|private-lease/);
 });
 it("refuses to export orphan motion studies or an oversized study inventory", async () => {
   memory.rows.set("motion_studies", [{ id: "study", session_id: "world", view_id: "missing" }]);

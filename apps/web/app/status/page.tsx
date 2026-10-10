@@ -1,5 +1,9 @@
-import { readServerEnv } from "@/lib/env";
-import { listRecentErrors } from "@/lib/db";
+import { readServerEnv, requireR2 } from "@/lib/env";
+import { getDb, listRecentErrors } from "@/lib/db";
+import { modalAuthHeaders, modalUrl } from "@/lib/modal";
+import { storedBucketReachable } from "@/lib/r2";
+import { debugAccessAllowed } from "@/lib/debug-access";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -22,27 +26,30 @@ interface BackendStatus {
 }
 
 async function fetchBackendStatus(): Promise<BackendStatus | null> {
-  const modalUrl = process.env.MODAL_API_URL;
-  if (!modalUrl) return null;
+  const base = process.env.MODAL_API_URL;
+  if (!base) return null;
   try {
-    const res = await fetch(`${modalUrl.replace(/\/$/, "")}/status`, {
+    const res = await fetch(modalUrl(base, "/status"), {
       cache: "no-store",
+      headers: modalAuthHeaders(),
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) return { error: `HTTP ${res.status}` };
     return (await res.json()) as BackendStatus;
-  } catch (err) {
-    return { error: (err as Error).message };
+  } catch {
+    return { error: "Request failed or timed out" };
   }
 }
 
 function buildRows(env: ReturnType<typeof readServerEnv>): Row[] {
+  let storageConfigured = false;
+  try { requireR2(env); storageConfigured = true; } catch { /* shown as missing below */ }
   return [
     {
       key: "MODAL_API_URL",
       required: true,
       ok: Boolean(env.MODAL_API_URL),
-      hint: "URL printed by `modal deploy generate.py`.",
+      hint: "Backend URL from Modal or the self-hosted API service.",
     },
     {
       key: "MONGODB_URI + MONGODB_DB",
@@ -51,16 +58,10 @@ function buildRows(env: ReturnType<typeof readServerEnv>): Row[] {
       hint: "MongoDB connection string + database name for the node graph.",
     },
     {
-      key: "R2_ACCOUNT_ID + R2_BUCKET + R2 keys",
+      key: "R2_ENDPOINT or R2_ACCOUNT_ID + bucket + keys",
       required: true,
-      ok: Boolean(
-        env.R2_ACCOUNT_ID &&
-          env.R2_ACCESS_KEY_ID &&
-          env.R2_SECRET_ACCESS_KEY &&
-          env.R2_BUCKET &&
-          env.R2_PUBLIC_BASE_URL
-      ),
-      hint: "Cloudflare R2 for generated image blobs.",
+      ok: storageConfigured,
+      hint: "Cloudflare R2 or a compatible S3 endpoint; use /api/blobs with a private bucket.",
     },
     {
       key: "NEXT_PUBLIC_LTX_WS_URL",
@@ -76,11 +77,18 @@ export default async function StatusPage() {
   const rows = buildRows(env);
   const allRequired = rows.filter((r) => r.required).every((r) => r.ok);
 
-  const [backend, recentErrors] = await Promise.all([
+  const debugAllowed = debugAccessAllowed(new Request("http://localhost/status", { headers: await headers() }));
+  const [backend, recentErrors, bucket, persistence] = await Promise.all([
     fetchBackendStatus(),
-    env.MONGODB_URI && env.MONGODB_DB
+    debugAllowed && env.MONGODB_URI && env.MONGODB_DB
       ? listRecentErrors(20).catch(() => [])
       : Promise.resolve([]),
+    storedBucketReachable(),
+    env.MONGODB_URI && env.MONGODB_DB ? getDb().then(async db => {
+      await db.command({ ping: 1 }, { timeoutMS: 4000 });
+      const workers = await db.collection("generation_workers").countDocuments({ last_seen: { $gt: new Date(Date.now() - 30_000) } }, { maxTimeMS: 4000 });
+      return { reachable: true, workers };
+    }).catch(() => ({ reachable: false, workers: 0 })) : Promise.resolve({ reachable: false, workers: 0 }),
   ]);
 
   return (
@@ -99,7 +107,7 @@ export default async function StatusPage() {
         }`}
       >
         {allRequired
-          ? "All required env vars are set — /play should generate pages."
+          ? "All required env vars are set. Backend health is checked below; generation also needs working providers and a worker."
           : "Some required env vars are missing. /play will show BYO-key errors."}
       </div>
 
@@ -171,8 +179,16 @@ export default async function StatusPage() {
         </ul>
       )}
 
+      <h2 className="mt-10 text-xl font-semibold">Stores and workers</h2>
+      <ul className="mt-3 space-y-2 text-sm">
+        <li>MongoDB: {persistence.reachable ? "reachable" : "unreachable or not configured"}</li>
+        <li>Private bucket: {bucket ? "reachable" : "unreachable or not configured"}</li>
+        <li>Worker heartbeat: {persistence.workers ? "fresh" : "no fresh worker"}</li>
+      </ul>
+      <p className="mt-2 text-xs opacity-70">These checks do not submit model jobs. Individual generation features also require a compatible worker and configured provider quote.</p>
+
       <h2 className="mt-10 text-xl font-semibold">Recent errors</h2>
-      {recentErrors.length === 0 ? (
+      {!debugAllowed ? <p className="mt-2 text-sm opacity-70">Operator debug access is required to view error details.</p> : recentErrors.length === 0 ? (
         <p className="mt-2 text-sm opacity-70">No errors logged.</p>
       ) : (
         <ul className="mt-3 space-y-2 text-xs">

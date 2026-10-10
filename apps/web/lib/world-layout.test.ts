@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   arcPath,
+  connectorFrame,
   depthTint,
   fitAllCamera,
   fitCamera,
@@ -109,6 +110,40 @@ describe("fitCamera", () => {
     // 800-tall rect into a 1600x400 viewport — height is the binding axis.
     const cam = fitCamera({ x: 0, y: 0, w: 100, h: 800 }, 1600, 400, 0);
     expect(cam.zoom).toBe(0.5);
+  });
+});
+
+describe("connectorFrame", () => {
+  it("contains the actual curved paths, source dots and marker margins at negative coordinates", () => {
+    const connectors = [
+      { fromNodeId: "a", toNodeId: "b", from: { x: -350, y: -500 }, to: { x: 750, y: -500 } },
+      { fromNodeId: "b", toNodeId: "c", from: { x: 750, y: -500 }, to: { x: -20, y: 900 } },
+      { fromNodeId: "c", toNodeId: "d", from: { x: -20, y: 900 }, to: { x: -20, y: 900 } },
+    ];
+    const frame = connectorFrame(connectors);
+    expect(frame.x).toBeLessThan(-350); expect(frame.y).toBeLessThan(-500);
+    expect(frame.w).toBeLessThan(2500); expect(frame.h).toBeLessThan(2500);
+    for (const connector of connectors) {
+      const numbers = arcPath(connector.from, connector.to).match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      for (let step = 0; step <= 100; step++) {
+        const t = step / 100, u = 1 - t;
+        const coordinate = (axis: number) => u ** 3 * numbers[axis]! + 3 * u ** 2 * t * numbers[axis + 2]! + 3 * u * t ** 2 * numbers[axis + 4]! + t ** 3 * numbers[axis + 6]!;
+        expect(coordinate(0)).toBeGreaterThanOrEqual(frame.x); expect(coordinate(0)).toBeLessThanOrEqual(frame.x + frame.w);
+        expect(coordinate(1)).toBeGreaterThanOrEqual(frame.y); expect(coordinate(1)).toBeLessThanOrEqual(frame.y + frame.h);
+      }
+      for (const point of [connector.from, connector.to]) {
+        expect(point.x - frame.x).toBeGreaterThanOrEqual(48); expect(frame.x + frame.w - point.x).toBeGreaterThanOrEqual(48);
+        expect(point.y - frame.y).toBeGreaterThanOrEqual(48); expect(frame.y + frame.h - point.y).toBeGreaterThanOrEqual(48);
+      }
+    }
+  });
+  it("moves the SVG origin with distant maps while keeping its size proportional to the same curves", () => {
+    const original = { fromNodeId: "a", toNodeId: "b", from: { x: -300, y: 700 }, to: { x: 400, y: -500 } };
+    const moved = { ...original, from: { x: original.from.x + 250_000, y: original.from.y - 180_000 }, to: { x: original.to.x + 250_000, y: original.to.y - 180_000 } };
+    const before = connectorFrame([original]), after = connectorFrame([moved]);
+    expect(after.w).toBeCloseTo(before.w); expect(after.h).toBeCloseTo(before.h);
+    expect(after.x - before.x).toBeCloseTo(250_000); expect(after.y - before.y).toBeCloseTo(-180_000);
+    expect(connectorFrame([])).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   });
 });
 

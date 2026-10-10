@@ -9,6 +9,8 @@ import { createHash } from "node:crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { PlaceViewExport } from "./place-view";
 import type { MotionArchiveExport } from "./motion-archive";
+import type { PathVideoArchiveExport } from "./path-video-archive";
+import type { ImageLedWalkArchiveExport } from "./image-led-walk-archive";
 import type { MeshSource, MeshImportProvenance } from "./mesh-asset";
 export interface MeshSourceExport extends MeshSource {
   bytes: Uint8Array;
@@ -113,14 +115,28 @@ export async function buildWorldZip(
   cameraViews: PlaceViewExport[] = [],
   context?: WorldExportContext,
   motion?: MotionArchiveExport,
+  pathVideos?: PathVideoArchiveExport,
+  imageLedWalks?: ImageLedWalkArchiveExport,
 ): Promise<Uint8Array> {
   const zip = new JSZip();
   const hasMotion = Boolean(motion && (motion.studies.length || motion.assets.length || motion.reviews.length || motion.selections.length));
-  const hasAlignment=Boolean(mapArtwork.drafts?.length), archiveVersion=hasAlignment?3:hasMotion?2:1;
-  if (hasMotion || hasAlignment) {
+  const hasPaths = Boolean(pathVideos?.receipts.length);
+  const hasImageLed = Boolean(imageLedWalks?.receipts.length);
+  const hasAlignment=Boolean(mapArtwork.drafts?.length), archiveVersion=hasImageLed?5:hasPaths?4:hasAlignment?3:hasMotion?2:1;
+  if (hasMotion || hasAlignment || hasPaths || hasImageLed) {
     if (context?.visibility !== "owner") throw new Error("Motion archives require owner visibility");
     const { files, ...metadata } = motion ?? {files:[],studies:[],assets:[],reviews:[],selections:[]};
     zip.file("motion.json", JSON.stringify({ version: 1, ...metadata, files: files.map(({ data, ...file }) => {
+      zip.file(file.file, data); return file;
+    }) }, null, 2));
+  }
+  if (hasPaths || hasImageLed) {
+    zip.file("path-videos.json", JSON.stringify({ version: 1, receipts: pathVideos?.receipts ?? [], files: (pathVideos?.files ?? []).map(({ data, ...file }) => {
+      zip.file(file.file, data); return file;
+    }) }, null, 2));
+  }
+  if (hasImageLed) {
+    zip.file("image-led-walks.json", JSON.stringify({ version: 1, receipts: imageLedWalks!.receipts, files: imageLedWalks!.files.map(({ data, ...file }) => {
       zip.file(file.file, data); return file;
     }) }, null, 2));
   }

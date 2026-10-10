@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import PlaceIllustrations from "./place-illustrations";
 import type { SavedPlaceView } from "@/lib/place-view";
@@ -16,6 +16,19 @@ beforeEach(() => {
 });
 const draw = (disabled = false) => render(<PlaceIllustrations sessionId="world" view={view} disabled={disabled}/>);
 const writes = () => fetcher.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => init.body);
+it("notifies the walk quote only when the accepted artwork changes after an acknowledged review", async () => {
+  const accepted=vi.fn();library.assets=[{id:"art",prompt:"Inked stone",accepted:false,historical:false}];
+  fetcher.mockImplementation(async(_url,init)=>{
+    if(init?.method==="POST"){library.accepted_id="art";library.assets=[{id:"art",prompt:"Inked stone",accepted:true,historical:false}];return Response.json({});}
+    return Response.json(library);
+  });
+  render(<PlaceIllustrations sessionId="world" view={view} disabled={false} onAcceptedChange={accepted}/>);
+  const image=await screen.findByRole("img",{name:"Generated camera illustration"});expect(accepted).not.toHaveBeenCalled();fireEvent.load(image);
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Accept illustration"})).toHaveProperty("disabled",false));
+  fireEvent.click(screen.getByRole("button",{name:"Accept illustration"}));await waitFor(()=>expect(accepted).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button",{name:"Refresh illustrations"}));await waitFor(()=>expect(fetcher.mock.calls.filter(([,init])=>!init?.method).length).toBe(3));
+  expect(accepted).toHaveBeenCalledOnce();expect(writes()).toHaveLength(1);
+});
 it("shows saved source pixels in the workspace before artwork exists without submitting generation", async () => {
   const target = document.createElement("div");
   const ui = render(<PlaceIllustrations sessionId="world" view={view} disabled={false} surfaceTarget={target}/>); ui.container.appendChild(target);
@@ -238,7 +251,7 @@ it("paints keyframes in place of flux, continues from an accepted camera, shows 
       candidates: [{ iou: 0.71, centre_dx: 0.052, centre_dy: -0.01, area_ratio: 1.31, painted: 40, passed: false }] } }] });
   draw(); await screen.findByText("Reserve $0.12 for this keyframe");
   expect(screen.queryByRole("button", { name: "Generate illustration" })).toBeNull();
-  expect(screen.getByRole("status", { name: "Keyframe gate" }).textContent).toBe("Keyframe from art / gate failed / IoU 0.710 / centre +5.2%, -1.0% / area 1.31");
+  expect(screen.getByRole("status", { name: "Keyframe gate" }).textContent).toBe("Keyframe from art / camera/paint check failed / IoU 0.710 / centre +5.2%, -1.0% / area 1.31");
   fireEvent.change(screen.getByLabelText("Illustration appearance"), { target: { value: "Warm lamplight" } }); fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(screen.getByLabelText("Continue from camera"), { target: { value: "front" } });
   fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
@@ -249,6 +262,30 @@ it("paints keyframes in place of flux, continues from an accepted camera, shows 
   await waitFor(() => expect(writes()).toHaveLength(2));
   const words = JSON.parse(writes()[1]);
   expect(words).toMatchObject({ action: "generate_keyframe", art: false, prompt: "Inked stone" }); expect(words.chain_from).toBeUndefined();
+});
+it.each(["failed", "unmeasured", "missing final"])("keeps a %s keyframe draft visible but unavailable for acceptance", async problem => {
+  library.assets = [{ id: "kf", sha256: "a".repeat(64), prompt: "Inked stone", accepted: false, historical: false,
+    keyframe: { version: 1, stage: "first", gate: problem === "missing final" ? "passed" : problem, object_id: "inn", chosen: 0, passed: problem === "missing final", sky_pinned: false,
+      candidates: [{ iou: 0.9, centre_dx: 0, centre_dy: 0, area_ratio: 1, painted: 40, passed: true }] } }];
+  draw(); fireEvent.load(await screen.findByRole("img", { name: "Generated camera illustration" }));
+  const accept = await screen.findByRole("button", { name: "Review and accept illustration" });
+  expect(accept).toHaveProperty("disabled", true);
+  expect(screen.getByRole("status", { name: "Illustration content review" }).textContent).toMatch(/needs a passing camera check and final-image verification/);
+  fireEvent.click(accept); expect(writes()).toHaveLength(0);
+});
+it("reviews the exact final-image hash separately from camera/paint evidence", async () => {
+  const sha256 = "a".repeat(64);
+  library.assets = [{ id: "kf", sha256, prompt: "Inked stone", accepted: false, historical: false,
+    keyframe: { version: 1, stage: "first", gate: "passed", object_id: "inn", chosen: 0, passed: true, sky_pinned: false,
+      candidates: [{ iou: 0.7, centre_dx: 0, centre_dy: 0, area_ratio: 1, painted: 40, passed: true }],
+      final_image: { version: 1, sha256, candidate_sha256: sha256, width: 256, height: 256, method: "candidate",
+        invariants: { dimensions: true, opaque: true, composition: true, protected_pixels: 0, changed_protected_pixels: 0 } } } }];
+  draw(); fireEvent.load(await screen.findByRole("img", { name: "Generated camera illustration" }));
+  const accept = await screen.findByRole("button", { name: "Review and accept illustration" });
+  await waitFor(() => expect(accept).toHaveProperty("disabled", false));
+  expect(screen.getByRole("status", { name: "Illustration content review" }).textContent).toMatch(/Camera\/paint checks do not verify this content/);
+  fireEvent.click(accept); await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(JSON.parse(writes()[0])).toEqual({ action: "accept", id: "kf", previous_id: null, reviewed_sha256: sha256 });
 });
 it("continues from the nearest accepted camera by default and still paints a first keyframe on request", async () => {
   Object.assign(library, { keyframe_capabilities: { enabled: true, model: "qwen", reservation: 0.12, parameters: {} },
@@ -264,4 +301,68 @@ it("continues from the nearest accepted camera by default and still paints a fir
   await waitFor(() => expect(screen.getByRole("checkbox")).toHaveProperty("disabled", false));
   fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
   await waitFor(() => expect(writes()).toHaveLength(2)); expect(JSON.parse(writes()[1]).chain_from).toBeUndefined();
+});
+const identityLabels = ["Bookshop", "Lantern Inn", "Watchtower", "Copper Kettle"];
+const identityAsset = (id: string, passed = true) => ({ id, model: "fal-ai/nano-banana-pro/edit", sha256: (id === "first" ? "a" : "b").repeat(64), prompt: "Keep the same mapped buildings", accepted: false, historical: false,
+  keyframe: { version: 1, stage: "first", art: "art", reference_profile: "source-art-map-landmarks-v1", gate: passed ? "passed" : "failed", object_id: "inn", chosen: 0, passed, sky_pinned: false,
+    candidates: [{ iou: passed ? .9 : .6, centre_dx: 0, centre_dy: 0, area_ratio: 1, painted: 40, passed }],
+    final_image: { version: 1, sha256: (id === "first" ? "a" : "b").repeat(64), candidate_sha256: (id === "first" ? "a" : "b").repeat(64), width: 400, height: 300, method: "candidate", invariants: { dimensions: true, opaque: true, composition: true, protected_pixels: 0, changed_protected_pixels: 0 } } } });
+it("compares original map, exact camera and candidate and binds all four identity reviews to the selected final bytes", async () => {
+  library.assets = [identityAsset("first"), identityAsset("second")];
+  render(<PlaceIllustrations sessionId="world" view={view} disabled={false} sourceArtworkUrl="/api/nodes/map/image" landmarkLabels={identityLabels}/>);
+  const panel = await screen.findByRole("region", { name: "World identity review" });
+  const images = within(panel).getAllByRole("img");
+  expect(images.map(image => new URL(image.getAttribute("src")!, "http://localhost").pathname)).toEqual(["/api/nodes/map/image", "/api/world/world/views/view/render", "/api/world/world/illustrations/first"]);
+  const checks = within(panel).getAllByRole("checkbox"); expect(checks).toHaveLength(4);
+  fireEvent.load(screen.getByRole("img", { name: "Generated camera illustration" })); images.forEach(image => fireEvent.load(image));
+  const accept = screen.getByRole("button", { name: "Review and accept illustration" });
+  for (const checkbox of checks.slice(0, 3)) fireEvent.click(checkbox);
+  expect(accept).toHaveProperty("disabled", true); expect(writes()).toHaveLength(0);
+  fireEvent.click(checks[3]!); await waitFor(() => expect(accept).toHaveProperty("disabled", false));
+  fireEvent.change(screen.getByLabelText("Saved illustration"), { target: { value: "second" } });
+  fireEvent.load(screen.getByRole("img", { name: "Generated camera illustration" })); fireEvent.load(within(panel).getByRole("img", { name: "Candidate artwork for identity review" }));
+  expect(checks.every(checkbox => !(checkbox as HTMLInputElement).checked)).toBe(true); expect(accept).toHaveProperty("disabled", true);
+  checks.forEach(checkbox => fireEvent.click(checkbox)); await waitFor(() => expect(accept).toHaveProperty("disabled", false));
+  fireEvent.click(accept); await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(JSON.parse(writes()[0])).toEqual({ action: "accept", id: "second", previous_id: null, reviewed_sha256: "b".repeat(64) });
+});
+it.each(["fal-ai/nano-banana-pro/edit", "fal-ai/flux-general/image-to-image"])("keeps failed %s framing blocked and cannot replace the map-bound profile with a words-only retry", async model => {
+  library.assets = [identityAsset("first", false)];
+  Object.assign(library, { keyframe_capabilities: { enabled: true, model, reservation: .3, parameters: {} } });
+  render(<PlaceIllustrations sessionId="world" view={view} disabled={false} sourceArtworkUrl="/api/nodes/map/image" landmarkLabels={identityLabels}/>);
+  const panel = await screen.findByRole("region", { name: "World identity review" });
+  within(panel).getAllByRole("img").forEach(image => fireEvent.load(image)); fireEvent.load(screen.getByRole("img", { name: "Generated camera illustration" }));
+  expect(within(panel).getAllByRole("checkbox").every(checkbox => (checkbox as HTMLInputElement).disabled)).toBe(true);
+  expect(screen.getByRole("button", { name: "Review and accept illustration" })).toHaveProperty("disabled", true);
+  expect(screen.queryByRole("button", { name: "Retry with words only" })).toBeNull(); expect(writes()).toHaveLength(0);
+  expect(within(panel).getByRole("status").textContent).toContain("cannot override the camera gate");
+});
+it("requires available source comparison pixels even when a candidate passes and all building checks are selected", async () => {
+  library.assets = [identityAsset("first")];
+  render(<PlaceIllustrations sessionId="world" view={view} disabled={false} sourceArtworkUrl="/api/nodes/map/image" landmarkLabels={identityLabels}/>);
+  const panel = await screen.findByRole("region", { name: "World identity review" });
+  fireEvent.load(screen.getByRole("img", { name: "Generated camera illustration" }));
+  within(panel).getAllByRole("checkbox").forEach(checkbox => fireEvent.click(checkbox));
+  const images = within(panel).getAllByRole("img"); images.slice(1).forEach(image => fireEvent.load(image));
+  const accept = screen.getByRole("button", { name: "Review and accept illustration" }); expect(accept).toHaveProperty("disabled", true);
+  fireEvent.load(images[0]!); await waitFor(() => expect(accept).toHaveProperty("disabled", false));
+  fireEvent.error(images[0]!); expect(accept).toHaveProperty("disabled", true); expect(writes()).toHaveLength(0);
+});
+it.each(["fal-ai/nano-banana-pro/edit", "fal-ai/flux-general/image-to-image"])("keeps an unavailable explicit %s profile disabled instead of submitting legacy full-view generation", async model => {
+  Object.assign(library, { keyframe_capabilities: { enabled: false, model, reservation: .3, parameters: {}, reason: "Capture a compatible 688 × 384 camera before Nano keyframe painting." } });
+  draw(); await screen.findByText("Capture a compatible 688 × 384 camera before Nano keyframe painting.");
+  expect(screen.getByRole("button", { name: "Paint keyframe" })).toHaveProperty("disabled", true);
+  expect(screen.queryByRole("button", { name: "Generate illustration" })).toBeNull(); expect(writes()).toHaveLength(0);
+});
+it("paints Flux reference as an independent exact-camera anchor even when a nearest accepted chain exists", async () => {
+  Object.assign(library, { keyframe_capabilities: { enabled: true, model: "fal-ai/flux-general/image-to-image", reservation: .15,
+    parameters: { num_images: 1, output_format: "jpeg", prompt_version: "saved-camera-flux-reference-controlnet-v1", structural_guidance: "saved-camera-controlnet-v1" } },
+    chain_sources: [{ view_id: "front", label: "Front door", angle: 12.4 }] });
+  draw(); await screen.findByText(/Flux \/ saved-camera depth/);
+  expect(screen.queryByLabelText("Continue from camera")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Illustration appearance"), { target: { value: "Inked stone with warm window light" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: /Reserve/ })); fireEvent.click(screen.getByRole("button", { name: "Paint keyframe" }));
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  const body = JSON.parse(writes()[0]); expect(body).toMatchObject({ action: "generate_keyframe", model: "fal-ai/flux-general/image-to-image", reservation: .15 });
+  expect(body.chain_from).toBeUndefined(); expect(body.art).toBeUndefined(); expect(body.reference_guidance).toBeUndefined();
 });

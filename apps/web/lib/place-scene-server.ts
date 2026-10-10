@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ClientSession, Db, Document } from "mongodb";
-import type { BuildingSide, Entity, EntityGeoEdit, PlaceSceneDefinition, PlaceSceneSnapshot, WorldEditProposal, WorldEntityGeo, SceneGenerationReceipt } from "@openflipbook/config";
+import type { BuildingSide, Entity, EntityGeoEdit, PlaceSceneDefinition, PlaceSceneSnapshot, WorldEditProposal, WorldEntityGeo, SceneGenerationReceipt, SceneTextEditReceipt } from "@openflipbook/config";
+import { isDeepStrictEqual } from "node:util";
 import { getDb, withDbTransaction, type NodeDoc } from "./db";
 import { CreatorError, requireCreator } from "./creator";
 import { isSafeId } from "./ids";
@@ -29,14 +30,15 @@ export interface ProposalDoc extends WorldEditProposal {
   placement?: WorldEntityGeo;
   generation_source?: SceneGenerationReceipt;
   alignment_source?: MapAlignmentCorrection;
+  edit_source?: SceneTextEditReceipt;
 }
 interface MapDoc extends Document { _id: string; entities: WorldEntityGeo[]; updated_at: Date }
 type SceneEntityDoc = Omit<Entity, "updated_at"> & { updated_at: Date; deleted_at?: Date | null; scene_id?: string };
 interface WorldDoc extends Document { _id: string; entities: SceneEntityDoc[]; updated_at: Date }
 export const sceneKey = (sid: string, pid: string) => `${sid}:${pid}`;
 export const sceneHash = (map: MapDoc | null, world: WorldDoc | null) => createHash("sha256").update(JSON.stringify([map, world])).digest("hex");
-export const wireScene = ({ _id: _unused, ...scene }: SceneDoc): PlaceSceneSnapshot => scene;
-const wireProposal = (p: ProposalDoc): WorldEditProposal => ({ id: p.id, scene_id: p.scene_id, base_revision: p.base_revision, definition: p.definition, affected_node_ids: p.affected_node_ids, changes: p.changes, ...(p.connection ? { connection: p.connection } : {}), ...(p.generation_source ? { generation_job_id: p.generation_source.job_id } : {}), ...(p.applied_revision ? { applied_revision: p.applied_revision } : {}) });
+export const wireScene = ({ _id: _unused, text_edit_fence: _fence, ...scene }: SceneDoc): PlaceSceneSnapshot => scene;
+export const wireProposal = (p: ProposalDoc): WorldEditProposal => ({ id: p.id, scene_id: p.scene_id, base_revision: p.base_revision, definition: p.definition, affected_node_ids: p.affected_node_ids, changes: p.changes, ...(p.connection ? { connection: p.connection } : {}), ...(p.generation_source ? { generation_job_id: p.generation_source.job_id } : {}), ...(p.applied_revision ? { applied_revision: p.applied_revision } : {}) });
 function validIds(sid: string, pid: string) {
   if (!placeScenesEnabled()) throw new CreatorError("World scenes are not enabled", 404);
   if (!isSafeId(sid) || !isSafeId(pid)) throw new CreatorError("Invalid place", 400);
@@ -113,9 +115,17 @@ export async function applyLegacySceneEdits(sid: string, sceneId: string, edits:
   const { proposal } = await previewPlaceScene(sid, current.place_id, { base_revision: current.revision, definition });
   return applyPlaceScene(sid, current.place_id, proposal.id);
 }
-export async function previewPlaceScene(sid: string, pid: string, input: Record<string, unknown>, adjacent?: { source_place_id: string; side: BuildingSide; width: number; source_revision: number }, generation?: SceneGenerationReceipt) {
+export async function previewPlaceScene(sid: string, pid: string, input: Record<string, unknown>, adjacent?: { source_place_id: string; side: BuildingSide; width: number; source_revision: number }, generation?: SceneGenerationReceipt, textEdit?: { id: string; receipt: SceneTextEditReceipt }) {
   validIds(sid, pid);
   const db = await requireCreator(sid);
+  if (textEdit) {
+    if (!isSafeId(textEdit.id) || textEdit.receipt.base_revision !== input.base_revision || createHash("sha256").update(JSON.stringify(input.definition)).digest("hex") !== textEdit.receipt.output_sha256) throw new CreatorError("Text edit proposal differs from its saved result", 409);
+    const previous = await db.collection<ProposalDoc>("world_edit_proposals").findOne({ _id: textEdit.id, session_id: sid, place_id: pid });
+    if (previous) {
+      if (!isDeepStrictEqual(previous.edit_source, textEdit.receipt) || !isDeepStrictEqual(previous.definition, input.definition)) throw new CreatorError("Text edit proposal identity already used", 409);
+      return { proposal: wireProposal(previous) };
+    }
+  }
   const current = await db.collection<SceneDoc>("place_scenes").findOne({ _id: sceneKey(sid, pid) });
   if (!Number.isSafeInteger(input.base_revision) || input.base_revision !== (current?.revision ?? 0)) throw new CreatorError("This place changed. Reload before previewing.", 409);
   let definition: PlaceSceneDefinition;
@@ -166,9 +176,10 @@ export async function previewPlaceScene(sid: string, pid: string, input: Record<
     if (affected.size > 2000) throw new CreatorError("Too many image revisions to preview this place", 409);
   }
   for (const entity of world?.entities ?? []) if (current?.definition.objects.some(o => o.entity_id === entity.id)) for (const node of entity.appears_on_node_ids) affected.add(node);
-  const id = randomUUID();
+  const id = textEdit?.id ?? randomUUID();
   const proposal: ProposalDoc = { _id: id, id, scene_id: sceneId, session_id: sid, place_id: pid, source_node_id: sourceId as string | null, source_image_key: current ? current.source_image_key : source?.image_key ?? null, base_revision: current?.revision ?? 0, base_hash: sceneHash(map, world), definition, changes, affected_node_ids: [...affected], created_at: new Date() };
   if (generation) proposal.generation_source = generation;
+  if (textEdit) proposal.edit_source = textEdit.receipt;
   if (alignment) {
     proposal.alignment_source = alignment.source;
     proposal.changes.unshift("Manual landmark correction / approximate ground-plane projection");
@@ -193,7 +204,13 @@ export async function previewPlaceScene(sid: string, pid: string, input: Record<
   const replaced=new Set(incoming.map(g=>g.id));
   const nextGeos=[...(map?.entities??[]).filter(g=>g.scene_id!==sceneId&&!replaced.has(g.id)),...incoming];
   await checkConnectedSceneEdit(db,sid,proposed,nextGeos,undefined,proposal.connection);
-  await db.collection<ProposalDoc>("world_edit_proposals").insertOne(proposal);
+  try { await db.collection<ProposalDoc>("world_edit_proposals").insertOne(proposal); }
+  catch (error) {
+    if (!textEdit || (error as { code?: number }).code !== 11000) throw error;
+    const previous = await db.collection<ProposalDoc>("world_edit_proposals").findOne({ _id: id, session_id: sid, place_id: pid });
+    if (!previous || !isDeepStrictEqual(previous.edit_source, proposal.edit_source) || !isDeepStrictEqual(previous.definition, proposal.definition)) throw error;
+    return { proposal: wireProposal(previous) };
+  }
   return { proposal: wireProposal(proposal) };
 }
 export async function previewAdjacentPlace(sid: string, sourcePid: string, input: Record<string, unknown>) {
@@ -228,10 +245,17 @@ export async function commitPlaceScene(db: Db, session: ClientSession, sid: stri
     if ((current?.revision ?? 0) !== p.base_revision || sceneHash(map, world) !== p.base_hash) throw new CreatorError("The world changed after preview. Review a fresh proposal.", 409);
     if (p.alignment_source) await assertMapAlignmentCorrectionCurrent(db, session, sid, pid, p.alignment_source);
     if (p.generation_source) await requireBuildConnections(db, { ...p.generation_source, session_id: sid, place_id: pid }, session);
+    if (p.edit_source) {
+      if (createHash("sha256").update(JSON.stringify(p.definition)).digest("hex") !== p.edit_source.output_sha256) throw new CreatorError("Saved text edit result changed", 409);
+      await requireBuildConnections(db, { ...p.edit_source, session_id: sid, place_id: pid }, session);
+    }
     const now = new Date(Math.max(Date.now(), (map?.updated_at?.getTime() ?? 0) + 1, (world?.updated_at?.getTime() ?? 0) + 1));
     const scene: SceneDoc = { _id: sceneKey(sid, pid), id: p.scene_id, session_id: sid, place_id: pid, revision: p.base_revision + 1, source_node_id: p.source_node_id, source_image_key: p.source_image_key, definition: p.definition, updated_at: now.toISOString() };
     const sources = [...(current?.generation_sources ?? []), ...(p.generation_source ? [p.generation_source] : [])];
     if (sources.length) scene.generation_sources = sources;
+    const edits = [...(current?.edit_sources ?? []), ...(p.edit_source ? [p.edit_source] : [])];
+    if (edits.length > 100) throw new CreatorError("This place has reached its text edit history capacity", 409);
+    if (edits.length) scene.edit_sources = edits;
     const incoming = sceneGeos(scene, [...(map?.entities ?? []),...(p.placement?[p.placement]:[])]);
     const replaced = new Set(incoming.map(g => g.id));
     const removed = new Set(current?.definition.objects.filter(o => !p.definition.objects.some(n => n.id === o.id)).map(o => o.entity_id) ?? []);
@@ -242,7 +266,7 @@ export async function commitPlaceScene(db: Db, session: ClientSession, sid: stri
       if (!geo.entity_id) continue;
       const at = entities.findIndex(e => e.id === geo.entity_id), previous = entities[at];
       const entity: SceneEntityDoc = previous ? { ...previous, scene_id: scene.id, name: geo.label, appearance: geo.visual, pinned_by_user: true, deleted_at: null, updated_at: now } : {
-        id: geo.entity_id, scene_id: scene.id, kind: geo.kind, name: geo.label, appearance: geo.visual, aliases: [], facts: [sources.some(s => s.object_ids.includes(geo.id)) ? "AI-proposed architecture, explicitly accepted by owner" : "User-authored local scene"], state: {}, reference_image_url: null,
+        id: geo.entity_id, scene_id: scene.id, kind: geo.kind, name: geo.label, appearance: geo.visual, aliases: [], facts: [[...sources, ...edits].some(s => s.object_ids.includes(geo.id)) ? "AI-proposed architecture, explicitly accepted by owner" : "User-authored local scene"], state: {}, reference_image_url: null,
         first_seen_node_id: p.source_node_id, last_seen_node_id: p.source_node_id, appears_on_node_ids: p.source_node_id ? [p.source_node_id] : [], appearance_bboxes: {}, pinned_by_user: true, confidence: 1, updated_at: now,
       };
       if (at >= 0) entities[at] = entity; else entities.push(entity);

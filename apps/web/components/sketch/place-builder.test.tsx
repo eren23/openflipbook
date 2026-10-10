@@ -60,6 +60,32 @@ it("requires fresh consent after changing floor scope and hides unsupported gene
   fireEvent.click(screen.getByRole("checkbox"));
   expect((screen.getByRole("button", { name: "Generate layout" }) as HTMLButtonElement).disabled).toBe(true); expect(writes()).toEqual([]);
 });
+it("uses a saved source image only after explicit selection and renews the layout quote consent", async () => {
+  const bound = { ...scene, source_node_id: "reference", source_image_key: "world/reference.png" };
+  fetcher.mockImplementation(async (_url, options) => options?.body
+    ? Response.json({ job: { ...job(JSON.parse(options.body).id), status: "submission_unknown" } })
+    : Response.json({ jobs, capabilities: { ...config, image_context_version: 1 } }));
+  render(<PlaceBuilder scene={bound} disabled={false} onPreview={vi.fn()} onBusy={vi.fn()}/>);
+  await screen.findByText("fixture / architecture layout");
+  const source = screen.getByRole("checkbox", { name: "Use saved source image for layout" }) as HTMLInputElement;
+  expect(source.checked).toBe(false); expect(writes()).toEqual([]);
+  fireEvent.change(screen.getByLabelText("Place description"), { target: { value: "Landmarks from this artwork" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Reserve $0.20 for this layout" })); fireEvent.click(source);
+  expect((screen.getByRole("checkbox", { name: "Reserve $0.20 for this layout" }) as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByText(/Image-based geometry is an estimated proposal/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Reserve $0.20 for this layout" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate layout" }));
+  await waitFor(() => expect(writes()).toHaveLength(2));
+  expect(writes()[0]).toMatchObject({ action: "queue", use_source_image: true, base_revision: 1 });
+  expect(writes()[0]).not.toHaveProperty("image_input");
+});
+it("keeps image layout selection disabled until all image workers and backend support it", async () => {
+  const bound = { ...scene, source_node_id: "reference", source_image_key: "world/reference.png" };
+  render(<PlaceBuilder scene={bound} disabled={false} onPreview={vi.fn()} onBusy={vi.fn()}/>);
+  await screen.findByText("Image layouts require updated backend and layout workers.");
+  expect((screen.getByRole("checkbox", { name: "Use saved source image for layout" }) as HTMLInputElement).disabled).toBe(true);
+  expect(writes()).toEqual([]);
+});
 it("never starts a saved queued job during mount or refresh", async () => {
   jobs = [job("saved")]; draw(); await screen.findByRole("button", { name: "Start reserved layout job" });
   fireEvent.click(screen.getByRole("button", { name: "Refresh layout jobs" }));
@@ -97,6 +123,25 @@ it("retries a lost queue response with the identical request, not a new billable
   await screen.findByText("Lost response"); expect((screen.getByLabelText("Place description") as HTMLTextAreaElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Retry saved request" }));
   await waitFor(() => expect(writes()).toHaveLength(3)); expect(writes()[0]).toEqual(writes()[1]);
+});
+it("recovers an approved layout request after backend availability and scene revision change", async () => {
+  let offline = false;
+  fetcher.mockImplementation(async (_url, options) => {
+    if (!options?.body) return Response.json({ jobs, capabilities: offline ? { enabled: false, reason: "Worker offline" } : config });
+    const body = JSON.parse(options.body);
+    if (!offline) { offline = true; throw new Error("Lost acknowledgement"); }
+    return Response.json({ job: { ...job(body.id), status: "submission_unknown" } });
+  });
+  const props = { scene, disabled: false, onPreview: vi.fn(), onBusy: vi.fn() };
+  const view = render(<PlaceBuilder {...props}/>); await consent();
+  fireEvent.click(screen.getByRole("button", { name: "Generate layout" })); await screen.findByText("Lost acknowledgement");
+  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+  view.rerender(<PlaceBuilder {...props} scene={{ ...scene, revision: 2 }} disabled/>);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh layout jobs" })); await screen.findByText("Worker offline");
+  const retry = screen.getByRole("button", { name: "Retry saved request" }) as HTMLButtonElement;
+  expect(retry.disabled).toBe(false); fireEvent.click(retry);
+  await waitFor(() => expect(writes()).toHaveLength(3));
+  expect(writes()[1]).toEqual(writes()[0]); expect(writes()[1].base_revision).toBe(1);
 });
 it("unlocks rejected input after a definitive configuration or budget rejection", async () => {
   fetcher.mockImplementation(async (_url, options) => options?.body ? Response.json({ error: "Reservation changed" }, { status: 409 }) : Response.json({ jobs, capabilities: config }));

@@ -189,6 +189,7 @@ export async function createSketch(req: Request) {
 export async function createMapArtworkSketch(req: Request, sid: string, pid: string) {
   enabled(); checkCreatorWrite(req);
   const body = await bodyInput(req), context = await mapArtworkContext(sid, pid);
+  if (context.kind !== "reference") throw new CreatorError("Generate or refresh map artwork from its saved plan camera", 409);
   if (!context.scene.source_node_id) throw new CreatorError("This place has no saved parent map", 409);
   if (body.scene_revision !== context.scene.revision || body.map_source_node_id !== context.map.id) throw new CreatorError("World or map changed. Reload before preparing the repaint.", 409);
   if (body.confirmed !== true) throw new CreatorError("Review the map placement first", 400);

@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { motionVideoToolsAvailable, silentMotionVideo, inspectMotionArchiveVideos, legMotion, motionEnd, landCheck, cutLeg, joinLegs, grayFrame, FREEZE_DELTA, LAND_MAX, SNAP_MAX } from "./motion-video";
+import { createHash } from "node:crypto";
+import { motionVideoToolsAvailable, silentMotionVideo, inspectMotionArchiveVideos, legMotion, motionEnd, landCheck, cutLeg, joinLegs, grayFrame, FREEZE_DELTA, LAND_MAX, SNAP_MAX, MAX_MOTION_SECONDS, MAX_PATH_VIDEO_SECONDS } from "./motion-video";
 const run = promisify(execFile), available = await motionVideoToolsAvailable();
 let directory: string, source: string, bytes: Buffer;
 beforeAll(async () => {
@@ -19,6 +20,8 @@ it.skipIf(!available)("removes audio while preserving the encoded video stream a
   const original = Buffer.from(bytes), result = await silentMotionVideo(bytes), output = join(directory, "result.mp4");
   await writeFile(output, result.bytes);
   expect(bytes).toEqual(original);
+  const hash = (value: Buffer) => createHash("sha256").update(value).digest("hex");
+  expect(result.hashes).toEqual({ original_sha256: hash(original), playback_sha256: hash(result.bytes) });
   expect(result.media).toMatchObject({ width: 128, height: 96, duration: 1, audio_streams: 0, source_audio_streams: 1, derivative: "silent_streamcopy_v1" });
   const streamHash = async (path: string) => (await run("ffmpeg", ["-nostdin", "-v", "error", "-i", path, "-map", "0:v:0", "-c", "copy", "-f", "hash", "-hash", "sha256", "-"])).stdout;
   expect(await streamHash(output)).toBe(await streamHash(source));
@@ -95,5 +98,31 @@ describe.skipIf(!available)("leg video helpers", () => {
     await expect(cutLeg(padded, NaN, 1)).rejects.toThrow();
     await expect(cutLeg(padded, 1, 1, { width: 63, height: 48 })).rejects.toThrow();
     await expect(joinLegs([])).rejects.toThrow();
+    await expect(cutLeg(padded, 4, 1)).rejects.toThrow("source duration");
+    await expect(joinLegs([slow, small])).rejects.toThrow("differ in size");
+    await expect(joinLegs([padded])).rejects.toThrow("contain audio");
+  }, 30_000);
+
+  it("assembles a real 24-second walk while keeping provider clips capped at 20 seconds", async () => {
+    const clip = join(directory, "long-walk-leg.mp4");
+    await run("ffmpeg", ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x32:rate=24:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip]);
+    const raw = await readFile(clip), original = Buffer.from(raw), leg = await cutLeg(raw, 3, 1);
+    const result = await joinLegs(Array(8).fill(leg), 24);
+    expect(result.media.duration).toBeCloseTo(24, 1); expect(result.media.audio_streams).toBe(0);
+    expect(raw).toEqual(original);
+    expect(result.hashes.playback_sha256).toBe(createHash("sha256").update(result.bytes).digest("hex"));
+    await expect(silentMotionVideo(result.bytes)).rejects.toThrow("duration");
+    await expect(joinLegs(Array(8).fill(leg), 12)).rejects.toThrow("differs from its plan");
+  });
+
+  it("accepts the assembled path limit and rejects longer or invalid plans before assembly", async () => {
+    expect(MAX_MOTION_SECONDS).toBe(20); expect(MAX_PATH_VIDEO_SECONDS).toBe(60);
+    const clip = join(directory, "ten-second-leg.mp4");
+    await run("ffmpeg", ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x32:rate=24:duration=10", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip]);
+    const leg = await readFile(clip);
+    expect((await joinLegs(Array(6).fill(leg), 60)).media.duration).toBeCloseTo(60, 1);
+    await expect(joinLegs(Array(7).fill(leg))).rejects.toThrow("duration differs");
+    for (const seconds of [NaN, 0, -1, 61]) await expect(joinLegs([leg], seconds)).rejects.toThrow("limit");
+    await expect(joinLegs(Array(12).fill(leg))).rejects.toThrow("leg limit");
   });
 });

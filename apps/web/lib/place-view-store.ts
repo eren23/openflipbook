@@ -11,6 +11,7 @@ import { materialAssetIds } from "./surface-material";
 import type { SavedPlaceView, ViewCapture, ViewPass, ViewSource } from "./place-view";
 
 export interface PlaceViewDoc extends Omit<SavedPlaceView, "historical"> {
+  source_use_fence?: number;
   _id: string; session_id: string; request_sha256: string;
   files: Record<ViewPass, { key: string; sha256: string; bytes: number }>;
   accepted_illustration_id?: string;

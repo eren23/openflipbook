@@ -14,14 +14,15 @@ import { illustrationEditSource, illustrationSource, keyframeChainSource, keyfra
 import type { KeyframeGateDoc, MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
 export type { MeshAssetDoc, MeshJobDoc } from "./mesh-docs";
 import { fenceViewSources } from "./place-view-store";
-import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL } from "./asset-pipeline";
+import { ILLUSTRATION_EDIT_MODEL, KEYFRAME_NANO_MODEL, KEYFRAME_FLUX_REFERENCE_MODEL, isKeyframeModel, isMapReferenceKeyframeModel, validFluxReferenceQuote } from "./asset-pipeline";
 import { registeredPixels } from "./illustration-region";
 import { buildConnectionsCurrent } from "./place-build-connections";
 import { usesIllustrationIdentity } from "./illustration-identity";
 import { finishKeyframe, keyframeGateBody, type KeyframePasses } from "./illustration-keyframe-server";
 import type { IllustrationKeyframe } from "./place-view";
+import { normalizeNanoKeyframe } from "./illustration-nano-output";
 
-const statusPath = (job: MeshJobDoc) => `requests/${encodeURIComponent(job.request_id!)}${[ILLUSTRATION_EDIT_MODEL, KEYFRAME_MODEL, MESH_IMAGE_MODEL].includes(job.model) ? `?model=${encodeURIComponent(job.model)}` : ""}`;
+const statusPath = (job: MeshJobDoc) => `requests/${encodeURIComponent(job.request_id!)}${isKeyframeModel(job.model) || [ILLUSTRATION_EDIT_MODEL, MESH_IMAGE_MODEL].includes(job.model) ? `?model=${encodeURIComponent(job.model)}` : ""}`;
 export const wireMesh = (job: MeshJobDoc): MeshJob => ({ id: job.id, prompt: job.prompt, model: job.model, status: job.status, reservation: job.reservation,
   ...(job.asset_id ? { asset_id: job.asset_id } : {}), ...(job.source_id ? { source_id: job.source_id } : {}), ...(job.error ? { error: job.error } : {}) });
 export async function assetBackend(kind: AssetKind | "motion", path: string, body?: unknown, timeout = 90_000, limit = 100_000) {
@@ -34,14 +35,20 @@ export async function assetBackend(kind: AssetKind | "motion", path: string, bod
   const text = await response.text(); if (text.length > limit) throw new Error("3D response too large");
   return JSON.parse(text);
 }
-export async function assetWorkerAvailable(db: Db, kind: AssetKind, region = false, image = false, brush = false, identity = false, keyframe = false) {
+export async function assetWorkerAvailable(db: Db, kind: AssetKind, region = false, image = false, brush = false, identity = false, keyframe = false, keyframeModel?: string, keyframeGuides = false) {
   // Older workers share this queue and cannot prepare image inputs. Require a
   // completed worker rollout before exposing the new paid capability.
   if (image && await db.collection("generation_workers").findOne({ kind: "place-layout", mesh: true, mesh_image: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
   if (brush && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_brush: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
   if (identity && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_identity: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
   if (keyframe && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_keyframe: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
-  return !!await db.collection("generation_workers").findOne({ kind: "place-layout", [kind]: true, ...(region ? { illustration_region: true } : {}), ...(image ? { mesh_image: true } : {}), ...(brush ? { illustration_brush: true } : {}), ...(identity ? { illustration_identity: true } : {}), ...(keyframe ? { illustration_keyframe: true } : {}), last_seen: { $gt: new Date(Date.now() - 30_000) } });
+  const nano = keyframe && keyframeModel === KEYFRAME_NANO_MODEL;
+  if (nano && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_keyframe_nano: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
+  const guides = nano && keyframeGuides;
+  if (guides && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_keyframe_nano_guides: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
+  const flux = keyframe && keyframeModel === KEYFRAME_FLUX_REFERENCE_MODEL;
+  if (flux && await db.collection("generation_workers").findOne({ kind: "place-layout", illustration: true, illustration_keyframe_flux_reference: { $ne: true }, last_seen: { $gt: new Date(Date.now() - 30_000) } })) return false;
+  return !!await db.collection("generation_workers").findOne({ kind: "place-layout", [kind]: true, ...(region ? { illustration_region: true } : {}), ...(image ? { mesh_image: true } : {}), ...(brush ? { illustration_brush: true } : {}), ...(identity ? { illustration_identity: true } : {}), ...(keyframe ? { illustration_keyframe: true } : {}), ...(nano ? { illustration_keyframe_nano: true } : {}), ...(guides ? { illustration_keyframe_nano_guides: true } : {}), ...(flux ? { illustration_keyframe_flux_reference: true } : {}), last_seen: { $gt: new Date(Date.now() - 30_000) } });
 }
 export async function expireAssetSubmissions(db: Db, kind: AssetKind, session_id?: string) {
   const scope = session_id ? { session_id } : {};
@@ -72,7 +79,14 @@ async function submitScheduledAsset(db: Db, kind: AssetKind) {
       } else {
         if (!candidate.view_dependency) throw new CreatorError("Illustration has no saved view dependency", 409);
         if ((candidate.model === ILLUSTRATION_EDIT_MODEL) !== !!candidate.edit_input) throw new CreatorError("Illustration edit input is missing or incompatible", 409);
-        if ((candidate.model === KEYFRAME_MODEL) !== !!candidate.keyframe_input) throw new CreatorError("Keyframe input is missing or incompatible", 409);
+        if (isKeyframeModel(candidate.model) !== !!candidate.keyframe_input) throw new CreatorError("Keyframe input is missing or incompatible", 409);
+        if (candidate.keyframe_input && isMapReferenceKeyframeModel(candidate.model) !== (candidate.keyframe_input.reference_profile === "source-art-map-landmarks-v1")) throw new CreatorError("Keyframe reference profile does not match its pinned model", 409);
+        if (!validFluxReferenceQuote({ model: candidate.model, reservation: candidate.reservation, parameters: candidate.parameters ?? {} })) throw new CreatorError("The structural keyframe parameters changed", 409);
+        if (candidate.model === KEYFRAME_FLUX_REFERENCE_MODEL && candidate.keyframe_input?.chain_from) throw new CreatorError("The Flux reference profile cannot replace the exact candidate with a warped chain", 409);
+        const guidance = candidate.model === KEYFRAME_FLUX_REFERENCE_MODEL ? "saved-camera-controlnet-v1"
+          : candidate.model === KEYFRAME_NANO_MODEL && candidate.parameters?.structural_guidance === "saved-camera-guides-v1" ? "saved-camera-guides-v1" : undefined;
+        if (candidate.keyframe_input && guidance !== candidate.keyframe_input.reference_guidance) throw new CreatorError("Keyframe guidance does not match its pinned model parameters", 409);
+        if (isMapReferenceKeyframeModel(candidate.model) && (candidate.view_dependency.width !== 688 || candidate.view_dependency.height !== 384)) throw new CreatorError("Map-reference keyframes need a compatible saved camera", 409);
         prepared = candidate.keyframe_input ? (await prepareKeyframeViewInput(db, candidate.session_id, candidate.view_dependency, candidate.keyframe_input)).inputs
           : await prepareIllustrationInput(db, candidate.session_id, candidate.view_dependency, candidate.edit_input, usesIllustrationIdentity(candidate.parameters));
       }
@@ -175,15 +189,63 @@ async function gateKeyframe(db: Db, job: MeshJobDoc, token: string, passes: Keyf
   if (!await col.findOneAndUpdate(lease, { $set: { keyframe_gate: gate } })) throw new Error("Keyframe gate lease lost");
   return gate;
 }
+async function archiveKeyframeRaw(db: Db, job: MeshJobDoc, token: string, url: string) {
+  const col = db.collection<MeshJobDoc>("illustration_jobs"), lease = { _id: job._id, status: "storing" as const, work_token: token };
+  const format = job.model === KEYFRAME_NANO_MODEL ? "image/png" : "image/jpeg";
+  const saved = job.keyframe_raw_downloads?.[0];
+  if (job.keyframe_raw_downloads && job.keyframe_raw_downloads.length !== 1) throw new Error("Raw keyframe image receipt changed");
+  if (saved && (!/^[a-f0-9]{64}$/.test(saved.sha256) || !Number.isSafeInteger(saved.bytes) || saved.bytes < 1 || saved.bytes > assetPipeline("illustration").maxBytes
+    || ![format, "application/octet-stream"].includes(saved.content_type)
+    || saved.key !== `${job.session_id}/illustrations/raw/${job.id}/${saved.sha256}.${saved.content_type === "image/png" ? "png" : saved.content_type === "image/jpeg" ? "jpg" : "bin"}`)) throw new Error("Raw keyframe ownership receipt is invalid");
+  const stored = saved ? await getStoredBytes(saved.key, AbortSignal.timeout(30_000)) : null;
+  let raw: Buffer, rawStored = false;
+  if (stored && stored.bytes.length === saved!.bytes && createHash("sha256").update(stored.bytes).digest("hex") === saved!.sha256) { raw = stored.bytes; rawStored = true; }
+  else raw = await downloadAsset("illustration", url);
+  const rawHash = createHash("sha256").update(raw).digest("hex");
+  if (saved && (saved.sha256 !== rawHash || saved.bytes !== raw.length)) throw new Error("Provider changed the archived raw keyframe bytes");
+  // Archive original bytes before validation or SAM, including incompatible
+  // results. Retries can use this owner copy after the provider URL expires.
+  const matchesFormat = format === "image/png" ? raw.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : raw[0] === 0xff && raw[1] === 0xd8;
+  const contentType = matchesFormat ? format : "application/octet-stream";
+  const extension = contentType === "image/png" ? "png" : contentType === "image/jpeg" ? "jpg" : "bin";
+  const download = saved ?? { key: `${job.session_id}/illustrations/raw/${job.id}/${rawHash}.${extension}`, sha256: rawHash, bytes: raw.length, content_type: contentType };
+  if (!await col.findOneAndUpdate(lease, { $set: { keyframe_raw_downloads: [download] } })) throw new Error("Raw keyframe archive lease lost");
+  if (!rawStored) await uploadJpeg(download.key, raw, download.content_type, AbortSignal.timeout(90_000));
+  return { raw, download, rawHash };
+}
 async function finishKeyframeJob(db: Db, job: MeshJobDoc, token: string, response: NonNullable<MeshJobDoc["provider_result"]>): Promise<{ bytes: Buffer; keyframe: IllustrationKeyframe }> {
   const input = job.keyframe_input!, urls = (response.images ?? [response.image]).map(image => meshDownloadUrl(image?.url));
   const { passes, chain } = await keyframeJobPasses(db, job.session_id, job.view_dependency!, input);
-  const gate = await gateKeyframe(db, job, token, passes, urls);
   const candidates: Buffer[] = [];
-  for (const url of urls) candidates.push(await downloadAsset("illustration", url));
+  let providerOutputs: IllustrationKeyframe["provider_outputs"];
+  let gate: KeyframeGateDoc;
+  if (isMapReferenceKeyframeModel(job.model)) {
+    if (urls.length !== 1) throw new Error("The pinned map-reference profile requires exactly one provider image");
+    const col = db.collection<MeshJobDoc>("illustration_jobs"), lease = { _id: job._id, status: "storing" as const, work_token: token };
+    const { raw, rawHash, download: rawDownload } = await archiveKeyframeRaw(db, job, token, urls[0]!);
+    if (job.model === KEYFRAME_FLUX_REFERENCE_MODEL && !response.raw_image || response.raw_image && (response.raw_image.sha256 !== rawHash || response.raw_image.bytes !== raw.length || response.raw_image.valid !== true)) throw new Error("Archived keyframe bytes differ from the provider verification receipt");
+    if (job.model === KEYFRAME_NANO_MODEL) {
+      if (response.normalization?.compatible === false) throw new Error("The provider output is incompatible with the pinned keyframe normalization");
+      const normalized = await normalizeNanoKeyframe(raw, passes.view);
+      const receipt = { ...normalized.normalization, raw_key: rawDownload.key, raw_bytes: rawDownload.bytes };
+      if (job.keyframe_provider_outputs && JSON.stringify(job.keyframe_provider_outputs) !== JSON.stringify([receipt])) throw new Error("Keyframe normalization receipt changed");
+      providerOutputs = [receipt]; candidates.push(normalized.bytes);
+      if (!await col.findOneAndUpdate(lease, { $set: { keyframe_provider_outputs: providerOutputs } })) throw new Error("Keyframe normalization lease lost");
+    } else {
+      const metadata = validateAssetBytes("illustration", raw);
+      if (metadata.illustration?.width !== 688 || metadata.illustration.height !== 384) throw new Error("The Flux reference candidate differs from the exact saved camera dimensions");
+      await registeredPixels(raw, 688, 384);
+      candidates.push(raw);
+    }
+    // SAM sees precisely the candidate JPEG whose final bytes are saved.
+    gate = await gateKeyframe(db, job, token, passes, [`data:image/jpeg;base64,${candidates[0]!.toString("base64")}`]);
+  } else {
+    gate = await gateKeyframe(db, job, token, passes, urls);
+    for (const url of urls) candidates.push(await downloadAsset("illustration", url));
+  }
   const { bytes, chain: warp, ...result } = await finishKeyframe(passes, input.gate_object_id, candidates, gate.status === "measured" ? gate.masks : null, chain);
   const { chain_from, gate_object_id, ...request } = input;
-  return { bytes, keyframe: { version: 1, ...request, ...(chain_from && warp ? { chain_from: { ...chain_from, ...warp } } : {}), object_id: gate_object_id, ...result } };
+  return { bytes, keyframe: { version: 1, ...request, ...(providerOutputs ? { provider_outputs: providerOutputs } : {}), ...(chain_from && warp ? { chain_from: { ...chain_from, ...warp } } : {}), object_id: gate_object_id, ...result } };
 }
 
 async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: string) {
@@ -208,15 +270,21 @@ async function storeAsset(db: Db, kind: AssetKind, job: MeshJobDoc, token: strin
       if (job.keyframe_input) ({ bytes, keyframe } = await finishKeyframeJob(db, job, token, response));
       else bytes = await downloadAsset(kind, kind === "mesh" ? response.model_glb?.url : response.image?.url);
     }
-    const metadata = validateAssetBytes(kind, bytes);
+    // Our depth-warp composite is a lossless PNG. registeredPixels below fully
+    // decodes it; ordinary provider JPEGs retain their existing validation.
+    const lossless = kind === "illustration" && keyframe?.final_image?.method === "depth_warp_v1";
+    const metadata = lossless ? { illustration: { width: keyframe!.final_image!.width, height: keyframe!.final_image!.height, color_space: "srgb" as const }, content_type: "image/png" as const }
+      : validateAssetBytes(kind, bytes);
     if (kind === "illustration" && (!job.view_dependency || metadata.illustration?.width !== job.view_dependency.width || metadata.illustration?.height !== job.view_dependency.height)) throw new Error("Generated illustration dimensions differ from the saved camera");
-    if (kind === "illustration") await registeredPixels(bytes, job.view_dependency!.width, job.view_dependency!.height);
+    if (kind === "illustration") await registeredPixels(bytes, job.view_dependency!.width, job.view_dependency!.height, lossless);
     const hash = createHash("sha256").update(bytes).digest("hex"), assetId = `${kind}_${job.id}`;
+    if (keyframe?.final_image && keyframe.final_image.sha256 !== hash) throw new Error("Keyframe final image differs from its verification receipt");
     if (job.download && (job.download.sha256 !== hash || job.download.bytes !== bytes.length)) throw new Error("Provider changed the saved asset bytes");
-    const download = job.download ?? { key: `${job.session_id}/${kind === "mesh" ? "meshes" : kind === "material" ? "materials" : "illustrations"}/${assetId}/${hash}.${spec.extension}`, sha256: hash, bytes: bytes.length };
+    const contentType = lossless ? "image/png" : spec.contentType, extension = lossless ? "png" : spec.extension;
+    const download = job.download ?? { key: `${job.session_id}/${kind === "mesh" ? "meshes" : kind === "material" ? "materials" : "illustrations"}/${assetId}/${hash}.${extension}`, sha256: hash, bytes: bytes.length };
     const current = await col.findOneAndUpdate({ _id: job._id, status: "storing", work_token: token }, { $set: { download, ...(keyframe ? { keyframe_result: keyframe } : {}) } }, { returnDocument: "after" });
     if (!current) return;
-    if (!alreadyStored) await uploadJpeg(download.key, bytes, spec.contentType, AbortSignal.timeout(90_000));
+    if (!alreadyStored) await uploadJpeg(download.key, bytes, contentType, AbortSignal.timeout(90_000));
     const asset: MeshAssetDoc = { _id: `${job.session_id}:${assetId}`, id: assetId, session_id: job.session_id, ...download, ...metadata,
       model: job.model, prompt: job.prompt, request_id: job.request_id, created_at: new Date(), ...(job.parameters ? { parameters: job.parameters } : {}), ...(job.dependency ? { dependency: job.dependency } : {}), ...(job.view_dependency ? { view_dependency: job.view_dependency } : {}), ...(job.edit_input ? { edit_input: job.edit_input } : {}), ...(keyframe ? { keyframe } : {}), ...(job.image_input ? { image_input: job.image_input } : {}) };
     // Asset publication and job completion are one transaction. A cancelled job

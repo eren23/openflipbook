@@ -64,7 +64,7 @@ export async function readWorldArchive(bytes: Buffer): Promise<WorldArchive> {
   const manifestEntry = zip.file("manifest.json");
   if (!manifestEntry) return invalidArchive("This ZIP has no versioned world manifest");
   const manifest = archiveObject(safeJson(await readEntry(manifestEntry, 4 * 1024 * 1024)));
-  if (manifest.format !== "openflipbook-world-content" || ![1,2,3].includes(manifest.version as number) || manifest.visibility !== "owner" || manifest.metadata_consistency !== "database_snapshot") return invalidArchive("Restore requires a snapshot export made by the world's owner");
+  if (manifest.format !== "openflipbook-world-content" || ![1,2,3,4,5].includes(manifest.version as number) || manifest.visibility !== "owner" || manifest.metadata_consistency !== "database_snapshot") return invalidArchive("Restore requires a snapshot export made by the world's owner");
   if (archiveList(manifest.missing_files).length || archiveList(manifest.external_resources).length) return invalidArchive("Archive is incomplete or depends on external media; nothing can be restored");
   const inventory = archiveList(manifest.files, 15000).map(archiveObject), names = new Set<string>(), files = new Map<string, Buffer>();
   let total = 0, jsonBytes = 0;

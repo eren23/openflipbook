@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { emptyPlaceScene, newComponent } from "./place-scene";
-import { worldEditorSelection, worldEditorHref } from "./world-editor-selection";
+import { walkVideoViewIds, worldEditorSelection, worldEditorHref } from "./world-editor-selection";
 
 function fixture() {
   const inn = { ...newComponent("building", 8, 10), id: "inn", label: "House" }, other = { ...newComponent("building", 20, 10), id: "other", label: "House" };
@@ -31,4 +31,13 @@ it("encodes canonical world, place, object, floor, view and camera without retai
 it("carries a /play walk route for the walk view", () => {
   const url = new URL(worldEditorHref({session_id:"world",place_id:"place"},{object_id:null,floor_id:null},{view:"walk",route:"1.00,-2.50,0.30;0.00,0.00,1.57"}),"http://localhost");
   expect(Object.fromEntries(url.searchParams)).toEqual({world:"world",place:"place",view:"walk",route:"1.00,-2.50,0.30;0.00,0.00,1.57"});
+});
+it("carries the illustrated workflow through the canonical route without changing its coordinates", () => {
+  const route = "1.00,-2.50,0.30;0.00,0.00,1.57";
+  const url = new URL(worldEditorHref({session_id:"world",place_id:"place"},{object_id:null,floor_id:null},{view:"walk",route,workflow:"illustrated-walk"}),"http://localhost");
+  expect(Object.fromEntries(url.searchParams)).toEqual({world:"world",place:"place",view:"walk",route,workflow:"illustrated-walk"});
+});
+it("restores a bounded distinct prepared chain and rejects malformed or oversized URL selections", () => {
+  expect(walkVideoViewIds("first,last")).toEqual(["first","last"]);
+  for (const value of [null,"first","first,first","../foreign,last",Array.from({length:13},(_,i)=>`view${i}`).join(",")]) expect(walkVideoViewIds(value)).toEqual([]);
 });

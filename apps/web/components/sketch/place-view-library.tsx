@@ -8,7 +8,7 @@ import s from "./world-editor.module.css";
 import PlaceIllustrations from "./place-illustrations";
 import PlaceCameraMotion, { type CaptureMotion } from "./place-camera-motion";
 
-export default function PlaceViewLibrary({ sessionId, placeId, revision, capture, refreshView, disabled, onLoadPath, surfaceTarget, onOpenIllustration, selectedObject, onSelectObject, captureMotion, onSelectedViewChange, onComposeSelection, selectedObjectLabel }: {
+export default function PlaceViewLibrary({ sessionId, placeId, revision, capture, refreshView, disabled, onLoadPath, surfaceTarget, onOpenIllustration, selectedObject, onSelectObject, captureMotion, onSelectedViewChange, onComposeSelection, selectedObjectLabel, refreshKey = 0, selectedViewId, onArtworkAccepted, onPendingChange, sourceArtworkUrl, landmarkLabels }: {
   sessionId: string; placeId: string; revision: number; capture: (() => ViewCapture) | null; disabled: boolean;
   onLoadPath?: ((view: SavedPlaceView) => void) | undefined;
   refreshView?: RefreshPlaceView | null;
@@ -17,25 +17,39 @@ export default function PlaceViewLibrary({ sessionId, placeId, revision, capture
   selectedObject?: string | null | undefined; onSelectObject?: ((id: string) => void) | undefined;
   onSelectedViewChange?: ((id: string | null) => void) | undefined;
   onComposeSelection?: (() => void) | undefined; selectedObjectLabel?: string | undefined;
+  refreshKey?: number; selectedViewId?: string | null | undefined;
+  onArtworkAccepted?: (() => void) | undefined; onPendingChange?: ((pending: boolean) => void) | undefined;
+  sourceArtworkUrl?: string | null | undefined; landmarkLabels?: string[] | undefined;
 }) {
   const [views, setViews] = useState<SavedPlaceView[]>([]), [selected, setSelected] = useState(() => typeof window !== "undefined" && onOpenIllustration ? new URLSearchParams(window.location.search).get("camera") ?? "" : "");
   const [label, setLabel] = useState("Camera view"), [pass, setPass] = useState<ViewPass>("render");
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [imageError, setImageError] = useState(false);
   const [illustrationPending, setIllustrationPending] = useState(false);
   const pending = useRef<{ id: string; label: string; capture: ViewCapture; refreshed_from?: string } | null>(null);
+  const externalSelection = useRef<{ key: string; applied: boolean } | null>(null);
   const saving = useRef(false), mounted = useRef(true);
   const openAfterSave = useRef(false);
   const reads = useRef({ version: 0 });
   const live = useRef({ disabled, revision, selected }); live.current = { disabled, revision, selected };
   const endpoint = `/api/world/${encodeURIComponent(sessionId)}/places/${encodeURIComponent(placeId)}/views`;
+  const readEndpoint = selectedViewId ? `${endpoint}?view=${encodeURIComponent(selectedViewId)}` : endpoint;
   const reload = useCallback(async () => {
     const read = ++reads.current.version;
-    const response = await fetch(endpoint, { cache: "no-store" }), data = await response.json();
+    const response = await fetch(readEndpoint, { cache: "no-store" }), data = await response.json();
     if (read !== reads.current.version) return;
     if (!response.ok) throw new Error(data.error || "Saved views are unavailable");
     setViews(data.views); setSelected(old => data.views.some((v: SavedPlaceView) => v.id === old) ? old : data.views[0]?.id ?? "");
-  }, [endpoint]);
-  useEffect(() => { const state = reads.current; let active = true; mounted.current = true; void reload().catch(e => { if (active) setError(e.message); }); return () => { active = false; mounted.current = false; state.version++; }; }, [reload, revision]);
+  }, [readEndpoint]);
+  useEffect(() => { const state = reads.current; let active = true; mounted.current = true; void reload().catch(e => { if (active) setError(e.message); }); return () => { active = false; mounted.current = false; state.version++; }; }, [reload, revision, refreshKey]);
+  useEffect(() => {
+    if (!selectedViewId) { externalSelection.current = null; return; }
+    const key = JSON.stringify([sessionId, placeId, selectedViewId, refreshKey]);
+    if (externalSelection.current?.key !== key) externalSelection.current = { key, applied: false };
+    if (externalSelection.current.applied || busy || pending.current || illustrationPending) return;
+    externalSelection.current.applied = true;
+    setSelected(selectedViewId);
+  }, [sessionId, placeId, selectedViewId, refreshKey, busy, illustrationPending]);
+  useEffect(() => { onPendingChange?.(busy || !!pending.current || illustrationPending); }, [busy, error, illustrationPending, onPendingChange]);
   useEffect(() => { setImageError(false); }, [selected, pass]);
   useEffect(() => { onSelectedViewChange?.(selected || null); }, [selected, onSelectedViewChange]);
   useEffect(() => {
@@ -102,7 +116,7 @@ export default function PlaceViewLibrary({ sessionId, placeId, revision, capture
       <Image unoptimized src={`/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(view.id)}/${pass}`} alt={`${view.label} ${pass} pass`} width={view.width} height={view.height} style={{ width: "100%", height: "auto" }} onError={() => setImageError(true)}/>
       {imageError && <p role="alert">Saved view image is unavailable.</p>}
       </details>
-      <PlaceIllustrations key={`${sessionId}:${view.id}`} sessionId={sessionId} view={view} previousView={views.find(v => v.id === view.refreshed_from)} disabled={disabled} surfaceTarget={surfaceTarget} selectedObject={selectedObject} onSelectObject={onSelectObject} onPendingChange={setIllustrationPending}/>
+      <PlaceIllustrations key={`${sessionId}:${view.id}`} sessionId={sessionId} view={view} previousView={views.find(v => v.id === view.refreshed_from)} disabled={disabled} surfaceTarget={surfaceTarget} selectedObject={selectedObject} onSelectObject={onSelectObject} onPendingChange={setIllustrationPending} onAcceptedChange={onArtworkAccepted} sourceArtworkUrl={sourceArtworkUrl} landmarkLabels={landmarkLabels}/>
     </>}
     {error && <p role="alert">{error}</p>}
   </section>;

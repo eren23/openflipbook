@@ -1,0 +1,23 @@
+# Complete authoring shell and independent worker. Provider generation remains
+# controlled by its own enable flag, configured quote and explicit UI consent.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.release.yml
+#          --profile world-build up --build
+services:
+  backend:
+    environment:
+      SHARED_TOKEN: ${SHARED_TOKEN:?Set a private SHARED_TOKEN in .env for the release stack}
+      SKETCH_ENABLED: ${SKETCH_ENABLED:-1}
+  place-worker:
+    environment:
+      SHARED_TOKEN: ${SHARED_TOKEN:?Set a private SHARED_TOKEN in .env for the release stack}
+      R2_PUBLIC_BASE_URL: /api/blobs
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_WORLD_SCENES: "1"
+        NEXT_PUBLIC_SKETCH_ENABLED: "1"
+    environment:
+      SHARED_TOKEN: ${SHARED_TOKEN:?Set a private SHARED_TOKEN in .env for the release stack}
+      NEXT_PUBLIC_WORLD_SCENES: "1"
+      NEXT_PUBLIC_SKETCH_ENABLED: "1"
+      R2_PUBLIC_BASE_URL: /api/blobs
