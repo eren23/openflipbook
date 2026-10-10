@@ -23,7 +23,7 @@ export function isolateCompose(input, { project, tag, storagePort, webPort, mong
     delete value.name;
   }
   const storage = { R2_ENDPOINT: "http://minio:9000", R2_BUCKET: "openflipbook", R2_ACCESS_KEY_ID: "selfhost-check", R2_SECRET_ACCESS_KEY: password,
-    R2_PUBLIC_BASE_URL: `http://127.0.0.1:${storagePort}/openflipbook` };
+    R2_PUBLIC_BASE_URL: "/api/blobs" };
   const common = { ...storage, MONGODB_URI: "mongodb://mongo:27017/?directConnection=true", MONGODB_DB: "selfhost_check", MODAL_API_URL: "http://backend:8787", SHARED_TOKEN: token };
   const environment = {
     mongo: {}, "mongo-init": {},

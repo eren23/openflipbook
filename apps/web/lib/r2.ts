@@ -1,38 +1,10 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { readServerEnv, requireR2 } from "./env";
+import { requireStoredImageRead } from "./stored-image-access";
+import { r2ClientConfig } from "./r2-client-config";
+export { r2ClientConfig, type R2ClientConfig } from "./r2-client-config";
 
 let cachedClient: S3Client | null = null;
-
-export interface R2ClientConfig {
-  region: "auto";
-  endpoint: string;
-  forcePathStyle: boolean;
-  credentials: { accessKeyId: string; secretAccessKey: string };
-}
-
-/**
- * S3Client config from resolved R2 settings. With no `endpoint` override we
- * derive Cloudflare R2's account-scoped URL and use virtual-host addressing
- * (today's behavior). With an explicit `endpoint` (e.g. a Minio container) we
- * use it verbatim and switch to path-style addressing, which Minio needs.
- * Pure so the endpoint/style decision is unit-tested without a live client.
- */
-export function r2ClientConfig(r2: {
-  accountId: string | null;
-  accessKeyId: string;
-  secretAccessKey: string;
-  endpoint: string | null;
-}): R2ClientConfig {
-  return {
-    region: "auto",
-    endpoint: r2.endpoint ?? `https://${r2.accountId}.r2.cloudflarestorage.com`,
-    forcePathStyle: Boolean(r2.endpoint),
-    credentials: {
-      accessKeyId: r2.accessKeyId,
-      secretAccessKey: r2.secretAccessKey,
-    },
-  };
-}
 
 function r2Client(): { s3: S3Client; bucket: string; publicBaseUrl: string } {
   const env = readServerEnv();
@@ -66,7 +38,7 @@ export async function uploadJpeg(
       Key: key,
       Body: body,
       ContentType: contentType,
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: "private, no-store",
     }),
     signal ? { abortSignal: signal } : undefined
   );
@@ -91,32 +63,36 @@ export function storedKeyFromUrl(
   publicBaseUrl: string
 ): string | null {
   const base = publicBaseUrl.replace(/\/$/, "");
-  if (!base || !url.startsWith(`${base}/`)) return null;
-  const key = url.slice(base.length + 1).split(/[?#]/, 1)[0] ?? "";
-  return key.length > 0 ? decodeURIComponent(key) : null;
+  if (!base) return null;
+  let target = url;
+  // Browsers expand same-origin /api/blobs URLs to absolute currentSrc values.
+  // Access to the extracted key is authorized separately before any read.
+  if (base.startsWith("/") && /^https?:\/\//.test(target)) {
+    try { target = new URL(target).pathname; } catch { return null; }
+  }
+  if (!target.startsWith(`${base}/`)) return null;
+  const key = target.slice(base.length + 1).split(/[?#]/, 1)[0] ?? "";
+  try { return key.length > 0 ? decodeURIComponent(key) : null; } catch { return null; }
 }
 
 /**
- * Inline one of OUR stored images into a data URL. Self-host reality check:
- * the docker stack's public base is a localhost minio URL — the browser can
- * load it, but OpenRouter/Google refuse to fetch private/localhost URLs, so
- * an unprefetched tap on a reopened node 400s at the VLM ("Cannot fetch
- * from private/localhost URLs"). The web server CAN reach the store (its S3
- * client speaks to the container endpoint), so the proxies inline the bytes
- * before forwarding. Best-effort: foreign URLs / fetch failures -> null and
- * the caller forwards the original URL (today's behaviour).
+ * Read our authorized stored image as a data URL for provider conditioning.
+ * Providers cannot fetch a private /api/blobs URL using the creator's cookie.
+ * The server checks the caller's read access before reading the exact bytes.
+ * Foreign URLs and failures return null for the caller's normal fallback.
  */
 export async function inlineStoredImage(url: string): Promise<string | null> {
   try {
     const { s3, bucket, publicBaseUrl } = r2Client();
     const key = storedKeyFromUrl(url, publicBaseUrl);
     if (!key) return null;
+    await requireStoredImageRead(key);
     const got = await s3.send(
       new GetObjectCommand({ Bucket: bucket, Key: key })
     );
     if (!got.Body) return null;
     const bytes = Buffer.from(await got.Body.transformToByteArray());
-    if (bytes.length === 0) return null;
+    if (bytes.length === 0 || bytes.length > 20 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(got.ContentType || "image/jpeg")) return null;
     const contentType = got.ContentType || "image/jpeg";
     return `data:${contentType};base64,${bytes.toString("base64")}`;
   } catch {

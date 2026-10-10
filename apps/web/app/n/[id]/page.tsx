@@ -7,6 +7,9 @@ import ForkButton from "@/components/fork-button";
 import TourButton from "@/components/tour-button";
 import PermalinkImage from "@/components/permalink-image";
 import { formatViewVerdict } from "@/lib/view-verdict";
+import { requireWorldRead } from "@/lib/world-access";
+
+export const dynamic = "force-dynamic";
 
 interface PermalinkPageProps {
   params: Promise<{ id: string }>;
@@ -18,7 +21,9 @@ const cachedGetNode = cache(async (id: string): Promise<NodeRow | null> => {
     return null;
   }
   try {
-    return await getNode(id);
+    const node = await getNode(id);
+    if (node) await requireWorldRead(node.session_id);
+    return node;
   } catch {
     return null;
   }

@@ -101,6 +101,8 @@ it("compares saved images read-only and requires loaded pixels before acceptance
   draw(); const image = await screen.findByRole("img", { name: "Generated camera illustration" });
   expect(screen.getByRole("button", { name: "Accept illustration" })).toHaveProperty("disabled", true); fireEvent.load(image);
   fireEvent.click(screen.getByRole("button", { name: "Source render" })); await screen.findByRole("img", { name: "Illustration source geometry" });
+  // next/image reports the load after an async decode(), so wait for the button instead of clicking at once.
+  await waitFor(() => expect(screen.getByRole("button", { name: "Accept illustration" })).toHaveProperty("disabled", false));
   expect(writes()).toEqual([]); fireEvent.click(screen.getByRole("button", { name: "Accept illustration" }));
   await waitFor(() => expect(writes()).toHaveLength(1)); expect(JSON.parse(writes()[0])).toEqual({ action: "accept", id: "art", previous_id: null });
 });

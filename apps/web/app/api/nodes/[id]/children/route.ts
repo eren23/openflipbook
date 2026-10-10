@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { listNodesByParent } from "@/lib/db";
+import { getNode, listNodesByParent } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
+import { worldReadHeaders, worldReadResponse } from "@/lib/world-read-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,11 @@ export async function GET(req: Request, { params }: Params) {
     );
   }
 
+  const parent = await getNode(id);
+  if (!parent) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const denied = await worldReadResponse(parent.session_id);
+  if (denied) return denied;
+
   const url = new URL(req.url);
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Number(limitParam) : 200;
@@ -30,7 +36,7 @@ export async function GET(req: Request, { params }: Params) {
 
   return NextResponse.json({
     parent_id: id,
-    children: rows.map((row) => ({
+    children: rows.filter(row => row.session_id === parent.session_id).map((row) => ({
       id: row.id,
       session_id: row.session_id,
       query: row.query,
@@ -44,5 +50,5 @@ export async function GET(req: Request, { params }: Params) {
       click_in_parent: row.click_in_parent,
       created_at: row.created_at,
     })),
-  });
+  }, { headers: worldReadHeaders });
 }

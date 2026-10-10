@@ -3,6 +3,7 @@ import { getNode, setNodeDescentClip } from "@/lib/db";
 import { isDescentClipUrl } from "@/lib/descent-clip";
 import { readServerEnv } from "@/lib/env";
 import { requireOwner } from "@/lib/session-owner";
+import { worldReadHeaders, worldReadResponse } from "@/lib/world-read-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,8 @@ export async function GET(_req: Request, { params }: Params) {
 
   const row = await getNode(id);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const denied = await worldReadResponse(row.session_id);
+  if (denied) return denied;
 
   const publicBase = env.R2_PUBLIC_BASE_URL!.replace(/\/$/, "");
   return NextResponse.json({
@@ -41,7 +44,7 @@ export async function GET(_req: Request, { params }: Params) {
     geo_extracted: row.geo_extracted,
     descent_video_url: row.descent_video_url,
     created_at: row.created_at,
-  });
+  }, { headers: worldReadHeaders });
 }
 
 // DESCENT_AUTO: store the background-generated arrival clip on the node.

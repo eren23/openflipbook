@@ -10,6 +10,7 @@ import {
   type ExportPage,
 } from "@/lib/export-build";
 import { getStoredBytes } from "@/lib/r2";
+import { worldReadHeaders, worldReadResponse } from "@/lib/world-read-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,11 @@ export async function GET(req: Request, { params }: Params) {
   if (chain.length === 0) {
     return NextResponse.json({ error: "node not found" }, { status: 404 });
   }
+  // Check every world before touching blobs, even for a malformed cross-world chain.
+  for (const sessionId of new Set(chain.map(row => row.session_id))) {
+    const denied = await worldReadResponse(sessionId);
+    if (denied) return denied;
+  }
 
   const wanted =
     fmt === "gif" ? new Set(sampleEvenly(chain.length, GIF_FRAME_CAP)) : null;
@@ -69,6 +75,7 @@ export async function GET(req: Request, { params }: Params) {
     const bytes = await buildZip(pages);
     return new Response(Buffer.from(bytes), {
       headers: {
+        ...worldReadHeaders,
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="openflipbook-${stamp}.zip"`,
       },
@@ -78,6 +85,7 @@ export async function GET(req: Request, { params }: Params) {
     const bytes = await buildFlipbookPdf(pages);
     return new Response(Buffer.from(bytes), {
       headers: {
+        ...worldReadHeaders,
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="openflipbook-${stamp}.pdf"`,
       },
@@ -92,6 +100,7 @@ export async function GET(req: Request, { params }: Params) {
   const bytes = await buildGif(frames);
   return new Response(Buffer.from(bytes), {
     headers: {
+      ...worldReadHeaders,
       "Content-Type": "image/gif",
       "Content-Disposition": `attachment; filename="openflipbook-${stamp}.gif"`,
     },
