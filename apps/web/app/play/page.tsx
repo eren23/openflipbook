@@ -51,6 +51,7 @@ import {
 } from "@/lib/trace";
 import { getStrings, resolveOutputLocale } from "@/lib/i18n";
 import { useImageTier, useVideoTier } from "@/hooks/usePersistedTier";
+import { useAnimationClip } from "@/hooks/useAnimationClip";
 import { useLoopKnobs, wireFields } from "@/hooks/useSpeedPreset";
 import { useSharedSession } from "@/hooks/useSharedSession";
 import { useExpandBloom, type PersistNeighbour } from "@/hooks/useExpandBloom";
@@ -833,8 +834,9 @@ export default function PlayPage() {
     // when the user navigates so "Replay clip" never resurfaces a stale clip.
     setFallbackVideoUrl(null);
     setShowVideo(false);
+    setStreamStatus("off");
     setClipPrompt("");
-  }, [page?.imageDataUrl]);
+  }, [sessionId, page?.nodeId, page?.imageDataUrl]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
 
@@ -3517,7 +3519,7 @@ export default function PlayPage() {
       streamRef.current?.close();
       streamRef.current = null;
     };
-  }, [page?.imageDataUrl]);
+  }, [sessionId, page?.nodeId, page?.imageDataUrl]);
 
   // Auto-submit if landed here with ?q=... in the URL (deeplinks from the landing page).
   const autoSubmittedRef = useRef(false);
@@ -3542,17 +3544,23 @@ export default function PlayPage() {
     });
   }, [generate, sessionId, imageTier, loopWire, devModel, outputLocale, styleAnchor]);
 
-  const animateAbortRef = useRef<AbortController | null>(null);
+  const { request: requestClip, cancel: cancelClip } = useAnimationClip(
+    `${sessionId}:${page?.nodeId ?? ""}:${page?.imageDataUrl ?? ""}`,
+    {
+      onStart: () => setStreamStatus("connecting"),
+      onReady: (url) => { setFallbackVideoUrl(url); setShowVideo(true); setStreamStatus("playing"); },
+      onError: (message) => { setStreamStatus("error"); setError(message); },
+    },
+  );
   const disconnectStream = useCallback(() => {
     streamRef.current?.close();
     streamRef.current = null;
-    animateAbortRef.current?.abort();
-    animateAbortRef.current = null;
+    cancelClip();
     setStreamStatus("off");
     setShowVideo(false);
     // Intentionally NOT clearing fallbackVideoUrl here — the user can hit
     // "Replay clip" to bring it back without re-running fal.
-  }, []);
+  }, [cancelClip]);
 
   const replayVideo = useCallback(() => {
     if (!fallbackVideoUrl) return;
@@ -3560,44 +3568,6 @@ export default function PlayPage() {
     setStreamStatus("playing");
   }, [fallbackVideoUrl]);
 
-  const requestClip = useCallback(async (body: Record<string, unknown>): Promise<string | null> => {
-    animateAbortRef.current?.abort();
-    const ac = new AbortController();
-    animateAbortRef.current = ac;
-    const timeoutId = window.setTimeout(() => ac.abort(), 180_000);
-    setStreamStatus("connecting");
-    try {
-      const res = await fetch("/api/animate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ac.signal,
-      });
-      const data = (await res.json()) as {
-        video_url?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.video_url) {
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      setFallbackVideoUrl(data.video_url);
-      setShowVideo(true);
-      setStreamStatus("playing");
-      return data.video_url;
-    } catch (err) {
-      if ((err as Error).name === "AbortError") {
-        setStreamStatus("error");
-        setError("Animate timed out after 3 minutes. Try again or stop.");
-      } else {
-        setStreamStatus("error");
-        setError((err as Error).message);
-      }
-      return null;
-    } finally {
-      window.clearTimeout(timeoutId);
-      if (animateAbortRef.current === ac) animateAbortRef.current = null;
-    }
-  }, []);
   useEffect(() => {
     startObjectClipRef.current = (focus, image, title) => {
       void requestClip({ image_data_url: image, prompt: title, video_tier: videoTier, focus });
