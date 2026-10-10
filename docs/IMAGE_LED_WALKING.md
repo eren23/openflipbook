@@ -91,6 +91,8 @@ the camera toward them ([research 40](research/40-walk-video-prompt-and-leg-leng
 A leg also fails when its two stills disagree. In a test, stills made by a depth
 warp of the previous still fixed this ([research 41](research/41-depth-warp-stills.md)).
 The product does not use that method yet.
+With only copied pixels, the start still limits the walk
+([research 42](research/42-copy-first-stills-and-gate.md)).
 It accepts no estimated translation distance or proxy camera trajectory. Audio
 is unverified until the storage worker inspects it. Completed clips remain drafts
 until temporal review; endpoint review cannot certify intermediate frames.
