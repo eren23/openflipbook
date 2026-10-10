@@ -22,7 +22,7 @@ import { imageLedPlayback } from "./image-led-walk-playback";
 export const IMAGE_LED_MODEL = "fal-ai/nano-banana-pro/edit";
 export const IMAGE_LED_VIDEO_MODEL = "minimax/h3-max/image-to-video";
 export const IMAGE_LED_PARAMETERS = IMAGE_LED_STILL_PROFILES[IMAGE_LED_MODEL].parameters;
-export const IMAGE_LED_VIDEO_PARAMETERS = { duration: 5, resolution: "768P", prompt_expansion_mode: "disabled", enable_safety_checker: true, sync_mode: false, prompt_version: "image-led-walk-video-v3" };
+export const IMAGE_LED_VIDEO_PARAMETERS = { duration: 3, resolution: "768P", prompt_expansion_mode: "disabled", enable_safety_checker: true, sync_mode: false, prompt_version: "image-led-walk-video-v4" };
 export interface ImageLedStepDoc { _id: string; id: string; session_id: string; walk_id: string; kind: "still" | "video"; index: number; status: ImageLedStepStatus; request_sha256: string; quote: ImageLedWalkQuote; input_sha256: string; ledger_ids: string[]; created_at: Date; updated_at: Date; provider_request_id?: string; provider_input_sha256?: string; provider_result?: Record<string, unknown>; submission_started_at?: Date; submission_deadline?: Date; work_token?: string; work_until?: Date; next_check?: Date; original?: ImageLedImage | ImageLedFile; error?: string; reservation_released?: boolean }
 function fail(message: string, status = 409): never { throw new CreatorError(message, status); }
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -44,8 +44,8 @@ export async function imageLedCapabilities(db: Db, kind: "still" | "video", sess
   let model = IMAGE_LED_VIDEO_MODEL, parameters = IMAGE_LED_VIDEO_PARAMETERS as Record<string, unknown>;
   if (kind === "still") { try { const selected = imageLedStillProfile(value.model, value.parameters); model = selected.model; parameters = selected.parameters; } catch { fail("Image-led model or current price is unavailable", 503); } }
   const reservation = value.reservation;
-  if (value.enabled !== true || value.profile !== IMAGE_LED_WALK_PROFILE || value.model !== model || !isDeepStrictEqual(value.parameters, parameters) || typeof reservation !== "number" || !Number.isFinite(reservation) || reservation < (kind === "still" ? .15 : .4) || reservation > 2.5) fail("Image-led model or current price is unavailable", 503);
-  const fresh = { kind: "place-layout", last_seen: { $gt: new Date(Date.now() - 30_000) } }, flag = kind === "still" ? "image_led_walk_v4_canvas_v1" : "image_led_walk_video_v3", lane = kind === "still" ? "mesh" : "motion", options = session ? { session } : {};
+  if (value.enabled !== true || value.profile !== IMAGE_LED_WALK_PROFILE || value.model !== model || !isDeepStrictEqual(value.parameters, parameters) || typeof reservation !== "number" || !Number.isFinite(reservation) || reservation < (kind === "still" ? .15 : .24) || reservation > 2.5) fail("Image-led model or current price is unavailable", 503);
+  const fresh = { kind: "place-layout", last_seen: { $gt: new Date(Date.now() - 30_000) } }, flag = kind === "still" ? "image_led_walk_v4_canvas_v1" : "image_led_walk_video_v4", lane = kind === "still" ? "mesh" : "motion", options = session ? { session } : {};
   if (kind === "video" && process.env.PATH_VIDEO_ENABLED !== "1") fail("Image-led walk videos are disabled", 503);
   if (await db.collection("generation_workers").findOne({ ...fresh, [lane]: true, [flag]: { $ne: true } }, options) || !await db.collection("generation_workers").findOne({ ...fresh, [flag]: true }, options)) fail("Compatible image-led worker unavailable", 503);
   return { model, parameters, reservation };

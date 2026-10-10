@@ -197,7 +197,7 @@ export async function importWorldImageLedWalks(archive: WorldArchive, sid: strin
         try {
           actual = await inspectMotionArchiveVideos(files.get(archiveObject(value.original).key as string)!.bytes, files.get(archiveObject(value.video).key as string)!.bytes);
         } catch { invalidArchive("Image-led video stream differs from its original"); }
-        if (media.width !== actual!.width || media.height !== actual!.height || Math.abs(number(media.duration, 4.4, 5.6) - actual!.duration) > .1 || media.audio_streams !== 0 || media.derivative !== "silent_streamcopy_v1" || integer(media.source_audio_streams, 0, 100) !== actual!.source_audio_streams) invalidArchive("Image-led video inspection differs");
+        if (media.width !== actual!.width || media.height !== actual!.height || Math.abs(number(media.duration, 2.4, 5.6) - actual!.duration) > .1 || media.audio_streams !== 0 || media.derivative !== "silent_streamcopy_v1" || integer(media.source_audio_streams, 0, 100) !== actual!.source_audio_streams) invalidArchive("Image-led video inspection differs");
       } else if (value.media) invalidArchive("Image-led video metadata has no bytes");
       legs.push({ index, from: index, to: index + 1, status: video ? "ready" : "empty", ...(video ? { video, original, media: value.media } : {}), review: review(value.review, "video", video) });
     }

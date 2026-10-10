@@ -104,7 +104,7 @@ async function store(db: Db, job: ImageLedStepDoc) {
     const image: ImageLedImage = { key, sha256, bytes: playback.length, width: info.width!, height: info.height!, content_type: "image/jpeg" };
     await update(db, job, { status: "ready", next_check: new Date(8640000000000000) }, { status: "ready", raw: rawImage, image, derivative: { kind: job.quote.playback ? "contain-jpeg-v1" : "uniform-scale-jpeg-v1", source_sha256: rawImage.sha256, crop: false, stretch: false, ...(job.quote.playback ? { canvas: job.quote.playback } : {}) } });
   } else {
-    const silent = await silentMotionVideo(bytes); if (Math.abs(silent.media.duration - 5) > .6) throw new CreatorError("Clip duration differs from the quoted five seconds", 409);
+    const silent = await silentMotionVideo(bytes); if (Math.abs(silent.media.duration - Number(job.quote.parameters.duration)) > .6) throw new CreatorError("Clip duration differs from the quoted duration", 409);
     const key = `${job.session_id}/image-led/${job.walk_id}/${job.id}/playback-${silent.hashes.playback_sha256}.mp4`; await uploadJpeg(key, silent.bytes, "video/mp4", AbortSignal.timeout(60_000));
     await update(db, job, { status: "ready", next_check: new Date(8640000000000000) }, { status: "ready", original: job.original, video: { key, sha256: silent.hashes.playback_sha256, bytes: silent.bytes.length, content_type: "video/mp4" }, media: silent.media });
   }

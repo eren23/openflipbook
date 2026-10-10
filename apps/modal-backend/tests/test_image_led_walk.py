@@ -629,7 +629,7 @@ def test_new_router_registered_and_shared_token_protected(monkeypatch):
 def video_payload():
     still = payload()
     return {
-        "profile": walk.PROFILE, "model": walk.VIDEO_MODEL, "reservation": 0.4,
+        "profile": walk.PROFILE, "model": walk.VIDEO_MODEL, "reservation": 0.24,
         "parameters": copy.deepcopy(walk.VIDEO_PARAMETERS), "prompt": still["prompt"],
         "source_sha256": still["source"]["sha256"], "route": still["route"],
         "route_intent": still["route_intent"],
@@ -675,10 +675,10 @@ async def test_video_requires_independent_existing_motion_quote(video_enabled, m
     assert error.value.status_code == 503
 
 
-async def test_video_quote_is_operator_rate_times_five_not_live_price(video_enabled, monkeypatch):
-    assert (await walk.video_capabilities())["reservation"] == 0.4
+async def test_video_quote_is_operator_rate_times_seconds_not_live_price(video_enabled, monkeypatch):
+    assert (await walk.video_capabilities())["reservation"] == 0.24
     monkeypatch.setenv("MOTION_RESERVATION_USD_PER_SECOND", "0.10")
-    assert walk.video_configuration()["reservation"] == 0.5
+    assert walk.video_configuration()["reservation"] == 0.3
     monkeypatch.setattr(walk, "to_fal_url", AsyncMock(side_effect=AssertionError("No upload")))
     with pytest.raises(HTTPException) as error:
         await walk.submit_video(walk.ImageLedVideoInput(**video_payload()))
@@ -757,14 +757,15 @@ async def test_video_single_h3_submission_only_exact_first_last_and_architecture
     assert slug == "minimax/h3-max/image-to-video"
     assert arguments["image_url"] == "https://fal.media/endpoint-1.png"
     assert arguments["end_image_url"] == "https://fal.media/endpoint-2.png"
-    assert arguments["duration"] == 5 and arguments["resolution"] == "768P"
+    assert arguments["duration"] == 3 and arguments["resolution"] == "768P"
     assert arguments["prompt_expansion_mode"] == "disabled"
     assert arguments["enable_safety_checker"] is True and arguments["sync_mode"] is False
     assert not {"camera_trajectory", "forward_m", "move", "prompt_version", "depth", "objects"} & arguments.keys()
-    assert "must not swap positions" in arguments["prompt"]
-    assert "moth emblem" in arguments["prompt"] and "open orange hearth" in arguments["prompt"]
+    assert arguments["prompt"] == walk.IMAGE_LED_VIDEO_PROMPT
+    # Named landmarks pulled the camera off the route, so v4 sends none.
+    assert not any(landmark.label in arguments["prompt"] or landmark.visual in arguments["prompt"] for landmark in request.landmarks)
     assert result["spatial_validation"] == "unmeasured"
-    assert result["prompt_version"] == "image-led-walk-video-v3"
+    assert result["prompt_version"] == "image-led-walk-video-v4"
     post.assert_awaited_once()
 
 
@@ -941,10 +942,6 @@ def test_prompt_explains_local_turn_and_surroundings_without_forcing_arrival_or_
     assert "well's location and roof, terrace corners" in text
     assert "fountain's actual sculpture and basin arrangement" in text
     assert "compact faceted conservatory" in text
-    video = walk.ImageLedVideoInput(**video_payload())
-    local_video = walk.route_intent_prompt(video.route_intent, video=True)
-    assert '"next":' in local_video
-    assert '"index":1' in local_video
 
 
 def test_source_geometry_overrides_generic_appearance_in_v4_prompt():

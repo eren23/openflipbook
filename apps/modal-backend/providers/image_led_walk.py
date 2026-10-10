@@ -84,10 +84,11 @@ STILL_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 VIDEO_MODEL = camera_motion.LEG_MODEL
+VIDEO_SECONDS = 3
 VIDEO_PARAMETERS: dict[str, object] = {
-    "duration": 5, "resolution": "768P", "prompt_expansion_mode": "disabled",
+    "duration": VIDEO_SECONDS, "resolution": "768P", "prompt_expansion_mode": "disabled",
     "enable_safety_checker": True, "sync_mode": False,
-    "prompt_version": "image-led-walk-video-v3",
+    "prompt_version": "image-led-walk-video-v4",
 }
 
 
@@ -130,7 +131,7 @@ async def capabilities() -> dict[str, object]:
 def video_configuration() -> dict[str, object]:
     motion = camera_motion.configuration()
     enabled = os.environ.get("IMAGE_LED_WALK_ENABLED") == "1" and motion["enabled"] is True
-    reservation = float(Decimal(str(motion["reservation_usd_per_second"])) * 5) if enabled else 0
+    reservation = float(Decimal(str(motion["reservation_usd_per_second"])) * VIDEO_SECONDS) if enabled else 0
     return {
         "enabled": enabled, "profile": PROFILE, "model": VIDEO_MODEL,
         "reservation": reservation, "parameters": VIDEO_PARAMETERS,
@@ -454,12 +455,10 @@ def input_fingerprint(body: ImageLedInput) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
-def route_intent_prompt(intent: RouteIntent, *, video: bool = False) -> str:
+def route_intent_prompt(intent: RouteIntent) -> str:
     index = intent.checkpoint_index
     current = intent.checkpoints[index]
     local = {"current": current.model_dump()}
-    if video:
-        local["next"] = intent.checkpoints[index + 1].model_dump()
     return (
         "Local route intent, recomputed from the ORIGINAL SOURCE-IMAGE pixels: "
         + json.dumps(local, ensure_ascii=False, separators=(",", ":"))
@@ -605,29 +604,18 @@ async def submit(body: ImageLedInput) -> dict[str, object]:
     }
 
 
-def image_led_video_prompt(body: ImageLedVideoInput) -> str:
-    index = body.route.checkpoint_index
-    references = [landmark.model_dump() for landmark in body.landmarks]
-    return (
-        "Begin exactly at the first reviewed street image and arrive at the last reviewed street image. "
-        "One continuous eye-level walk through the same illustrated street, with steady forward movement, "
-        "natural ground parallax and gradual turning only as the ending view requires. Nearby facade "
-        "corners pass relative to distant buildings. Preserve each existing building's architectural "
-        "identity and the ordering of its doors, windows, projecting bays, signs, hearths and glass ribs. "
-        "Features may become occluded or newly revealed through viewpoint change; they must not swap "
-        "positions, morph into other openings, duplicate or relocate between frames. Preserve the "
-        "illustrated medium, lighting and street detail. No aerial dive, rising camera, zoom, lens change, "
-        "teleport, cut, dissolve or replacement city. The map route below is approximate image-frame "
-        "context, not a top-down survey or a calibrated metric camera trajectory. "
-        "Architectural identities from the original artwork: "
-        + json.dumps(references, ensure_ascii=False, separators=(",", ":"))
-        + ". " + route_intent_prompt(body.route_intent, video=True)
-        + ". Source-art route segment: "
-        + json.dumps({"frame": body.route.frame, "from_index": index, "to_index": index + 1,
-                      "from": body.route.points[index].model_dump(),
-                      "to": body.route.points[index + 1].model_dump()}, separators=(",", ":"))
-        + f". Requested appearance: {body.prompt.strip()}"
-    )
+# v4: no landmark list or route JSON. Named landmarks made H3 swing the camera toward
+# them (docs/research/40-walk-video-prompt-and-leg-length.md); the reviewed endpoints carry identity.
+IMAGE_LED_VIDEO_PROMPT = (
+    "Begin exactly at the first image and end exactly at the last image. One continuous eye-level walk "
+    "forward along this same illustrated street, with steady forward movement, natural ground parallax "
+    "and gradual turning only as the ending view requires. Show only what lies between these two views; "
+    "do not swing the camera toward other streets or buildings. Every building keeps its architecture: "
+    "roofs, doors, windows, signs and openings stay in the same places. Features may be hidden or revealed "
+    "by parallax, but they never morph, swap, duplicate or relocate. Preserve the illustrated medium, "
+    "lighting and detail. No aerial dive, rising camera, zoom, lens change, teleport, cut, dissolve or "
+    "replacement street."
+)
 
 
 @router.post("/video/generate")
@@ -645,9 +633,11 @@ async def submit_video(body: ImageLedVideoInput) -> dict[str, object]:
     fingerprint["start"].pop("url")
     fingerprint["end"].pop("url")
     input_sha256 = hashlib.sha256(json.dumps(fingerprint, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    prompt = image_led_video_prompt(body)
+    prompt = IMAGE_LED_VIDEO_PROMPT
     start, end = await to_fal_url(body.start.url), await to_fal_url(body.end.url)
-    arguments = h3_arguments(VIDEO_MODEL, start, prompt, 5, end_image_url=end)
+    arguments = h3_arguments(VIDEO_MODEL, start, prompt, VIDEO_SECONDS, end_image_url=end)
+    # h3_arguments floors first/last-frame clips at 5 s; the quoted profile is shorter.
+    arguments["duration"] = VIDEO_SECONDS
     # This closed quoted profile overrides the shared helper's balanced default.
     arguments["prompt_expansion_mode"] = body.parameters["prompt_expansion_mode"]
     arguments["sync_mode"] = body.parameters["sync_mode"]
