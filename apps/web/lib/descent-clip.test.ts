@@ -58,6 +58,27 @@ describe("saveDescentClip", () => {
     expect(sentTo(send)).toEqual(["/api/nodes/n1"]);
   });
 
+  it("hands the retained current-node URI back to the caller after a delayed migration acknowledgement", async () => {
+    let resolve!: (value: Response) => void;
+    const send = vi.fn(() => new Promise<Response>((done) => { resolve = done; }));
+    const saved = vi.fn();
+    const request = saveDescentClip("n1", "https://fal.media/old.mp4", send, saved);
+    expect(saved).not.toHaveBeenCalled();
+    resolve(Response.json({ ok: true, durable: true, kept: "/api/nodes/n1/descent-video" }));
+    await expect(request).resolves.toBe(true);
+    expect(saved).toHaveBeenCalledExactlyOnceWith("/api/nodes/n1/descent-video");
+    expect(sentTo(send)).toEqual(["/api/nodes/n1"]);
+  });
+
+  it("does not apply a foreign-node or non-video acknowledgement URI", async () => {
+    const saved = vi.fn();
+    for (const kept of ["/api/nodes/foreign/descent-video", "javascript:alert(1)", null]) {
+      const send = vi.fn().mockResolvedValue(Response.json({ ok: true, kept }));
+      await expect(saveDescentClip("n1", "https://fal.media/old.mp4", send, saved)).resolves.toBe(true);
+    }
+    expect(saved).not.toHaveBeenCalled();
+  });
+
   it("reports a refused save instead of swallowing it -- the viewer who does not own the session", async () => {
     const send = vi.fn().mockResolvedValueOnce(reply(403)).mockResolvedValue(reply(200));
     await expect(saveDescentClip("n1", "https://v3b.fal.media/c.mp4", send)).resolves.toBe(false);

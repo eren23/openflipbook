@@ -1,6 +1,7 @@
 import { MongoClient, type ClientSession, type Collection, type Db, type Document, type TransactionOptions } from "mongodb";
 import type { GroundingSummary, ScaleTier, SceneView, StoredWalk, ViewSpec, ViewVerdict, TransitionContextV1 } from "@openflipbook/config";
 import { readServerEnv, requireMongo } from "./env";
+import { descentVideoPath, type StoredDescentVideo } from "./descent-clip";
 
 declare global {
   // Singleton pool sentinel. Both `lib/db.ts` and `lib/world.ts` share this
@@ -189,6 +190,7 @@ export interface NodeDoc extends Document {
   geo_extracted_at?: Date | null;
   // DESCENT_AUTO's stored arrival clip. Absent on every legacy row.
   descent_video_url?: string | null;
+  descent_video?: StoredDescentVideo | null;
   // A painted walk drawn on this page, kept so it outlives the tab that made
   // it -- a walk is paid for, and losing it to a refresh means paying twice.
   walk?: StoredWalk | null;
@@ -253,6 +255,7 @@ export interface NodeRow {
   // into this page). Null until (and unless) the flag-gated client stores
   // one; served back so every future visitor replays it instantly.
   descent_video_url: string | null;
+  descent_video?: StoredDescentVideo | null;
   /** The last walk painted on this page, or null. */
   walk: StoredWalk | null;
   created_at: string;
@@ -289,7 +292,7 @@ export function toRow(doc: NodeDoc): NodeRow {
     view_verdict: view_verdict ?? null,
     forked_from: forked_from ?? null,
     geo_extracted: geo_extracted_at != null,
-    descent_video_url: descent_video_url ?? null,
+    descent_video_url: doc.descent_video ? descentVideoPath(_id) : descent_video_url ?? null,
     walk: walk ?? null,
     transition_context: transition_context ?? null,
     created_at: created_at.toISOString(),
@@ -495,16 +498,16 @@ export async function updateNodeEstimatedView(
   return res.matchedCount === 1;
 }
 
-/** Stamp a node as having had entity extraction run (set even when it found
- *  zero entities). The durable counterpart to the client's in-memory
- *  "already attempted" guard — read back via `NodeRow.geo_extracted` so a
- *  revisit / reload never silently re-runs the non-deterministic VLM pass.
- *  Best-effort + idempotent; the caller never blocks on it. */
-export async function setNodeDescentClip(id: string, url: string): Promise<boolean> {
+/** Pin the first arrival clip's exact bytes. A retry may migrate the same
+ *  historical URL, but cannot replace an existing URL or immutable receipt. */
+export async function setNodeDescentClip(id: string, url: string, video: StoredDescentVideo): Promise<boolean> {
   const collection = await nodes();
   const res = await collection.updateOne(
-    { _id: id },
-    { $set: { descent_video_url: url } },
+    { _id: id, $and: [
+      { $or: [{ descent_video: { $exists: false } }, { descent_video: null }] },
+      { $or: [{ descent_video_url: { $exists: false } }, { descent_video_url: null }, { descent_video_url: url }] },
+    ] },
+    { $set: { descent_video_url: url, descent_video: video } },
   );
   return res.matchedCount > 0;
 }
