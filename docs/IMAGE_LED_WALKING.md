@@ -88,6 +88,9 @@ architectural references and prior temporal reviews before claiming the job.
 The video transport uses exact endpoint images and one short walking prompt. The
 prompt does not name landmarks or include route JSON: named landmarks made H3 turn
 the camera toward them ([research 40](research/40-walk-video-prompt-and-leg-length.md)).
+A leg also fails when its two stills disagree. In a test, stills made by a depth
+warp of the previous still fixed this ([research 41](research/41-depth-warp-stills.md)).
+The product does not use that method yet.
 It accepts no estimated translation distance or proxy camera trajectory. Audio
 is unverified until the storage worker inspects it. Completed clips remain drafts
 until temporal review; endpoint review cannot certify intermediate frames.
