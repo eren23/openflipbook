@@ -93,6 +93,9 @@ warp of the previous still fixed this ([research 41](research/41-depth-warp-stil
 The product does not use that method yet.
 With only copied pixels, the start still limits the walk
 ([research 42](research/42-copy-first-stills-and-gate.md)).
+Source identity judges compare each building with its source crop first. If not,
+a still can pass a change that its predecessor already had
+([research 43](research/43-judge-consistency.md)).
 It accepts no estimated translation distance or proxy camera trajectory. Audio
 is unverified until the storage worker inspects it. Completed clips remain drafts
 until temporal review; endpoint review cannot certify intermediate frames.
