@@ -12,8 +12,13 @@ export function useWalkPosition(sid: string | null) {
     let active=true;
     const abort=new AbortController(),url=`/api/creator/worlds/${encodeURIComponent(sid)}/walk`;
     setState({status:"idle"});setLoaded(null);
+    // A network drop (Wi-Fi switch, ERR_NETWORK_CHANGED) rejects fetch. One failed load kept Walk disabled until a reload.
+    const load=async(i=0):Promise<Response>=>{
+      try{return await fetch(url,{cache:"no-store",signal:abort.signal});}
+      catch(e){if(!active||i>=2)throw e;await new Promise(r=>setTimeout(r,500*2**i));return load(i+1);}
+    };
     void (async()=>{
-      const res=await fetch(url,{cache:"no-store",signal:abort.signal}),data=await res.json();
+      const res=await load(),data=await res.json();
       if(!res.ok)throw new Error(data.error??"Saved position unavailable");
       if(!Number.isSafeInteger(data.revision)||data.revision<0||(data.pose!==null&&!parseWalkPose(data.pose)))throw new Error("Invalid saved position");
       if(!active)return;
