@@ -90,6 +90,9 @@ VIDEO_PARAMETERS: dict[str, object] = {
     "enable_safety_checker": True, "sync_mode": False,
     "prompt_version": "image-led-walk-video-v4",
 }
+# Copy-first stills (research 41-43): one depth request; the web worker warps the reviewed prior's own pixels.
+DEPTH_MODEL = "fal-ai/image-preprocessors/depth-anything/v2"
+COPY_FIRST_WARP_VERSION = "copy-first-warp-v1"
 
 
 def configuration() -> dict[str, object]:
@@ -146,6 +149,43 @@ def video_configuration() -> dict[str, object]:
 @router.get("/video/capabilities")
 async def video_capabilities() -> dict[str, object]:
     return video_configuration()
+
+
+def copy_first_configuration() -> dict[str, object]:
+    def number(name: str, default: str) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except ValueError:
+            return math.nan
+    reservation = number("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "0")
+    tz = number("IMAGE_LED_WALK_COPY_FIRST_TZ", "0.10")
+    max_turn = number("IMAGE_LED_WALK_COPY_FIRST_MAX_TURN_DEGREES", "3")
+    enabled = (  # NaN fails every comparison below
+        os.environ.get("IMAGE_LED_WALK_ENABLED") == "1"
+        and os.environ.get("IMAGE_LED_WALK_COPY_FIRST_ENABLED") == "1"
+        and not env_flag("MOCK_PROVIDERS")
+        and bool(os.environ.get("FAL_KEY"))
+        and bool(os.environ.get("SHARED_TOKEN"))
+        and 0.01 <= reservation <= MIN_RESERVATION_USD
+        and 0 < tz <= 0.3
+        and 0 <= max_turn <= 10
+    )
+    return {
+        "enabled": enabled, "profile": PROFILE, "model": DEPTH_MODEL,
+        "reservation": reservation if enabled else 0,
+        "parameters": {"tz": tz, "max_turn_degrees": max_turn, "pitch_degrees": 0, "offset": 0.4,
+                       "fov_degrees": 60, "bg_fill": True, "warp_version": COPY_FIRST_WARP_VERSION} if enabled else {},
+        "spatial_validation": "unmeasured", "identity_validation": "owner_review_required",
+        "reason": None if enabled else (
+            "Copy-first stills need image-led enablement, IMAGE_LED_WALK_COPY_FIRST_ENABLED=1, provider/shared keys "
+            "and an explicit depth reservation of $0.01 to $0.15 per step."
+        ),
+    }
+
+
+@router.get("/copy-first/capabilities")
+async def copy_first_capabilities() -> dict[str, object]:
+    return copy_first_configuration()
 
 
 class StrictInput(BaseModel):
@@ -412,6 +452,14 @@ class ImageLedVideoInput(StrictInput):
         return self
 
 
+class CopyFirstInput(StrictInput):
+    profile: Literal["image-led-v1"]
+    model: Literal["fal-ai/image-preprocessors/depth-anything/v2"]
+    reservation: float = Field(gt=0, le=MIN_RESERVATION_USD)
+    parameters: dict[str, Any]
+    prior: SourceImage
+
+
 def validate_image(source: SourceImage, *, mask: bool = False) -> None:
     """Inline immutable inputs only; validate every input before any upload."""
     try:
@@ -650,6 +698,29 @@ async def submit_video(body: ImageLedVideoInput) -> dict[str, object]:
     }
 
 
+@router.post("/copy-first/generate")
+async def submit_copy_first(body: CopyFirstInput) -> dict[str, object]:
+    """One depth request for the reviewed prior's original PNG. The worker warps it; nothing is painted."""
+    config = copy_first_configuration()
+    if not config["enabled"]:
+        raise HTTPException(503, "Copy-first stills are not configured")
+    if (body.reservation != config["reservation"]
+            or json.dumps(body.parameters, sort_keys=True) != json.dumps(config["parameters"], sort_keys=True)):
+        raise HTTPException(409, "Copy-first configuration changed")
+    if not body.prior.url.startswith("data:image/png;base64,"):
+        raise HTTPException(400, "Copy-first needs the prior's original PNG")
+    validate_image(body.prior)
+    fingerprint = body.model_dump()
+    fingerprint["prior"].pop("url")
+    input_sha256 = hashlib.sha256(json.dumps(fingerprint, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    request_id = await post_once(DEPTH_MODEL, {"image_url": await to_fal_url(body.prior.url)})
+    return {
+        "request_id": request_id, "model": DEPTH_MODEL, "profile": PROFILE, "input_sha256": input_sha256,
+        "warp_version": COPY_FIRST_WARP_VERSION,
+        "spatial_validation": "unmeasured", "identity_validation": "owner_review_required",
+    }
+
+
 @router.get("/video/requests/{request_id}")
 async def video_status(request_id: str) -> dict[str, object]:
     # Status recovery is GET-only on the fixed H3 image-to-video model.
@@ -719,7 +790,7 @@ async def raw_output_metadata(url: str) -> dict[str, object]:
 async def status(request_id: str, model: str = MODEL) -> dict[str, object]:
     if not valid_request_id(request_id):
         raise HTTPException(400, "Invalid image-led request id")
-    if model not in STILL_PROFILES:
+    if model not in STILL_PROFILES and model != DEPTH_MODEL:
         raise HTTPException(400, "Unknown saved image-led model")
     # Paid request recovery remains possible after disabling new generation.
     if not os.environ.get("SHARED_TOKEN") or not os.environ.get("FAL_KEY") or env_flag("MOCK_PROVIDERS"):
@@ -740,7 +811,9 @@ async def status(request_id: str, model: str = MODEL) -> dict[str, object]:
         if error.status_code == 422:
             return {**base, "status": "failed"}
         raise
-    images = result.get("images") if isinstance(result, dict) else None
+    # The depth preprocessor returns one "image"; still models return "images".
+    images = (None if not isinstance(result, dict)
+              else [result.get("image")] if model == DEPTH_MODEL else result.get("images"))
     flags = result.get("has_nsfw_concepts") if isinstance(result, dict) else None
     if (not isinstance(images, list) or len(images) != 1
             or (flags is not None and (not isinstance(flags, list) or any(flags)))):

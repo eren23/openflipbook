@@ -1,0 +1,15 @@
+{
+ "generator": "research warp.py (copy-first-warp-v1), bg_fill, offset 0.4, FOV 60",
+ "cases": {
+  "step": {
+   "tz": 0.12,
+   "yaw_degrees": 2.0,
+   "holes": 14
+  },
+  "turn": {
+   "tz": 0.0,
+   "yaw_degrees": 12.0,
+   "holes": 1478
+  }
+ }
+}

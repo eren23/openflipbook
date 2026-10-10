@@ -10,6 +10,7 @@ import { IMAGE_LED_MAP_FRAME, IMAGE_LED_WALK_PROFILE, type ImageLedFile, type Im
 import type { WorldImportPlan } from "./world-import-plan";
 import { prepareImageLedPlayback, validateImageLedPlayback } from "./image-led-walk-playback";
 import type { ImageLedPlayback } from "./image-led-walk";
+import { COPY_FIRST_WARP_VERSION } from "./image-led-copy-first";
 
 export interface ImageLedWalkReceipt extends Omit<ImageLedWalkDoc, "_id" | "created_at" | "updated_at"> { created_at: string; updated_at: string }
 export interface ImageLedWalkArchiveExport {
@@ -26,7 +27,7 @@ export function imageLedWalkReceipt(walk: ImageLedWalkDoc): ImageLedWalkReceipt 
     landmarks: structuredClone(walk.landmarks), route: structuredClone(walk.route), prompt: walk.prompt,
     ...(walk.seed ? { seed: structuredClone(walk.seed) } : {}), revision: walk.revision,
     frames: walk.frames.map(f => ({ index: f.index, status: f.image ? "ready" : "empty",
-      ...(f.derivative ? { derivative: structuredClone(f.derivative) } : {}),
+      ...(f.derivative ? { derivative: structuredClone(f.derivative) } : {}), ...(f.copy_first ? { copy_first: structuredClone(f.copy_first) } : {}),
       ...(f.raw ? { raw: structuredClone(f.raw) } : {}), ...(f.image ? { image: structuredClone(f.image) } : {}), review: structuredClone(f.review) })),
     legs: walk.legs.map(l => ({ index: l.index, from: l.from, to: l.to, status: l.video ? "ready" : "empty",
       ...(l.original ? { original: structuredClone(l.original) } : {}), ...(l.video ? { video: structuredClone(l.video) } : {}),
@@ -167,7 +168,7 @@ export async function importWorldImageLedWalks(archive: WorldArchive, sid: strin
     }
     const frames = [];
     for (const [index, value] of archiveList(raw.frames, 12).map(archiveObject).entries()) {
-      only(value, ["index", "status", "raw", "image", "derivative", "review"]);
+      only(value, ["index", "status", "raw", "image", "derivative", "copy_first", "review"]);
       if (value.index !== index || !["ready", "empty"].includes(String(value.status))) invalidArchive("Invalid image-led still inventory");
       const image = value.image ? await stored(value.image, true) : undefined, original = value.raw ? await stored(value.raw, true) : undefined;
       if ((value.status === "ready") !== Boolean(image) || image && !original) invalidArchive("Image-led still originals are missing");
@@ -183,7 +184,12 @@ export async function importWorldImageLedWalks(archive: WorldArchive, sid: strin
           if (archiveHash(await prepareImageLedPlayback(originalBytes, canvas!)) !== a.sha256) invalidArchive("Image-led playback pixels differ from declared whole-image padding");
         } else if (derivative.canvas !== undefined || a.width > b.width || a.height > b.height || Math.abs(a.height - b.height * a.width / b.width) > 1) invalidArchive("Image-led playback image is cropped or stretched");
       } else if (image && image.sha256 !== original!.sha256) invalidArchive("Image-led derivative declaration is missing");
-      frames.push({ index, status: image ? "ready" : "empty", ...(image ? { image } : {}), ...(original ? { raw: original } : {}), ...(value.derivative ? { derivative: value.derivative } : {}), review: review(value.review, "still", image) });
+      if (value.copy_first !== undefined) { // a copied still names the prior original it was warped from
+        const c = archiveObject(value.copy_first); only(c, ["prior_raw_sha256", "yaw_degrees", "warp_version", "depth_request_id", "depth_sha256", "tz", "pitch_degrees", "offset", "fov_degrees", "bg_fill", "uncovered_pixels"]);
+        hash(c.depth_sha256); id(c.depth_request_id); number(c.yaw_degrees, -10, 10); number(c.tz, 0, .3);
+        if (!original || hash(c.prior_raw_sha256) !== (frames[index - 1]?.raw as ImageLedImage | undefined)?.sha256 || c.warp_version !== COPY_FIRST_WARP_VERSION || c.pitch_degrees !== 0 || c.offset !== .4 || c.fov_degrees !== 60 || c.bg_fill !== true || c.uncovered_pixels !== 0) invalidArchive("Invalid copy-first provenance");
+      }
+      frames.push({ index, status: image ? "ready" : "empty", ...(image ? { image } : {}), ...(original ? { raw: original } : {}), ...(value.derivative ? { derivative: value.derivative } : {}), ...(value.copy_first ? { copy_first: value.copy_first } : {}), review: review(value.review, "still", image) });
     }
     const legs = [];
     for (const [index, value] of archiveList(raw.legs, 11).map(archiveObject).entries()) {
