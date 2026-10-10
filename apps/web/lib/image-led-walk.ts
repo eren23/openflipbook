@@ -8,6 +8,9 @@ export interface ImageLedImage extends ImageLedFile { width: number; height: num
 export interface ImageLedPlayback { kind: "contain-jpeg-v1"; width: number; height: number; background: "#20231e" }
 /** Repair images remain unapproved. The full quote also binds the route and predecessor. */
 export interface ImageLedRepair { checkpoint_index: number; source_sha256: string; target_sha256: string; image: ImageLedImage; mask?: ImageLedImage }
+/** Copy-first step (research 41-43): the still copies the approved prior's own pixels by a depth warp. The turn is an image-plane estimate, never ground yaw. */
+export interface ImageLedCopyFirst { prior_raw_sha256: string; yaw_degrees: number }
+export interface ImageLedCopyFirstProvenance extends ImageLedCopyFirst { warp_version: string; depth_request_id: string; depth_sha256: string; tz: number; pitch_degrees: number; offset: number; fov_degrees: number; bg_fill: true; uncovered_pixels: 0 }
 export type ImageLedReview = "pending" | "approved" | "rejected";
 export type ImageLedStepStatus = "empty" | "scheduled" | "submitting" | "queued" | "running" | "ready" | "submission_unknown" | "storage_failed" | "failed";
 export interface ImageLedLandmark {
@@ -26,6 +29,7 @@ export interface ImageLedStill {
   index: number; status: ImageLedStepStatus; job_id?: string;
   raw?: ImageLedImage; image?: ImageLedImage;
   derivative?: { kind: "uniform-scale-jpeg-v1" | "contain-jpeg-v1"; source_sha256: string; crop: false; stretch: false; canvas?: ImageLedPlayback };
+  copy_first?: ImageLedCopyFirstProvenance;
   review: { identity: ImageLedReview; route: ImageLedReview; spatial: "unmeasured"; sha256?: string; reviewed_at?: string; notes?: string };
   error?: string;
 }
@@ -55,6 +59,7 @@ export interface ImageLedWalkQuote {
   quote_sha256: string; spatial_validation: "unmeasured";
   repair?: ImageLedRepair;
   playback?: ImageLedPlayback;
+  copy_first?: ImageLedCopyFirst;
 }
 export interface ImageLedWalkWire extends Omit<ImageLedWalkDoc, "_id" | "created_at" | "updated_at" | "source" | "landmarks" | "frames" | "legs" | "seed"> {
   created_at: string; updated_at: string;

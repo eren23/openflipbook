@@ -18,6 +18,7 @@ import { imageLedRouteIntent } from "./image-led-route-intent";
 import { IMAGE_LED_STILL_PROFILES, imageLedStillProfile, validateImageLedStillInputs } from "./image-led-walk-profiles";
 import { imageLedBytesHash, IMAGE_LED_IMAGE_LIMIT } from "./image-led-walk-source";
 import { imageLedPlayback } from "./image-led-walk-playback";
+import { copyFirstParameters, IMAGE_LED_DEPTH_MODEL } from "./image-led-copy-first";
 
 export const IMAGE_LED_MODEL = "fal-ai/nano-banana-pro/edit";
 export const IMAGE_LED_VIDEO_MODEL = "minimax/h3-max/image-to-video";
@@ -39,13 +40,15 @@ export async function imageLedBackend(path: string, body?: unknown): Promise<Rec
   if (!response.ok) throw new ImageLedBackendError(response.status, value);
   return value;
 }
-export async function imageLedCapabilities(db: Db, kind: "still" | "video", session?: ClientSession) {
-  const value = await imageLedBackend(kind === "still" ? "capabilities" : "video/capabilities");
+/** "copy_first" is a still made by a depth warp of the approved prior (one depth request, no painting). */
+export async function imageLedCapabilities(db: Db, kind: "still" | "video" | "copy_first", session?: ClientSession) {
+  const value = await imageLedBackend({ still: "capabilities", video: "video/capabilities", copy_first: "copy-first/capabilities" }[kind]);
   let model = IMAGE_LED_VIDEO_MODEL, parameters = IMAGE_LED_VIDEO_PARAMETERS as Record<string, unknown>;
   if (kind === "still") { try { const selected = imageLedStillProfile(value.model, value.parameters); model = selected.model; parameters = selected.parameters; } catch { fail("Image-led model or current price is unavailable", 503); } }
+  if (kind === "copy_first") { try { model = IMAGE_LED_DEPTH_MODEL; parameters = { ...copyFirstParameters(value.parameters) }; } catch { fail("Copy-first stills are unavailable", 503); } }
   const reservation = value.reservation;
-  if (value.enabled !== true || value.profile !== IMAGE_LED_WALK_PROFILE || value.model !== model || !isDeepStrictEqual(value.parameters, parameters) || typeof reservation !== "number" || !Number.isFinite(reservation) || reservation < (kind === "still" ? .15 : .24) || reservation > 2.5) fail("Image-led model or current price is unavailable", 503);
-  const fresh = { kind: "place-layout", last_seen: { $gt: new Date(Date.now() - 30_000) } }, flag = kind === "still" ? "image_led_walk_v4_canvas_v1" : "image_led_walk_video_v4", lane = kind === "still" ? "mesh" : "motion", options = session ? { session } : {};
+  if (value.enabled !== true || value.profile !== IMAGE_LED_WALK_PROFILE || value.model !== model || !isDeepStrictEqual(value.parameters, parameters) || typeof reservation !== "number" || !Number.isFinite(reservation) || reservation < { still: .15, video: .24, copy_first: .01 }[kind] || reservation > (kind === "copy_first" ? .15 : 2.5)) fail("Image-led model or current price is unavailable", 503);
+  const fresh = { kind: "place-layout", last_seen: { $gt: new Date(Date.now() - 30_000) } }, flag = { still: "image_led_walk_v4_canvas_v1", video: "image_led_walk_video_v4", copy_first: "image_led_walk_copy_first_v1" }[kind], lane = kind === "video" ? "motion" : "mesh", options = session ? { session } : {};
   if (kind === "video" && process.env.PATH_VIDEO_ENABLED !== "1") fail("Image-led walk videos are disabled", 503);
   if (await db.collection("generation_workers").findOne({ ...fresh, [lane]: true, [flag]: { $ne: true } }, options) || !await db.collection("generation_workers").findOne({ ...fresh, [flag]: true }, options)) fail("Compatible image-led worker unavailable", 503);
   return { model, parameters, reservation };
@@ -93,16 +96,22 @@ async function repairMaskDescriptor(mask: ImageLedImage) {
 export async function imageLedInputs(db: Db, walk: ImageLedWalkDoc, kind: "still" | "video", index: number, cap: Awaited<ReturnType<typeof imageLedCapabilities>>, repairInput?: ImageLedRepair) {
   const repair = parseImageLedRepair(repairInput, walk, index);
   if (repair && kind !== "still") fail("Video requests do not support repair inputs", 400);
-  const parent = index > 0 ? walk.frames[index - 1]?.image : walk.seed?.image;
-  if (kind === "still") validateImageLedStillInputs(cap.model, cap.parameters, [...(repair ? [repair.image] : []), ...(parent ? [parent] : []), walk.source.image, ...walk.landmarks.map(l => l.image)], repair);
+  const parent = index > 0 ? walk.frames[index - 1]?.image : walk.seed?.image, copy = kind === "still" && cap.model === IMAGE_LED_DEPTH_MODEL;
+  if (copy) { const prev = walk.frames[index - 1]; if (!index || repair) fail("Copy-first needs an approved previous view and no repair", 400); if (!prev?.raw || prev.raw.content_type !== "image/png" || prev.raw.sha256 !== prev.image?.sha256 && prev.derivative?.source_sha256 !== prev.raw.sha256) fail("The previous view has no original PNG to copy"); }
+  else if (kind === "still") validateImageLedStillInputs(cap.model, cap.parameters, [...(repair ? [repair.image] : []), ...(parent ? [parent] : []), walk.source.image, ...walk.landmarks.map(l => l.image)], repair);
   imageLedEligible(walk, kind, index); const context = await requireImageLedCurrent(db, walk);
   if (repair && !await db.collection<ImageLedStepDoc>("image_led_walk_steps").findOne({ session_id: walk.session_id, kind: "still", index, "original.key": repair.image.key, "original.sha256": repair.target_sha256, "original.bytes": repair.image.bytes, "quote.source_sha256": walk.source.image.sha256, "quote.binding_sha256": walk.source.binding_sha256, "quote.route_sha256": walk.route.sha256 })) fail("Repair target lacks a saved receipt for this exact source, route and checkpoint", 409);
   if (walk.seed && imageLedHash(await imageLedSeed(db, walk.session_id, walk.seed, walk.source.image.sha256)) !== imageLedHash(walk.seed)) fail("Starting artwork changed");
   const descriptor = async (image: ImageLedImage) => { const read = await readImageLedImage(image.key, image); if (read.image.width !== image.width || read.image.height !== image.height || read.image.content_type !== image.content_type) fail("Saved image dimensions or format changed"); const { key: _key, content_type: _mime, ...fields } = image; return { ...fields, url: read.url }; };
   const source = await descriptor(walk.source.image), route = { frame: walk.route.frame, points: walk.route.points, checkpoint_index: index, map_sha256: walk.source.image.sha256 };
   const route_intent = imageLedRouteIntent({ source: walk.source.image, points: walk.route.points, landmarks: walk.landmarks, checkpointIndex: index });
-  let body: Record<string, unknown>;
-  if (kind === "still") {
+  let body: Record<string, unknown>, copy_first: { prior_raw_sha256: string; yaw_degrees: number } | undefined;
+  if (copy) {
+    // The turn comes from the drawn route in the map image: an estimate, never ground yaw.
+    const raw = walk.frames[index - 1]!.raw!, yaw = route_intent.checkpoints[index]!.turn_from_previous_degrees, max = Number(cap.parameters.max_turn_degrees);
+    if (Math.abs(yaw) > max) fail(`This step turns ${Math.abs(yaw).toFixed(1)}° on the map image; a copied view allows ${max}°. Quote a generated painting for it.`);
+    copy_first = { prior_raw_sha256: raw.sha256, yaw_degrees: yaw }; body = { profile: IMAGE_LED_WALK_PROFILE, ...cap, prior: await descriptor(raw) };
+  } else if (kind === "still") {
     const landmarks = await Promise.all(walk.landmarks.map(async l => ({ id: l.id, label: l.label, visual: l.visual, source_rectangle: l.source_rectangle, image: await descriptor(l.image) })));
     body = { profile: IMAGE_LED_WALK_PROFILE, ...cap, prompt: walk.prompt, source_projection: context.source.source_projection, source, landmarks, route, route_intent, ...(parent ? { prior: { checkpoint_index: index ? index - 1 : 0, reviewed_sha256: parent.sha256, image: await descriptor(parent) } } : {}), ...(repair ? { repair: { ...repair, image: await descriptor(repair.image), ...(repair.mask ? { mask: await repairMaskDescriptor(repair.mask) } : {}) } } : {}) };
   } else {
@@ -110,8 +119,8 @@ export async function imageLedInputs(db: Db, walk: ImageLedWalkDoc, kind: "still
     body = { profile: IMAGE_LED_WALK_PROFILE, ...cap, prompt: walk.prompt, source_sha256: walk.source.image.sha256, route, route_intent, landmarks: walk.landmarks.map(({ id, label, visual }) => ({ id, label, visual })), start: await descriptor(a), end: await descriptor(b) };
   }
   const playback = kind === "still" ? imageLedPlayback(walk) : undefined;
-  const fingerprint = { source: walk.source, landmarks: walk.landmarks, route: walk.route, route_intent, prompt: walk.prompt, seed: walk.seed ?? null, kind, index, parent: index > 0 ? walk.frames[index - 1] : null, ...(kind === "video" ? { frames: walk.frames, prior_legs: walk.legs.slice(0, index) } : {}), model: cap.model, parameters: cap.parameters, reservation: cap.reservation, ...(repair ? { repair } : {}), ...(playback ? { playback } : {}) };
-  return { body, sha256: imageLedHash(fingerprint), ...(playback ? { playback } : {}) };
+  const fingerprint = { source: walk.source, landmarks: walk.landmarks, route: walk.route, route_intent, prompt: walk.prompt, seed: walk.seed ?? null, kind, index, parent: index > 0 ? walk.frames[index - 1] : null, ...(kind === "video" ? { frames: walk.frames, prior_legs: walk.legs.slice(0, index) } : {}), model: cap.model, parameters: cap.parameters, reservation: cap.reservation, ...(repair ? { repair } : {}), ...(playback ? { playback } : {}), ...(copy_first ? { copy_first } : {}) };
+  return { body, sha256: imageLedHash(fingerprint), ...(playback ? { playback } : {}), ...(copy_first ? { copy_first } : {}) };
 }
 export function imageLedWire(walk: ImageLedWalkDoc): ImageLedWalkWire {
   const base = `/api/world/${encodeURIComponent(walk.session_id)}/image-led-walks/${encodeURIComponent(walk.id)}/files`, image = ({ key: _key, ...v }: ImageLedImage) => v;
@@ -136,31 +145,32 @@ export async function createImageLedWalk(sid: string, input: Record<string, unkn
   const walk: ImageLedWalkDoc = { _id: key, id: body.id, session_id: sid, profile: IMAGE_LED_WALK_PROFILE, created_at: now, updated_at: now, request_sha256: requestHash, status: "draft", source: context.source, landmarks, route: imageLedRoute(body.points, context.source.image.sha256), prompt: body.prompt?.trim() || "Continue through this original illustrated world at street level, preserving its recognizable architecture and atmosphere.", ...(seed ? { seed } : {}), frames: body.points.map((_, index) => ({ index, status: index === 0 && seed ? "ready" : "empty", ...(index === 0 && seed ? { raw: seed.image, image: seed.image } : {}), review: { identity: "pending", route: "pending", spatial: "unmeasured", ...(index === 0 && seed ? { sha256: seed.sha256 } : {}) } })), legs: body.points.slice(1).map((_, index) => ({ index, from: index, to: index + 1, status: "empty", review: { temporal: "pending" } })), revision: 1 };
   return withDbTransaction(async (tx, session) => { const collection = tx.collection<ImageLedWalkDoc>("image_led_walks"), old = await collection.findOne({ _id: key }, { session }); if (old) return same(old); if (await collection.countDocuments({ session_id: sid }, { session }) >= 30) fail("This world already has 30 image-led routes"); await fenceImageLedSource(tx, session, walk); if (seed) await imageLedSeed(tx, sid, seed, walk.source.image.sha256, session); await collection.insertOne(walk, { session }); return { walk: imageLedWire(walk) }; });
 }
-export async function imageLedQuote(db: Db, walk: ImageLedWalkDoc, kind: "still" | "video", index: number, repairInput?: ImageLedRepair) {
+export async function imageLedQuote(db: Db, walk: ImageLedWalkDoc, kind: "still" | "video", index: number, repairInput?: ImageLedRepair, mode?: "copy_first") {
   const repair = parseImageLedRepair(repairInput, walk, index);
-  const cap = await imageLedCapabilities(db, kind), inputs = await imageLedInputs(db, walk, kind, index, cap, repair), quote = { version: 1 as const, profile: IMAGE_LED_WALK_PROFILE, kind, index, ...cap, retry_allowance: 0 as const, source_sha256: walk.source.image.sha256, binding_sha256: walk.source.binding_sha256, route_sha256: walk.route.sha256, inputs_sha256: inputs.sha256, spatial_validation: "unmeasured" as const, ...(repair ? { repair } : {}) };
-  const prepared = { ...quote, ...(inputs.playback ? { playback: inputs.playback } : {}) };
+  if (mode && kind !== "still") fail("Only artwork steps can be copied", 400);
+  const cap = await imageLedCapabilities(db, mode ?? kind), inputs = await imageLedInputs(db, walk, kind, index, cap, repair), quote = { version: 1 as const, profile: IMAGE_LED_WALK_PROFILE, kind, index, ...cap, retry_allowance: 0 as const, source_sha256: walk.source.image.sha256, binding_sha256: walk.source.binding_sha256, route_sha256: walk.route.sha256, inputs_sha256: inputs.sha256, spatial_validation: "unmeasured" as const, ...(repair ? { repair } : {}) };
+  const prepared = { ...quote, ...(inputs.playback ? { playback: inputs.playback } : {}), ...(inputs.copy_first ? { copy_first: inputs.copy_first } : {}) };
   return { ...prepared, quote_sha256: imageLedHash(prepared) };
 }
-export async function imageLedDetail(sid: string, id: string, kind?: string, index?: number) {
+export async function imageLedDetail(sid: string, id: string, kind?: string, index?: number, mode?: string) {
   const db = await requireCreator(sid), walk = await ownedWalk(db, sid, id); let quote: ImageLedWalkQuote | null = null, reason: string | undefined;
-  if (kind !== undefined) { if (!["still", "video"].includes(kind) || !Number.isInteger(index)) fail("Invalid quote checkpoint", 400); try { quote = await imageLedQuote(db, walk, kind as "still" | "video", index!); } catch (error) { reason = error instanceof CreatorError ? error.message : "Image-led quote unavailable"; } }
+  if (kind !== undefined) { if (!["still", "video"].includes(kind) || !Number.isInteger(index) || ![undefined, "copy_first"].includes(mode)) fail("Invalid quote checkpoint", 400); try { quote = await imageLedQuote(db, walk, kind as "still" | "video", index!, undefined, mode as "copy_first" | undefined); } catch (error) { reason = error instanceof CreatorError ? error.message : "Image-led quote unavailable"; } }
   return { walk: imageLedWire(walk), quote, ...(reason ? { reason } : {}) };
 }
 export async function imageLedAction(sid: string, id: string, input: Record<string, unknown>) {
   const db = await requireCreator(sid), walk = await ownedWalk(db, sid, id);
   if (input.action === "fork") return forkImageLedWalk(db, walk, input);
   if (input.action === "quote") {
-    if (Object.keys(input).some(k => !["action", "kind", "index", "repair"].includes(k)) || !["still", "video"].includes(String(input.kind)) || !Number.isInteger(input.index)) fail("Invalid quote checkpoint", 400);
+    if (Object.keys(input).some(k => !["action", "kind", "index", "repair", "mode"].includes(k)) || !["still", "video"].includes(String(input.kind)) || !Number.isInteger(input.index) || ![undefined, "copy_first"].includes(input.mode as string | undefined)) fail("Invalid quote checkpoint", 400);
     const index = input.index as number, repair = parseImageLedRepair(input.repair, walk, index);
-    const quote = await imageLedQuote(db, walk, input.kind as "still" | "video", index, repair);
+    const quote = await imageLedQuote(db, walk, input.kind as "still" | "video", index, repair, input.mode as "copy_first" | undefined);
     return { walk: imageLedWire(walk), quote };
   }
   if (input.action === "review") return reviewImageLedWalk(db, walk, input);
   if (input.action !== "schedule" || Object.keys(input).some(k => !["action", "id", "kind", "index", "quote", "confirmed"].includes(k)) || !imageLedUuid(input.id) || input.confirmed !== true || !["still", "video"].includes(String(input.kind)) || !Number.isInteger(input.index)) fail("Explicit current quote consent is required", 400);
   const key = `${sid}:${input.id}`, requestHash = imageLedHash(input), jobs = db.collection<ImageLedStepDoc>("image_led_walk_steps"), old = await jobs.findOne({ _id: key });
   const same = async (job: ImageLedStepDoc) => { if (job.walk_id !== id || job.request_sha256 !== requestHash) fail("Step request id already belongs to another action"); return { walk: imageLedWire(await ownedWalk(db, sid, id)) }; }; if (old) return same(old);
-  const kind = input.kind as "still" | "video", index = input.index as number, repair = object(input.quote) ? parseImageLedRepair(input.quote.repair, walk, index) : undefined, quote = await imageLedQuote(db, walk, kind, index, repair); if (!isDeepStrictEqual(input.quote, quote)) fail("Artwork, review or price changed; review the current quote");
+  const kind = input.kind as "still" | "video", index = input.index as number, repair = object(input.quote) ? parseImageLedRepair(input.quote.repair, walk, index) : undefined, quote = await imageLedQuote(db, walk, kind, index, repair, object(input.quote) && input.quote.copy_first ? "copy_first" : undefined); if (!isDeepStrictEqual(input.quote, quote)) fail("Artwork, review or price changed; review the current quote");
   return withDbTransaction(async (tx, session) => { const jobs = tx.collection<ImageLedStepDoc>("image_led_walk_steps"), options = { session }, old = await jobs.findOne({ _id: key }, options); if (old) { if (old.walk_id !== id || old.request_sha256 !== requestHash) fail("Step request id already belongs to another action"); return { walk: imageLedWire((await tx.collection<ImageLedWalkDoc>("image_led_walks").findOne({ _id: walk._id }, options))!) }; }
     const current = await tx.collection<ImageLedWalkDoc>("image_led_walks").findOne({ _id: walk._id, revision: walk.revision }, options); if (!current) fail("Walk review changed before scheduling"); imageLedEligible(current, kind, index); await fenceImageLedSource(tx, session, current); if (current.seed) await imageLedSeed(tx, sid, current.seed, current.source.image.sha256, session);
     const ledger_ids = await reserveGenerationSpend(tx, session, sid, kind === "still" ? "illustration" : "motion", quote.reservation, kind === "still" ? "ILLUSTRATION_DAILY_CAP_USD" : "MOTION_DAILY_CAP_USD", new Date(), kind === "still" ? "4" : "3"), now = new Date(), slot = kind === "still" ? "frames" : "legs";
@@ -197,7 +207,7 @@ async function forkImageLedWalk(db: Db, walk: ImageLedWalkDoc, input: Record<str
     const now = new Date();
     if (!(await col.updateOne({ _id: walk._id, session_id: walk.session_id, revision: walk.revision }, { $inc: { revision: 1 }, $set: { updated_at: now } }, options)).matchedCount) fail("Walk review changed before forking");
     const next: ImageLedWalkDoc = { _id: key, id: input.id as string, session_id: walk.session_id, profile: walk.profile, created_at: now, updated_at: now, request_sha256: requestHash, status: "draft", revision: 1, source: structuredClone(walk.source), landmarks: structuredClone(walk.landmarks), route: structuredClone(walk.route), prompt: walk.prompt, ...(seed ? { seed: structuredClone(seed) } : {}),
-      frames: walk.frames.map((f, i) => i < index ? { index: i, status: "ready", ...(f.raw ? { raw: structuredClone(f.raw) } : {}), image: structuredClone(f.image!), ...(f.derivative ? { derivative: structuredClone(f.derivative) } : {}), review: structuredClone(f.review) } : { index: i, status: "empty", review: { identity: "pending", route: "pending", spatial: "unmeasured" } }),
+      frames: walk.frames.map((f, i) => i < index ? { index: i, status: "ready", ...(f.raw ? { raw: structuredClone(f.raw) } : {}), image: structuredClone(f.image!), ...(f.derivative ? { derivative: structuredClone(f.derivative) } : {}), ...(f.copy_first ? { copy_first: structuredClone(f.copy_first) } : {}), review: structuredClone(f.review) } : { index: i, status: "empty", review: { identity: "pending", route: "pending", spatial: "unmeasured" } }),
       legs: walk.legs.map((leg, i) => i < index - 1 && leg.status === "ready" ? { index: i, from: leg.from, to: leg.to, status: "ready", original: structuredClone(leg.original!), video: structuredClone(leg.video!), ...(leg.media ? { media: structuredClone(leg.media) } : {}), review: structuredClone(leg.review) } : { index: i, from: leg.from, to: leg.to, status: "empty", review: { temporal: "pending" } }) };
     await col.insertOne(next, options); return { walk: imageLedWire(next) };
   });

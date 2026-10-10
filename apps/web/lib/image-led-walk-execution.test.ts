@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { beforeEach, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { Db, Document } from "mongodb";
 const state = vi.hoisted(() => ({ db: null as Db | null, backend: vi.fn(), cap: vi.fn(), inputs: vi.fn(), fence: vi.fn(), seed: vi.fn(), get: vi.fn(), upload: vi.fn(), download: vi.fn(), silent: vi.fn() }));
 vi.mock("./db",()=>({withDbTransaction:async(run:(db:Db,session:unknown)=>Promise<unknown>)=>run(state.db!,{})}));
@@ -71,4 +73,46 @@ it.each([[3.04, "ready"], [5.04, "failed"]])("checks a %s s clip against the quo
   state.download.mockResolvedValue(bytes); state.silent.mockResolvedValue({ bytes, hashes: { playback_sha256: "c".repeat(64) }, media: { duration } });
   await processNextImageLedWalk(state.db!, true);
   expect(job().status).toBe(status); expect(state.backend).not.toHaveBeenCalled();
+});
+const DEPTH = "fal-ai/image-preprocessors/depth-anything/v2", fixture = (name: string) => readFileSync(path.join(__dirname, "../tests/fixtures/copy-first", name));
+async function copyJob(depth: Buffer, prior = fixture("prior.png"), tz = .1) {
+  const raw = { key: "world/image-led/walk/old/original-prior.png", sha256: imageLedBytesHash(prior), bytes: prior.length, width: 96, height: 64, content_type: "image/png" };
+  files.set(raw.key, prior);
+  Object.assign(job(), { index: 1, quote: { model: DEPTH, parameters: { tz, max_turn_degrees: 3, pitch_degrees: 0, offset: .4, fov_degrees: 60, bg_fill: true, warp_version: "copy-first-warp-v1" }, reservation: .02, copy_first: { prior_raw_sha256: raw.sha256, yaw_degrees: 0 } } });
+  rows.image_led_walks![0]!.frames = [{ index: 0, status: "ready", raw, review: { identity: "approved", route: "approved", spatial: "unmeasured" } }, { index: 1, status: "storage_failed", job_id: "job", review: { identity: "pending", route: "pending", spatial: "unmeasured" } }];
+  Object.assign(job(), { status: "storage_failed", provider_request_id: "depth_known", provider_result: { status: "ready", image: { url: "https://fal.media/depth.png" }, raw_image: { valid: true, sha256: imageLedBytesHash(depth), bytes: depth.length, width: (await sharp(depth).metadata()).width, height: (await sharp(depth).metadata()).height } } });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(depth))));
+  return raw;
+}
+it("submits a copied view as one depth request and polls it under the depth model", async () => {
+  job().quote = { ...job().quote, model: DEPTH, copy_first: { prior_raw_sha256: "f".repeat(64), yaw_degrees: 0 } };
+  state.backend.mockImplementation(async (p: string) => p === "copy-first/generate" ? { request_id: "depth_known", model: DEPTH, profile: "image-led-v1", input_sha256: "b".repeat(64) } : { request_id: "depth_known", model: DEPTH, profile: "image-led-v1", status: "queued" });
+  state.cap.mockResolvedValue({ model: DEPTH, parameters: job().quote.parameters, reservation: .15 });
+  await processNextImageLedWalk(state.db!); await processNextImageLedWalk(state.db!);
+  expect(state.cap).toHaveBeenCalledWith(state.db, "copy_first");
+  expect(state.backend.mock.calls.map(c => c[0])).toEqual(["copy-first/generate", `requests/depth_known?model=${encodeURIComponent(DEPTH)}`]); expect(job().status).toBe("queued");
+});
+it("stores the warped prior as the still, keeps the depth map as the provider original, and records provenance", async () => {
+  const depth = await sharp({ create: { width: 96, height: 64, channels: 3, background: "#808080" } }).png().toBuffer(), prior = await copyJob(depth);
+  await processNextImageLedWalk(state.db!);
+  const frame = rows.image_led_walks![0]!.frames[1], still = files.get(frame.raw.key)!;
+  expect(job().status).toBe("ready"); expect(job().original.sha256).toBe(imageLedBytesHash(depth));
+  expect(frame.raw).toMatchObject({ sha256: imageLedBytesHash(still), width: 96, height: 64, content_type: "image/png" }); expect(frame.raw.key).toContain("/copy-");
+  expect(frame.copy_first).toEqual({ prior_raw_sha256: prior.sha256, yaw_degrees: 0, warp_version: "copy-first-warp-v1", depth_request_id: "depth_known", depth_sha256: imageLedBytesHash(depth), tz: .1, pitch_degrees: 0, offset: .4, fov_degrees: 60, bg_fill: true, uncovered_pixels: 0 });
+  expect(frame.derivative.source_sha256).toBe(frame.raw.sha256); expect(frame.review.identity).toBe("pending"); expect(state.backend).not.toHaveBeenCalled();
+});
+it.each([
+  ["uncovered pixels", () => fixture("depth.png"), .12, /Copy-first refused: \d+ pixels are not covered/],
+  ["a depth size that differs", () => sharp({ create: { width: 48, height: 32, channels: 3, background: "#808080" } }).png().toBuffer(), .1, /Depth map size differs/],
+])("fails a copied view with %s and never asks the provider again", async (_name, depth, tz, error) => {
+  await copyJob(await depth(), fixture("prior.png"), tz);
+  if (tz === .12) job().quote.copy_first.yaw_degrees = 2;
+  await processNextImageLedWalk(state.db!); await processNextImageLedWalk(state.db!);
+  expect(job().status).toBe("failed"); expect(job().error).toMatch(error); expect(rows.image_led_walks![0]!.frames[1].raw).toBeUndefined(); expect(state.backend).not.toHaveBeenCalled();
+});
+it("fails a copied view when the previous original changed after the quote", async () => {
+  await copyJob(await sharp({ create: { width: 96, height: 64, channels: 3, background: "#808080" } }).png().toBuffer());
+  job().quote.copy_first.prior_raw_sha256 = "0".repeat(64);
+  await processNextImageLedWalk(state.db!);
+  expect(job().status).toBe("failed"); expect(job().error).toMatch(/previous view changed/);
 });

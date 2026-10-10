@@ -619,7 +619,8 @@ def test_new_router_registered_and_shared_token_protected(monkeypatch):
     monkeypatch.setenv("IMAGE_LED_WALK_ENABLED", "0")
     client = TestClient(fastapi_app)
     for method, path in (("GET", "/image-led-walk/capabilities"), ("POST", "/image-led-walk/generate"), ("GET", "/image-led-walk/requests/known-id"),
-                         ("GET", "/image-led-walk/video/capabilities"), ("POST", "/image-led-walk/video/generate"), ("GET", "/image-led-walk/video/requests/known-id")):
+                         ("GET", "/image-led-walk/video/capabilities"), ("POST", "/image-led-walk/video/generate"), ("GET", "/image-led-walk/video/requests/known-id"),
+                         ("GET", "/image-led-walk/copy-first/capabilities"), ("POST", "/image-led-walk/copy-first/generate")):
         assert client.request(method, path).status_code == 401
     response = client.get("/image-led-walk/capabilities", headers={"x-openflipbook-token": "image-led-test"})
     assert response.status_code == 200
@@ -956,3 +957,91 @@ def test_source_geometry_overrides_generic_appearance_in_v4_prompt():
     assert "glass-roof brace junctions connected to the same wall bays" in text
     assert "crown, supports, dish count and ground pool" in text
     assert "Features hidden in the original remain unknown" in text
+
+
+@pytest.fixture
+def copy_first(enabled, monkeypatch):
+    monkeypatch.setenv("IMAGE_LED_WALK_COPY_FIRST_ENABLED", "1")
+    monkeypatch.setenv("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "0.02")
+    monkeypatch.delenv("IMAGE_LED_WALK_COPY_FIRST_TZ", raising=False)
+    monkeypatch.delenv("IMAGE_LED_WALK_COPY_FIRST_MAX_TURN_DEGREES", raising=False)
+
+
+def copy_first_payload(prior=None):
+    config = walk.copy_first_configuration()
+    return {"profile": walk.PROFILE, "model": walk.DEPTH_MODEL, "reservation": config["reservation"],
+            "parameters": copy.deepcopy(config["parameters"]), "prior": prior or image()}
+
+
+def test_copy_first_is_off_by_default_and_reports_closed_parameters(enabled, monkeypatch):
+    assert walk.copy_first_configuration()["enabled"] is False
+    assert walk.copy_first_configuration()["parameters"] == {}
+    monkeypatch.setenv("IMAGE_LED_WALK_COPY_FIRST_ENABLED", "1")
+    monkeypatch.setenv("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "0.02")
+    config = walk.copy_first_configuration()
+    assert config["enabled"] is True and config["reservation"] == 0.02
+    assert config["parameters"] == {"tz": 0.1, "max_turn_degrees": 3.0, "pitch_degrees": 0, "offset": 0.4, "fov_degrees": 60,
+                                    "bg_fill": True, "warp_version": "copy-first-warp-v1"}
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("IMAGE_LED_WALK_COPY_FIRST_ENABLED", "0"), ("IMAGE_LED_WALK_ENABLED", "0"), ("MOCK_PROVIDERS", "1"), ("FAL_KEY", ""),
+    ("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "0"), ("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "0.16"),
+    ("IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD", "nan"), ("IMAGE_LED_WALK_COPY_FIRST_TZ", "0"),
+    ("IMAGE_LED_WALK_COPY_FIRST_TZ", "0.31"), ("IMAGE_LED_WALK_COPY_FIRST_TZ", "garbage"),
+    ("IMAGE_LED_WALK_COPY_FIRST_MAX_TURN_DEGREES", "-1"), ("IMAGE_LED_WALK_COPY_FIRST_MAX_TURN_DEGREES", "11"),
+])
+def test_each_copy_first_setting_alone_disables_it(copy_first, monkeypatch, name, value):
+    assert walk.copy_first_configuration()["enabled"] is True
+    monkeypatch.setenv(name, value)
+    assert walk.copy_first_configuration()["enabled"] is False
+
+
+async def test_copy_first_posts_exactly_one_depth_request_for_the_prior_png(copy_first, monkeypatch):
+    upload, post = AsyncMock(return_value="https://fal.media/prior.png"), AsyncMock(return_value="depth-id")
+    monkeypatch.setattr(walk, "to_fal_url", upload)
+    monkeypatch.setattr(walk, "post_once", post)
+    payload = copy_first_payload()
+    receipt = await walk.submit_copy_first(walk.CopyFirstInput(**payload))
+    post.assert_awaited_once_with(walk.DEPTH_MODEL, {"image_url": "https://fal.media/prior.png"})
+    upload.assert_awaited_once_with(payload["prior"]["url"])
+    assert receipt["request_id"] == "depth-id" and receipt["model"] == walk.DEPTH_MODEL and receipt["profile"] == walk.PROFILE
+    assert receipt["warp_version"] == "copy-first-warp-v1" and len(receipt["input_sha256"]) == 64
+
+
+@pytest.mark.parametrize("change", ["disabled", "config", "jpeg", "bytes"])
+async def test_copy_first_refuses_changed_inputs_before_any_upload(copy_first, monkeypatch, change):
+    upload, post = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(walk, "to_fal_url", upload)
+    monkeypatch.setattr(walk, "post_once", post)
+    payload = copy_first_payload(image(format="JPEG") if change == "jpeg" else None)
+    if change == "config":
+        payload["parameters"]["tz"] = 0.2
+    if change == "bytes":
+        payload["prior"]["sha256"] = "0" * 64
+    if change == "disabled":
+        monkeypatch.setenv("IMAGE_LED_WALK_COPY_FIRST_ENABLED", "0")
+    with pytest.raises(HTTPException) as error:
+        await walk.submit_copy_first(walk.CopyFirstInput(**payload))
+    assert error.value.status_code == {"disabled": 503, "config": 409}.get(change, 400)
+    upload.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+async def test_depth_status_reads_the_single_image_result_after_disable(enabled, monkeypatch):
+    monkeypatch.setattr(fal_client, "status_async", AsyncMock(return_value=fal_client.Completed(logs=[], metrics={})))
+    monkeypatch.setattr(fal_client, "result_async", AsyncMock(return_value={"image": {"url": "https://fal.media/depth.png"}}))
+    monkeypatch.setattr(walk, "raw_output_metadata", AsyncMock(return_value={"valid": True, "width": 128, "height": 96}))
+    result = await walk.status("known-id", model=walk.DEPTH_MODEL)
+    assert result["status"] == "ready" and result["image"]["url"] == "https://fal.media/depth.png" and result["model"] == walk.DEPTH_MODEL
+
+
+@pytest.mark.parametrize("result", [{}, {"images": [{"url": "https://fal.media/one.png"}]},
+                                    {"image": {"url": "https://example.com/depth.png"}}, {"image": None}])
+async def test_depth_status_requires_one_owned_image(enabled, monkeypatch, result):
+    monkeypatch.setattr(fal_client, "status_async", AsyncMock(return_value=fal_client.Completed(logs=[], metrics={})))
+    monkeypatch.setattr(fal_client, "result_async", AsyncMock(return_value=result))
+    metadata = AsyncMock()
+    monkeypatch.setattr(walk, "raw_output_metadata", metadata)
+    assert (await walk.status("known-id", model=walk.DEPTH_MODEL))["status"] == "failed"
+    metadata.assert_not_awaited()

@@ -146,3 +146,15 @@ it("rejects a forged padding declaration despite valid original and playback che
     rows[0]!.frames[0]!.derivative.canvas.width = 127;
   })).rejects.toMatchObject({ status: 422 });
 });
+it("round-trips copied-view provenance and rejects one that names another prior original", async () => {
+  const f = await fixture(), copy = { prior_raw_sha256: f.walk.frames[0]!.raw!.sha256, yaw_degrees: 1.5, warp_version: "copy-first-warp-v1", depth_request_id: "depth_known", depth_sha256: "d".repeat(64), tz: .1, pitch_degrees: 0, offset: .4, fov_degrees: 60, bg_fill: true, uncovered_pixels: 0 };
+  const copied = (content: Record<string, unknown>) => { const frames = (content.receipts as { frames: Record<string, unknown>[] }[])[0]!.frames; frames[1] = { ...structuredClone(frames[0]!), index: 1, copy_first: structuredClone(copy) }; return frames[1]!; };
+  const content = structuredClone(f.archive.json("image-led-walks.json")) as Record<string, unknown>; copied(content);
+  const records: Record<string, Document[]> = {};
+  await importWorldImageLedWalks({ ...f.archive, json: name => name === "image-led-walks.json" ? content : f.archive.json(name) }, "destination", records, [], new Map([["map", "restored-map"]]));
+  expect(records.image_led_walks![0]!.frames[1].copy_first).toEqual(copy);
+  const walk = structuredClone(f.walk); walk.frames[1] = { ...walk.frames[0]!, index: 1, copy_first: copy as NonNullable<ImageLedWalkDoc["frames"][number]["copy_first"]> };
+  expect(imageLedWalkReceipt(walk).frames[1]!.copy_first).toEqual(copy);
+  await expect(changed(f, c => { (copied(c).copy_first as typeof copy).prior_raw_sha256 = "0".repeat(64); })).rejects.toMatchObject({ status: 422 });
+  await expect(changed(f, c => { (copied(c).copy_first as typeof copy).uncovered_pixels = 3; })).rejects.toMatchObject({ status: 422 });
+});

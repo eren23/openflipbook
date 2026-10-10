@@ -15,6 +15,7 @@ import { imageLedBytesHash, imageLedHash, imageLedRoute } from "./image-led-walk
 import { IMAGE_LED_STILL_PROFILES } from "./image-led-walk-profiles";
 import type { imageLedRouteIntent } from "./image-led-route-intent";
 import { CreatorError } from "./creator-error";
+import { IMAGE_LED_DEPTH_MODEL } from "./image-led-copy-first";
 
 const sourcePixels = [[940, 900], [1020, 815], [1060, 720], [1070, 630], [1050, 545], [1030, 465]] as const;
 const points = sourcePixels.map(([x, y]) => ({ x: x / 2048, y: y / 1152 }));
@@ -46,7 +47,7 @@ function approve(walk: ImageLedWalkDoc, index: number, file = image(`world/frame
 const db = { collection: (name: string) => ({ findOne: async (query: Record<string, unknown>) => {
   if (name === "image_led_walks") return state.walk;
   if (name === "image_led_walk_steps") return state.receipt;
-  if (name === "generation_workers" && (query.image_led_walk_v4_canvas_v1 === true || query.image_led_walk_video_v4 === true)) return { _id: "compatible-worker" };
+  if (name === "generation_workers" && (query.image_led_walk_v4_canvas_v1 === true || query.image_led_walk_video_v4 === true || query.image_led_walk_copy_first_v1 === true)) return { _id: "compatible-worker" };
   return null;
 } }) } as unknown as Db;
 const capability = (kind: "still" | "video") => ({ model: kind === "still" ? IMAGE_LED_MODEL : IMAGE_LED_VIDEO_MODEL, parameters: kind === "still" ? IMAGE_LED_PARAMETERS : IMAGE_LED_VIDEO_PARAMETERS, reservation: kind === "still" ? .15 : .24 });
@@ -219,4 +220,46 @@ it("binds the exact starting canvas into a still quote and invalidates it when t
   const after = await imageLedQuote(db, state.walk!, "still", 2);
   expect(after.inputs_sha256).not.toBe(before.inputs_sha256); expect(after.quote_sha256).not.toBe(before.quote_sha256);
   expect(fetch).toHaveBeenCalled(); expect(state.reserve).not.toHaveBeenCalled(); expect(state.transaction).not.toHaveBeenCalled();
+});
+
+const copyParameters = { tz: .1, max_turn_degrees: 10, pitch_degrees: 0, offset: .4, fov_degrees: 60, bg_fill: true, warp_version: "copy-first-warp-v1" };
+function copyFirstWalk(index = 5) { // checkpoint 5 is the straightest step of the fixture route
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("copy-first") ? { enabled: true, profile: "image-led-v1", model: IMAGE_LED_DEPTH_MODEL, parameters: copyParameters, reservation: .02 } : { enabled: true, profile: "image-led-v1", ...capability("still") }))));
+  for (let i = 2; i < index; i++) approve(state.walk!, i);
+  const raw: ImageLedImage = { ...image(`world/image-led/raw-${index - 1}.png`, "f", 688, 384), content_type: "image/png" }, prev = state.walk!.frames[index - 1]!;
+  prev.raw = raw; prev.derivative = { kind: "uniform-scale-jpeg-v1", source_sha256: raw.sha256, crop: false, stretch: false };
+  return raw;
+}
+it("quotes a copied view from the previous original PNG with its map-image turn and nothing else", async () => {
+  const raw = copyFirstWalk(), quote = await imageLedQuote(db, state.walk!, "still", 5, undefined, "copy_first");
+  const turn = (await imageLedInputs(db, state.walk!, "still", 5, capability("still"))).body.route_intent as ReturnType<typeof imageLedRouteIntent>;
+  expect(quote).toMatchObject({ model: IMAGE_LED_DEPTH_MODEL, reservation: .02, copy_first: { prior_raw_sha256: raw.sha256, yaw_degrees: turn.checkpoints[5]!.turn_from_previous_degrees } });
+  const cap = await imageLedCapabilities(db, "copy_first"), inputs = await imageLedInputs(db, state.walk!, "still", 5, cap);
+  expect(Object.keys(inputs.body).sort()).toEqual(["model", "parameters", "prior", "profile", "reservation"]);
+  expect(inputs.body.prior).toMatchObject({ sha256: raw.sha256, url: expect.stringMatching(/^data:image\/png;base64,/) });
+  expect(inputs.sha256).not.toBe((await imageLedInputs(db, state.walk!, "still", 5, capability("still"))).sha256);
+  expect(state.reserve).not.toHaveBeenCalled(); expect(state.transaction).not.toHaveBeenCalled();
+});
+it("refuses copied views without a previous original PNG, at the start, or past the turn limit", async () => {
+  copyFirstWalk(2); const cap = await imageLedCapabilities(db, "copy_first"), walk = state.walk!;
+  await expect(imageLedInputs(db, walk, "still", 0, cap)).rejects.toMatchObject({ status: 400 });
+  await expect(imageLedInputs(db, walk, "still", 2, cap)).rejects.toThrow("This step turns 16.5° on the map image; a copied view allows 10°. Quote a generated painting for it.");
+  walk.frames[1]!.raw = walk.frames[1]!.image!;
+  await expect(imageLedInputs(db, walk, "still", 2, cap)).rejects.toThrow(/no original PNG/);
+  expect(state.read.mock.calls.map(([key]) => key).filter(key => String(key).includes("raw-"))).toEqual([]); expect(state.reserve).not.toHaveBeenCalled();
+});
+it("blocks copied views when the backend profile changed or no worker understands them", async () => {
+  copyFirstWalk();
+  const legacyDb = { collection: () => ({ findOne: vi.fn().mockResolvedValue({ _id: "old-worker", image_led_walk_v4_canvas_v1: true }) }) } as unknown as Db;
+  await expect(imageLedCapabilities(legacyDb, "copy_first")).rejects.toMatchObject({ status: 503 });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ enabled: true, profile: "image-led-v1", model: IMAGE_LED_DEPTH_MODEL, parameters: { ...copyParameters, offset: .2 }, reservation: .02 }))));
+  await expect(imageLedCapabilities(db, "copy_first")).rejects.toMatchObject({ status: 503 });
+  await expect(imageLedQuote(db, state.walk!, "video", 1, undefined, "copy_first")).rejects.toMatchObject({ status: 400 });
+});
+it("schedules a copied-view quote only as a copied view", async () => {
+  copyFirstWalk(); const quote = await imageLedQuote(db, state.walk!, "still", 5, undefined, "copy_first"), id = "22222222-2222-4222-8222-222222222222";
+  await expect(imageLedAction("world", "route", { action: "schedule", id, kind: "still", index: 5, quote, confirmed: true })).rejects.toThrow("No transaction should start");
+  const { copy_first: _copy, ...painting } = quote;
+  await expect(imageLedAction("world", "route", { action: "schedule", id, kind: "still", index: 5, quote: painting, confirmed: true })).rejects.toMatchObject({ status: 409 });
+  expect(state.reserve).not.toHaveBeenCalled();
 });

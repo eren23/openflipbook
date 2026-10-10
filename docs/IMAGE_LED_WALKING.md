@@ -90,7 +90,7 @@ prompt does not name landmarks or include route JSON: named landmarks made H3 tu
 the camera toward them ([research 40](research/40-walk-video-prompt-and-leg-length.md)).
 A leg also fails when its two stills disagree. In a test, stills made by a depth
 warp of the previous still fixed this ([research 41](research/41-depth-warp-stills.md)).
-The product does not use that method yet.
+The product can make these stills as copied views (see below).
 With only copied pixels, the start still limits the walk
 ([research 42](research/42-copy-first-stills-and-gate.md)).
 Source identity judges compare each building with its source crop first. If not,
@@ -99,6 +99,48 @@ a still can pass a change that its predecessor already had
 It accepts no estimated translation distance or proxy camera trajectory. Audio
 is unverified until the storage worker inspects it. Completed clips remain drafts
 until temporal review; endpoint review cannot certify intermediate frames.
+
+### Copied views (depth warp)
+
+A copied view is a still that moves the previous approved view one small step
+forward. It uses only pixels from that view ([research 41](research/41-depth-warp-stills.md),
+[42](research/42-copy-first-stills-and-gate.md)). All flags are off by default.
+To use copied views, set all of these:
+
+- `IMAGE_LED_WALK_COPY_FIRST_ENABLED=1`, together with `IMAGE_LED_WALK_ENABLED=1`,
+  `FAL_KEY` and `SHARED_TOKEN`.
+- `IMAGE_LED_WALK_COPY_FIRST_RESERVATION_USD`, from 0.01 to 0.15 for each step.
+- `NEXT_PUBLIC_IMAGE_LED_COPY_FIRST=1` in the web build. This shows the
+  "Quote copied view" button after a reviewed view.
+- A worker that advertises `image_led_walk_copy_first_v1`.
+
+Two settings are optional. `IMAGE_LED_WALK_COPY_FIRST_TZ` is the forward step in
+median-depth units (default 0.10, maximum 0.3).
+`IMAGE_LED_WALK_COPY_FIRST_MAX_TURN_DEGREES` is the largest turn for a copied
+view (default 3, maximum 10).
+
+1. The quote binds the hash of the original PNG of the previous view and the turn
+   at this checkpoint. The turn comes from the drawn route in the map image. It is
+   an image-plane estimate, not a ground yaw or a measured camera. The quote fails
+   when the turn is larger than the maximum.
+2. The backend sends one request to `fal-ai/image-preprocessors/depth-anything/v2`
+   (`POST /image-led-walk/copy-first/generate`). It uses no painting model and
+   makes no retry.
+3. The worker moves the previous original with the depth map (`copy-first-warp-v1`:
+   60° field of view, the forward step, then the image-plane turn). A gap behind a
+   near object gets the farthest pixels within 15 px.
+4. If a pixel of the new view has no source pixel in the previous view, the step
+   fails. The message tells you to quote a generated painting for that step.
+   Sharp turns usually fail in this way.
+
+The depth map stays as the provider original of the step. The worker stores the
+still as a separate PNG. The frame records `copy_first`: the hash of the previous
+original, the turn, the depth request and its hash, the warp settings and
+`uncovered_pixels: 0`. Walk export, import and fork keep this record.
+
+The owner
+must review each copied view. A copied view cannot correct a bad start, because it
+copies all of the start, mistakes included ([research 42](research/42-copy-first-stills-and-gate.md)).
 
 ## Local implementation verification — 2026-10-05
 
