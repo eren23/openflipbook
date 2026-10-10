@@ -80,12 +80,15 @@ automatic visual acceptance is part of this profile.
 Image-led clips have separate `/image-led-walk/video/capabilities`,
 `POST /image-led-walk/video/generate` and `GET /image-led-walk/video/requests/{request_id}`
 endpoints. They use the existing motion enablement and operator reservation rate
-in addition to `IMAGE_LED_WALK_ENABLED`. A quote covers one five-second 768P H3
-first/last-frame leg: $0.40 at an operator rate of $0.08 per second. This is not
+in addition to `IMAGE_LED_WALK_ENABLED`. A quote covers one 3-second 768P H3
+first/last-frame leg (profile `image-led-walk-video-v4`): $0.24 at an operator
+rate of $0.08 per second. This is not
 a live invoice. The web must pin reviewed adjacent endpoints, the source artwork,
 architectural references and prior temporal reviews before claiming the job.
-The video transport uses exact endpoint images and source-led architectural text;
-it accepts no estimated translation distance or proxy camera trajectory. Audio
+The video transport uses exact endpoint images and one short walking prompt. The
+prompt does not name landmarks or include route JSON: named landmarks made H3 turn
+the camera toward them ([research 40](research/40-walk-video-prompt-and-leg-length.md)).
+It accepts no estimated translation distance or proxy camera trajectory. Audio
 is unverified until the storage worker inspects it. Completed clips remain drafts
 until temporal review; endpoint review cannot certify intermediate frames.
 
@@ -116,7 +119,8 @@ source provenance, not the visual fidelity of an unrun model output.
 
 Readable failed raw images survive portable import as inert pending history.
 Video import verifies identical encoded video streams between original and
-silent playback, including the accepted 4.4–5.6 second duration range. Imported
+silent playback, including the accepted 2.4–5.6 second duration range (3-second v4 legs and
+earlier 5-second v3 legs). Imported
 records never restore generation claims or budget reservations.
 
 

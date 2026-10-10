@@ -46,10 +46,10 @@ function approve(walk: ImageLedWalkDoc, index: number, file = image(`world/frame
 const db = { collection: (name: string) => ({ findOne: async (query: Record<string, unknown>) => {
   if (name === "image_led_walks") return state.walk;
   if (name === "image_led_walk_steps") return state.receipt;
-  if (name === "generation_workers" && (query.image_led_walk_v4_canvas_v1 === true || query.image_led_walk_video_v3 === true)) return { _id: "compatible-worker" };
+  if (name === "generation_workers" && (query.image_led_walk_v4_canvas_v1 === true || query.image_led_walk_video_v4 === true)) return { _id: "compatible-worker" };
   return null;
 } }) } as unknown as Db;
-const capability = (kind: "still" | "video") => ({ model: kind === "still" ? IMAGE_LED_MODEL : IMAGE_LED_VIDEO_MODEL, parameters: kind === "still" ? IMAGE_LED_PARAMETERS : IMAGE_LED_VIDEO_PARAMETERS, reservation: kind === "still" ? .15 : .4 });
+const capability = (kind: "still" | "video") => ({ model: kind === "still" ? IMAGE_LED_MODEL : IMAGE_LED_VIDEO_MODEL, parameters: kind === "still" ? IMAGE_LED_PARAMETERS : IMAGE_LED_VIDEO_PARAMETERS, reservation: kind === "still" ? .15 : .24 });
 type InputsBody = { route_intent: ReturnType<typeof imageLedRouteIntent>; landmarks: { id: string; image?: { sha256: string } }[]; prior?: { checkpoint_index: number; reviewed_sha256: string; image: { sha256: string; url: string } }; start?: { sha256: string }; end?: { sha256: string } };
 
 beforeEach(() => {
@@ -114,8 +114,8 @@ it("rejects v2 still capabilities before a v4 quote can reserve or upload", asyn
   expect(state.read).not.toHaveBeenCalled(); expect(state.reserve).not.toHaveBeenCalled(); expect(state.transaction).not.toHaveBeenCalled();
 });
 
-it("quotes only the closed disabled-expansion video v3 profile with a compatible worker", async () => {
-  await expect(imageLedCapabilities(db, "video")).resolves.toEqual({ model: "minimax/h3-max/image-to-video", reservation: .4, parameters: { duration: 5, resolution: "768P", prompt_expansion_mode: "disabled", enable_safety_checker: true, sync_mode: false, prompt_version: "image-led-walk-video-v3" } });
+it("quotes only the closed disabled-expansion video v4 profile with a compatible worker", async () => {
+  await expect(imageLedCapabilities(db, "video")).resolves.toEqual({ model: "minimax/h3-max/image-to-video", reservation: .24, parameters: { duration: 3, resolution: "768P", prompt_expansion_mode: "disabled", enable_safety_checker: true, sync_mode: false, prompt_version: "image-led-walk-video-v4" } });
   expect(state.read).not.toHaveBeenCalled(); expect(state.reserve).not.toHaveBeenCalled();
 });
 
@@ -139,7 +139,7 @@ it("rejects a consented balanced v2 video quote rather than upgrading it to v3",
 });
 
 it.each(["still", "video"] as const)("blocks new %s quotes while a fresh worker only understands older prompts", async kind => {
-  const flag = kind === "still" ? "image_led_walk_v4_canvas_v1" : "image_led_walk_video_v3";
+  const flag = kind === "still" ? "image_led_walk_v4_canvas_v1" : "image_led_walk_video_v4";
   const find = vi.fn<(query: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue({ _id: "old-worker", image_led_walk_v1: true, image_led_walk_v2: true, image_led_walk_video_v1: true, image_led_walk_video_v2: true });
   const legacyDb = { collection: () => ({ findOne: find }) } as unknown as Db;
   await expect(imageLedCapabilities(legacyDb, kind)).rejects.toMatchObject({ status: 503 });

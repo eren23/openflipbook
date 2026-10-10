@@ -65,3 +65,10 @@ it("releases a stale canvas reservation once before any provider submission", as
   await processNextImageLedWalk(state.db!); await processNextImageLedWalk(state.db!);
   expect(state.backend).not.toHaveBeenCalled(); expect(job().status).toBe("failed"); expect(rows.spend_ledger![0]!.total).toBe(0);
 });
+it.each([[3.04, "ready"], [5.04, "failed"]])("checks a %s s clip against the quoted 3 s video duration", async (duration, status) => {
+  const bytes = Buffer.from("mp4"); job().kind = "video"; job().quote.parameters = { duration: 3, prompt_version: "image-led-walk-video-v4" };
+  job().status = "storage_failed"; job().provider_request_id = "provider_known"; job().provider_result = { status: "ready", video: { url: "https://fal.media/leg.mp4" } };
+  state.download.mockResolvedValue(bytes); state.silent.mockResolvedValue({ bytes, hashes: { playback_sha256: "c".repeat(64) }, media: { duration } });
+  await processNextImageLedWalk(state.db!, true);
+  expect(job().status).toBe(status); expect(state.backend).not.toHaveBeenCalled();
+});
