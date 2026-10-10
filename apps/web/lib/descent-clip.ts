@@ -13,6 +13,22 @@ export interface AutoDescendInput {
   alreadyFired: boolean;
 }
 
+/** Exact paid arrival bytes retained independently of the provider's URL. */
+export interface StoredDescentVideo {
+  version: 1;
+  key: string;
+  sha256: string;
+  bytes: number;
+  content_type: "video/mp4";
+  parent_node_id: string;
+  parent_image_key: string;
+  node_image_key: string;
+}
+
+export function descentVideoPath(nodeId: string) {
+  return `/api/nodes/${encodeURIComponent(nodeId)}/descent-video`;
+}
+
 /** Fire the background clip exactly once per node: flag on, a real saved
  *  node, both frames present, nothing stored yet, not already in flight. */
 export function shouldAutoDescend(input: AutoDescendInput): boolean {
@@ -39,6 +55,7 @@ export async function saveDescentClip(
   nodeId: string,
   url: string,
   send: typeof fetch = fetch,
+  onSaved?: (keptUrl: string) => void,
 ): Promise<boolean> {
   const report = (message: string) =>
     send("/api/errors", {
@@ -52,7 +69,13 @@ export async function saveDescentClip(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ descent_video_url: url }),
     });
-    if (res.ok) return true;
+    if (res.ok) {
+      if (onSaved) {
+        const receipt = await res.json().catch(() => null) as { kept?: unknown } | null;
+        if (receipt?.kept === descentVideoPath(nodeId) || isDescentClipUrl(receipt?.kept)) onSaved(receipt.kept);
+      }
+      return true;
+    }
     await report(`descent clip for ${nodeId} not saved: HTTP ${res.status}`);
   } catch (err) {
     await report(`descent clip for ${nodeId} not saved: ${String(err)}`);
@@ -60,8 +83,8 @@ export async function saveDescentClip(
   return false;
 }
 
-/** The PATCH accepts only an https video URL of sane length — the field is
- *  served back verbatim to every future visitor of the node. */
+/** Recognize historical external clips. New downloads additionally require
+ *  a supported provider host on the server. */
 export function isDescentClipUrl(url: unknown): url is string {
   return (
     typeof url === "string" &&

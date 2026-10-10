@@ -50,6 +50,15 @@ describe("toRow scene_view round-trip", () => {
   });
 });
 
+it("derives durable playback from the current node ID while preserving historical provider URLs", () => {
+  const external = "https://fal.media/arrival.mp4";
+  expect(toRow(doc({ descent_video_url: external })).descent_video_url).toBe(external);
+  const stored = { version: 1 as const, key: "source/descent-videos/source-child/abc.mp4", sha256: "a".repeat(64), bytes: 40, content_type: "video/mp4" as const, parent_node_id: "source-parent", parent_image_key: "source-parent.png", node_image_key: "child.png" };
+  const row = toRow(doc({ _id: "fork-child", session_id: "fork", descent_video_url: external, descent_video: stored }));
+  expect(row.descent_video_url).toBe("/api/nodes/fork-child/descent-video");
+  expect(row.descent_video).toEqual(stored);
+});
+
 describe("toRow scale_tier round-trip (B2)", () => {
   it("preserves a persisted scale_tier and an ascend relation", () => {
     const row = toRow(doc({ scale_tier: "city", relation: "ascend" }));

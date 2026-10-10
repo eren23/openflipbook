@@ -139,7 +139,7 @@ import { focusOnMap } from "@/lib/click-route";
 import { sseData } from "@/lib/sse";
 import { selectNeighbors } from "@/lib/scale-neighbors";
 import { buildOutwardContext } from "@/lib/outward-context";
-import { saveDescentClip, shouldAutoDescend } from "@/lib/descent-clip";
+import { isDescentClipUrl, saveDescentClip, shouldAutoDescend } from "@/lib/descent-clip";
 import { parseAzgaarExport } from "@/lib/azgaar-import";
 import { sceneCloseupSpec } from "@/lib/scene-closeup";
 import { childrenOf, frameForView, projectTopDown, toAbsoluteEntities } from "@/lib/world-geometry";
@@ -3581,6 +3581,15 @@ export default function PlayPage() {
   const descentParentImage = page?.parentId
     ? history.items.find((p) => p.nodeId === page.parentId)?.imageDataUrl
     : undefined;
+  const persistDescentClip = useCallback((nodeId: string, sourceUrl: string) => {
+    void saveDescentClip(nodeId, sourceUrl, fetch, (kept) => {
+      setPage((prev) => prev?.nodeId === nodeId && prev.descentVideoUrl === sourceUrl ? { ...prev, descentVideoUrl: kept } : prev);
+      setHistory((prev) => ({ ...prev, items: prev.items.map((p) => p.nodeId === nodeId && p.descentVideoUrl === sourceUrl ? { ...p, descentVideoUrl: kept } : p) }));
+      // A late acknowledgement may update its history entry, but must not
+      // replace playback after the user has navigated to another node/clip.
+      if (pageRef.current?.nodeId === nodeId) setFallbackVideoUrl((prev) => prev === sourceUrl ? kept : prev);
+    });
+  }, []);
   const rememberDescentClip = useCallback((nodeId: string, url: string) => {
     setPage((prev) =>
       prev && prev.nodeId === nodeId ? { ...prev, descentVideoUrl: url } : prev,
@@ -3591,10 +3600,12 @@ export default function PlayPage() {
         p.nodeId === nodeId ? { ...p, descentVideoUrl: url } : p,
       ),
     }));
-    void saveDescentClip(nodeId, url);
-  }, []);
+    persistDescentClip(nodeId, url);
+  }, [persistDescentClip]);
   const descendClip = useCallback(() => {
     if (page?.descentVideoUrl) {
+      // Free migration of historical provider clips; never schedules a model.
+      if (page.nodeId && isDescentClipUrl(page.descentVideoUrl)) persistDescentClip(page.nodeId, page.descentVideoUrl);
       setFallbackVideoUrl(page.descentVideoUrl);
       setShowVideo(true);
       setStreamStatus("playing");
@@ -3611,7 +3622,7 @@ export default function PlayPage() {
     }).then((url) => {
       if (url && forNode) rememberDescentClip(forNode, url);
     });
-  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip, sessionId]);
+  }, [page, descentParentImage, requestClip, videoTier, rememberDescentClip, persistDescentClip, sessionId]);
 
   // DESCENT_AUTO (default off): generate the arrival clip in the BACKGROUND
   // as soon as an entered page settles, so the replay is instant and the
