@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getNode } from "@/lib/db";
 import { readServerEnv } from "@/lib/env";
 import { getStoredBytes } from "@/lib/r2";
+import { worldReadHeaders, worldReadResponse } from "@/lib/world-read-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ export async function GET(req: Request, { params }: Params) {
 
   const row = await getNode(nodeId);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const denied = await worldReadResponse(row.session_id);
+  if (denied) return denied;
 
   const stored = await getStoredBytes(row.image_key);
   if (!stored) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -36,7 +39,7 @@ export async function GET(req: Request, { params }: Params) {
   return new NextResponse(new Uint8Array(stored.bytes), {
     headers: {
       "Content-Type": stored.contentType,
-      "Cache-Control": "public, max-age=31536000, immutable",
+      ...worldReadHeaders,
       ...(download
         ? { "Content-Disposition": `attachment; filename="openflipbook-${row.id}.${ext}"` }
         : {}),

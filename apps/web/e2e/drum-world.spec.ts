@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { MongoClient } from "mongodb";
 import { DeleteObjectsCommand, S3Client } from "@aws-sdk/client-s3";
 import { readServerEnv, requireR2 } from "../lib/env";
-import { r2ClientConfig } from "../lib/r2";
+import { r2ClientConfig } from "../lib/r2-client-config";
 
 test.skip(process.env.E2E_DRUM_WORLD !== "1", "Opt-in real persistence test; imports existing images, never generates");
 test("map, edited image and fitted materials share one revisioned place", async ({ page, browser, baseURL }) => {

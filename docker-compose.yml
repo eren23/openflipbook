@@ -46,8 +46,8 @@ services:
       "try { rs.status() } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}) }"
 
   # S3-compatible blob store — the local stand-in for Cloudflare R2. The web
-  # app writes here (R2_ENDPOINT=http://minio:9000) and the browser reads image
-  # URLs from the published port (R2_PUBLIC_BASE_URL=http://localhost:9000/...).
+  # app writes here (R2_ENDPOINT=http://minio:9000). The browser reads images
+  # through the web app's authorized /api/blobs route.
   minio:
     # The service keeps its old name so R2_ENDPOINT=http://minio:9000 and
     # everything wired to it stay the same, but it is RustFS now: MinIO
@@ -62,12 +62,13 @@ services:
       RUSTFS_ACCESS_KEY: ${MINIO_ROOT_USER:-openflipbook}
       RUSTFS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
     ports:
-      - "9000:9000" # S3 API (also the browser's image origin)
+      - "9000:9000" # S3 API; bucket is private
     volumes:
       - s3-data:/data
 
-  # One-shot: create the bucket and make its objects anonymously readable, so
-  # the browser's <img src> GETs aren't 403'd. Retries until the store
+  # One-shot: create a private bucket. Browsers read authorized same-origin
+  # /api/blobs URLs; publications expose only their selected immutable files.
+  # Retries until the store
   # answers, then exits -- `web` waits on it completing.
   minio-setup:
     image: amazon/aws-cli:2.37.1
@@ -81,13 +82,13 @@ services:
       R2_BUCKET: ${R2_BUCKET:-openflipbook}
     entrypoint: |
       /bin/sh -c '
+      set -e;
       s3="aws --endpoint-url http://minio:9000 s3api";
       until $$s3 list-buckets >/dev/null 2>&1; do
         echo "waiting for the s3 store..."; sleep 1;
       done;
       $$s3 head-bucket --bucket "$${R2_BUCKET}" 2>/dev/null || $$s3 create-bucket --bucket "$${R2_BUCKET}";
-      policy=$$(printf "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::%s/*\"]}]}" "$${R2_BUCKET}");
-      $$s3 put-bucket-policy --bucket "$${R2_BUCKET}" --policy "$$policy";
+      $$s3 delete-bucket-policy --bucket "$${R2_BUCKET}";
       echo "s3 bucket $${R2_BUCKET} ready";
       '
     restart: "no"
@@ -172,7 +173,7 @@ services:
       R2_BUCKET: ${R2_BUCKET:-openflipbook}
       R2_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
       R2_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
-      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:9000/openflipbook}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-/api/blobs}
     depends_on:
       backend:
         condition: service_healthy
@@ -229,12 +230,12 @@ services:
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/?directConnection=true}
       MONGODB_DB: ${MONGODB_DB:-openflipbook}
       # Blobs → local Minio by default. R2_ENDPOINT makes the S3 client target
-      # Minio (path-style); the public base URL is what the browser fetches.
+      # Minio (path-style); the browser uses the authorized same-origin route.
       R2_ENDPOINT: ${R2_ENDPOINT:-http://minio:9000}
       R2_BUCKET: ${R2_BUCKET:-openflipbook}
       R2_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-openflipbook}
       R2_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-openflipbook-local}
-      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:9000/openflipbook}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-/api/blobs}
       # The web server routes gate geometry seeding + scale-nav on these —
       # same graduated single-knob coupling as the backend block above.
       WORLD_MODE: ${WORLD_MODE:-true}

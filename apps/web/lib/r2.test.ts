@@ -42,5 +42,8 @@ describe("storedKeyFromUrl", () => {
     expect(storedKeyFromUrl("https://elsewhere.com/a.jpg", base)).toBeNull();
     expect(storedKeyFromUrl(`${base}/`, base)).toBeNull();
     expect(storedKeyFromUrl("data:image/jpeg;base64,xxx", base)).toBeNull();
+    expect(storedKeyFromUrl("/api/blobs/world/image.png", "/api/blobs")).toBe("world/image.png");
+    expect(storedKeyFromUrl("https://app.test/api/blobs/world/image.png", "/api/blobs")).toBe("world/image.png");
+    expect(storedKeyFromUrl("/api/blobs/world/%XX", "/api/blobs")).toBeNull();
   });
 });
