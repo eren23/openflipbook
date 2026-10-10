@@ -49,3 +49,10 @@ export function creatorWorldUrl(world: Pick<WorldSummary, "id" | "resume_node_id
     ? `/sketch/world?${new URLSearchParams({ world: world.id, place: world.resume_place_id,...(world.resume_view==="walk"?{view:"walk"}:{}) })}`
     : `/play?${new URLSearchParams({ continue: world.id, ...(world.resume_node_id ? { node: world.resume_node_id } : {}) })}`;
 }
+
+// Artwork and a physical walk keep separate saved positions. Opening artwork
+// must remain available when the most recent activity was in the 3D editor.
+export function creatorArtworkUrl(world: Pick<WorldSummary, "id" | "node_count" | "resume_node_id">): string | null {
+  if (!world.node_count) return null;
+  return `/play?${new URLSearchParams({ continue: world.id, ...(world.resume_node_id ? { node: world.resume_node_id } : {}) })}`;
+}

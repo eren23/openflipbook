@@ -48,6 +48,17 @@ describe("private creator boundary", () => {
   });
 });
 describe("library", () => {
+  it("retains the artwork cursor when later activity resumes a physical place", async () => {
+    state.scene = true;
+    await updateCreatorWorld("world", { resume_node_id: "arrival" });
+    expect(state.updates[0][1].$set).toMatchObject({ resume_node_id: "arrival", artwork_node_id: "arrival", resume_place_id: null });
+    await updateCreatorWorld("world", { resume_place_id: "p1" });
+    expect(state.updates[1][1].$set).toMatchObject({ resume_node_id: null, resume_place_id: "p1" });
+    expect(state.updates[1][1].$set).not.toHaveProperty("artwork_node_id");
+    await listCreatorWorlds(new URL("http://local"));
+    const projection = state.pipeline.find(step => step.$project).$project;
+    expect(projection.resume_node_id.$ifNull[0]).toBe("$metadata.artwork_node_id");
+  });
   it("retains source-free worlds and validates place resume targets", async () => {
     state.nodes = false; state.scene = true;
     state.rows = [{ _id: "world", title: "Workshop", node_count: 0, place_count: 1, resume_node_id: null, resume_place_id: "p1", last_opened_at: new Date(0), pinned: false, archived: false }];
