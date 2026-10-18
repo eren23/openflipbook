@@ -155,6 +155,20 @@ it("keeps historical overlay inspection read-only and reports missing source pix
   expect(screen.getByRole("button", { name: "Accept illustration" })).toHaveProperty("disabled", true);
   expect(writes()).toEqual([]); ui.unmount(); expect(target.childElementCount).toBe(0);
 });
+it("keeps a comparison picked as soon as the image shows", async () => {
+  // A slow CPU in miniature: each scheduler clock read jumps 10 ms, so React yields between the
+  // commit and its effects. The click lands in that gap, where an effect used to reset the view.
+  library.assets = [{ id: "art", prompt: "Old image", accepted: false, historical: true }];
+  const real = performance.now.bind(performance); let skew = 0;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => real() + (skew += 10));
+  render(<PlaceIllustrations sessionId="world" view={{ ...view, historical: true }} disabled={false}/>);
+  await new Promise<void>(resolve => { const observer = new MutationObserver(() => {
+    const overlay = screen.queryByRole("button", { name: "Overlay" });
+    if (overlay && screen.queryByRole("img", { name: "Generated camera illustration" })) { observer.disconnect(); fireEvent.click(overlay); resolve(); }
+  }); observer.observe(document.body, { subtree: true, childList: true, attributes: true }); });
+  clock.mockRestore(); await new Promise(resolve => setTimeout(resolve, 50));
+  expect(screen.getByRole("button", { name: "Overlay" }).getAttribute("aria-pressed")).toBe("true");
+});
 it("rejects a malformed library response without crashing the camera panel", async () => {
   fetcher.mockResolvedValue(Response.json({ views: [] })); draw(); await screen.findByText("Invalid illustration library response");
   expect(screen.getByLabelText("Illustration appearance")).toHaveProperty("disabled", false); expect(writes()).toEqual([]);
