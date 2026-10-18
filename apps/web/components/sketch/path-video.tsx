@@ -17,7 +17,7 @@ const resumeSignature = (quote: ResumeQuote) => JSON.stringify(quote);
 // H3 legs between them, joined. The server hides this panel (404) unless PATH_VIDEO_ENABLED=1.
 export default function PathVideo({ sessionId, studyId, walk, disabled, children, refreshKey = 0, preferReviewed = false }: { sessionId: string; studyId?: string; walk?: { placeId: string; viewIds: string[] }; disabled: boolean; children?: ReactNode; refreshKey?: number; preferReviewed?: boolean }) {
   const [library, setLibrary] = useState<Library | null>(null), [off, setOff] = useState(false);
-  const [prompt, setPrompt] = useState(""), [consent, setConsent] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [prompt, setPrompt] = useState(""), [consentFor, setConsentFor] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [resumeConsents, setResumeConsents] = useState<Record<string, string>>({});
   const [acceptedOnly, setAcceptedOnly] = useState(preferReviewed);
   const lastPreference = useRef(preferReviewed);
@@ -51,12 +51,12 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
   useEffect(() => {
     if (lastExternalRefresh.current === refreshKey) return;
     lastExternalRefresh.current = refreshKey;
-    setLibrary(null); setConsent(false); setResumeConsents({}); refresh();
+    setLibrary(null); setConsentFor(""); setResumeConsents({}); refresh();
   }, [refreshKey, refresh]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (pending.current?.url !== url) pending.current = null;
-    setLibrary(null); setOff(false); setConsent(false); setResumeConsents({}); setError(""); refresh();
+    setLibrary(null); setOff(false); setConsentFor(""); setResumeConsents({}); setError(""); refresh();
   }, [refresh, url]);
   // Only a first paint reads words; chain keyframes copy the accepted artwork.
   const appearance = !!library?.quote?.appearance;
@@ -64,7 +64,9 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
   const anchorSha = library?.accepted_anchors_sha256;
   const active = library?.jobs.some(job => job.status === "scheduled" || job.status === "running");
   useEffect(() => { if (!active) return; const timer = setInterval(refresh, 5000); return () => clearInterval(timer); }, [active, refresh]);
-  useEffect(() => { setConsent(false); }, [library?.quote?.reservation, library?.quote?.expected_cost, library?.quote?.retry_allowance, sha, anchorSha]);
+  // Consent is for one exact quote, so a new quote is not approved in the same render.
+  // An effect that cleared consent after the render could undo a click on the new quote.
+  const quoteKey = library?.quote ? JSON.stringify([library.quote, sha, anchorSha]) : "", consent = !!quoteKey && consentFor === quoteKey;
   async function send(body: Record<string, unknown>) {
     if (submitting.current) return;
     submitting.current = true;
@@ -81,7 +83,7 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
         if (paid && response.status < 500) pending.current = null;
         throw new Error(result.error || "Path video request failed");
       }
-      if (paid) { pending.current = null; if (mounted.current && currentScope.current === scope) { setConsent(false); setResumeConsents({}); } }
+      if (paid) { pending.current = null; if (mounted.current && currentScope.current === scope) { setConsentFor(""); setResumeConsents({}); } }
       await reload();
     } catch (e) { if (mounted.current && currentScope.current === scope) setError((e as Error).message); }
     finally { submitting.current = false; if (mounted.current) setBusy(false); }
@@ -96,7 +98,7 @@ export default function PathVideo({ sessionId, studyId, walk, disabled, children
     {library && (!walk || library.checkpoints > 0) && <p role="status">{library.checkpoints} keyframe checkpoints / {Math.max(0, library.checkpoints - 1)} legs</p>}
     {library?.quote && <>
       {appearance && <label>Appearance<textarea aria-label="Path video appearance" value={prompt} maxLength={1024} disabled={busy || disabled} onChange={e => setPrompt(e.target.value)}/></label>}
-      <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || disabled} onChange={e => setConsent(e.target.checked)}/>
+      <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || disabled} onChange={e => setConsentFor(e.target.checked ? quoteKey : "")}/>
         Approve up to {dollars(library.quote.reservation)} (expected {dollars(library.quote.expected_cost ?? library.quote.reservation)}) for {library.quote.paid_keyframes} keyframes and {library.quote.legs.length} legs</label>
       {library.quote.retry_allowance === 1 && <p>Includes up to one consistency retry per paid step. A failed retry pauses for review and a new quote.</p>}
       {policy && <p>{policy === "accepted-only-v1" ? "One five-second leg from the exact reviewed JPEG anchors." : "One five-second leg for each adjacent reviewed pair."} No artwork generation or paid retry. A failed check preserves the clip for review.</p>}
