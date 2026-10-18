@@ -33,9 +33,8 @@ it("asks no appearance words when every paid keyframe chains from the accepted a
   render(<PathVideo sessionId="world" studyId="study" disabled={false}/>);
   const generate = await screen.findByRole("button", { name: "Generate path video" });
   expect(screen.queryByRole("textbox")).toBeNull();
-  // Consent resets when the quote arrives, so tick it again until it holds.
-  const consent = screen.getByRole("checkbox", { name: "Approve up to $0.74 (expected $0.37) for 1 keyframes and 1 legs" }) as HTMLInputElement;
-  await waitFor(() => { if (!consent.checked) fireEvent.click(consent); expect((generate as HTMLButtonElement).disabled).toBe(false); });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Approve up to $0.74 (expected $0.37) for 1 keyframes and 1 legs" }));
+  expect((generate as HTMLButtonElement).disabled).toBe(false);
 });
 it("makes a walk video: a saved checkpoint view at each eye pose of the route, then one priced job over them", async () => {
   const empty = { views_sha256: "", checkpoints: 0, quote: null, reason: "", jobs: [] };
@@ -59,8 +58,8 @@ it("makes a walk video: a saved checkpoint view at each eye pose of the route, t
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith(`/walk-videos?views=${encodeURIComponent(ids.join(","))}`))).toBe(true);
   expect(screen.queryByRole("button", { name: "Make walk video" })).toBeNull();
   fireEvent.change(screen.getByRole("textbox", { name: "Path video appearance" }), { target: { value: "Inked stone" } });
-  const consent = screen.getByRole("checkbox", { name: "Approve up to $1.10 (expected $0.55) for 3 keyframes and 2 legs" }) as HTMLInputElement;
-  await waitFor(() => { if (!consent.checked) fireEvent.click(consent); expect((generate as HTMLButtonElement).disabled).toBe(false); });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Approve up to $1.10 (expected $0.55) for 3 keyframes and 2 legs" }));
+  expect((generate as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(generate);
   await waitFor(() => expect(posts("/walk-videos")).toHaveLength(1));
   expect(posts("/walk-videos")[0]).toMatchObject({ action: "generate", confirmed: true, prompt: "Inked stone", view_ids: ids, views_sha256: "pinned", reservation: 1.1 });

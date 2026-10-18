@@ -10,7 +10,7 @@ export default function MotionGeneration({ sessionId, studyId, disabled, onTime 
   sessionId: string; studyId: string; disabled: boolean; onTime: (seconds: number) => void;
 }) {
   const [library, setLibrary] = useState<Library | null>(null), [selected, setSelected] = useState("");
-  const [consent, setConsent] = useState(false), [experimental, setExperimental] = useState(false);
+  const [consentFor, setConsentFor] = useState(""), [experimental, setExperimental] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const mounted = useRef(true), writing = useRef(false), pending = useRef<string | null>(null), reads = useRef({ version: 0 });
@@ -25,7 +25,8 @@ export default function MotionGeneration({ sessionId, studyId, disabled, onTime 
     return () => { mounted.current = false; state.version++; }; }, [reload]);
   const active = library?.jobs.some(job => ["scheduled", "submitting", "queued", "running", "storing", "submission_unknown"].includes(job.status));
   useEffect(() => { if (!active) return; const timer = setInterval(() => { void reload().catch(e => { if (mounted.current) setError(e.message); }); }, 5000); return () => clearInterval(timer); }, [active, reload]);
-  useEffect(() => { setConsent(false); }, [library?.quote?.reservation, library?.study_sha256, library?.comparison?.sha256]);
+  // Consent is for one exact quote (see path-video.tsx).
+  const quoteKey = library?.quote ? JSON.stringify([library.quote, library.study_sha256, library.comparison?.sha256]) : "", consent = !!quoteKey && consentFor === quoteKey;
   async function action(body: Record<string, unknown>) {
     if (writing.current) return false;
     if (body.action === "generate" && !pending.current && (disabled || !consent || !experimental || !library?.quote)) return false;
@@ -38,7 +39,7 @@ export default function MotionGeneration({ sessionId, studyId, disabled, onTime 
         if (body.action === "generate" && [400, 403, 404, 409, 413, 429].includes(response.status)) pending.current = null;
         throw new Error(result.error || "Motion request failed");
       }
-      if (body.action === "generate") { pending.current = null; if (mounted.current) setConsent(false); }
+      if (body.action === "generate") { pending.current = null; if (mounted.current) setConsentFor(""); }
       await reload();
       return true;
     } catch (e) { if (mounted.current) setError((e as Error).message); return false; }
@@ -58,7 +59,7 @@ export default function MotionGeneration({ sessionId, studyId, disabled, onTime 
     </details>}
     {library?.quote && <>
       <label className={s.checkbox}><input type="checkbox" checked={experimental} disabled={busy || disabled} onChange={e => setExperimental(e.target.checked)}/>Use experimental camera mapping</label>
-      <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || disabled} onChange={e => setConsent(e.target.checked)}/>Reserve {dollars(library.quote.reservation)} for this clip</label>
+      <label className={s.checkbox}><input type="checkbox" checked={consent} disabled={busy || disabled} onChange={e => setConsentFor(e.target.checked ? quoteKey : "")}/>Reserve {dollars(library.quote.reservation)} for this clip</label>
     </>}
     {(library?.quote || pending.current) && <button disabled={busy || !pending.current && (disabled || !consent || !experimental)} onClick={() => void action({ action: "generate" })}><Video size={16}/>{busy ? "Submitting..." : pending.current ? "Retry same motion request" : "Generate calibration clip"}</button>}
     {library?.reason && <p>{library.reason}</p>}
