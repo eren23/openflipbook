@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -21,6 +22,10 @@ import { importWorldPathVideos } from "./world-import-path-video";
 import { motionVideoToolsAvailable } from "./motion-video";
 import type { PathVideoDoc } from "./path-video";
 import type { MotionStudyDoc } from "./motion-study";
+// These tests run real ffmpeg or sharp. Several take 1 to 3.4 s on Linux, and in a gVisor
+// sandbox or with two sandboxes on one host they pass the 5 s vitest default. So every test
+// in this file gets 20 s.
+vi.setConfig({ testTimeout: 20_000 });
 
 async function fixture(accepted = false, count = 2, route = false) {
   const date = new Date(0).toISOString(), definition = emptyPlaceScene(), scene = { id: "scene", session_id: "source", place_id: "place", revision: 1, source_node_id: null, source_image_key: null, definition, updated_at: date };
@@ -75,9 +80,6 @@ it("keeps accepted-only anchor policy and exact JPEG evidence inert and portable
   expect(restored.keyframes.map(frame => frame.file!.sha256)).toEqual(f.job.keyframes.map(frame => frame.file!.sha256));
   expect(restored.keyframes.every(frame => frame.file!.key.startsWith("destination/") && frame.stage === "source" && !frame.attempt)).toBe(true);
 });
-// The 12-anchor case makes 12 JPEG anchors with sharp. It takes 2.6 to 3.4 s on Linux, up to
-// 4.8 s in a gVisor sandbox and more than 5 s with two sandboxes on one host. The vitest
-// default is 5 s, so 20 s gives margin.
 it.each([2, 3, 12])("roundtrips %i ordered accepted-route anchors as inert exact JPEGs with uniform five-second legs", async count => {
   const f = await fixture(true, count, true), plan = await prepareWorldImport(await f.archive(), "destination"), restored = plan.records.path_videos![0] as PathVideoDoc;
   expect(restored).toMatchObject({ status: "cancelled", keyframe_policy: "accepted-route-v1", retry_allowance: 0, duration: 5 * (count - 1), accepted_anchors_sha256: f.job.accepted_anchors_sha256,
@@ -87,7 +89,7 @@ it.each([2, 3, 12])("roundtrips %i ordered accepted-route anchors as inert exact
   for (const [i, frame] of restored.keyframes.entries()) { const upload = plan.uploads.find(item => item.key === frame.file!.key)!;
     expect(upload.contentType).toBe("image/jpeg"); expect(upload.bytes).toEqual(f.storage.get(f.job.keyframes[i]!.file!.key)); expect(frame.stage).toBe("source"); expect(frame.attempt).toBeUndefined(); }
   expect(restored).not.toHaveProperty("work_token"); expect(restored).not.toHaveProperty("verification_version");
-}, 20_000);
+});
 it.each(["missing-anchor", "anchor-order", "middle-camera", "middle-review", "frame-paint", "frame-time", "leg-duration", "leg-price", "leg-retry", "dropped", "total-duration", "overspend", "v1-substitution"])("rejects forged accepted-route archive %s", async change => {
   const f = await fixture(true, 3, true), archive = await f.archive(), json = archive.json, content = json("path-videos.json") as Document, receipt = content.receipts[0];
   if (change === "missing-anchor") receipt.accepted_anchors.splice(1, 1);

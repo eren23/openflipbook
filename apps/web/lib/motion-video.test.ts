@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -7,6 +8,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { motionVideoToolsAvailable, silentMotionVideo, inspectMotionArchiveVideos, legMotion, motionEnd, landCheck, cutLeg, joinLegs, grayFrame, FREEZE_DELTA, LAND_MAX, SNAP_MAX, MAX_MOTION_SECONDS, MAX_PATH_VIDEO_SECONDS } from "./motion-video";
+// These tests run real ffmpeg or sharp. Several take 1 to 3.4 s on Linux, and in a gVisor
+// sandbox or with two sandboxes on one host they pass the 5 s vitest default. So every test
+// in this file gets 20 s.
+vi.setConfig({ testTimeout: 20_000 });
 const run = promisify(execFile), available = await motionVideoToolsAvailable();
 let directory: string, source: string, bytes: Buffer;
 beforeAll(async () => {
@@ -103,8 +108,6 @@ describe.skipIf(!available)("leg video helpers", () => {
     await expect(joinLegs([padded])).rejects.toThrow("contain audio");
   }, 30_000);
 
-  // The next two tests encode with real ffmpeg. They take 1.3 to 2.4 s on Linux and up to
-  // about 5 s in a gVisor sandbox. The vitest default is 5 s, so 20 s gives margin.
   it("assembles a real 24-second walk while keeping provider clips capped at 20 seconds", async () => {
     const clip = join(directory, "long-walk-leg.mp4");
     await run("ffmpeg", ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x32:rate=24:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip]);
@@ -115,7 +118,7 @@ describe.skipIf(!available)("leg video helpers", () => {
     expect(result.hashes.playback_sha256).toBe(createHash("sha256").update(result.bytes).digest("hex"));
     await expect(silentMotionVideo(result.bytes)).rejects.toThrow("duration");
     await expect(joinLegs(Array(8).fill(leg), 12)).rejects.toThrow("differs from its plan");
-  }, 20_000);
+  });
 
   it("accepts the assembled path limit and rejects longer or invalid plans before assembly", async () => {
     expect(MAX_MOTION_SECONDS).toBe(20); expect(MAX_PATH_VIDEO_SECONDS).toBe(60);
@@ -126,5 +129,5 @@ describe.skipIf(!available)("leg video helpers", () => {
     await expect(joinLegs(Array(7).fill(leg))).rejects.toThrow("duration differs");
     for (const seconds of [NaN, 0, -1, 61]) await expect(joinLegs([leg], seconds)).rejects.toThrow("limit");
     await expect(joinLegs(Array(12).fill(leg))).rejects.toThrow("leg limit");
-  }, 20_000);
+  });
 });
