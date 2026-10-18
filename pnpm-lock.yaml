@@ -16,6 +16,7 @@ overrides:
   nanoid@^3: ^3.3.18
   postcss@^8: ^8.5.23
   rollup@^3: ^3.30.0
+  tinypool@^1: 2.2.0
 
 importers:
 
@@ -4886,9 +4887,9 @@ packages:
     resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
     engines: {node: '>=12.0.0'}
 
-  tinypool@1.1.1:
-    resolution: {integrity: sha512-Zba82s87IFq9A9XmjiX5uZA/ARWDrB03OHlq+Vw1fSdt0I+4/Kutwy8BP4Y/y/aORMo61FQ0vIb5j44vSo5Pkg==}
-    engines: {node: ^18.0.0 || >=20.0.0}
+  tinypool@2.2.0:
+    resolution: {integrity: sha512-jBrmx4lYmaC9k/mgPbylxs7kBUxHtD8256up+HjLaDFfXScKJQyil+SWXSvhAtT7XHo+yTVlpB81PGmHP8oLSQ==}
+    engines: {node: ^20.0.0 || >=22.0.0}
 
   tinyrainbow@2.0.0:
     resolution: {integrity: sha512-op4nsTR47R6p0vMUUoYl/a+ljLFVtlfaXkLQmqfLR1qHma1h/ysYk4hEXZ880bf2CYgTskvTa/e196Vd5dDQXw==}
@@ -10376,7 +10377,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.4)
       picomatch: 4.0.4
 
-  tinypool@1.1.1: {}
+  tinypool@2.2.0: {}
 
   tinyrainbow@2.0.0: {}
 
@@ -10556,7 +10557,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 0.3.2
       tinyglobby: 0.2.16
-      tinypool: 1.1.1
+      tinypool: 2.2.0
       tinyrainbow: 2.0.0
       vite: 5.4.21(@types/node@22.19.17)(lightningcss@1.32.0)(sass@1.51.0)(terser@5.47.1)
       vite-node: 3.2.4(@types/node@22.19.17)(lightningcss@1.32.0)(sass@1.51.0)(terser@5.47.1)
