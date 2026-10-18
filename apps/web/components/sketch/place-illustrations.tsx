@@ -72,7 +72,9 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
     timer = setTimeout(() => void poll(), 3000);
     return () => { stopped = true; clearTimeout(timer); };
   }, [polling, busy, reload]);
-  useEffect(() => { setEditingRegion(false); setRegionIds([]); setStrokes(undefined); setMaskReady(false); setComparison("illustration"); setSourceOpacity(50); }, [selected, view.id]);
+  // Reset in render, not in an effect: the effect ran after the new image was on screen and undid a comparison picked in between.
+  const shownKey = `${view.id}:${selected}`, [resetKey, setResetKey] = useState(shownKey);
+  if (resetKey !== shownKey) { setResetKey(shownKey); setEditingRegion(false); setRegionIds([]); setStrokes(undefined); setMaskReady(false); setComparison("illustration"); setSourceOpacity(50); }
   const editQuote = JSON.stringify(library?.region_capabilities);
   useEffect(() => { if (!maskedPending.current) setEditConsent(false); }, [editQuote, library?.accepted_id, regionIds, regionMode, strokes]);
   async function action(body: Record<string, unknown>, retained?: "generation" | "region" | "masked") {
@@ -119,7 +121,7 @@ export default function PlaceIllustrations({ sessionId, view, previousView, disa
   // Keyed to the shown image, not reset by an effect: next/image fires onLoad
   // during commit for an image that is already complete (a cached one), which
   // is before a reset effect would run, and never fires again for that src.
-  const shownKey = `${view.id}:${selected}`, loaded = loadedKey === shownKey;
+  const loaded = loadedKey === shownKey;
   const imageLoaded = () => setLoadedKey(shownKey);
   const imageFailed = () => { setLoadedKey(""); setError("Saved illustration image unavailable."); };
   const labels = kf?.reference_preparation?.landmarks?.map(l => l.label) ?? landmarkLabels;
