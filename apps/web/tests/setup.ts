@@ -9,8 +9,19 @@
  * library's own implicit afterEach hook.
  */
 
-import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { cleanup, getQueriesForElement, screen } from "@testing-library/react";
+import { afterEach, beforeEach, vi } from "vitest";
+
+// The setup file runs again for each test file. Drop the app modules (and the mocks bound into them)
+// that an earlier file in this worker loaded. node_modules stay loaded.
+vi.resetModules();
+
+// screen is bound to document.body when the module first loads. With --no-isolate the module stays loaded
+// in the reused worker, so bind it again to the body of this file's document.
+beforeEach(() => {
+  // Files with @vitest-environment node have no document.
+  if (typeof document !== "undefined") Object.assign(screen, getQueriesForElement(document.body));
+});
 
 afterEach(() => {
   cleanup();

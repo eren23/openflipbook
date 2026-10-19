@@ -77,14 +77,8 @@ function installPath2D(): FakePath2D[] {
 beforeEach(() => {
   // Each test sets its own naturalWidth / naturalHeight via Image.prototype.
   vi.spyOn(Image.prototype, "decode").mockResolvedValue(undefined);
-  Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
-    configurable: true,
-    get: () => 1000,
-  });
-  Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
-    configurable: true,
-    get: () => 500,
-  });
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(1000);
+  vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(500);
   vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(STUBBED_OUTPUT);
 });
 
