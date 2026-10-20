@@ -16,7 +16,8 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
   vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+// Real timers first: the fake clock replaced the stubbed animation frame globals and must put them back before the unstub.
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("spatial navigation lifecycle", () => {
   it("waits for decode, reframes, holds, then commits once at the cut", async () => {
