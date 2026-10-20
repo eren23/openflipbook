@@ -102,7 +102,8 @@ it("warns before leaving unsaved measurements and removes the warning after savi
   expect(unload()).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Add landmark coordinates" })); expect(unload()).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Save alignment draft" }));
-  await screen.findByRole("button", { name: "Alignment draft saved" }); expect(unload()).toBe(false);
+  await screen.findByRole("button", { name: "Alignment draft saved" });
+  await waitFor(() => expect(unload()).toBe(false));
 });
 it.each(["map", "replaced-map"])("only explicitly rebases surviving identities when the source image is unchanged (%s)", async mapId => {
   const alignment = { revision: 3, scene_id: scene.id, map_node_id: mapId, frame: { width: 1000, height: 600 }, registration, landmarks: [{ object_id: "inn", x: 24, y: 40 }, { object_id: "removed", x: 60, y: 40 }] };
