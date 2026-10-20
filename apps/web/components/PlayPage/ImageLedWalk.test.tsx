@@ -29,7 +29,11 @@ afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 async function restore(walk:ImageLedWalkWire,extra?:(url:string,init?:RequestInit)=>Promise<Response>|Response){
   localStorage.setItem(`${key}:selected`,walk.id);
   const fetch=vi.fn(async(url:string,init?:RequestInit)=>extra&&init?extra(url,init):response(url.includes("?kind=")?{walk,quote:q(url.includes("kind=video")?"video":"still",Number(new URL(url,"http://localhost").searchParams.get("index")))}:{walks:[walk],source}));
-  vi.stubGlobal("fetch",fetch);render(<ImageLedWalk {...props}/>);await screen.findByRole("button",{name:/View 1/});return fetch;
+  vi.stubGlobal("fetch",fetch);
+  // Restoring a route resets its review controls in a passive effect.
+  // Finish that effect before tests start checking consent boxes.
+  await act(async()=>{render(<ImageLedWalk {...props}/>);});
+  await screen.findByRole("button",{name:/View 1/});return fetch;
 }
 describe("ImageLedWalk",()=>{
   it("opens above the map's stacking layer so fixed navigation cannot obscure review controls",async()=>{
@@ -100,6 +104,7 @@ describe("ImageLedWalk",()=>{
     fireEvent.click(screen.getByLabelText("Position, facing direction and neighbouring buildings fit this drawn route."));
     expect((approval as HTMLButtonElement).disabled).toBe(true);
     fireEvent.load(screen.getByAltText(/Generated street painting/));
+    expect((approval as HTMLButtonElement).disabled).toBe(false);
     await act(async()=>fireEvent.click(approval));
     expect(posts).toEqual([{action:"review",kind:"still",index:0,sha256:sha,identity:"approved",route:"approved"}]);
   });
