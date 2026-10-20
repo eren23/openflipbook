@@ -10,7 +10,7 @@
  */
 
 import { cleanup, getQueriesForElement, screen } from "@testing-library/react";
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, vi } from "vitest";
 
 // The setup file runs again for each test file. Drop the app modules (and the mocks bound into them)
 // that an earlier file in this worker loaded. node_modules stay loaded.
@@ -25,6 +25,17 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+// With --no-isolate the next test file runs in this same process. Put back the env vars this file
+// stubbed or wrote and the globals it stubbed. Tests that replace DOM prototype members must use
+// vi.spyOn, which vitest restores between files: happy-dom keeps its classes for the whole worker.
+const env = { ...process.env };
+afterAll(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
+  Object.assign(process.env, env);
 });
 
 class MemoryStorage implements Storage {

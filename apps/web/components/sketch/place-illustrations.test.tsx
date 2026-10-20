@@ -5,7 +5,7 @@ import type { SavedPlaceView } from "@/lib/place-view";
 vi.mock("./illustration-region-picker", () => ({ default: ({ onReady, onChange, onBrushChange, disabled }: { onReady(v: boolean): void; onChange(v: string[]): void; onBrushChange(v: unknown): void; disabled: boolean }) => <><button disabled={disabled} onClick={() => { onReady(true); onChange(["roof"]); }}>Select roof fixture</button><button disabled={disabled} onClick={() => { onReady(true); onChange(["roof"]); onBrushChange([{ operation: "paint", radius: 3, points: [[10, 10]] }]); }}>Paint fixture</button></> }));
 // happy-dom 20 reports every <img> complete at once. An uncached image in a
 // browser is not, and these tests fire its load event themselves.
-Object.defineProperty(HTMLImageElement.prototype, "complete", { configurable: true, get: () => false });
+const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
 const fetcher = vi.fn();
 const view = { id: "view", width: 400, height: 300, historical: false } as SavedPlaceView;
 let library: { jobs: unknown[]; assets: unknown[]; historical: boolean; accepted_id: string | null; capabilities: { enabled: boolean; model: string; reservation: number; parameters: object }; region_capabilities?: { enabled: boolean; model: string; reservation: number; parameters: object; brush_enabled?: boolean } };
@@ -100,13 +100,13 @@ it("blocks generation for unsaved or historical geometry", async () => {
   expect(screen.getByRole("button", { name: "Generate illustration" })).toHaveProperty("disabled", true); expect(writes()).toEqual([]);
 });
 it("counts a cached image as loaded, though next/image reports it before the reset effect runs", async () => {
-  Object.defineProperty(HTMLImageElement.prototype, "complete", { configurable: true, get: () => true });
+  complete.mockReturnValue(true);
   try {
     library.assets = [{ id: "art", prompt: "Inked stone", accepted: false, historical: false }];
     draw(); await screen.findByRole("img", { name: "Generated camera illustration" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Accept illustration" })).toHaveProperty("disabled", false));
   } finally {
-    Object.defineProperty(HTMLImageElement.prototype, "complete", { configurable: true, get: () => false });
+    complete.mockReturnValue(false);
   }
 });
 it("compares saved images read-only and requires loaded pixels before acceptance", async () => {

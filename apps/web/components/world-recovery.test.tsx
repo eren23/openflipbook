@@ -4,8 +4,8 @@ import WorldRecovery from "./world-recovery";
 const reply = (data: unknown, status = 200) => ({ ok: status < 400, json: async () => data });
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
-  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
-  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
+  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) { this.setAttribute("open", ""); });
+  vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute("open"); });
 });
 it("requires explicit confirmation, establishes identity first and clears the secret on success", async () => {
   const fetcher = vi.fn().mockResolvedValue(reply({ recovered: true })), changed = vi.fn(); vi.stubGlobal("fetch", fetcher);

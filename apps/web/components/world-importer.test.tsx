@@ -5,8 +5,8 @@ const preview = { request_id: "request", sha256: "digest", status: "preview", se
 const reply = (value: unknown, status = 200) => ({ ok: status < 400, json: async () => value });
 beforeEach(() => {
   localStorage.clear();
-  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
-  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
+  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) { this.setAttribute("open", ""); });
+  vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute("open"); });
 });
 it("inspects an archive and requires separate explicit confirmation before publishing", async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(reply({})).mockResolvedValueOnce(reply(preview)).mockResolvedValueOnce(reply({ ...preview, status: "applied" }));
