@@ -24,6 +24,11 @@ export default defineConfig({
       "tests/**/*.test.{ts,tsx}",
     ],
     globals: false,
+    // Each fork reuses one module graph and one happy-dom window for all its test files. This makes
+    // the suite about 2.5x faster (Mac 21 s, was 50 s; gVisor 106 s, was 322 s). tests/setup.ts puts
+    // back the env vars and globals that a file changes. Use vi.spyOn for DOM prototype members.
+    // To find a leak between files, run with --isolate.
+    isolate: false,
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
