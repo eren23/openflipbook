@@ -43,6 +43,7 @@ from .client import (
     ENTITY_KINDS,
     OPENROUTER_BASE_URL,
     REASONING_HEADROOM,
+    REQUESTY_BASE_URL,
     SCALE_KINDS,
     _cache_enabled,
     _choice_content,

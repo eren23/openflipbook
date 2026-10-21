@@ -413,6 +413,17 @@ async def status_payload(service: str) -> dict[str, Any]:
         _check_provider("fal", "https://fal.run/health"),
         _check_provider("openrouter", "https://openrouter.ai/api/v1/models"),
     )
+    providers: dict[str, bool] = {
+        "fal": fal_ok,
+        "openrouter": openrouter_ok,
+    }
+    # Requesty is an optional OpenRouter-shaped LLM provider; only probe (and
+    # surface) it when it's the configured provider, so the default payload is
+    # unchanged for the OpenRouter path.
+    if (os.environ.get("LLM_PROVIDER", "").strip().lower()) == "requesty":
+        providers["requesty"] = await _check_provider(
+            "requesty", "https://router.requesty.ai/v1/models"
+        )
     return {
         "ok": True,
         "service": service,
@@ -420,8 +431,5 @@ async def status_payload(service: str) -> dict[str, Any]:
         "uptime_s": round(time.time() - _started_at, 1),
         "in_flight": _in_flight,
         "last_error_ts": _last_error_ts,
-        "providers": {
-            "fal": fal_ok,
-            "openrouter": openrouter_ok,
-        },
+        "providers": providers,
     }
