@@ -68,6 +68,7 @@ image = (
         "fastapi>=0.115",
         "websockets>=13",
         "httpx>=0.27",
+        "aiohttp>=3.14.4",  # GHSA-9xw5-w5jj-pvcg; also used transitively by Modal.
     )
     .add_local_python_source("ltxf")
     .add_local_python_source("obs")
