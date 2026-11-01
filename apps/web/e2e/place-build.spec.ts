@@ -38,6 +38,7 @@ const materialParameters = { image_size: { width: 1024, height: 1024 }, num_imag
 const blobs = new Map<string, Buffer>();
 const meshParameters = { enable_pbr: true, face_count: 40000, generate_type: "LowPoly", polygon_type: "triangle" };
 const name = `ofb_e2e_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
+const E2E_MONGODB_URI = "mongodb://127.0.0.1:27017/?directConnection=true";
 const backend = createServer(async (req, res) => {
   res.setHeader("Content-Type", "application/json");
   if (req.url === "/place-build/capabilities") { res.end(JSON.stringify({ enabled: true, reservation: 0.2, model: "e2e-fixture-planner", connection_context_version: 1, floor_target_version: 1 })); return; }
@@ -115,7 +116,7 @@ async function startApp() {
   }, { timeout: 150_000, intervals: [1000] }).toBe(true);
 }
 async function stopApp() {
-  if (app && app.exitCode === null) { const exited = once(app, "exit"); app.kill("SIGTERM"); await exited; }
+  if (app && app.exitCode === null && app.signalCode === null) { const exited = once(app, "exit"); app.kill("SIGTERM"); await exited; }
 }
 async function startWorker() {
   let output = "";
@@ -153,13 +154,14 @@ async function importThroughLibrary(page: Page, bytes: Buffer) {
 test.beforeAll(async () => {
   test.setTimeout(180_000); process.loadEnvFile(".env.local");
   originalRouteReference = (await readFile("next-env.d.ts", "utf8")).split("\n").find(line => line.startsWith("/// <reference path="));
-  client = new MongoClient(process.env.MONGODB_URI!); await client.connect();
+  // This test makes one database for each run, so it uses only the local compose Mongo (`docker compose up -d mongo mongo-init`), never MONGODB_URI from .env.local.
+  client = new MongoClient(E2E_MONGODB_URI, { serverSelectionTimeoutMS: 5_000 }); await client.connect();
   if ((await client.db().admin().listDatabases({ nameOnly: true })).databases.some(d => d.name === name)) throw new Error("Test database already exists");
   backend.listen(0, "127.0.0.1"); await once(backend, "listening");
   const port = (backend.address() as { port: number }).port;
   const free = createServer(); free.listen(0, "127.0.0.1"); await once(free, "listening"); appPort = (free.address() as { port: number }).port; await new Promise<void>(resolve => free.close(() => resolve()));
   origin = `http://127.0.0.1:${appPort}`;
-  appEnv = { ...process.env, MONGODB_DB: name, MODAL_API_URL: `http://127.0.0.1:${port}`, SHARED_TOKEN: "fixture-only", NEXT_PUBLIC_WORLD_SCENES: "1",
+  appEnv = { ...process.env, MONGODB_URI: E2E_MONGODB_URI, MONGODB_DB: name, MODAL_API_URL: `http://127.0.0.1:${port}`, SHARED_TOKEN: "fixture-only", NEXT_PUBLIC_WORLD_SCENES: "1",
     R2_ENDPOINT: `http://127.0.0.1:${port}`, R2_BUCKET: "fixture-store", R2_ACCESS_KEY_ID: "fixture-only", R2_SECRET_ACCESS_KEY: "fixture-only", R2_PUBLIC_BASE_URL: `http://127.0.0.1:${port}/fixture-store`, E2E_MESH_DOWNLOAD_ORIGIN: `http://127.0.0.1:${port}`,
     NEXT_DIST_DIR: "test-results/place-build-next", NEXT_TSCONFIG_PATH: "tsconfig.e2e.json", NEXT_TELEMETRY_DISABLED: "1", MAX_DAILY_SPEND: "40", MAX_SESSION_SPEND: "10", PLACE_BUILD_DAILY_CAP_USD: "10", MESH_DAILY_CAP_USD: "30" };
   worker = await startWorker(); await startApp();
@@ -1323,20 +1325,25 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   expect(meshSubmissions).toBeLessThanOrEqual(before + 2); meshEnabled = false;
 });
 test.afterAll(async () => {
-  pending?.destroy();
-  for (const child of workers) await stopWorker(child, "SIGKILL");
-  await stopApp();
-  backend.closeAllConnections(); if (backend.listening) await new Promise<void>(resolve => backend.close(() => resolve()));
-  if (originalRouteReference) {
-    const generated = await readFile("next-env.d.ts", "utf8");
-    const ownReference = '/// <reference path="./test-results/place-build-next/types/routes.d.ts" />';
-    if (generated.includes(ownReference)) await writeFile("next-env.d.ts", generated.replace(ownReference, originalRouteReference));
-  }
-  // This database name is minted by this test and never comes from user config.
-  if (client) {
-    try {
-      if (/^ofb_e2e_[a-f0-9]{24}$/.test(name)) for (const col of await client.db(name).listCollections({}, { nameOnly: true }).toArray()) await client.db(name).collection(col.name).deleteMany({});
-    } finally { await client.close(); }
+  try {
+    pending?.destroy();
+    for (const child of workers) await stopWorker(child, "SIGKILL");
+    await stopApp();
+    backend.closeAllConnections(); if (backend.listening) await new Promise<void>(resolve => backend.close(() => resolve()));
+    if (originalRouteReference) {
+      const generated = await readFile("next-env.d.ts", "utf8");
+      const ownReference = '/// <reference path="./test-results/place-build-next/types/routes.d.ts" />';
+      if (generated.includes(ownReference)) await writeFile("next-env.d.ts", generated.replace(ownReference, originalRouteReference));
+    }
+  } finally {
+    // This database name is minted by this test and never comes from user config.
+    if (client) {
+      try {
+        // Drop, not empty: an emptied database keeps its collections. Drop each collection, because a
+        // readWrite user cannot run dropDatabase, and a database with no collections is removed.
+        if (/^ofb_e2e_[a-f0-9]{24}$/.test(name)) for (const col of await client.db(name).listCollections({}, { nameOnly: true }).toArray()) await client.db(name).collection(col.name).drop();
+      } finally { await client.close(); }
+    }
   }
 });
 
