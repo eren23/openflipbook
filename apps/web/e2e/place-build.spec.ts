@@ -428,6 +428,11 @@ test(`mesh shell conversion rejects solids and preserves traversal at ${width}`,
     await page.keyboard.down("ArrowLeft"); try { await expect.poll(async () => Number(await viewport.getAttribute("data-yaw")), { intervals: [30] }).toBeGreaterThan(3.12); } finally { await page.keyboard.up("ArrowLeft"); }
     await expect.poll(colored).toBeGreaterThan(30); await viewport.screenshot({ path: `test-results/mesh-shell-upstairs-${width}.png` });
     await page.keyboard.down("ArrowRight"); try { await expect.poll(async () => Number(await viewport.getAttribute("data-yaw")), { intervals: [30] }).toBeLessThan(0.02); } finally { await page.keyboard.up("ArrowRight"); }
+    // Key release can overshoot between frames; face along the stair lane before descending.
+    const heading = Number(await viewport.getAttribute("data-yaw")), turnBox = (await viewport.locator("canvas").boundingBox())!;
+    const turnX = turnBox.x + turnBox.width / 2, turnY = turnBox.y + turnBox.height / 2;
+    await page.mouse.move(turnX, turnY); await page.mouse.down(); await page.mouse.move(turnX + heading / 0.005, turnY); await page.mouse.up();
+    await expect.poll(async () => Math.abs(Number(await viewport.getAttribute("data-yaw")))).toBeLessThan(0.01);
     const savedYaw = Number(await viewport.getAttribute("data-yaw")), savedCamera = await camera();
     await expect.poll(async () => {
       const pose = (await db.collection("creator_worlds").findOne({ _id: sid as never }))?.walk_position?.pose;
@@ -625,6 +630,8 @@ for (const width of [1280, 390]) test(`image concept to durable mesh at ${width}
 });
 
 for (const width of [1280, 390]) test(`durable mesh generation and storage at ${width}`, async ({ page, browser }) => {
+  // This workflow includes archive round-trips and several cold app restarts.
+  test.setTimeout(480_000);
   meshEnabled = true; meshReady = false; failStorage = true;
   illustrationEnabled = true; illustrationReady = false;
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
@@ -798,6 +805,7 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   await objectCheckbox.press("Space"); await expect(objectCheckbox).toBeChecked();
   await objectCheckbox.press("Space"); await expect(objectCheckbox).not.toBeChecked();
   const overlay = page.getByLabel("Object selection overlay", { exact: true });
+  await expect(overlay).toHaveAttribute("data-ready", "true");
   await overlay.scrollIntoViewIfNeeded(); const overlayRect = (await overlay.boundingBox())!;
   const visiblePixels: number[] = [];
   for (let i = 0; i < objectPixels.length; i += 4) if (rgb.every((v, j) => objectPixels[i + j] === v)) visiblePixels.push(i / 4);
@@ -958,6 +966,7 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   await page.getByRole("button", { name: "Select ground", exact: true }).click();
   await expect.poll(paintedCount).toBe(0);
   await overlay.scrollIntoViewIfNeeded();
+  await expect(overlay).toHaveAttribute("data-ready", "true");
   const selectBox = (await overlay.boundingBox())!;
   await page.mouse.click(selectBox.x + (hitPixel % orbitCapture.width + .5) / orbitCapture.width * selectBox.width, selectBox.y + (Math.floor(hitPixel / orbitCapture.width) + .5) / orbitCapture.height * selectBox.height);
   await expect.poll(paintedCount).toBe(maskPixels);
@@ -987,7 +996,8 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   const scene = (await db.collection("place_scenes").findOne({ session_id: sid }))!;
   await viewPanel.getByLabel("Saved camera view", { exact: true }).selectOption(savedOrbit.id);
   await viewPanel.getByRole("button", { name: "Load camera path", exact: true }).click();
-  const restoredViewport = page.getByTestId("place-viewport");
+  await expect(page.getByRole("navigation", { name: "Place view" }).getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const restoredViewport = page.locator('[data-testid="place-viewport"][data-mode="orbit"]');
   await expect(restoredViewport).toHaveAttribute("data-mode", "orbit");
   await expect(cameraPath.getByRole("button", { name: "Camera keyframe 2", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Place view" })).toBeInViewport({ ratio: 1 });
@@ -1113,8 +1123,9 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   expect(forkViews.views.find((v: { id: string }) => v.id === savedOrbit.id).path).toEqual(orbitCapture.path);
   await viewPanel.getByLabel("Saved camera view", { exact: true }).selectOption(savedOrbit.id);
   await viewPanel.getByRole("button", { name: "Load camera path", exact: true }).click();
-  await expect(page.getByTestId("place-viewport")).toHaveAttribute("data-camera", captureCamera!);
-  await expect.poll(async () => (await page.getByTestId("place-viewport").getAttribute("data-projection"))?.split(",").map(Number)).toEqual(orbitCapture.camera.projection_matrix);
+  await expect(page.getByRole("navigation", { name: "Place view" }).getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(restoredViewport).toHaveAttribute("data-camera", captureCamera!);
+  await expect.poll(async () => (await restoredViewport.getAttribute("data-projection"))?.split(",").map(Number)).toEqual(orbitCapture.camera.projection_matrix);
   await page.getByRole("button", { name: `${scene.definition.objects[0].label} mesh`, exact: true }).click();
   await page.getByLabel("Object x", { exact: true }).fill(String(scene.definition.objects[0].x + 1));
   await expect(viewPanel.getByRole("button", { name: "Save camera view", exact: true })).toBeDisabled();
