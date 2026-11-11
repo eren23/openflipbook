@@ -989,7 +989,8 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   const scene = (await db.collection("place_scenes").findOne({ session_id: sid }))!;
   await viewPanel.getByLabel("Saved camera view", { exact: true }).selectOption(savedOrbit.id);
   await viewPanel.getByRole("button", { name: "Load camera path", exact: true }).click();
-  const restoredViewport = region.getByTestId("place-viewport");
+  await expect(page.getByRole("navigation", { name: "Place view" }).getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const restoredViewport = page.locator('[data-testid="place-viewport"][data-mode="orbit"]');
   await expect(restoredViewport).toHaveAttribute("data-mode", "orbit");
   await expect(cameraPath.getByRole("button", { name: "Camera keyframe 2", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Place view" })).toBeInViewport({ ratio: 1 });
@@ -1115,8 +1116,9 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   expect(forkViews.views.find((v: { id: string }) => v.id === savedOrbit.id).path).toEqual(orbitCapture.path);
   await viewPanel.getByLabel("Saved camera view", { exact: true }).selectOption(savedOrbit.id);
   await viewPanel.getByRole("button", { name: "Load camera path", exact: true }).click();
-  await expect(page.getByTestId("place-viewport")).toHaveAttribute("data-camera", captureCamera!);
-  await expect.poll(async () => (await page.getByTestId("place-viewport").getAttribute("data-projection"))?.split(",").map(Number)).toEqual(orbitCapture.camera.projection_matrix);
+  await expect(page.getByRole("navigation", { name: "Place view" }).getByRole("button", { name: "3D", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(restoredViewport).toHaveAttribute("data-camera", captureCamera!);
+  await expect.poll(async () => (await restoredViewport.getAttribute("data-projection"))?.split(",").map(Number)).toEqual(orbitCapture.camera.projection_matrix);
   await page.getByRole("button", { name: `${scene.definition.objects[0].label} mesh`, exact: true }).click();
   await page.getByLabel("Object x", { exact: true }).fill(String(scene.definition.objects[0].x + 1));
   await expect(viewPanel.getByRole("button", { name: "Save camera view", exact: true })).toBeDisabled();

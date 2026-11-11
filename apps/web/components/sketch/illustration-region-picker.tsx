@@ -14,12 +14,13 @@ export default function IllustrationRegionPicker({ sessionId, view, imageUrl, se
   surfaceTarget?: HTMLElement | null | undefined; showObjects?: boolean; imageLabel?: string;
   onImageLoad?(): void; onImageError?(): void;
 }) {
-  const canvas = useRef<HTMLCanvasElement>(null), [pixels, setPixels] = useState<Uint8ClampedArray | null>(null), [error, setError] = useState("");
+  const canvas = useRef<HTMLCanvasElement>(null), [mask, setMask] = useState<{ sessionId: string; viewId: string; width: number; height: number; pixels: Uint8ClampedArray } | null>(null), [error, setError] = useState("");
+  const pixels = mask?.sessionId === sessionId && mask.viewId === view.id && mask.width === view.width && mask.height === view.height ? mask.pixels : null;
   const [tool, setTool] = useState<"select" | "paint" | "erase">("select"), [radius, setRadius] = useState(12), [painted, setPainted] = useState(0);
   const gesture = useRef<{ pointer: number; previous: IllustrationBrushStroke[]; stroke: IllustrationBrushStroke } | null>(null);
   useEffect(() => {
     const abort = new AbortController(); let stopped = false;
-    setPixels(null); setError(""); onReady(false);
+    setMask(null); setError(""); onReady(false);
     void (async () => {
       const response = await fetch(`/api/world/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(view.id)}/objects`, { cache: "no-store", signal: abort.signal });
       if (!response.ok) throw new Error("Saved object mask unavailable");
@@ -29,13 +30,13 @@ export default function IllustrationRegionPicker({ sessionId, view, imageUrl, se
         if (bitmap.width !== view.width || bitmap.height !== view.height) throw new Error("Saved object mask dimensions differ");
         const buffer = document.createElement("canvas"); buffer.width = view.width; buffer.height = view.height;
         const context = buffer.getContext("2d"); if (!context) throw new Error("Object selection canvas unavailable");
-        context.drawImage(bitmap, 0, 0); setPixels(context.getImageData(0, 0, view.width, view.height).data);
+        context.drawImage(bitmap, 0, 0); setMask({ sessionId, viewId: view.id, width: view.width, height: view.height, pixels: context.getImageData(0, 0, view.width, view.height).data });
       } finally { bitmap.close(); }
     })().catch(e => { if (!stopped) setError((e as Error).message); });
     return () => { stopped = true; abort.abort(); };
   }, [sessionId, view.id, view.width, view.height, onReady]);
   useEffect(() => {
-    const context = canvas.current?.getContext("2d"); if (!context || !pixels) return;
+    const context = canvas.current?.getContext("2d"); if (!context || !pixels) { onReady(false); return; }
     const output = context.createImageData(view.width, view.height);
     const colors = new Set(view.objects.filter(o => selected.includes(o.object_id)).map(o => o.rgb[0] * 65536 + o.rgb[1] * 256 + o.rgb[2]));
     const brush = strokes ? brushPixels(strokes, view.width, view.height) : null;

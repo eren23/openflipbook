@@ -67,10 +67,13 @@ it("invalidates readiness while a replacement view mask is loading", async () =>
   const ui = draw(); await waitFor(() => expect(ready).toHaveBeenLastCalledWith(true));
   let resolve!: (value: unknown) => void;
   bitmap.mockImplementation(() => new Promise(r => { resolve = r; }));
+  ready.mockClear();
   ui.rerender(<IllustrationRegionPicker sessionId="world" view={{ ...view, id: "replacement" }} imageUrl="/next.png" selected={[]} onChange={change} onReady={ready} disabled={false}/>);
   const overlay = screen.getByLabelText("Object selection overlay");
   expect(overlay.getAttribute("data-ready")).toBe("false");
   expect(overlay.getAttribute("aria-busy")).toBe("true");
+  expect(ready).toHaveBeenLastCalledWith(false);
+  expect(ready).not.toHaveBeenCalledWith(true);
   await waitFor(() => expect(bitmap).toHaveBeenCalledTimes(2));
   resolve({ width: 32, height: 32, close });
   await waitFor(() => expect(overlay.getAttribute("data-ready")).toBe("true"));
