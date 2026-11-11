@@ -625,6 +625,8 @@ for (const width of [1280, 390]) test(`image concept to durable mesh at ${width}
 });
 
 for (const width of [1280, 390]) test(`durable mesh generation and storage at ${width}`, async ({ page, browser }) => {
+  // This workflow includes archive round-trips and several cold app restarts.
+  test.setTimeout(480_000);
   meshEnabled = true; meshReady = false; failStorage = true;
   illustrationEnabled = true; illustrationReady = false;
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
