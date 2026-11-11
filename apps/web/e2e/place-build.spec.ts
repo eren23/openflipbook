@@ -428,6 +428,11 @@ test(`mesh shell conversion rejects solids and preserves traversal at ${width}`,
     await page.keyboard.down("ArrowLeft"); try { await expect.poll(async () => Number(await viewport.getAttribute("data-yaw")), { intervals: [30] }).toBeGreaterThan(3.12); } finally { await page.keyboard.up("ArrowLeft"); }
     await expect.poll(colored).toBeGreaterThan(30); await viewport.screenshot({ path: `test-results/mesh-shell-upstairs-${width}.png` });
     await page.keyboard.down("ArrowRight"); try { await expect.poll(async () => Number(await viewport.getAttribute("data-yaw")), { intervals: [30] }).toBeLessThan(0.02); } finally { await page.keyboard.up("ArrowRight"); }
+    // Key release can overshoot between frames; face along the stair lane before descending.
+    const heading = Number(await viewport.getAttribute("data-yaw")), turnBox = (await viewport.locator("canvas").boundingBox())!;
+    const turnX = turnBox.x + turnBox.width / 2, turnY = turnBox.y + turnBox.height / 2;
+    await page.mouse.move(turnX, turnY); await page.mouse.down(); await page.mouse.move(turnX + heading / 0.005, turnY); await page.mouse.up();
+    await expect.poll(async () => Math.abs(Number(await viewport.getAttribute("data-yaw")))).toBeLessThan(0.01);
     const savedYaw = Number(await viewport.getAttribute("data-yaw")), savedCamera = await camera();
     await expect.poll(async () => {
       const pose = (await db.collection("creator_worlds").findOne({ _id: sid as never }))?.walk_position?.pose;
