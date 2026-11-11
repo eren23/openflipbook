@@ -65,6 +65,7 @@ export default function IllustrationRegionPicker({ sessionId, view, imageUrl, se
     if (cancel) publish(previous);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  const loading = !pixels && !error;
   return <div className={s.regionPicker} role="group" aria-label="Registered object selection">
     {onBrushChange && <>
       <div className={s.regionTools} role="toolbar" aria-label="Region selection tools">
@@ -76,9 +77,9 @@ export default function IllustrationRegionPicker({ sessionId, view, imageUrl, se
       </div>
       {tool !== "select" && <label>Brush radius ({radius} px)<input aria-label="Brush radius" type="range" min={1} max={64} step={1} value={radius} disabled={disabled} onChange={e => setRadius(Number(e.target.value))}/></label>}
     </>}
-    <IllustrationSurface target={surfaceTarget} width={view.width} height={view.height}>
+    <IllustrationSurface target={surfaceTarget} width={view.width} height={view.height} status={loading ? "Loading object selection…" : ""}>
       <Image unoptimized src={imageUrl} alt={imageLabel} fill sizes={surfaceTarget ? "100vw" : "320px"} onLoad={onImageLoad} onError={onImageError}/>
-      <canvas ref={canvas} width={view.width} height={view.height} aria-label="Object selection overlay" style={{ touchAction: tool === "select" ? "manipulation" : "none" }} onPointerDown={event => {
+      <canvas ref={canvas} width={view.width} height={view.height} aria-label="Object selection overlay" data-ready={!!pixels && !error} aria-busy={loading} aria-disabled={disabled || !pixels || !!error} style={{ touchAction: tool === "select" ? "manipulation" : "none" }} onPointerDown={event => {
         if (!pixels || disabled) return;
         const rect = event.currentTarget.getBoundingClientRect(), x = Math.floor((event.clientX - rect.left) / rect.width * view.width), y = Math.floor((event.clientY - rect.top) / rect.height * view.height);
         if (x < 0 || y < 0 || x >= view.width || y >= view.height) return;

@@ -798,6 +798,7 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   await objectCheckbox.press("Space"); await expect(objectCheckbox).toBeChecked();
   await objectCheckbox.press("Space"); await expect(objectCheckbox).not.toBeChecked();
   const overlay = page.getByLabel("Object selection overlay", { exact: true });
+  await expect(overlay).toHaveAttribute("data-ready", "true");
   await overlay.scrollIntoViewIfNeeded(); const overlayRect = (await overlay.boundingBox())!;
   const visiblePixels: number[] = [];
   for (let i = 0; i < objectPixels.length; i += 4) if (rgb.every((v, j) => objectPixels[i + j] === v)) visiblePixels.push(i / 4);
@@ -958,6 +959,7 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   await page.getByRole("button", { name: "Select ground", exact: true }).click();
   await expect.poll(paintedCount).toBe(0);
   await overlay.scrollIntoViewIfNeeded();
+  await expect(overlay).toHaveAttribute("data-ready", "true");
   const selectBox = (await overlay.boundingBox())!;
   await page.mouse.click(selectBox.x + (hitPixel % orbitCapture.width + .5) / orbitCapture.width * selectBox.width, selectBox.y + (Math.floor(hitPixel / orbitCapture.width) + .5) / orbitCapture.height * selectBox.height);
   await expect.poll(paintedCount).toBe(maskPixels);
@@ -987,7 +989,7 @@ for (const width of [1280, 390]) test(`durable mesh generation and storage at ${
   const scene = (await db.collection("place_scenes").findOne({ session_id: sid }))!;
   await viewPanel.getByLabel("Saved camera view", { exact: true }).selectOption(savedOrbit.id);
   await viewPanel.getByRole("button", { name: "Load camera path", exact: true }).click();
-  const restoredViewport = page.getByTestId("place-viewport");
+  const restoredViewport = region.getByTestId("place-viewport");
   await expect(restoredViewport).toHaveAttribute("data-mode", "orbit");
   await expect(cameraPath.getByRole("button", { name: "Camera keyframe 2", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Place view" })).toBeInViewport({ ratio: 1 });

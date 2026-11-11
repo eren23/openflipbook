@@ -28,7 +28,7 @@ it("moves the registered surface into the workspace without resetting tools or r
 });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubGlobal("fetch", fetcher); vi.stubGlobal("createImageBitmap", bitmap);
-  fetcher.mockResolvedValue(new Response(new Uint8Array([1]))); bitmap.mockResolvedValue({ width: 32, height: 32, close });
+  fetcher.mockImplementation(() => Promise.resolve(new Response(new Uint8Array([1])))); bitmap.mockResolvedValue({ width: 32, height: 32, close });
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn(), getImageData: () => ({ data: pixels }), createImageData: () => ({ data: new Uint8ClampedArray(pixels.length) }), putImageData: paint } as never);
 });
 it("loads the private mask, paints only selected labels, and offers keyboard checkboxes", async () => {
@@ -43,6 +43,37 @@ it("maps pointer positions in the fitted image to exact saved object labels", as
   const overlay = screen.getByLabelText("Object selection overlay"); vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({ left: 100, top: 200, width: 320, height: 320 } as DOMRect);
   fireEvent.pointerDown(overlay, { clientX: 105, clientY: 205 }); expect(change).toHaveBeenCalledWith(["roof"]);
   change.mockClear(); fireEvent.pointerDown(overlay, { clientX: 115, clientY: 205 }); fireEvent.pointerDown(overlay, { clientX: 99, clientY: 205 }); expect(change).not.toHaveBeenCalled();
+});
+it("shows loading and enables selection only after the object mask is decoded", async () => {
+  let resolve!: (value: unknown) => void;
+  bitmap.mockImplementation(() => new Promise(r => { resolve = r; }));
+  draw();
+  const overlay = screen.getByLabelText("Object selection overlay");
+  vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 32, height: 32 } as DOMRect);
+  expect(overlay.getAttribute("aria-busy")).toBe("true");
+  expect(overlay.getAttribute("aria-disabled")).toBe("true");
+  expect(overlay.getAttribute("data-ready")).toBe("false");
+  expect(screen.getByText("Loading object selection…")).toBeTruthy();
+  fireEvent.pointerDown(overlay, { clientX: .5, clientY: .5 }); expect(change).not.toHaveBeenCalled();
+  await waitFor(() => expect(bitmap).toHaveBeenCalledOnce());
+  resolve({ width: 32, height: 32, close });
+  await waitFor(() => expect(overlay.getAttribute("data-ready")).toBe("true"));
+  expect(overlay.getAttribute("aria-busy")).toBe("false");
+  expect(overlay.getAttribute("aria-disabled")).toBe("false");
+  expect(screen.queryByText("Loading object selection…")).toBeNull();
+  fireEvent.pointerDown(overlay, { clientX: .5, clientY: .5 }); expect(change).toHaveBeenCalledWith(["roof"]);
+});
+it("invalidates readiness while a replacement view mask is loading", async () => {
+  const ui = draw(); await waitFor(() => expect(ready).toHaveBeenLastCalledWith(true));
+  let resolve!: (value: unknown) => void;
+  bitmap.mockImplementation(() => new Promise(r => { resolve = r; }));
+  ui.rerender(<IllustrationRegionPicker sessionId="world" view={{ ...view, id: "replacement" }} imageUrl="/next.png" selected={[]} onChange={change} onReady={ready} disabled={false}/>);
+  const overlay = screen.getByLabelText("Object selection overlay");
+  expect(overlay.getAttribute("data-ready")).toBe("false");
+  expect(overlay.getAttribute("aria-busy")).toBe("true");
+  await waitFor(() => expect(bitmap).toHaveBeenCalledTimes(2));
+  resolve({ width: 32, height: 32, close });
+  await waitFor(() => expect(overlay.getAttribute("data-ready")).toBe("true"));
 });
 it("does not change selection when disabled", async () => {
   draw([], true); await waitFor(() => expect(ready).toHaveBeenLastCalledWith(true));
@@ -77,6 +108,11 @@ it.each(["http", "dimensions", "decode"])("fails closed on %s errors", async fai
   if (failure === "dimensions") bitmap.mockResolvedValue({ width: 33, height: 32, close });
   if (failure === "decode") bitmap.mockRejectedValue(new Error("Invalid mask"));
   draw(); await screen.findByRole("alert"); expect(ready).not.toHaveBeenCalledWith(true); expect(change).not.toHaveBeenCalled();
+  const overlay = screen.getByLabelText("Object selection overlay");
+  expect(overlay.getAttribute("data-ready")).toBe("false");
+  expect(overlay.getAttribute("aria-busy")).toBe("false");
+  expect(overlay.getAttribute("aria-disabled")).toBe("true");
+  expect(screen.queryByText("Loading object selection…")).toBeNull();
   if (failure === "dimensions") expect(close).toHaveBeenCalledOnce();
 });
 it("aborts detached input reads and closes a bitmap that resolves after unmount", async () => {

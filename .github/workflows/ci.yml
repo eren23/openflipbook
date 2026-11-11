@@ -138,7 +138,8 @@ jobs:
     # Zero-key boot proof, every PR: the whole compose stack comes up under
     # MOCK_PROVIDERS=1 (no secrets at all) and serves a full generate stream.
     # This is the contributor's first-clone experience, continuously tested.
-    runs-on: ubuntu-latest
+    # Keep the runner within the installed Playwright version's supported OSes.
+    runs-on: ubuntu-24.04
     needs: [build]
     steps:
       - uses: actions/checkout@v4
@@ -224,7 +225,7 @@ jobs:
     # Every-PR release workflow gate: real Mongo/private S3, independent worker,
     # desktop/mobile authoring, creator ZIP restore, publication and operator
     # recovery. Providers and keys are replaced with isolated fixtures.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build, test-web, python-check]
     timeout-minutes: 30
     steps:
@@ -266,7 +267,7 @@ jobs:
     # Gated on `e2e:run` label. Like perfbudget, this needs the full stack +
     # secrets, so don't fire on every push.
     if: contains(github.event.pull_request.labels.*.name, 'e2e:run')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build]
     steps:
       - uses: actions/checkout@v4
